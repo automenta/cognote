@@ -40,6 +40,9 @@ public class Logic {
     private static final String ID_PREFIX_TEMP_ITEM = "temp_";
     private static final String ID_PREFIX_TICKET = "tms_";
 
+    private static final Set<String> REFLEXIVE_PREDICATES = Set.of("instance", "subclass", "subrelation", "equivalent", "same", "equal", "domain", "range");
+    private static final String ID_PREFIX_OPERATOR = "op_";
+
     static boolean isTrivial(KifList list) {
         var s = list.size();
         var opOpt = list.op();
@@ -50,10 +53,8 @@ public class Logic {
         return false;
     }
 
-    enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
-
     enum AssertionType {GROUND, UNIVERSAL, SKOLEMIZED}
-
+    enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
 
     enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
 
@@ -80,7 +81,7 @@ public class Logic {
 
         KifAtom pred();
 
-        CompletableFuture<KifTerm> exe(KifList arguments, ReasonerContext context);
+        CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context);
     }
 
     sealed interface KifTerm permits KifAtom, KifVar, KifList {
@@ -139,7 +140,7 @@ public class Logic {
 
             Map<KifVar, KifTerm> skolemMap = new HashMap<>();
             for (var exVar : vars) {
-                var skolemNameBase = ID_PREFIX_SKOLEM_CONST + exVar.name().substring(1) + "_" + idCounter.incrementAndGet();
+                var skolemNameBase = ID_PREFIX_SKOLEM_CONST + exVar.name().substring(1) + "_" + Cog.idCounter.incrementAndGet();
                 var skolemTerm = skolemArgs.isEmpty()
                         ? KifAtom.of(skolemNameBase)
                         : new KifList(Stream.concat(Stream.of(KifAtom.of(ID_PREFIX_SKOLEM_FUNC + exVar.name().substring(1) + "_" + idCounter.incrementAndGet())), skolemArgs.stream()).toList());
@@ -400,7 +401,8 @@ public class Logic {
                         list.terms().stream().skip(1).map(Rule::validateAntecedentClause).toList();
                 case KifList list -> List.of(validateAntecedentClause(list));
                 case KifTerm t when t.equals(KifAtom.of("true")) -> List.<KifTerm>of();
-                default -> throw new IllegalArgumentException("Antecedent must be a KIF list, (not list), (and ...), or true: " + antTerm.toKif());
+                default ->
+                        throw new IllegalArgumentException("Antecedent must be a KIF list, (not list), (and ...), or true: " + antTerm.toKif());
             };
             validateUnboundVariables(ruleForm, antTerm, conTerm);
             return new Rule(id, ruleForm, antTerm, conTerm, pri, parsedAntecedents);
@@ -413,7 +415,8 @@ public class Logic {
                         throw new IllegalArgumentException("Argument of 'not' in rule antecedent must be a list: " + list.toKif());
                     yield list;
                 }
-                default -> throw new IllegalArgumentException("Elements of rule antecedent must be lists or (not list): " + term.toKif());
+                default ->
+                        throw new IllegalArgumentException("Elements of rule antecedent must be lists or (not list): " + term.toKif());
             };
         }
 
@@ -808,7 +811,7 @@ public class Logic {
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
-        private final Events events;
+        final Events events;
         private final Truths tms;
         private final Skolemizer skolemizer;
         private final Operators operators;
@@ -1277,7 +1280,7 @@ public class Logic {
         }
 
         @Override
-        public CompletableFuture<KifTerm> exe(KifList arguments, ReasonerContext context) {
+        public CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context) {
             return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
         }
     }

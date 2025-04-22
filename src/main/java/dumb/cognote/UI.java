@@ -29,6 +29,7 @@ import java.util.function.Predicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
@@ -75,6 +76,22 @@ class UI extends JFrame {
         setupMenuBar();
         updateUIForSelection();
         setupFonts();
+    }
+
+    private static @NotNull JList<Logic.Rule> ruleList(DefaultListModel<Logic.Rule> ruleListModel) {
+        var ruleJList = new JList<>(ruleListModel);
+        ruleJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        ruleJList.setFont(MONOSPACED_FONT);
+        ruleJList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean s, boolean f) {
+                var lbl = (JLabel) super.getListCellRendererComponent(l, v, i, s, f);
+                if (v instanceof Logic.Rule r)
+                    lbl.setText(String.format("[%s] %.2f %s", r.id(), r.pri(), r.form().toKif()));
+                return lbl;
+            }
+        });
+        return ruleJList;
     }
 
     void setSystemReference(Cog system) {
@@ -355,7 +372,6 @@ class UI extends JFrame {
         refreshAttachmentDisplay();
     }
 
-
     private void updateAttachmentPanelTitle() {
         var count = (currentNote != null) ? noteAttachmentModels.getOrDefault(currentNote.id, new DefaultListModel<>()).getSize() : 0;
         ((TitledBorder) attachmentPanel.getBorder()).setTitle("Attachments" + (count > 0 ? " (" + count + ")" : ""));
@@ -378,7 +394,7 @@ class UI extends JFrame {
     }
 
     private void enhanceNoteAction() {
-        performNoteActionAsync("Enhancing", cog::enhanceNoteWithLlmAsync, (resp, n) -> {
+        performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (resp, n) -> {
         }, this::handleLlmFailure);
     }
 
@@ -387,23 +403,23 @@ class UI extends JFrame {
             // Retracting BY_NOTE caused issues, including removing the KB.
             // Just clear the UI list. Duplicates should be handled by the KB commit logic.
             clearNoteAttachmentList(note.id); // Clears UI list immediately
-            return cog.text2kifAsync(taskId, note.text, note.id); // LLM call starts
+            return cog.lm.text2kifAsync(taskId, note.text, note.id); // LLM call starts
         }, (kif, note) -> {
         }, this::handleLlmFailure);
     }
 
     private void summarizeNoteAction() {
-        performNoteActionAsync("Summarizing", cog::summarizeNoteWithLlmAsync, (resp, n) -> {
+        performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (resp, n) -> {
         }, this::handleLlmFailure);
     }
 
     private void keyConceptsAction() {
-        performNoteActionAsync("Identifying Concepts", cog::keyConceptsWithLlmAsync, (resp, n) -> {
+        performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (resp, n) -> {
         }, this::handleLlmFailure);
     }
 
     private void generateQuestionsAction() {
-        performNoteActionAsync("Generating Questions", cog::generateQuestionsWithLlmAsync, (resp, n) -> {
+        performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (resp, n) -> {
         }, this::handleLlmFailure);
     }
 
@@ -424,7 +440,7 @@ class UI extends JFrame {
 
     private void cancelSelectedLlmTaskAction() {
         getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType.name().startsWith("LLM_")).ifPresent(vm -> {
-            ofNullable(cog.activeLlmTasks.remove(vm.id)).ifPresent(future -> future.cancel(true));
+            ofNullable(cog.lm.activeLlmTasks.remove(vm.id)).ifPresent(future -> future.cancel(true));
             updateLlmItem(vm.id, LlmStatus.CANCELLED, "Task cancelled by user.");
         });
     }
@@ -524,7 +540,8 @@ class UI extends JFrame {
         removeButton.addActionListener(ae -> {
             var selectedRule = ruleJList.getSelectedValue();
             if (selectedRule != null && JOptionPane.showConfirmDialog(this, "Remove rule: " + selectedRule.id() + "?", "Confirm Rule Removal", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                cog.events.emit(new Cog.RetractionRequestEvent(selectedRule.form().toKif(), Logic.RetractionType.BY_RULE_FORM, "UI-RuleView", null));
+                cog.events.emit(new Cog.RetractionRequestEvent(selectedRule.form().toKif(),
+                        Logic.RetractionType.BY_RULE_FORM, "UI-RuleView", null));
                 ruleListModel.removeElement(selectedRule);
             }
         });
@@ -534,29 +551,13 @@ class UI extends JFrame {
         JOptionPane.showMessageDialog(this, panel, "Current Rules", JOptionPane.PLAIN_MESSAGE);
     }
 
-    private static @NotNull JList<Logic.Rule> ruleList(DefaultListModel<Logic.Rule> ruleListModel) {
-        var ruleJList = new JList<>(ruleListModel);
-        ruleJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        ruleJList.setFont(MONOSPACED_FONT);
-        ruleJList.setCellRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean s, boolean f) {
-                var lbl = (JLabel) super.getListCellRendererComponent(l, v, i, s, f);
-                if (v instanceof Logic.Rule r)
-                    lbl.setText(String.format("[%s] %.2f %s", r.id(), r.pri(), r.form().toKif()));
-                return lbl;
-            }
-        });
-        return ruleJList;
-    }
-
     private void togglePauseAction() {
         ofNullable(cog).ifPresent(r -> r.setPaused(!r.isPaused()));
     }
 
     private void clearAllAction() {
         if (cog != null && JOptionPane.showConfirmDialog(this, "Clear all notes (except config), assertions, and rules? This cannot be undone.", "Confirm Clear All", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION)
-            cog.clearAllKnowledge();
+            cog.clear();
     }
 
     private void performNoteAction(String actionName, String confirmTitle, String confirmMsgFormat, int confirmMsgType, Consumer<Cog.Note> action) {
@@ -604,9 +605,9 @@ class UI extends JFrame {
                     var taskId = addLlmUiPlaceholder(n.id, actionName);
                     try {
                         var future = asyncAction.execute(taskId, n);
-                        cog.activeLlmTasks.put(taskId, future);
+                        cog.lm.activeLlmTasks.put(taskId, future);
                         future.whenCompleteAsync((result, ex) -> {
-                            cog.activeLlmTasks.remove(taskId);
+                            cog.lm.activeLlmTasks.remove(taskId);
                             // Status updates (Done/Error/Cancelled) are handled by LlmUpdateEvent handler
                             if (ex != null) failureCallback.accept(ex, n);
                             else successCallback.accept(result, n);
@@ -615,7 +616,7 @@ class UI extends JFrame {
                             cog.updateStatusLabel();
                         }, SwingUtilities::invokeLater);
                     } catch (Exception e) {
-                        cog.activeLlmTasks.remove(taskId);
+                        cog.lm.activeLlmTasks.remove(taskId);
                         cog.updateLlmItemStatus(taskId, LlmStatus.ERROR, "Failed to start: " + e.getMessage());
                         failureCallback.accept(e, n);
                         setControlsEnabled(true);
@@ -837,7 +838,7 @@ class UI extends JFrame {
 
     private String extractHighlightTerm(Logic.KifList kif) {
         return kif.terms().stream().filter(Logic.KifAtom.class::isInstance).map(Logic.KifAtom.class::cast).map(Logic.KifAtom::value)
-                .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, Logic.PRED_NOTE_SUMMARY, Logic.PRED_NOTE_CONCEPT, Logic.PRED_NOTE_QUESTION).contains(s))
+                .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
                 .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT))
                 .findFirst().orElse(null);
     }
@@ -931,7 +932,8 @@ class UI extends JFrame {
             return new AttachmentViewModel(a.id(), a.sourceNoteId(), a.toKifString(),
                     determineTypeFromAssertion(a),
                     determineStatusFromCallback(callbackType, a.isActive()),
-                    a.pri(), a.derivationDepth(), a.timestamp(), requireNonNullElse(associatedNoteId, a.sourceNoteId()),
+                    a.pri(), a.derivationDepth(), a.timestamp(),
+                    requireNonNullElse(associatedNoteId, a.sourceNoteId()),
                     a.kb(), a.justificationIds(), LlmStatus.IDLE);
         }
 
@@ -945,9 +947,9 @@ class UI extends JFrame {
 
         private static AttachmentType determineTypeFromAssertion(Logic.Assertion a) {
             return a.kif().op().map(op -> switch (op) {
-                case Logic.PRED_NOTE_SUMMARY -> AttachmentType.SUMMARY;
-                case Logic.PRED_NOTE_CONCEPT -> AttachmentType.CONCEPT;
-                case Logic.PRED_NOTE_QUESTION -> AttachmentType.QUESTION;
+                case PRED_NOTE_SUMMARY -> AttachmentType.SUMMARY;
+                case PRED_NOTE_CONCEPT -> AttachmentType.CONCEPT;
+                case PRED_NOTE_QUESTION -> AttachmentType.QUESTION;
                 default -> switch (a.type()) {
                     case GROUND -> (a.derivationDepth() == 0) ? AttachmentType.FACT : AttachmentType.DERIVED;
                     case SKOLEMIZED -> AttachmentType.SKOLEMIZED;
