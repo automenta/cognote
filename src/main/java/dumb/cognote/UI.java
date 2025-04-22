@@ -245,7 +245,7 @@ class UI extends JFrame {
         attachmentList.addMouseListener(itemDoubleClickListener);
     }
 
-    private MouseAdapter createContextMenuMouseListener(@Nullable JList<?> list, JPopupMenu popup, Runnable... preShowActions) {
+    private static MouseAdapter createContextMenuMouseListener(@Nullable JList<?> list, JPopupMenu popup, Runnable... preShowActions) {
         return new MouseAdapter() {
             private void maybeShowPopup(MouseEvent e) {
                 if (!e.isPopupTrigger()) return;
@@ -395,7 +395,7 @@ class UI extends JFrame {
 
     private void enhanceNoteAction() {
         performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (resp, n) -> {
-        }, this::handleLlmFailure);
+        }, UI::handleLlmFailure);
     }
 
     private void analyzeNoteAction() {
@@ -405,22 +405,22 @@ class UI extends JFrame {
             clearNoteAttachmentList(note.id); // Clears UI list immediately
             return cog.lm.text2kifAsync(taskId, note.text, note.id); // LLM call starts
         }, (kif, note) -> {
-        }, this::handleLlmFailure);
+        }, UI::handleLlmFailure);
     }
 
     private void summarizeNoteAction() {
         performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (resp, n) -> {
-        }, this::handleLlmFailure);
+        }, UI::handleLlmFailure);
     }
 
     private void keyConceptsAction() {
         performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (resp, n) -> {
-        }, this::handleLlmFailure);
+        }, UI::handleLlmFailure);
     }
 
     private void generateQuestionsAction() {
         performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (resp, n) -> {
-        }, this::handleLlmFailure);
+        }, UI::handleLlmFailure);
     }
 
     private void retractSelectedAttachmentAction() {
@@ -484,14 +484,14 @@ class UI extends JFrame {
         });
     }
 
-    private String extractContentFromKif(String kifString) {
+    private static String extractContentFromKif(String kifString) {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
             // Expecting a single KIF list like (predicate noteId attachmentId "Content")
             if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list && list.size() >= 4) {
                 var fourthTerm = list.get(3);
-                if (fourthTerm instanceof Logic.KifAtom atom) {
-                    return atom.value();
+                if (fourthTerm instanceof KifAtom(String value)) {
+                    return value;
                 }
             }
         } catch (Logic.ParseException e) {
@@ -636,7 +636,7 @@ class UI extends JFrame {
         JOptionPane.showMessageDialog(this, "Error during " + actionName + ":\n" + cause.getMessage(), "Action Error", JOptionPane.ERROR_MESSAGE);
     }
 
-    private void handleLlmFailure(Throwable ex, Cog.Note contextNote) {
+    private static void handleLlmFailure(Throwable ex, Cog.Note contextNote) {
         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
         var action = (cause instanceof Logic.ParseException) ? "KIF Parse Error" : "LLM Interaction Failed";
         if (!(cause instanceof CancellationException)) {
@@ -665,7 +665,7 @@ class UI extends JFrame {
     }
 
 
-    private void updateOrAddModelItem(DefaultListModel<AttachmentViewModel> sourceModel, AttachmentViewModel newItem) {
+    private static void updateOrAddModelItem(DefaultListModel<AttachmentViewModel> sourceModel, AttachmentViewModel newItem) {
         var existingIndex = findViewModelIndexById(sourceModel, newItem.id);
         if (existingIndex != -1) {
             var existingItem = sourceModel.getElementAt(existingIndex);
@@ -710,7 +710,7 @@ class UI extends JFrame {
                 .findFirst();
     }
 
-    private int findViewModelIndexById(DefaultListModel<AttachmentViewModel> model, String id) {
+    private static int findViewModelIndexById(DefaultListModel<AttachmentViewModel> model, String id) {
         for (var i = 0; i < model.getSize(); i++) if (model.getElementAt(i).id.equals(id)) return i;
         return -1;
     }
@@ -775,7 +775,7 @@ class UI extends JFrame {
         if (findNoteById(Cog.GLOBAL_KB_NOTE_ID).isEmpty())
             addNoteToList(new Cog.Note(Cog.GLOBAL_KB_NOTE_ID, Cog.GLOBAL_KB_NOTE_TITLE, "Assertions in the global knowledge base."));
         if (findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
-            addNoteToList(cog != null ? cog.createDefaultConfigNote() : new Cog.Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
+            addNoteToList(cog != null ? Cog.createDefaultConfigNote() : new Cog.Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
         if (!noteListModel.isEmpty()) {
             var firstSelectable = IntStream.range(0, noteListModel.getSize()).filter(i -> !noteListModel.getElementAt(i).id.equals(Cog.GLOBAL_KB_NOTE_ID) && !noteListModel.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID)).findFirst().orElse(findNoteIndexById(Cog.GLOBAL_KB_NOTE_ID).orElse(0));
             noteList.setSelectedIndex(firstSelectable);
@@ -839,7 +839,7 @@ class UI extends JFrame {
         }
     }
 
-    private String extractHighlightTerm(Logic.KifList kif) {
+    private static String extractHighlightTerm(Logic.KifList kif) {
         return kif.terms().stream().filter(Logic.KifAtom.class::isInstance).map(Logic.KifAtom.class::cast).map(Logic.KifAtom::value)
                 .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
                 .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT))

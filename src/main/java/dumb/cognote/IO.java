@@ -1,6 +1,5 @@
 package dumb.cognote;
 
-import javax.swing.*;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Set;
@@ -8,7 +7,9 @@ import java.util.function.Consumer;
 
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
+import static javax.swing.SwingUtilities.invokeLater;
 
+/** miscellanous functions that don't belong in the Core */
 public class IO {
     static class StatusUpdaterPlugin extends Cog.BasePlugin {
         private final Consumer<Cog.SystemStatusEvent> uiUpdater;
@@ -126,8 +127,8 @@ public class IO {
             ev.on(Cog.AssertionStatusChangedEvent.class, this::handleStatusChange);
             ev.on(Cog.LlmInfoEvent.class, e -> handleUiUpdate("llm-info", e.llmItem()));
             ev.on(Cog.LlmUpdateEvent.class, this::handleLlmUpdate);
-            ev.on(Cog.AddedEvent.class, e -> SwingUtilities.invokeLater(() -> swingUI.addNoteToList(e.note())));
-            ev.on(Cog.RemovedEvent.class, e -> SwingUtilities.invokeLater(() -> swingUI.removeNoteFromList(e.note().id)));
+            ev.on(Cog.AddedEvent.class, e -> invokeLater(() -> swingUI.addNoteToList(e.note())));
+            ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> swingUI.removeNoteFromList(e.note().id)));
             ev.on(Cog.QueryResultEvent.class, e -> handleUiUpdate("query-result", e.result()));
             ev.on(Cog.QueryRequestEvent.class, e -> handleUiUpdate("query-sent", e.query()));
         }
@@ -135,8 +136,8 @@ public class IO {
         private void handleUiUpdate(String type, Object payload) {
             if (swingUI == null || !swingUI.isDisplayable()) return;
 
-            UI.AttachmentViewModel vm = null;
-            String displayNoteId = null;
+            UI.AttachmentViewModel vm;
+            String displayNoteId;
 
             switch (payload) {
                 case Logic.Assertion assertion -> {
@@ -164,11 +165,12 @@ public class IO {
                 } // Unknown payload type
             }
 
-            if (vm != null && displayNoteId != null) {
-                final var finalVm = vm;
-                final var finalDisplayNoteId = displayNoteId;
-                SwingUtilities.invokeLater(() -> swingUI.handleSystemUpdate(finalVm, finalDisplayNoteId));
-            }
+            if (displayNoteId != null)
+                handleSystemUpdate(vm, displayNoteId);
+        }
+
+        private void handleSystemUpdate(UI.AttachmentViewModel vm, String displayNoteId) {
+            invokeLater(() -> swingUI.handleSystemUpdate(vm, displayNoteId));
         }
 
         private void handleStatusChange(Cog.AssertionStatusChangedEvent event) {
@@ -177,7 +179,7 @@ public class IO {
         }
 
         private void handleLlmUpdate(Cog.LlmUpdateEvent event) {
-            SwingUtilities.invokeLater(() -> swingUI.updateLlmItem(event.taskId(), event.status(), event.content()));
+            invokeLater(() -> swingUI.updateLlmItem(event.taskId(), event.status(), event.content()));
         }
     }
 }

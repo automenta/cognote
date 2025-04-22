@@ -22,6 +22,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
+/** Probabilistic Prolog Engine */
 public class Logic {
     public static final String KIF_OP_IMPLIES = "=>";
     public static final String KIF_OP_EQUIV = "<=>";
@@ -54,6 +55,7 @@ public class Logic {
     }
 
     enum AssertionType {GROUND, UNIVERSAL, SKOLEMIZED}
+
     enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
 
     enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
@@ -125,7 +127,7 @@ public class Logic {
     }
 
     static class Skolemizer {
-        KifList skolemize(KifList existentialFormula, Map<KifVar, KifTerm> contextBindings) {
+        static KifList skolemize(KifList existentialFormula, Map<KifVar, KifTerm> contextBindings) {
             if (!KIF_OP_EXISTS.equals(existentialFormula.op().orElse("")))
                 throw new IllegalArgumentException("Input must be an 'exists' formula");
             if (existentialFormula.size() != 3 || !(existentialFormula.get(1) instanceof KifList || existentialFormula.get(1) instanceof KifVar) || !(existentialFormula.get(2) instanceof KifList body))
@@ -363,7 +365,7 @@ public class Logic {
             return Collections.unmodifiableSet(p);
         }
 
-        private void collectPredicatesRecursive(KifTerm term, Set<KifAtom> predicates) {
+        private static void collectPredicatesRecursive(KifTerm term, Set<KifAtom> predicates) {
             switch (term) {
                 case KifList list when !list.terms().isEmpty() && list.get(0) instanceof KifAtom pred -> {
                     predicates.add(pred);
@@ -522,16 +524,16 @@ public class Logic {
         }
 
         Stream<Assertion> findUnifiableAssertions(KifTerm queryTerm) {
-            return findCandidates(queryTerm, this::findUnifiableRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
+            return findCandidates(queryTerm, PathIndex::findUnifiableRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
         }
 
         Stream<Assertion> findInstancesOf(KifTerm queryPattern) {
             var neg = (queryPattern instanceof KifList ql && ql.op().filter(KIF_OP_NOT::equals).isPresent());
-            return findCandidates(queryPattern, this::findInstancesRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated == neg).filter(a -> Unifier.match(queryPattern, a.kif, Map.of()) != null);
+            return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated == neg).filter(a -> Unifier.match(queryPattern, a.kif, Map.of()) != null);
         }
 
         Stream<Assertion> findGeneralizationsOf(KifTerm queryTerm) {
-            return findCandidates(queryTerm, this::findGeneralizationsRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
+            return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
         }
 
         private Set<String> findCandidates(KifTerm query, TriConsumer<KifTerm, PathNode, Set<String>> searchFunc) {
@@ -540,7 +542,7 @@ public class Logic {
             return Set.copyOf(candidates);
         }
 
-        private void addPathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
+        private static void addPathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
             if (currentNode == null) return;
             currentNode.assertionIdsHere.add(assertionId);
             var key = getIndexKey(term);
@@ -550,7 +552,7 @@ public class Logic {
                 list.terms().forEach(subTerm -> addPathsRecursive(subTerm, assertionId, termNode));
         }
 
-        private boolean removePathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
+        private static boolean removePathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
             if (currentNode == null) return false;
             currentNode.assertionIdsHere.remove(assertionId);
             var key = getIndexKey(term);
@@ -566,7 +568,7 @@ public class Logic {
             return currentNode.assertionIdsHere.isEmpty() && currentNode.children.isEmpty();
         }
 
-        private Object getIndexKey(KifTerm term) {
+        private static Object getIndexKey(KifTerm term) {
             return switch (term) {
                 case KifAtom a -> a.value();
                 case KifVar _ -> PathNode.VAR_MARKER;
@@ -574,13 +576,13 @@ public class Logic {
             };
         }
 
-        private void collectAllAssertionIds(PathNode node, Set<String> ids) {
+        private static void collectAllAssertionIds(PathNode node, Set<String> ids) {
             if (node == null) return;
             ids.addAll(node.assertionIdsHere);
             node.children.values().forEach(child -> collectAllAssertionIds(child, ids));
         }
 
-        private void findUnifiableRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
+        private static void findUnifiableRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
             if (indexNode == null) return;
             ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
             if (queryTerm instanceof KifList)
@@ -594,7 +596,7 @@ public class Logic {
                 indexNode.children.values().forEach(childNode -> collectAllAssertionIds(childNode, candidates));
         }
 
-        private void findInstancesRecursive(KifTerm queryPattern, PathNode indexNode, Set<String> candidates) {
+        private static void findInstancesRecursive(KifTerm queryPattern, PathNode indexNode, Set<String> candidates) {
             if (indexNode == null) return;
             if (queryPattern instanceof KifVar) {
                 collectAllAssertionIds(indexNode, candidates);
@@ -609,7 +611,7 @@ public class Logic {
             }
         }
 
-        private void findGeneralizationsRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
+        private static void findGeneralizationsRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
             if (indexNode == null) return;
             ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
             if (queryTerm instanceof KifList)
@@ -808,19 +810,17 @@ public class Logic {
 
     static class Cognition {
         final Cog cog;
+        final Events events;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
-        final Events events;
         private final Truths tms;
-        private final Skolemizer skolemizer;
         private final Operators operators;
 
-        Cognition(int globalKbCapacity, Events events, Truths tms, Skolemizer skolemizer, Operators operators, Cog cog) {
+        Cognition(int globalKbCapacity, Events events, Truths tms, Operators operators, Cog cog) {
             this.cog = cog;
             this.events = events;
             this.tms = tms;
-            this.skolemizer = skolemizer;
             this.operators = operators;
             this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, events, tms);
         }
@@ -859,10 +859,6 @@ public class Logic {
 
         public Truths truth() {
             return tms;
-        }
-
-        public Skolemizer skolemizer() {
-            return skolemizer;
         }
 
         public Operators operators() {
@@ -934,11 +930,11 @@ public class Logic {
             return supportIds.stream().map(this::findAssertionByIdAcrossKbs).flatMap(Optional::stream).mapToInt(Assertion::derivationDepth).max().orElse(-1);
         }
 
-        public KifList performSkolemization(KifList body, Collection<KifVar> existentialVars, Map<KifVar, KifTerm> contextBindings) {
-            return skolemizer.skolemize(new KifList(KifAtom.of(KIF_OP_EXISTS), new KifList(new ArrayList<>(existentialVars)), body), contextBindings);
+        public static KifList performSkolemization(KifList body, Collection<KifVar> existentialVars, Map<KifVar, KifTerm> contextBindings) {
+            return Skolemizer.skolemize(new KifList(KifAtom.of(KIF_OP_EXISTS), new KifList(new ArrayList<>(existentialVars)), body), contextBindings);
         }
 
-        public KifList simplifyLogicalTerm(KifList term) {
+        public static KifList simplifyLogicalTerm(KifList term) {
             final var MAX_DEPTH = 5;
             var current = term;
             for (var depth = 0; depth < MAX_DEPTH; depth++) {
@@ -951,7 +947,7 @@ public class Logic {
             return current;
         }
 
-        private KifList simplifyLogicalTermOnce(KifList term) {
+        private static KifList simplifyLogicalTermOnce(KifList term) {
             if (term.op().filter(KIF_OP_NOT::equals).isPresent() && term.size() == 2 && term.get(1) instanceof KifList nl && nl.op().filter(KIF_OP_NOT::equals).isPresent() && nl.size() == 2 && nl.get(1) instanceof KifList inner)
                 return simplifyLogicalTermOnce(inner);
             var changed = new boolean[]{false};
@@ -1356,7 +1352,7 @@ public class Logic {
             return KifAtom.of(sb.toString());
         }
 
-        private boolean isValidAtomChar(int c) {
+        private static boolean isValidAtomChar(int c) {
             return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
         }
 

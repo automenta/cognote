@@ -31,6 +31,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
+/** Cognition Reasoning engine */
 public class Cog {
 
     // --- ID Prefixes ---
@@ -51,16 +52,16 @@ public class Cog {
     static final AtomicLong idCounter = new AtomicLong(System.currentTimeMillis());
     static final String ID_PREFIX_RULE = "rule_";
     static final String ID_PREFIX_INPUT_ITEM = "input_";
-
+    // --- System Parameters ---
+    static final int HTTP_TIMEOUT_SECONDS = 90; // Still relevant for LLM calls via LangChain4j config
+    static final double INPUT_ASSERTION_BASE_PRIORITY = 10.0;
+    static final String ID_PREFIX_PLUGIN = "plugin_";
     // --- Configuration Defaults ---
     private static final String NOTES_FILE = "cognote_notes.json";
     private static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     private static final int DEFAULT_REASONING_DEPTH = 4;
     private static final boolean DEFAULT_BROADCAST_INPUT = false;
-    // --- System Parameters ---
-    static final int HTTP_TIMEOUT_SECONDS = 90; // Still relevant for LLM calls via LangChain4j config
     private static final double DEFAULT_RULE_PRIORITY = 1.0;
-    static final double INPUT_ASSERTION_BASE_PRIORITY = 10.0;
     private static final int WS_STOP_TIMEOUT_MS = 1000;
     private static final int WS_CONNECTION_LOST_TIMEOUT_MS = 100;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
@@ -72,11 +73,11 @@ public class Cog {
     final AtomicBoolean running = new AtomicBoolean(true);
     final AtomicBoolean paused = new AtomicBoolean(false);
     final LM lm = new LM(this); // LM instance
-    private final Plugins plugins;
-    private final Reason.ReasonerManager reasonerManager;
     // final HttpClient http; // Removed - LM now uses LangChain4j's internal client
     final UI ui;
     final MyWebSocketServer websocket;
+    private final Plugins plugins;
+    private final Reason.ReasonerManager reasonerManager;
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Object pauseLock = new Object();
     volatile String systemStatus = "Initializing";
@@ -93,18 +94,13 @@ public class Cog {
         lm.reconfigure();
 
 
-        var skolemizer = new Skolemizer();
         var tms = new BasicTMS(events);
         var operatorRegistry = new Operators();
 
-        this.context = new Cognition(globalKbCapacity, events, tms, skolemizer, operatorRegistry, this);
+        this.context = new Cognition(globalKbCapacity, events, tms, operatorRegistry, this);
         this.reasonerManager = new Reason.ReasonerManager(events, context);
         this.plugins = new Plugins(events, context);
 
-        // this.http = HttpClient.newBuilder() // Removed HttpClient field
-        //         .connectTimeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
-        //         .executor(mainExecutor)
-        //         .build();
         this.websocket = new MyWebSocketServer(new InetSocketAddress(port));
 
         System.out.printf("System config: Port=%d, KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d%n",
@@ -174,7 +170,6 @@ public class Cog {
         }
     }
 
-
     private void setupDefaultPlugins() {
         plugins.loadPlugin(new InputProcessingPlugin());
         plugins.loadPlugin(new RetractionPlugin());
@@ -189,18 +184,24 @@ public class Cog {
 
         var or = context.operators();
         BiFunction<KifList, DoubleBinaryOperator, Optional<KifTerm>> numeric = (args, op) -> {
-            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(String value2)) {
+            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(
+                    String value2
+            )) {
                 try {
                     return Optional.of(KifAtom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
-                } catch (NumberFormatException e) {}
+                } catch (NumberFormatException e) {
+                }
             }
             return Optional.empty();
         };
         BiFunction<KifList, DoubleDoublePredicate, Optional<KifTerm>> comparison = (args, op) -> {
-            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(String value2)) {
+            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(
+                    String value2
+            )) {
                 try {
                     return Optional.of(KifAtom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
-                } catch (NumberFormatException e) { }
+                } catch (NumberFormatException e) {
+                }
             }
             return Optional.empty();
         };
@@ -430,7 +431,7 @@ public class Cog {
         }
     }
 
-    Note createDefaultConfigNote() {
+    static Note createDefaultConfigNote() {
         var configJson = new JSONObject()
                 .put("llmApiUrl", LM.DEFAULT_LLM_URL)
                 .put("llmModel", LM.DEFAULT_LLM_MODEL)
@@ -459,7 +460,7 @@ public class Cog {
         }
     }
 
-    private List<Note> loadNotesFromFile() {
+    private static List<Note> loadNotesFromFile() {
         Path filePath = Paths.get(NOTES_FILE);
         if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
         try {
@@ -485,7 +486,7 @@ public class Cog {
         saveNotesToFile(ui.getAllNotes());
     }
 
-    private synchronized void saveNotesToFile(List<Note> notes) {
+    private static synchronized void saveNotesToFile(List<Note> notes) {
         var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
         List<Note> notesToSave = new ArrayList<>(notes);
@@ -509,7 +510,6 @@ public class Cog {
         events.emit(new LlmUpdateEvent(taskId, status, content));
     }
 
-    // --- Enums & Interfaces ---
     enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
 
     enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}
@@ -527,6 +527,7 @@ public class Cog {
         }
     }
 
+
     interface Plugin {
         String id();
 
@@ -539,7 +540,6 @@ public class Cog {
         default void stop() {
         }
     }
-
 
     record AssertionEvent(Assertion assertion, String noteId) implements CogEvent {
         @Override
@@ -645,9 +645,9 @@ public class Cog {
     }
 
     static class Events {
+        final ExecutorService exe;
         private final ConcurrentMap<Class<? extends CogEvent>, CopyOnWriteArrayList<Consumer<CogEvent>>> listeners = new ConcurrentHashMap<>();
         private final ConcurrentMap<KifTerm, CopyOnWriteArrayList<BiConsumer<CogEvent, Map<KifVar, KifTerm>>>> patternListeners = new ConcurrentHashMap<>();
-        final ExecutorService exe;
 
         Events(ExecutorService exe) {
             this.exe = requireNonNull(exe);
@@ -684,7 +684,7 @@ public class Cog {
             );
         }
 
-        private void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
+        private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
             try {
                 listener.accept(event);
             } catch (Exception e) {
@@ -692,7 +692,7 @@ public class Cog {
             }
         }
 
-        private void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
+        private static void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
             try {
                 listener.accept(event, bindings);
             } catch (Exception e) {
@@ -700,7 +700,7 @@ public class Cog {
             }
         }
 
-        private void logExeError(Exception e, String type, String eventName) {
+        private static void logExeError(Exception e, String type, String eventName) {
             System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
             e.printStackTrace();
         }
@@ -781,6 +781,7 @@ public class Cog {
             return new Answer(queryId, QueryStatus.ERROR, List.of(), new Explanation(message));
         }
     }
+    // --- End Reasoner Related ---
 
     public record Configuration(Cog cog) {
         String llmApiUrl() {
@@ -812,7 +813,6 @@ public class Cog {
                     .put("broadcastInputAssertions", broadcastInputAssertions());
         }
     }
-    // --- End Reasoner Related ---
 
     static class Note {
         final String id;
@@ -841,7 +841,6 @@ public class Cog {
         }
     }
 
-    static final String ID_PREFIX_PLUGIN = "plugin_";
     // --- Base Plugin Classes ---
     abstract static class BasePlugin implements Plugin {
         protected final String id = generateId(ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("Plugin", "").toLowerCase() + "_");
@@ -943,7 +942,7 @@ public class Cog {
                 return;
             }
 
-            var skolemBody = context.performSkolemization(body, vars, Map.of());
+            var skolemBody = Cognition.performSkolemization(body, vars, Map.of());
             var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
             var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
             var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();

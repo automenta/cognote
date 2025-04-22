@@ -16,11 +16,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class LM {
-    private final Cog cog;
     static final String DEFAULT_LLM_URL = "http://localhost:11434"; // Base URL for Ollama
     static final String DEFAULT_LLM_MODEL = "llama3";
     static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
-    final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<String, CompletableFuture<?>>();
+    final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
+    private final Cog cog;
     volatile String llmApiUrl; // Now base URL
     volatile String llmModel;
 
@@ -36,9 +36,9 @@ public class LM {
             // OllamaChatModel uses baseUrl, not the full /api/chat endpoint
             var baseUrl = llmApiUrl;
             if (baseUrl.endsWith("/api/chat")) {
-                 baseUrl = baseUrl.substring(0, baseUrl.length() - "/api/chat".length());
+                baseUrl = baseUrl.substring(0, baseUrl.length() - "/api/chat".length());
             } else if (baseUrl.endsWith("/api")) {
-                 baseUrl = baseUrl.substring(0, baseUrl.length() - "/api".length());
+                baseUrl = baseUrl.substring(0, baseUrl.length() - "/api".length());
             }
 
             this.chatModel = OllamaChatModel.builder()
@@ -66,13 +66,11 @@ public class LM {
             cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Waiting for LLM...");
 
             try {
-                // Use LangChain4j's generate method within the supplyAsync block
-                var response = chatModel.generate(prompt);
 
-                var content = response;//.content().text();
+                var content = chatModel.generate(prompt);
 
                 if (content == null || content.isBlank()) {
-                     throw new IOException("LLM response missing content. Response: " + response);
+                    throw new IOException("LLM response missing content. Response: " + chatModel.generate(prompt));
                 }
                 return content;
 
@@ -142,19 +140,17 @@ public class LM {
     }
 
     void handleLlmEnhancementResponse(String taskId, String noteId, String response, Throwable ex) {
-        handleLlmResponse(taskId, noteId, "Note Enhancement", null, response, ex, (id, result) -> {
-            cog.ui.findNoteById(noteId).ifPresent(note -> {
-                note.text = result.trim();
-                SwingUtilities.invokeLater(() -> {
-                    if (note.equals(cog.ui.currentNote)) {
-                        cog.ui.noteEditor.setText(note.text);
-                        cog.ui.noteEditor.setCaretPosition(0);
-                    }
-                });
-                cog.saveNotesToFile();
-                cog.updateLlmItemStatus(id, UI.LlmStatus.DONE, "Note Enhanced and Updated.");
+        handleLlmResponse(taskId, noteId, "Note Enhancement", null, response, ex, (id, result) -> cog.ui.findNoteById(noteId).ifPresent(note -> {
+            note.text = result.trim();
+            SwingUtilities.invokeLater(() -> {
+                if (note.equals(cog.ui.currentNote)) {
+                    cog.ui.noteEditor.setText(note.text);
+                    cog.ui.noteEditor.setCaretPosition(0);
+                }
             });
-        });
+            cog.saveNotesToFile();
+            cog.updateLlmItemStatus(id, UI.LlmStatus.DONE, "Note Enhanced and Updated.");
+        }));
     }
 
     public CompletableFuture<String> enhanceNoteWithLlmAsync(String taskId, Cog.Note n) {
@@ -162,10 +158,10 @@ public class LM {
                 You are a helpful assistant. Please revise and enhance the following note for clarity, conciseness, and improved structure. Keep the core meaning intact.
                 Focus on improving readability and flow. Correct any grammatical errors or awkward phrasing.
                 Output ONLY the revised note text, without any introductory or concluding remarks.
-
+                
                 Original Note:
                 "%s"
-
+                
                 Enhanced Note:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Note Enhancement", n.id);
         activeLlmTasks.put(taskId, future);
@@ -176,10 +172,10 @@ public class LM {
     public CompletableFuture<String> summarizeNoteWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Summarize the following note in one or two concise sentences. Output ONLY the summary.
-
+                
                 Note:
                 "%s"
-
+                
                 Summary:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Note Summarization", n.id);
         activeLlmTasks.put(taskId, future);
@@ -190,10 +186,10 @@ public class LM {
     public CompletableFuture<String> keyConceptsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.
-
+                
                 Note:
                 "%s"
-
+                
                 Key Concepts:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Key Concept Identification", n.id);
         activeLlmTasks.put(taskId, future);
@@ -204,16 +200,17 @@ public class LM {
     public CompletableFuture<String> generateQuestionsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Based on the following note, generate 1-3 insightful questions that could lead to further exploration or clarification. Output ONLY the questions, each on a new line starting with '- '.
-
+                
                 Note:
                 "%s"
-
+                
                 Questions:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Question Generation", n.id);
         activeLlmTasks.put(taskId, future);
         future.whenCompleteAsync((response, ex) -> handleLlmGenericResponse(taskId, n.id, "Question Gen", response, ex, Logic.PRED_NOTE_QUESTION), cog.events.exe);
         return future;
     }
+
     public CompletableFuture<String> text2kifAsync(String taskId, String noteText, String noteId) {
         var finalPrompt = """
                 Convert the following note into a set of concise SUMO KIF assertions (standard Lisp-like syntax, e.g., (instance MyCat Cat)).
@@ -225,10 +222,10 @@ public class LM {
                 Use '(exists (?Y) (and (instance ?Y Cat) (attribute ?Y BlackColor)))' for existential statements.
                 Avoid trivial assertions like (instance X X) or (= X X) or (not (= X X)).
                 Example: (instance Fluffy Cat) (attribute Fluffy OrangeColor) (= (age Fluffy) 3) (not (attribute Fluffy BlackColor)) (exists (?K) (instance ?K Kitten))
-
+                
                 Note:
                 "%s"
-
+                
                 KIF Assertions:""".formatted(noteText);
         var future = llmAsync(taskId, finalPrompt, "KIF Generation", noteId);
         activeLlmTasks.put(taskId, future);

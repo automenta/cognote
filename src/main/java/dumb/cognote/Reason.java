@@ -17,6 +17,7 @@ import static dumb.cognote.Cog.ID_PREFIX_PLUGIN;
 import static dumb.cognote.Logic.*;
 import static java.util.Optional.ofNullable;
 
+/** uses Logic to implement higher-level Reasoning functions */
 public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
@@ -53,10 +54,6 @@ public class Reason {
 
         Cog.Configuration getConfig() {
             return new Cog.Configuration(cognition.cog);
-        }
-
-        Logic.Skolemizer getSkolemizer() {
-            return cognition.skolemizer();
         }
 
         Logic.Truths getTMS() {
@@ -127,7 +124,8 @@ public class Reason {
         private void dispatchRuleEvent(Cog.CogEvent event) {
             switch (event) {
                 case Cog.RuleAddedEvent(var rule) -> plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
-                case Cog.RuleRemovedEvent(var rule) -> plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
+                case Cog.RuleRemovedEvent(var rule) ->
+                        plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
                 default -> {
                 }
             }
@@ -196,7 +194,6 @@ public class Reason {
             return reasonerContext.getTMS();
         }
     }
-
 
 
     abstract static class BaseReasonerPlugin implements ReasonerPlugin {
@@ -304,7 +301,13 @@ public class Reason {
             var consequent = Logic.Unifier.subst(rule.consequent(), result.bindings());
             if (consequent == null) return; // Substitution failed (shouldn't happen if antecedents matched)
 
-            var simplified = (consequent instanceof Logic.KifList kl) ? getCogNoteContext().simplifyLogicalTerm(kl) : consequent;
+            KifTerm simplified;
+            if ((consequent instanceof KifList kl)) {
+                getCogNoteContext();
+                simplified = Cognition.simplifyLogicalTerm(kl);
+            } else {
+                simplified = consequent;
+            }
             var targetNoteId = getCogNoteContext().findCommonSourceNodeId(result.supportIds());
 
             switch (simplified) {
@@ -324,7 +327,13 @@ public class Reason {
 
         private void processDerivedConjunction(Rule rule, KifList conj, MatchResult result, @Nullable String targetNoteId) {
             conj.terms().stream().skip(1).forEach(term -> {
-                var simp = (term instanceof KifList kl) ? getCogNoteContext().simplifyLogicalTerm(kl) : term;
+                KifTerm simp;
+                if ((term instanceof KifList kl)) {
+                    getCogNoteContext();
+                    simp = Cognition.simplifyLogicalTerm(kl);
+                } else {
+                    simp = term;
+                }
                 if (simp instanceof KifList c) // Recurse for each conjunct
                     processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents()), result);
                 else if (!(simp instanceof KifVar))
@@ -376,7 +385,7 @@ public class Reason {
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
             if (depth > getMaxDerivationDepth()) return;
 
-            var skolemBody = getCogNoteContext().performSkolemization(body, vars, result.bindings());
+            var skolemBody = Cognition.performSkolemization(body, vars, result.bindings());
             var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
             var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
             var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();
@@ -540,7 +549,7 @@ public class Reason {
         }
 
         // Finds bindings if any sub-expression of 'expr' matches 'target'
-        private Stream<Map<KifVar, KifTerm>> findSubExpressionMatches(KifTerm expr, KifTerm target) {
+        private static Stream<Map<KifVar, KifTerm>> findSubExpressionMatches(KifTerm expr, KifTerm target) {
             return Stream.concat(
                     ofNullable(Unifier.match(expr, target, Map.of())).stream(), // Match whole expression
                     (expr instanceof KifList l) ? l.terms().stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty() // Match sub-expressions recursively
@@ -638,7 +647,7 @@ public class Reason {
                     .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
         }
 
-        private Rule renameRuleVariables(Rule rule, int depth) {
+        private static Rule renameRuleVariables(Rule rule, int depth) {
             var suffix = "_d" + depth + "_" + Cog.idCounter.incrementAndGet();
             Map<KifVar, KifTerm> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> KifVar.of(v.name() + suffix)));
             var renamedForm = (KifList) Unifier.subst(rule.form(), renameMap);
