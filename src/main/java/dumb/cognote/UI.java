@@ -67,7 +67,7 @@ class UI extends JFrame {
         super("Cognote - Event Driven");
         this.cog = cog;
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        setSize(1200, 800);
+        setSize(1200, 700);
         setLocationRelativeTo(null);
         setupComponents();
         setupLayout();
