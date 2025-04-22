@@ -2,34 +2,18 @@ package dumb.cognote;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.output.Response;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.UserMessage;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
-import org.json.JSONTokener;
 
 import javax.swing.*;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
-
-import static java.util.Optional.ofNullable;
 
 public class LM {
     private final Cog cog;
@@ -83,9 +67,9 @@ public class LM {
 
             try {
                 // Use LangChain4j's generate method within the supplyAsync block
-                Response<AiMessage> response = chatModel.generate(prompt);
+                var response = chatModel.generate(prompt);
 
-                var content = response.content().text();
+                var content = response;//.content().text();
 
                 if (content == null || content.isBlank()) {
                      throw new IOException("LLM response missing content. Response: " + response);

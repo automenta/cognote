@@ -39,3 +39,4 @@ build/
 .DS_Store
 
 cognote_notes.json
+.aider*
