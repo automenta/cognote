@@ -487,14 +487,17 @@ class UI extends JFrame {
     private String extractContentFromKif(String kifString) {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
-            if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list && list.size() >= 4 && list.get(3) instanceof Logic.KifAtom(
-                    var value
-            ))
-                return value;
+            // Expecting a single KIF list like (predicate noteId attachmentId "Content")
+            if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list && list.size() >= 4) {
+                var fourthTerm = list.get(3);
+                if (fourthTerm instanceof Logic.KifAtom atom) {
+                    return atom.value();
+                }
+            }
         } catch (Logic.ParseException e) {
             System.err.println("Failed to parse KIF for content extraction: " + kifString);
         }
-        return kifString;
+        return kifString; // Return original string if parsing/extraction fails
     }
 
     private Optional<AttachmentViewModel> getSelectedAttachmentViewModel() {
