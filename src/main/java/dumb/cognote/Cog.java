@@ -16,7 +16,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.*;
@@ -516,7 +515,7 @@ public class Cog {
     }
 
     public CompletableFuture<String> enhanceNoteWithLlmAsync(String taskId, Note n) {
-        String noteId = n.id;
+        var noteId = n.id;
         var finalPrompt = """
                 You are a helpful assistant. Please revise and enhance the following note for clarity, conciseness, and improved structure. Keep the core meaning intact.
                 Focus on improving readability and flow. Correct any grammatical errors or awkward phrasing.
@@ -610,8 +609,8 @@ public class Cog {
         if (swingUI != null && swingUI.isDisplayable()) {
             var kbCount = context.kbCount();
             var kbCapacityTotal = context.kbTotalCapacity();
-            int notesCount = swingUI.noteListModel.size();
-            int tasksCount = activeLlmTasks.size();
+            var notesCount = swingUI.noteListModel.size();
+            var tasksCount = activeLlmTasks.size();
             var statusText = String.format("KB: %d/%d | Rules: %d | Notes: %d | Tasks: %d | Status: %s",
                     kbCount, kbCapacityTotal, context.ruleCount(), notesCount, tasksCount, systemStatus);
             updateStatusLabel(statusText);
@@ -637,8 +636,8 @@ public class Cog {
     }
 
     private void loadNotesAndConfig() {
-        List<Note> notes = loadNotesFromFile();
-        Optional<Note> configNoteOpt = notes.stream().filter(n -> n.id.equals(CONFIG_NOTE_ID)).findFirst();
+        var notes = loadNotesFromFile();
+        var configNoteOpt = notes.stream().filter(n -> n.id.equals(CONFIG_NOTE_ID)).findFirst();
 
         if (configNoteOpt.isPresent()) {
             parseConfig(configNoteOpt.get().text);
@@ -698,13 +697,13 @@ public class Cog {
     }
 
     private List<Note> loadNotesFromFile() {
-        Path filePath = Paths.get(NOTES_FILE);
+        var filePath = Paths.get(NOTES_FILE);
         if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
         try {
             var jsonText = Files.readString(filePath);
             var jsonArray = new JSONArray(new JSONTokener(jsonText));
             List<Note> notes = new ArrayList<>();
-            for (int i = 0; i < jsonArray.length(); i++) {
+            for (var i = 0; i < jsonArray.length(); i++) {
                 var obj = jsonArray.getJSONObject(i);
                 notes.add(new Note(obj.getString("id"), obj.getString("title"), obj.getString("text")));
             }
@@ -724,7 +723,7 @@ public class Cog {
     }
 
     private void saveNotesToFile(List<Note> notes) {
-        Path filePath = Paths.get(NOTES_FILE);
+        var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
         List<Note> notesToSave = new ArrayList<>(notes);
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
@@ -771,7 +770,7 @@ public class Cog {
 
         void start(Events events, Cognition context);
 
-        void stop();
+        default void stop() { }
     }
 
     interface ReasonerPlugin extends Plugin {
@@ -1273,10 +1272,6 @@ public class Cog {
             this.context = ctx;
         }
 
-        @Override
-        public void stop() {
-        }
-
         protected void publish(CogEvent event) {
             if (events != null) events.emit(event);
         }
@@ -1452,10 +1447,6 @@ public class Cog {
         @Override
         public void initialize(ReasonerContext ctx) {
             this.context = ctx;
-        }
-
-        @Override
-        public void stop() {
         }
 
         protected void publish(CogEvent event) {
@@ -1937,11 +1928,9 @@ public class Cog {
 
     static class UiUpdatePlugin extends BasePlugin {
         private final UI swingUI;
-        private final Cog cog;
 
         UiUpdatePlugin(UI ui, Cog cog) {
             this.swingUI = ui;
-            this.cog = cog;
         }
 
         @Override

@@ -392,6 +392,7 @@ public class Logic {
         static Rule parseRule(String id, KifList ruleForm, double pri) throws IllegalArgumentException {
             if (!(ruleForm.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent() && ruleForm.size() == 3))
                 throw new IllegalArgumentException("Rule form must be (=> ant con) or (<=> ant con): " + ruleForm.toKif());
+
             var antTerm = ruleForm.get(1);
             var conTerm = ruleForm.get(2);
             var parsedAntecedents = switch (antTerm) {
@@ -399,8 +400,7 @@ public class Logic {
                         list.terms().stream().skip(1).map(Rule::validateAntecedentClause).toList();
                 case KifList list -> List.of(validateAntecedentClause(list));
                 case KifTerm t when t.equals(KifAtom.of("true")) -> List.<KifTerm>of();
-                default ->
-                        throw new IllegalArgumentException("Antecedent must be a KIF list, (not list), (and ...), or true: " + antTerm.toKif());
+                default -> throw new IllegalArgumentException("Antecedent must be a KIF list, (not list), (and ...), or true: " + antTerm.toKif());
             };
             validateUnboundVariables(ruleForm, antTerm, conTerm);
             return new Rule(id, ruleForm, antTerm, conTerm, pri, parsedAntecedents);
@@ -413,13 +413,12 @@ public class Logic {
                         throw new IllegalArgumentException("Argument of 'not' in rule antecedent must be a list: " + list.toKif());
                     yield list;
                 }
-                default ->
-                        throw new IllegalArgumentException("Elements of rule antecedent must be lists or (not list): " + term.toKif());
+                default -> throw new IllegalArgumentException("Elements of rule antecedent must be lists or (not list): " + term.toKif());
             };
         }
 
         private static void validateUnboundVariables(KifList ruleForm, KifTerm antecedent, KifTerm consequent) {
-            var unbound = new HashSet<KifVar>(consequent.vars());
+            var unbound = new HashSet<>(consequent.vars());
             unbound.removeAll(antecedent.vars());
             unbound.removeAll(getQuantifierBoundVariables(consequent));
             if (!unbound.isEmpty() && ruleForm.op().filter(KIF_OP_IMPLIES::equals).isPresent())
@@ -1372,7 +1371,6 @@ public class Logic {
                         case 'n' -> '\n';
                         case 't' -> '\t';
                         case 'r' -> '\r';
-                        case '\\', '"' -> next;
                         default -> next;
                     });
                 } else sb.append((char) c);

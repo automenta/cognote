@@ -1,5 +1,6 @@
 package dumb.cognote;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 
@@ -471,7 +472,7 @@ class UI extends JFrame {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
             if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list && list.size() >= 4 && list.get(3) instanceof Logic.KifAtom(
-                    String value
+                    var value
             ))
                 return value;
         } catch (Logic.ParseException e) {
@@ -513,18 +514,7 @@ class UI extends JFrame {
         }
         var ruleListModel = new DefaultListModel<Logic.Rule>();
         rules.forEach(ruleListModel::addElement);
-        var ruleJList = new JList<>(ruleListModel);
-        ruleJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        ruleJList.setFont(MONOSPACED_FONT);
-        ruleJList.setCellRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean s, boolean f) {
-                var lbl = (JLabel) super.getListCellRendererComponent(l, v, i, s, f);
-                if (v instanceof Logic.Rule r)
-                    lbl.setText(String.format("[%s] %.2f %s", r.id(), r.pri(), r.form().toKif()));
-                return lbl;
-            }
-        });
+        var ruleJList = ruleList(ruleListModel);
         var scrollPane = new JScrollPane(ruleJList);
         scrollPane.setPreferredSize(new Dimension(700, 400));
         var removeButton = new JButton("Remove Selected Rule");
@@ -542,6 +532,22 @@ class UI extends JFrame {
         panel.add(scrollPane, BorderLayout.CENTER);
         panel.add(removeButton, BorderLayout.SOUTH);
         JOptionPane.showMessageDialog(this, panel, "Current Rules", JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private static @NotNull JList<Logic.Rule> ruleList(DefaultListModel<Logic.Rule> ruleListModel) {
+        var ruleJList = new JList<>(ruleListModel);
+        ruleJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        ruleJList.setFont(MONOSPACED_FONT);
+        ruleJList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean s, boolean f) {
+                var lbl = (JLabel) super.getListCellRendererComponent(l, v, i, s, f);
+                if (v instanceof Logic.Rule r)
+                    lbl.setText(String.format("[%s] %.2f %s", r.id(), r.pri(), r.form().toKif()));
+                return lbl;
+            }
+        });
+        return ruleJList;
     }
 
     private void togglePauseAction() {
@@ -717,7 +723,7 @@ class UI extends JFrame {
     }
 
     private void clearNoteAttachmentList(String noteId) {
-        DefaultListModel<AttachmentViewModel> modelToClear = noteAttachmentModels.get(noteId);
+        var modelToClear = noteAttachmentModels.get(noteId);
         if (modelToClear != null) {
             modelToClear.clear(); // Clear the model stored in the map
         }
