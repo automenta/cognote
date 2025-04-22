@@ -1,5 +1,11 @@
 package dumb.cognote;
 
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -27,75 +33,72 @@ import static java.util.Optional.ofNullable;
 
 public class LM {
     private final Cog cog;
-    static final String DEFAULT_LLM_URL = "http://localhost:11434/api/chat";
-    // --- End Configuration Defaults ---
+    static final String DEFAULT_LLM_URL = "http://localhost:11434"; // Base URL for Ollama
     static final String DEFAULT_LLM_MODEL = "llama3";
     static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
     final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<String, CompletableFuture<?>>();
-    volatile String llmApiUrl;
+    volatile String llmApiUrl; // Now base URL
     volatile String llmModel;
+
+    private volatile ChatLanguageModel chatModel;
 
     public LM(Cog cog) {
         this.cog = cog;
+        // Initial configuration will happen via loadNotesAndConfig -> updateConfig
     }
 
-    static Optional<String> extractLlmContent(JSONObject r) {
-        return Stream.<Supplier<Optional<String>>>of(
-                        () -> ofNullable(r.optJSONObject("message")).map(m -> m.optString("content", null)),
-                        () -> ofNullable(r.optString("response", null)),
-                        () -> ofNullable(r.optJSONArray("choices")).filter(Predicate.not(JSONArray::isEmpty)).map(a -> a.optJSONObject(0)).map(c -> c.optJSONObject("message")).map(m -> m.optString("content", null)),
-                        () -> ofNullable(r.optJSONArray("results")).filter(Predicate.not(JSONArray::isEmpty)).map(a -> a.optJSONObject(0)).map(res -> res.optJSONObject("candidates")).map(cand -> cand.optJSONObject("content")).map(cont -> cont.optJSONArray("parts")).filter(Predicate.not(JSONArray::isEmpty)).map(p -> p.optJSONObject(0)).map(p -> p.optString("text", null)),
-                        () -> findNestedContent(r) // Fallback generic search
-                ).map(Supplier::get)
-                .flatMap(Optional::stream)
-                .findFirst();
-    }
+    void reconfigure() {
+        try {
+            // OllamaChatModel uses baseUrl, not the full /api/chat endpoint
+            var baseUrl = llmApiUrl;
+            if (baseUrl.endsWith("/api/chat")) {
+                 baseUrl = baseUrl.substring(0, baseUrl.length() - "/api/chat".length());
+            } else if (baseUrl.endsWith("/api")) {
+                 baseUrl = baseUrl.substring(0, baseUrl.length() - "/api".length());
+            }
 
-    private static Optional<String> findNestedContent(Object jsonValue) {
-        return switch (jsonValue) {
-            case JSONObject obj -> obj.keySet().stream()
-                    .filter(key -> key.toLowerCase().contains("content") || key.toLowerCase().contains("text") || key.toLowerCase().contains("response"))
-                    .map(obj::opt)
-                    .flatMap(val -> (val instanceof String s && !s.isBlank()) ? Stream.of(s) : Stream.empty())
-                    .findFirst()
-                    .or(() -> obj.keySet().stream().map(obj::opt).map(LM::findNestedContent).flatMap(Optional::stream).findFirst());
-            case JSONArray arr -> IntStream.range(0, arr.length()).mapToObj(arr::opt)
-                    .map(LM::findNestedContent)
-                    .flatMap(Optional::stream)
-                    .findFirst();
-            case String s -> Optional.of(s).filter(Predicate.not(String::isBlank));
-            default -> Optional.empty();
-        };
+            this.chatModel = OllamaChatModel.builder()
+                    .baseUrl(baseUrl)
+                    .modelName(llmModel)
+                    .temperature(0.2) // Matches original temperature
+                    .timeout(Duration.ofSeconds(Cog.HTTP_TIMEOUT_SECONDS))
+                    .build();
+            System.out.printf("LM reconfigured: Base URL=%s, Model=%s%n", baseUrl, llmModel);
+        } catch (Exception e) {
+            System.err.println("Failed to reconfigure LLM: " + e.getMessage());
+            this.chatModel = null; // Ensure it's null if config fails
+        }
     }
 
     CompletableFuture<String> llmAsync(String taskId, String prompt, String interactionType, String noteId) {
+        if (chatModel == null) {
+            var errorMsg = interactionType + " Error: LLM not configured.";
+            cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, errorMsg);
+            return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
+        }
+
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
             cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Waiting for LLM...");
-            var payload = new JSONObject()
-                    .put("model", llmModel)
-                    .put("messages", new JSONArray().put(new JSONObject().put("role", "user").put("content", prompt)))
-                    .put("stream", false)
-                    .put("options", new JSONObject().put("temperature", 0.2));
-            var request = HttpRequest.newBuilder(URI.create(llmApiUrl))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(Cog.HTTP_TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
-                    .build();
+
             try {
-                var response = cog.http.send(request, HttpResponse.BodyHandlers.ofString());
-                var responseBody = response.body();
-                if (response.statusCode() < 200 || response.statusCode() >= 300)
-                    throw new IOException("LLM API request failed (" + interactionType + "): " + response.statusCode() + " Body: " + responseBody);
-                return extractLlmContent(new JSONObject(new JSONTokener(responseBody)))
-                        .orElseThrow(() -> new IOException("LLM response missing expected content field. Body: " + responseBody));
-            } catch (IOException | InterruptedException e) {
-                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-                throw new CompletionException("LLM API communication error (" + interactionType + ")", e);
+                // Use LangChain4j's generate method within the supplyAsync block
+                Response<AiMessage> response = chatModel.generate(prompt);
+
+                var content = response.content().text();
+
+                if (content == null || content.isBlank()) {
+                     throw new IOException("LLM response missing content. Response: " + response);
+                }
+                return content;
+
             } catch (Exception e) {
-                throw new CompletionException("LLM response processing error (" + interactionType + ")", e);
+                // LangChain4j exceptions might wrap others, check cause
+                var cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
+                if (cause instanceof InterruptedException) Thread.currentThread().interrupt();
+                throw new CompletionException("LLM API communication or processing error (" + interactionType + ")", cause);
             }
-        }, cog.events.exe);
+        }, cog.events.exe); // Use the system's event executor
     }
 
     void handleLlmResponse(String taskId, String noteId, String interactionType, String kifPredicate, String response, Throwable ex, BiConsumer<String, String> successHandler) {
@@ -144,6 +147,9 @@ public class LM {
                     .filter(Predicate.not(String::isBlank))
                     .forEach(lineContent -> {
                         var resultId = Cog.generateId(Cog.ID_PREFIX_LLM_RESULT);
+                        // Assuming lineContent is the value for the 4th term in the KIF list
+                        // Need to handle potential quotes/escaping if lineContent contains special chars
+                        // For simplicity, let's assume lineContent is a simple string that can be an atom value
                         var kifTerm = new Logic.KifList(Logic.KifAtom.of(kifPredicate), Logic.KifAtom.of(noteId), Logic.KifAtom.of(resultId), Logic.KifAtom.of(lineContent));
                         cog.events.emit(new Cog.ExternalInputEvent(kifTerm, "llm-" + kifPredicate + ":" + noteId, noteId));
                     });
@@ -172,10 +178,10 @@ public class LM {
                 You are a helpful assistant. Please revise and enhance the following note for clarity, conciseness, and improved structure. Keep the core meaning intact.
                 Focus on improving readability and flow. Correct any grammatical errors or awkward phrasing.
                 Output ONLY the revised note text, without any introductory or concluding remarks.
-                
+
                 Original Note:
                 "%s"
-                
+
                 Enhanced Note:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Note Enhancement", n.id);
         activeLlmTasks.put(taskId, future);
@@ -186,10 +192,10 @@ public class LM {
     public CompletableFuture<String> summarizeNoteWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Summarize the following note in one or two concise sentences. Output ONLY the summary.
-                
+
                 Note:
                 "%s"
-                
+
                 Summary:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Note Summarization", n.id);
         activeLlmTasks.put(taskId, future);
@@ -200,10 +206,10 @@ public class LM {
     public CompletableFuture<String> keyConceptsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.
-                
+
                 Note:
                 "%s"
-                
+
                 Key Concepts:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Key Concept Identification", n.id);
         activeLlmTasks.put(taskId, future);
@@ -214,10 +220,10 @@ public class LM {
     public CompletableFuture<String> generateQuestionsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Based on the following note, generate 1-3 insightful questions that could lead to further exploration or clarification. Output ONLY the questions, each on a new line starting with '- '.
-                
+
                 Note:
                 "%s"
-                
+
                 Questions:""".formatted(n.text);
         var future = llmAsync(taskId, finalPrompt, "Question Generation", n.id);
         activeLlmTasks.put(taskId, future);
@@ -235,10 +241,10 @@ public class LM {
                 Use '(exists (?Y) (and (instance ?Y Cat) (attribute ?Y BlackColor)))' for existential statements.
                 Avoid trivial assertions like (instance X X) or (= X X) or (not (= X X)).
                 Example: (instance Fluffy Cat) (attribute Fluffy OrangeColor) (= (age Fluffy) 3) (not (attribute Fluffy BlackColor)) (exists (?K) (instance ?K Kitten))
-                
+
                 Note:
                 "%s"
-                
+
                 KIF Assertions:""".formatted(noteText);
         var future = llmAsync(taskId, finalPrompt, "KIF Generation", noteId);
         activeLlmTasks.put(taskId, future);

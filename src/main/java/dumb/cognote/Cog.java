@@ -12,7 +12,7 @@ import javax.swing.*;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.http.HttpClient;
+import java.net.http.HttpClient; // Keep import if needed elsewhere, but remove field if not
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -58,7 +58,7 @@ public class Cog {
     private static final int DEFAULT_REASONING_DEPTH = 4;
     private static final boolean DEFAULT_BROADCAST_INPUT = false;
     // --- System Parameters ---
-    static final int HTTP_TIMEOUT_SECONDS = 90;
+    static final int HTTP_TIMEOUT_SECONDS = 90; // Still relevant for LLM calls via LangChain4j config
     private static final double DEFAULT_RULE_PRIORITY = 1.0;
     static final double INPUT_ASSERTION_BASE_PRIORITY = 10.0;
     private static final int WS_STOP_TIMEOUT_MS = 1000;
@@ -71,10 +71,10 @@ public class Cog {
     final Cognition context;
     final AtomicBoolean running = new AtomicBoolean(true);
     final AtomicBoolean paused = new AtomicBoolean(false);
-    final LM lm = new LM(this);
+    final LM lm = new LM(this); // LM instance
     private final Plugins plugins;
     private final Reason.ReasonerManager reasonerManager;
-    final HttpClient http;
+    // final HttpClient http; // Removed - LM now uses LangChain4j's internal client
     final UI ui;
     final MyWebSocketServer websocket;
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -87,7 +87,11 @@ public class Cog {
     public Cog(int port, UI ui) {
         this.ui = requireNonNull(ui, "SwingUI cannot be null");
         this.events = new Events(mainExecutor);
+        // Load notes and config first to set initial LM properties
         loadNotesAndConfig();
+        // Now reconfigure LM based on loaded config
+        lm.reconfigure();
+
 
         var skolemizer = new Skolemizer();
         var tms = new BasicTMS(events);
@@ -97,10 +101,10 @@ public class Cog {
         this.reasonerManager = new Reason.ReasonerManager(events, context);
         this.plugins = new Plugins(events, context);
 
-        this.http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
-                .executor(mainExecutor)
-                .build();
+        // this.http = HttpClient.newBuilder() // Removed HttpClient field
+        //         .connectTimeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
+        //         .executor(mainExecutor)
+        //         .build();
         this.websocket = new MyWebSocketServer(new InetSocketAddress(port));
 
         System.out.printf("System config: Port=%d, KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d%n",
@@ -128,7 +132,7 @@ public class Cog {
             UI ui = null;
             try {
                 ui = new UI(null);
-                var server = new Cog(port, ui);
+                var server = new Cog(port, ui); // Cog constructor now loads config and reconfigures LM
                 ui.setSystemReference(server);
                 Runtime.getRuntime().addShutdownHook(new Thread(server::stopSystem));
                 server.startSystem();
@@ -185,17 +189,17 @@ public class Cog {
 
         var or = context.operators();
         BiFunction<KifList, DoubleBinaryOperator, Optional<KifTerm>> numeric = (args, op) -> {
-            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value) && args.get(2) instanceof KifAtom) {
+            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(String value2)) {
                 try {
-                    return Optional.of(KifAtom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value), Double.parseDouble(value)))));
+                    return Optional.of(KifAtom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
                 } catch (NumberFormatException e) {}
             }
             return Optional.empty();
         };
         BiFunction<KifList, DoubleDoublePredicate, Optional<KifTerm>> comparison = (args, op) -> {
-            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value) && args.get(2) instanceof KifAtom) {
+            if (args.size() == 3 && args.get(1) instanceof KifAtom(String value1) && args.get(2) instanceof KifAtom(String value2)) {
                 try {
-                    return Optional.of(KifAtom.of(op.test(Double.parseDouble(value), Double.parseDouble(value)) ? "true" : "false"));
+                    return Optional.of(KifAtom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
                 } catch (NumberFormatException e) { }
             }
             return Optional.empty();
@@ -221,7 +225,7 @@ public class Cog {
 
         SwingUtilities.invokeLater(() -> {
             ui.addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Assertions in the global knowledge base."));
-            ui.loadNotes(loadNotesFromFile());
+            ui.loadNotes(loadNotesFromFile()); // This will reload notes, including config, and trigger updateConfig again
         });
 
         setupDefaultPlugins();
@@ -439,7 +443,8 @@ public class Cog {
     public boolean updateConfig(String newConfigJsonText) {
         try {
             var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText)); // Validate first
-            parseConfig(newConfigJsonText); // Apply changes
+            parseConfig(newConfigJsonText); // Apply changes to volatile fields
+            lm.reconfigure(); // Reconfigure the LLM instance
             ui.findNoteById(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = newConfigJson.toString(2); // Update note text
                 saveNotesToFile(); // Persist changes

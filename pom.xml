@@ -12,6 +12,8 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Define LangChain4j version -->
+        <langchain4j.version>0.32.0</langchain4j.version>
     </properties>
 
     <dependencies>
@@ -29,6 +31,24 @@
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
             <version>26.0.1</version>
+        </dependency>
+
+        <!-- LangChain4j Dependencies -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!-- Optional: For structured output with JSON -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-json</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
     </dependencies>
 </project>
