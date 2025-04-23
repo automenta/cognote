@@ -1,0 +1,38 @@
+.llmInterface {
+    background-color: #e0e0e0;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 5px;
+}
+
+.llmInput {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* Make sure padding doesn't affect width */
+}
+
+.llmButton {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.llmButton:hover {
+    background-color: #3e8e41;
+}
+
+.llmInterface div {
+    margin-top: 10px;
+    text-align: left;
+}
+
+.llmInterface div strong {
+    display: block;
+    margin-bottom: 5px;
+}

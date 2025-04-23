@@ -1,0 +1,1132 @@
+<!--Okay, let's replace the `three-forcegraph` library with a custom force-directed layout implementation. This gives us full control and removes the external dependency.-->
+
+<!--**1. Backend (`flowmind_enhanced.ts`) - No Changes Needed**-->
+
+<!--The backend code remains the same as the previous version. It's agnostic to how the frontend lays out the nodes.-->
+
+<!--**2. Client-Side UI (`ui/index.html`) - Major Refactoring**-->
+
+<!--This file gets significant changes to remove `three-forcegraph` and implement the custom layout.-->
+
+<!--```html-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowMind Enhanced (Custom Layout)</title>
+    <style>
+        /* --- Base Styles (keep as before) --- */
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --text-muted-color: #aaaaaa;
+            --border-color: #444444;
+            --accent-color: #007bff;
+            --error-color: #f99;
+            --success-color: #9f9;
+            --warning-color: #ff9;
+            --node-goal: #4CAF50;
+            --node-task: #FFC107;
+            --node-question: #2196F3;
+            --node-insight: #9C27B0;
+            --node-note: #9E9E9E;
+            --node-default: #607D8B;
+        }
+        body { margin: 0; overflow: hidden; background-color: var(--bg-color); color: var(--text-color); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; font-size: 14px; }
+        canvas { display: block; }
+        #graph-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #css-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; /* Allow interaction with canvas */ }
+
+        /* --- HUD Styles (keep as before) --- */
+        .hud { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); color: var(--text-muted-color); font-size: 12px; max-width: 320px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 10;}
+        .hud h3 { margin: 0 0 8px 0; color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; font-size: 14px; }
+        .hud-section { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+        .hud button { background-color: #333; border: 1px solid #555; color: var(--text-color); padding: 4px 10px; margin: 0; border-radius: 4px; cursor: pointer; font-size: 11px; transition: background-color 0.2s; }
+        .hud button:hover { background-color: #444; }
+        .hud button:active { background-color: #222; }
+        .hud button:disabled { background-color: #222; color: #666; cursor: not-allowed; }
+        .hud button.danger { background-color: #702a2a; border-color: #9c3e3e; }
+        .hud button.danger:hover { background-color: #8d3636; }
+        .hud .status { margin-top: 5px; font-size: 11px; }
+        .hud .status span { display: inline-block; margin-right: 10px; padding: 2px 4px; border-radius: 3px; }
+        .hud .status .status-text { background-color: rgba(255, 255, 255, 0.1); }
+        .hud .status .paused-yes { background-color: var(--warning-color); color: #333; }
+        .hud .status .paused-no { background-color: var(--success-color); color: #333; }
+        .hud .graph-info { font-size: 10px; color: #888; margin-top: 5px; }
+
+        /* --- Log Styles (keep as before) --- */
+        .logs { margin-top: 8px; max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; }
+        .logs div { margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+        .logs .error { color: var(--error-color); }
+        .logs .warn { color: var(--warning-color); }
+        .logs .info { color: var(--text-muted-color); }
+        .logs .success { color: var(--success-color); }
+
+        /* --- Settings Styles (keep as before) --- */
+        #settings-panel { background: rgba(0,0,0,0.85); border: 1px solid var(--border-color); padding: 10px; border-radius: 5px; margin-top: 10px; display: none; /* Hidden by default */ flex-direction: column; gap: 8px; }
+        #settings-panel h4 { margin: 0 0 5px 0; color: var(--text-color); font-size: 13px; border-bottom: 1px solid var(--border-color); padding-bottom: 3px;}
+        .settings-group label { display: block; margin-bottom: 2px; font-weight: bold; font-size: 11px; }
+        .settings-group input, .settings-group select { width: calc(100% - 10px); padding: 4px; font-size: 11px; background: #333; color: var(--text-color); border: 1px solid #555; border-radius: 3px; }
+        .settings-group input[type="password"] { font-family: monospace; }
+
+        /* --- Node Label Styles (keep as before) --- */
+        .node-label {
+            position: absolute;
+            background: rgba(40, 40, 40, 0.9);
+            color: var(--text-color);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: all;
+            cursor: grab;
+            border: 1px solid var(--border-color);
+            border-left: 4px solid var(--node-default);
+            min-width: 150px;
+            max-width: 300px;
+            white-space: normal;
+            box-shadow: 0 1px 8px rgba(0,0,0,0.4);
+            transition: transform 0.2s ease-out, box-shadow 0.2s;
+            user-select: none; /* Prevent text selection during drag */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+        }
+        .node-label:hover { box-shadow: 0 3px 12px rgba(0,0,0,0.6); transform: scale(1.02); }
+        .node-label.dragging { cursor: grabbing; box-shadow: 0 5px 15px rgba(0,0,0,0.7); z-index: 1; }
+        .node-label h4 { margin: 0 0 5px 0; font-size: 13px; color: #fff; border-bottom: 1px solid #555; padding-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
+        .node-label h4 .node-id { font-size: 10px; color: var(--text-muted-color); font-weight: normal; }
+        .node-label p { margin: 4px 0; font-size: 11px; line-height: 1.4; overflow-wrap: break-word; max-height: 60px; overflow-y: auto; }
+        .node-label .meta { font-size: 10px; color: var(--text-muted-color); margin-top: 5px; border-top: 1px dashed #555; padding-top: 5px; }
+        .node-label .meta span { margin-right: 8px; }
+        .node-label .meta .error { color: var(--error-color); font-weight: bold; }
+        .node-label .suggestions { margin-top: 5px; padding-top: 5px; border-top: 1px dashed #555; }
+        .node-label .suggestions b { color: var(--text-color); font-size: 11px; }
+        .node-label .suggestions ul { margin: 2px 0 0 0; padding-left: 15px; list-style: disc; font-size: 10px; }
+        .node-label .actions { margin-top: 8px; display: flex; gap: 5px; }
+        .node-label .actions button { font-size: 10px; padding: 2px 6px; background-color: #444; border: 1px solid #666; }
+        .node-label .actions button:hover { background-color: #555; }
+        .node-label .edit-form { display: none; margin-top: 8px; border-top: 1px solid #555; padding-top: 8px; }
+        .node-label .edit-form textarea { width: calc(100% - 8px); min-height: 50px; margin-bottom: 5px; }
+        .node-label .edit-form input, .node-label .edit-form textarea { background: #2a2a2a; color: var(--text-color); border: 1px solid #555; font-size: 11px; padding: 4px; border-radius: 3px; }
+        .node-label .edit-form .edit-actions { display: flex; justify-content: flex-end; gap: 5px; }
+
+        /* Simple Link Style */
+        .link-line { /* Lines are now handled by Three.js directly */ }
+
+    </style>
+</head>
+<body>
+<div id="graph-container"></div>
+<div id="css-container"></div>
+
+<!-- HUD (keep structure as before) -->
+<div class="hud">
+    <h3>FlowMind</h3>
+    <div class="hud-section">
+        <button id="run-btn" title="Resume simulation & processing">Run</button>
+        <button id="pause-btn" title="Pause simulation & processing">Pause</button>
+        <button id="step-btn" title="Run one processing step (server)">Step Srv</button>
+        <button id="step-sim-btn" title="Run one simulation step (client)">Step Sim</button>
+        <button id="add-node-btn" title="Add a new thought node">+</button>
+        <button id="settings-toggle-btn" title="Show/Hide Settings">Settings</button>
+        <button id="clear-all-btn" class="danger" title="Clear All Data (Destructive!)">Clear All</button>
+    </div>
+    <div class="status">
+        <span class="status-text" id="system-status">Initializing...</span>
+        <span id="pause-status" class="paused-yes">Paused</span>
+    </div>
+    <div class="graph-info">
+        Nodes: <span id="node-count">0</span> | Links: <span id="link-count">0</span> | Energy: <span id="sim-energy">N/A</span>
+    </div>
+    <div id="settings-panel">
+        <!-- Settings Form (keep as before) -->
+        <h4>LLM Configuration</h4>
+        <div class="settings-group"> <label for="llm-provider">Provider:</label> <select id="llm-provider"><option value="ollama">Ollama</option><option value="openai">OpenAI</option></select> </div>
+        <div class="settings-group"> <label for="llm-endpoint">Endpoint (Ollama Base URL):</label> <input type="text" id="llm-endpoint"> </div>
+        <div class="settings-group"> <label for="llm-model">Chat Model:</label> <input type="text" id="llm-model"> </div>
+        <div class="settings-group"> <label for="llm-embedding-model">Embedding Model:</label> <input type="text" id="llm-embedding-model"> </div>
+        <div class="settings-group"> <label for="llm-api-key">API Key (OpenAI):</label> <input type="password" id="llm-api-key"> </div>
+        <div class="settings-group"> <label for="auto-process-interval">Auto Process Interval (ms):</label> <input type="number" id="auto-process-interval" min="1000" step="1000"> </div>
+        <button id="save-settings-btn">Save Settings</button>
+    </div>
+    <div class="logs" id="log-output"> <div>Welcome to FlowMind Enhanced!</div> </div>
+    <div class="hud-section fov-control" style="margin-top: 5px;">
+        <label for="fov-slider" style="font-size: 11px;">FOV:</label>
+        <input type="range" id="fov-slider" min="30" max="120" value="75" style="width: 100px; vertical-align: middle;">
+        <span id="fov-value" style="font-size: 11px; min-width: 25px;">75&deg;</span>
+    </div>
+</div>
+
+<!-- ES Module Shims -->
+<script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+
+<script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/",
+        "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@^18/dist/tween.esm.js"
+      }
+    }
+</script>
+
+<script type="module">
+    // --- Client-Side Logic (Custom Layout) ---
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+    import TWEEN from '@tweenjs/tween.js';
+
+    // --- Simulation Parameters ---
+    const simConfig = {
+        chargeStrength: -25000, // Repulsion force strength (increase magnitude for more push)
+        linkStrength: 0.05,    // Spring force strength (0 to 1)
+        linkDistance: 120,     // Target distance for links
+        centerStrength: 0.005, // Force pulling towards origin
+        damping: 0.96,         // Velocity reduction per step (closer to 1 = less damping)
+        timeStep: 0.02,        // Simulation time step
+        stabilizationThreshold: 0.5, // Avg velocity below which simulation might auto-pause
+        maxVelocity: 50,      // Prevent nodes shooting off too fast
+    };
+
+    // --- Global State ---
+    let scene, camera, renderer, cssRenderer, controls;
+    let webSocket;
+    let isSystemPaused = true; // Server processing pause state
+    let isSimPaused = true; // Client simulation pause state
+    let isDragging = false;
+    let draggedNode = null;
+    let dragPlane = new THREE.Plane();
+    let dragOffset = new THREE.Vector3();
+    let animationId;
+
+    const graphData = { nodes: [], links: [] }; // Local cache including simulation properties
+    const nodeMap = new Map(); // id -> node data object
+    const nodeObjects = new Map(); // id -> CSS3DObject
+    const linkObjects = new Map(); // link key (srcId_targetId) -> THREE.Line
+
+    // --- DOM Elements (Get references as before) ---
+    const graphContainer = document.getElementById('graph-container');
+    const cssContainer = document.getElementById('css-container');
+    const runBtn = document.getElementById('run-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const stepBtn = document.getElementById('step-btn'); // Server step
+    const stepSimBtn = document.getElementById('step-sim-btn'); // Client sim step
+    const addNodeBtn = document.getElementById('add-node-btn');
+    const clearAllBtn = document.getElementById('clear-all-btn');
+    const settingsToggleBtn = document.getElementById('settings-toggle-btn');
+    const systemStatus = document.getElementById('system-status');
+    const pauseStatusSpan = document.getElementById('pause-status');
+    const logOutput = document.getElementById('log-output');
+    const fovSlider = document.getElementById('fov-slider');
+    const fovValue = document.getElementById('fov-value');
+    const nodeCountSpan = document.getElementById('node-count');
+    const linkCountSpan = document.getElementById('link-count');
+    const simEnergySpan = document.getElementById('sim-energy');
+    // ... (settings panel elements as before)
+    const settingsPanel = document.getElementById('settings-panel');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const llmProviderSelect = document.getElementById('llm-provider');
+    const llmEndpointInput = document.getElementById('llm-endpoint');
+    const llmModelInput = document.getElementById('llm-model');
+    const llmEmbeddingModelInput = document.getElementById('llm-embedding-model');
+    const llmApiKeyInput = document.getElementById('llm-api-key');
+    const autoProcessIntervalInput = document.getElementById('auto-process-interval');
+
+    // --- Initialization ---
+    function init() {
+        setupScene();
+        setupRenderers();
+        setupControls();
+        // No ForceGraph setup
+        setupEventListeners();
+        setupHUD();
+        connectWebSocket();
+        animate();
+        logMessage('Client initialized (Custom Layout).', 'info');
+        updatePauseState(true, true); // Start fully paused
+    }
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onMouseWheel(event) {
+        // Default OrbitControls handles zoom (dolly) with vertical scroll
+
+        // Horizontal scroll (or Shift+Wheel) for FOV adjustment
+        let delta = 0;
+        if (event.shiftKey) delta = event.deltaY * -0.05;
+        else if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) delta = event.deltaX * -0.05;
+
+        if (delta !== 0) {
+            event.preventDefault();
+            const currentFov = camera.fov;
+            let newFov = Math.max(30, Math.min(120, currentFov + delta));
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
+            fovSlider.value = newFov;
+            fovValue.textContent = Math.round(newFov);
+        }
+    }
+
+    // --- Scene, Renderers, Controls Setup (Keep as before) ---
+    function setupScene() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim());
+        scene.fog = new THREE.Fog(scene.background, 500, 2500);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+        camera.position.z = 500;
+
+        scene.add(new THREE.AmbientLight(0xcccccc, 1.0));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        dirLight.position.set(50, 200, 100);
+        scene.add(dirLight);
+    }
+    function setupRenderers() {
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        graphContainer.appendChild(renderer.domElement);
+
+        cssRenderer = new CSS3DRenderer();
+        cssRenderer.setSize(window.innerWidth, window.innerHeight);
+        cssContainer.appendChild(cssRenderer.domElement);
+    }
+    function setupControls() {
+        controls = new OrbitControls(camera, cssRenderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 10;
+        controls.maxDistance = 2000;
+    }
+
+    function setupEventListeners() {
+        window.addEventListener('resize', onWindowResize);
+        cssContainer.addEventListener('wheel', onMouseWheel, { passive: false });
+
+        // Dragging listeners on the CSS container (will delegate to nodes)
+        cssContainer.addEventListener('pointerdown', onPointerDown, false);
+        cssContainer.addEventListener('pointermove', onPointerMove, false);
+        cssContainer.addEventListener('pointerup', onPointerUp, false);
+        cssContainer.addEventListener('pointercancel', onPointerUp, false);
+
+
+        // Expose node actions globally
+        window.editNode = editNode;
+        window.deleteNode = deleteNode;
+        window.saveNodeEdit = saveNodeEdit;
+        window.runMemoryTool = runMemoryTool;
+        window.provideFeedback = provideFeedback;
+        window.cancelEdit = cancelEdit;
+        window.toggleNodeFix = toggleNodeFix; // For fixing/unfixing nodes
+    }
+
+    function setupHUD() {
+        runBtn.onclick = () => { sendControlCommand('run'); updatePauseState(false, false); };
+        pauseBtn.onclick = () => { sendControlCommand('pause'); updatePauseState(true, true); };
+        stepBtn.onclick = () => sendControlCommand('step'); // Step server processing
+        stepSimBtn.onclick = () => tickSimulation(1); // Step client simulation
+        addNodeBtn.onclick = addNewThought;
+        clearAllBtn.onclick = () => { if (confirm("ARE YOU SURE?\n\nDelete ALL data?")) { sendControlCommand('clear_all'); } };
+        settingsToggleBtn.onclick = toggleSettingsPanel;
+        saveSettingsBtn.onclick = saveSettings;
+        fovSlider.oninput = (e) => { /* (keep as before) */
+            const newFov = parseInt(e.target.value);
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
+            fovValue.textContent = `${newFov}`;
+            };
+        }
+
+        // --- Node & Link Object Creation/Update ---
+        function createNodeObject(nodeData) {
+            // Initialize simulation properties if missing
+             nodeData.x = nodeData.metadata?.ui?.fx ?? (Math.random() - 0.5) * 500;
+             nodeData.y = nodeData.metadata?.ui?.fy ?? (Math.random() - 0.5) * 500;
+             nodeData.z = nodeData.metadata?.ui?.fz ?? (Math.random() - 0.5) * 500;
+             nodeData.vx = nodeData.vy = nodeData.vz = 0; // Initial velocity
+             nodeData.fx = nodeData.metadata?.ui?.fx; // Fixed position
+             nodeData.fy = nodeData.metadata?.ui?.fy;
+             nodeData.fz = nodeData.metadata?.ui?.fz;
+             nodeData.isFixed = (nodeData.fx !== undefined);
+
+
+            const element = document.createElement('div');
+            element.className = 'node-label';
+            element.id = `node-${nodeData.id}`;
+            element.dataset.nodeId = nodeData.id; // Store ID for event delegation
+            updateNodeElementContent(element, nodeData); // Populate content
+            element.style.borderLeftColor = getNodeColor(nodeData.type);
+
+            // Add event listeners directly for simplicity (could use delegation)
+            element.addEventListener('click', (e) => { if (!isDragging) onNodeClick(nodeData.id, e); });
+            element.addEventListener('contextmenu', (e) => onNodeRightClick(nodeData.id, e));
+             element.addEventListener('dblclick', (e) => toggleNodeFix(nodeData.id)); // Double click to fix/unfix
+
+
+            const cssObject = new CSS3DObject(element);
+            cssObject.position.set(nodeData.x, nodeData.y, nodeData.z);
+            cssObject.userData = { id: nodeData.id, data: nodeData }; // Link back to data
+
+            nodeObjects.set(nodeData.id, cssObject);
+            cssContainer.appendChild(element); // Add element to CSS container
+             scene.add(cssObject); // Add the CSS object itself to the scene for positioning
+
+            return nodeData; // Return the data object
+        }
+    function updateNodeElementContent(element, nodeData) {
+        const contentStr = typeof nodeData.content === 'object' ? JSON.stringify(nodeData.content, null, 2) : String(nodeData.content); // Pretty print object content
+        const shortContent = contentStr.length > 150 ? contentStr.substring(0, 147) + '...' : contentStr;
+        const tags = (nodeData.metadata?.tags || []).join(', ') || 'none';
+        const status = nodeData.metadata?.status || 'n/a';
+        const errorInfo = nodeData.metadata?.errorInfo;
+        const suggestions = (nodeData.metadata?.aiSuggestions || []);
+
+        element.innerHTML = `
+                <h4>
+                    <span>${nodeData.type}</span>
+                    <span class="node-id">${nodeData.id.substring(0, 8)}</span>
+                </h4>
+                <p title="${contentStr.replace(/"/g, '&quot;')}">${shortContent || '(empty)'}</p>
+                <div class="meta">
+                    <span>Prio: ${nodeData.priority?.toFixed(2)}</span> |
+                    <span>Status: ${status}</span>
+                    ${errorInfo ? `<span class="error" title="${errorInfo}"> (Error)</span>` : ''} <br>
+                    <span>Tags: ${tags}</span> |
+                    <span>Links: ${nodeData.links?.length || 0}</span>
+                </div>
+                ${suggestions.length > 0 ? `
+                    <div class="suggestions">
+                        <b>Suggestions:</b>
+                        <ul>${suggestions.map(s => `<li>${s}</li>`).join('')}</ul>
+                        <button onclick="provideFeedback('${nodeData.id}', 'rating', 1.0)" title="Good Suggestions">👍</button>
+                        <button onclick="provideFeedback('${nodeData.id}', 'rating', 0.0)" title="Bad Suggestions">👎</button>
+                    </div>
+                ` : ''}
+                <div class="actions">
+                     <button onclick="editNode('${nodeData.id}')" title="Edit Thought">Edit</button>
+                     <button onclick="deleteNode('${nodeData.id}')" title="Delete Thought">Del</button>
+                     <button onclick="runMemoryTool('${nodeData.id}')" title="Find Semantically Similar Thoughts">Related</button>
+                </div>
+                <div class="edit-form" id="edit-${nodeData.id}">
+                     <textarea placeholder="Content (string or JSON)...">${contentStr}</textarea>
+                     <input type="number" step="0.1" min="0" max="1" value="${nodeData.priority}" placeholder="Priority" style="width: 50px;">
+                     <input type="text" value="${nodeData.type}" placeholder="Type" style="width: 80px;">
+                     <input type="text" value="${(nodeData.metadata?.tags || []).join(', ')}" placeholder="Tags (comma-sep)">
+                     <div class="edit-actions">
+                        <button onclick="cancelEdit('${nodeData.id}')">Cancel</button>
+                        <button onclick="saveNodeEdit('${nodeData.id}')">Save</button>
+                     </div>
+                </div>
+            `;
+    }
+
+    function getNodeColor(type) {
+        switch(type) {
+            case 'goal': return 'var(--node-goal)';
+            case 'task': return 'var(--node-task)';
+            case 'question': return 'var(--node-question)';
+            case 'insight': return 'var(--node-insight)';
+            case 'note': return 'var(--node-note)';
+            default: return 'var(--node-default)';
+        }
+    }
+
+    // --- Interaction Handlers ---
+    function onNodeClick(node, event) {
+        if (isDragging) return; // Don't process click if just finished dragging
+        console.log("Node clicked:", node.id);
+        // Center view smoothly on the node
+        centerViewOnNode(node);
+    }
+
+    function onNodeRightClick(node, event) {
+        if (event) event.preventDefault();
+        console.log("Node right-clicked:", node.id);
+        // Zoom in closer on right-click
+        centerViewOnNode(node, 150); // Zoom closer (e.g., distance 150)
+    }
+
+    function centerViewOnNode(node, distance = 300) {
+        const nodePosition = new THREE.Vector3(node.x, node.y, node.z);
+        // Calculate target position based on current camera angle relative to node
+        const currentDir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+        const newCamPos = new THREE.Vector3().addVectors(nodePosition, currentDir.multiplyScalar(distance));
+
+        // Use TWEEN for smooth transition
+        new TWEEN.Tween(camera.position)
+            .to(newCamPos, 800)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .start();
+
+        new TWEEN.Tween(controls.target)
+            .to(nodePosition, 800)
+            .easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => controls.update()) // Essential for target change
+            .start();
+    }
+
+
+    function createLinkObject(linkData) {
+            const key = getLinkKey(linkData);
+            if (linkObjects.has(key)) return; // Already exists
+
+            const material = new THREE.LineBasicMaterial({ color: 0x666666, transparent: true, opacity: 0.6, linewidth: 1 }); // Linewidth might not work on all systems
+            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+            const line = new THREE.Line(geometry, material);
+            line.userData = { id: key, data: linkData }; // Store link data
+
+            linkObjects.set(key, line);
+            scene.add(line); // Add line to the main WebGL scene
+        }
+
+        function updateNodeObjectPosition(nodeData) {
+            const nodeObj = nodeObjects.get(nodeData.id);
+            if (nodeObj) {
+                nodeObj.position.set(nodeData.x, nodeData.y, nodeData.z);
+                 // Maybe update border if fixed status changes
+                 if (nodeObj.element) {
+                     nodeObj.element.style.outline = nodeData.isFixed ? '2px solid var(--accent-color)' : 'none';
+                 }
+            }
+        }
+
+         function updateLinkObjectPosition(linkData) {
+            const linkKey = getLinkKey(linkData);
+            const line = linkObjects.get(linkKey);
+            const sourceNode = nodeMap.get(linkData.source);
+            const targetNode = nodeMap.get(linkData.target);
+
+            if (line && sourceNode && targetNode) {
+                const positions = line.geometry.attributes.position;
+                positions.setXYZ(0, sourceNode.x, sourceNode.y, sourceNode.z);
+                positions.setXYZ(1, targetNode.x, targetNode.y, targetNode.z);
+                positions.needsUpdate = true;
+                line.geometry.computeBoundingSphere(); // Important for visibility/rendering
+            }
+        }
+
+         function removeNodeObject(nodeId) {
+             const nodeObj = nodeObjects.get(nodeId);
+             if (nodeObj) {
+                 scene.remove(nodeObj);
+                 if (nodeObj.element.parentNode) {
+                     nodeObj.element.parentNode.removeChild(nodeObj.element);
+                 }
+                 nodeObjects.delete(nodeId);
+             }
+             nodeMap.delete(nodeId);
+         }
+
+         function removeLinkObject(linkData) {
+             const key = getLinkKey(linkData);
+             const line = linkObjects.get(key);
+             if (line) {
+                 scene.remove(line);
+                 line.geometry.dispose();
+                 line.material.dispose();
+                 linkObjects.delete(key);
+             }
+         }
+
+        function getLinkKey(linkData) {
+            // Consistent key regardless of source/target order? No, use defined source/target.
+             return `${linkData.source}_${linkData.target}_${linkData.relationship || 'related'}`;
+        }
+
+         // --- Custom Force Simulation ---
+
+        function tickSimulation(steps = 1) {
+             if (!graphData.nodes.length) return; // No nodes to simulate
+
+             let totalEnergy = 0;
+
+            for (let step = 0; step < steps; step++) {
+                 // 1. Calculate Forces
+                 graphData.nodes.forEach(node => {
+                     // Initialize forces for this step
+                     node.fxApplied = 0; node.fyApplied = 0; node.fzApplied = 0;
+
+                     // Skip force calculation if node is fixed (unless we want fixed nodes to still push others)
+                     // if (node.isFixed) return; // Option 1: Fixed nodes don't exert force
+
+                     // a) Centering Force
+                     const distToCenter = Math.sqrt(node.x*node.x + node.y*node.y + node.z*node.z);
+                     if (distToCenter > 1) { // Avoid division by zero/instability at center
+                         const centerFactor = -simConfig.centerStrength * distToCenter;
+                         node.fxApplied += (node.x / distToCenter) * centerFactor;
+                         node.fyApplied += (node.y / distToCenter) * centerFactor;
+                         node.fzApplied += (node.z / distToCenter) * centerFactor;
+                     }
+
+                     // b) Charge Force (Repulsion) - N^2 complexity, can be slow for many nodes
+                     graphData.nodes.forEach(otherNode => {
+                         if (node === otherNode) return;
+
+                         const dx = otherNode.x - node.x;
+                         const dy = otherNode.y - node.y;
+                         const dz = otherNode.z - node.z;
+                         let distanceSq = dx*dx + dy*dy + dz*dz;
+
+                         if (distanceSq < 1) distanceSq = 1; // Prevent extreme forces at close range
+                         const distance = Math.sqrt(distanceSq);
+                         const chargeForce = simConfig.chargeStrength / distanceSq; // Inverse square
+
+                         node.fxApplied += (dx / distance) * chargeForce;
+                         node.fyApplied += (dy / distance) * chargeForce;
+                         node.fzApplied += (dz / distance) * chargeForce;
+                     });
+                 });
+
+                 // c) Link Force (Spring)
+                 graphData.links.forEach(link => {
+                     const source = link.sourceNode; // Use pre-linked nodes
+                     const target = link.targetNode;
+                     if (!source || !target) return; // Skip if nodes not found
+
+                     const dx = target.x - source.x;
+                     const dy = target.y - source.y;
+                     const dz = target.z - source.z;
+                     const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+                     if (distance > 0) {
+                         const displacement = distance - simConfig.linkDistance;
+                         const linkForce = simConfig.linkStrength * displacement;
+                         const factor = linkForce / distance; // Force per unit distance component
+
+                         const fx = dx * factor;
+                         const fy = dy * factor;
+                         const fz = dz * factor;
+
+                         // Apply force to both nodes (unless fixed)
+                         if (!source.isFixed) { source.fxApplied += fx; source.fyApplied += fy; source.fzApplied += fz; }
+                         if (!target.isFixed) { target.fxApplied -= fx; target.fyApplied -= fy; target.fzApplied -= fz; }
+                     }
+                 });
+
+                // 2. Update Velocities & Positions (Integration)
+                 let currentStepEnergy = 0;
+                 graphData.nodes.forEach(node => {
+                     if (node.isFixed) {
+                         // If fixed, ensure position matches fixed coordinates and zero velocity
+                         node.x = node.fx; node.y = node.fy; node.z = node.fz;
+                         node.vx = node.vy = node.vz = 0;
+                         return; // Skip physics update for fixed nodes
+                     }
+
+                     // Apply forces to velocity
+                     node.vx += node.fxApplied * simConfig.timeStep;
+                     node.vy += node.fyApplied * simConfig.timeStep;
+                     node.vz += node.fzApplied * simConfig.timeStep;
+
+                     // Apply damping
+                     node.vx *= simConfig.damping;
+                     node.vy *= simConfig.damping;
+                     node.vz *= simConfig.damping;
+
+                     // Cap velocity
+                     const speed = Math.sqrt(node.vx*node.vx + node.vy*node.vy + node.vz*node.vz);
+                     if (speed > simConfig.maxVelocity) {
+                         const capFactor = simConfig.maxVelocity / speed;
+                         node.vx *= capFactor;
+                         node.vy *= capFactor;
+                         node.vz *= capFactor;
+                     }
+
+                     // Update position
+                     node.x += node.vx * simConfig.timeStep;
+                     node.y += node.vy * simConfig.timeStep;
+                     node.z += node.vz * simConfig.timeStep;
+
+                     // Accumulate kinetic energy for stability check (0.5 * m * v^2, assume m=1)
+                     currentStepEnergy += 0.5 * (node.vx*node.vx + node.vy*node.vy + node.vz*node.vz);
+                 });
+                 totalEnergy = currentStepEnergy; // Store energy of the last step
+             } // End sub-steps loop
+
+             // 3. Update Three.js Object Positions
+             graphData.nodes.forEach(updateNodeObjectPosition);
+             graphData.links.forEach(updateLinkObjectPosition);
+
+             // Update energy display (average energy per node)
+             const avgEnergy = graphData.nodes.length > 0 ? totalEnergy / graphData.nodes.length : 0;
+             simEnergySpan.textContent = avgEnergy.toFixed(2);
+
+             // Optional: Auto-pause if stable
+             // if (!isSimPaused && avgEnergy < simConfig.stabilizationThreshold) {
+             //     logMessage("Simulation stabilized, pausing.", "info");
+             //     updatePauseState(isSystemPaused, true); // Pause only simulation
+             // }
+         }
+
+
+        // --- WebSocket Handling ---
+        function connectWebSocket() { /* (keep as before) */
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}`;
+            webSocket = new WebSocket(wsUrl);
+            webSocket.onopen = () => { logMessage('WebSocket connected.', 'success'); updateStatus('Connected'); };
+            webSocket.onmessage = (event) => { try { handleServerMessage(JSON.parse(event.data)); } catch (e) { logMessage('Error parsing server message.', 'error'); console.error(e); } };
+            webSocket.onerror = (error) => { logMessage('WebSocket error.', 'error'); updateStatus('Connection Error'); console.error('WS Error:', error); };
+            webSocket.onclose = () => { logMessage('WebSocket disconnected. Retrying...', 'warn'); updateStatus('Disconnected'); setTimeout(connectWebSocket, 5000); };
+        }
+        function sendMessage(message) { /* (keep as before) */
+             if (webSocket?.readyState === WebSocket.OPEN) {
+                webSocket.send(JSON.stringify(message));
+            } else {
+                logMessage('WebSocket not connected.', 'error');
+            }
+        }
+
+        function handleServerMessage(message) {
+            switch (message.type) {
+                case 'init':
+                    handleGraphUpdate(message.payload, true); // Full update
+                    logMessage(`Initial graph: ${graphData.nodes.length} nodes, ${graphData.links.length} links.`, 'info');
+                    break;
+                case 'settings':
+                    updateSettingsForm(message.payload);
+                    logMessage('Received system settings.', 'info');
+                    break;
+                case 'thought_update':
+                    handleGraphUpdate({ nodes: [message.payload], links: [] }, false); // Partial update
+                    break;
+                case 'thought_delete':
+                    handleNodeDeletion(message.payload.id);
+                    break;
+                case 'event_log': /* (keep as before) */
+                     logMessage(`Event: ${message.payload.type} (${message.payload.targetId?.substring(0,8)}...)`, 'info'); break;
+                case 'status_update': /* (keep status/pause update as before) */
+                     if(message.payload.message) updateStatus(message.payload.message);
+                     if (message.payload.paused !== undefined) updatePauseState(message.payload.paused, isSimPaused); // Update only system pause state
+                     if(message.payload.targetId) highlightNodeBriefly(message.payload.targetId);
+                     break;
+                case 'error': /* (keep as before) */
+                     logMessage(`Server Error: ${message.payload.message}${message.payload.details ? ' ('+message.payload.details+')' : ''}`, 'error'); break;
+                case 'log': /* (keep as before) */
+                      logMessage(`Server: ${message.payload.message}`, 'info'); break;
+                default:
+                    logMessage(`Unhandled server message: ${message.type}`, 'warn');
+            }
+        }
+
+        function handleGraphUpdate(newData, isFullUpdate) {
+             console.log(`Handling graph update (Full: ${isFullUpdate})`, newData);
+             let needsReheat = false;
+
+             if (isFullUpdate) {
+                 // Clear existing objects
+                 graphData.nodes.forEach(n => removeNodeObject(n.id));
+                 graphData.links.forEach(l => removeLinkObject(l));
+                 graphData.nodes = [];
+                 graphData.links = [];
+                 nodeMap.clear();
+
+                 // Process new nodes
+                 (newData.nodes || []).forEach(newNodeData => {
+                      nodeMap.set(newNodeData.id, newNodeData); // Add to map first
+                      createNodeObject(newNodeData); // Creates obj and adds to scene
+                 });
+                 graphData.nodes = Array.from(nodeMap.values()); // Update nodes array
+
+                 // Process new links
+                 (newData.links || []).forEach(newLinkData => {
+                     const sourceNode = nodeMap.get(newLinkData.source);
+                     const targetNode = nodeMap.get(newLinkData.target);
+                     if (sourceNode && targetNode) {
+                         // Enhance link data with node references
+                         newLinkData.sourceNode = sourceNode;
+                         newLinkData.targetNode = targetNode;
+                         graphData.links.push(newLinkData);
+                         createLinkObject(newLinkData); // Creates line and adds to scene
+                     } else {
+                         console.warn("Skipping link due to missing node:", newLinkData);
+                     }
+                 });
+                 needsReheat = true;
+
+             } else { // Partial update (only node updates expected here for now)
+                 (newData.nodes || []).forEach(updatedNodeData => {
+                     const existingNode = nodeMap.get(updatedNodeData.id);
+                     if (existingNode) {
+                         // Merge data, preserving simulation state unless fixed pos changes
+                         const uiMeta = updatedNodeData.metadata?.ui;
+                         const oldFixed = existingNode.isFixed;
+                         const newFixed = uiMeta?.fx !== undefined;
+
+                         Object.assign(existingNode, updatedNodeData); // Update data
+
+                         // Update simulation properties based on metadata
+                         existingNode.fx = uiMeta?.fx;
+                         existingNode.fy = uiMeta?.fy;
+                         existingNode.fz = uiMeta?.fz;
+                         existingNode.isFixed = newFixed;
+
+                         // If fixed status changed, update position and maybe velocity
+                         if (newFixed) {
+                             existingNode.x = existingNode.fx;
+                             existingNode.y = existingNode.fy;
+                             existingNode.z = existingNode.fz;
+                             existingNode.vx = existingNode.vy = existingNode.vz = 0; // Stop movement if fixed
+                         } else if (oldFixed && !newFixed) {
+                              // If unfixed, maybe give it a small kick? Or let forces take over.
+                         }
+
+
+                         // Update the visual object (HTML content and position)
+                         const nodeObj = nodeObjects.get(updatedNodeData.id);
+                         if (nodeObj) {
+                             updateNodeElementContent(nodeObj.element, existingNode);
+                             updateNodeObjectPosition(existingNode); // Ensure visual pos matches data
+                         }
+                         needsReheat = true; // Reheat if node data changed
+                     } else {
+                         // New node arrived in a partial update
+                         nodeMap.set(updatedNodeData.id, updatedNodeData);
+                         createNodeObject(updatedNodeData);
+                         graphData.nodes.push(updatedNodeData); // Add to nodes array
+                         needsReheat = true;
+                     }
+                 });
+                  // Handling partial link updates would be more complex here.
+                  // Assuming links only come with full updates for now.
+             }
+
+             // Update counts in HUD
+             nodeCountSpan.textContent = graphData.nodes.length;
+             linkCountSpan.textContent = graphData.links.length;
+
+             // Reheat simulation slightly if data changed
+             // if (needsReheat && !isSimPaused) {
+             //     // How to reheat? Maybe increase velocities slightly?
+             // }
+        }
+
+        function handleNodeDeletion(deletedNodeId) {
+            logMessage(`Thought deleted: ${deletedNodeId.substring(0,8)}...`, 'info');
+            removeNodeObject(deletedNodeId); // Removes from map, scene, CSS container
+
+            // Remove links connected to the deleted node
+            const linksToRemove = graphData.links.filter(l => l.source === deletedNodeId || l.target === deletedNodeId);
+            linksToRemove.forEach(link => {
+                 removeLinkObject(link);
+                 const index = graphData.links.indexOf(link);
+                 if (index > -1) graphData.links.splice(index, 1);
+            });
+
+            // Update node array
+            const nodeIndex = graphData.nodes.findIndex(n => n.id === deletedNodeId);
+            if (nodeIndex > -1) graphData.nodes.splice(nodeIndex, 1);
+
+
+            // Update counts
+            nodeCountSpan.textContent = graphData.nodes.length;
+            linkCountSpan.textContent = graphData.links.length;
+        }
+
+        // --- HUD & Logging ---
+        function updateStatus(text) { systemStatus.textContent = text; }
+        function updatePauseState(systemPaused, simPaused) {
+            isSystemPaused = systemPaused;
+            isSimPaused = simPaused;
+            pauseStatusSpan.textContent = isSystemPaused ? (isSimPaused ? 'Sys+Sim Paused' : 'Sys Paused') : (isSimPaused ? 'Sim Paused' : 'Running');
+            pauseStatusSpan.className = (isSystemPaused || isSimPaused) ? 'paused-yes' : 'paused-no';
+
+            // Server controls
+            stepBtn.disabled = !isSystemPaused; // Can step server only if system paused
+            runBtn.disabled = !isSystemPaused && !isSimPaused; // Can run only if both are paused
+            pauseBtn.disabled = isSystemPaused && isSimPaused; // Can pause only if both are running
+
+             // Client sim controls
+             stepSimBtn.disabled = !isSimPaused; // Can step sim only if sim paused
+        }
+
+        function logMessage(text, type = 'info') { /* (keep as before) */
+             const logEntry = document.createElement('div');
+             logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+             logEntry.classList.add(type); // error, warn, info, success
+             logOutput.insertBefore(logEntry, logOutput.firstChild);
+             while (logOutput.childElementCount > 100) logOutput.removeChild(logOutput.lastChild);
+         }
+        function sendControlCommand(command) { sendMessage({ type: 'control', payload: { command } }); }
+        function highlightNodeBriefly(nodeId, duration = 1000) { /* (keep as before) */
+            const nodeObject = nodeObjects.get(nodeId);
+            if (nodeObject && nodeObject.element) {
+                const element = nodeObject.element;
+                const originalBorder = element.style.borderLeftColor;
+                element.style.transition = 'border-left-color 0.3s ease-in-out, outline 0.3s ease-in-out';
+                element.style.borderLeftColor = 'var(--accent-color)';
+                element.style.outline = '2px solid var(--accent-color)';
+                setTimeout(() => {
+                    element.style.borderLeftColor = originalBorder;
+                    element.style.outline = nodeMap.get(nodeId)?.isFixed ? '2px solid var(--accent-color)' : 'none'; // Restore outline based on fixed state
+                }, duration);
+            }
+        }
+
+        // --- Settings Panel ---
+        function toggleSettingsPanel() { /* (keep as before) */
+             const panel = settingsPanel;
+            if (panel.style.display === 'none' || panel.style.display === '') {
+                panel.style.display = 'flex';
+                sendMessage({ type: 'request_settings' });
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+        function updateSettingsForm(settings) { /* (keep as before) */
+             llmProviderSelect.value = settings.llm.provider;
+             llmEndpointInput.value = settings.llm.endpoint;
+             llmModelInput.value = settings.llm.model;
+             llmEmbeddingModelInput.value = settings.llm.embeddingModel;
+             llmApiKeyInput.value = settings.llm.apiKey;
+             autoProcessIntervalInput.value = settings.autoProcessInterval;
+         }
+        function saveSettings() { /* (keep as before) */
+             const newSettings = {
+                 llm: { provider: llmProviderSelect.value, endpoint: llmEndpointInput.value, model: llmModelInput.value, embeddingModel: llmEmbeddingModelInput.value, apiKey: llmApiKeyInput.value, },
+                 autoProcessInterval: parseInt(autoProcessIntervalInput.value) || 15000
+             };
+             logMessage('Saving settings...', 'info');
+             sendMessage({ type: 'update_settings', payload: newSettings });
+             settingsPanel.style.display = 'none';
+         }
+
+
+        // --- Node Actions ---
+        // editNode, cancelEdit, deleteNode, saveNodeEdit, runMemoryTool, provideFeedback, addNewThought
+        // (Keep implementations as before, they interact with the DOM elements and send WebSocket messages)
+         window.editNode = (id) => {
+            const editDiv = document.getElementById(`edit-${id}`);
+            const labelDiv = editDiv?.closest('.node-label');
+            if (editDiv && labelDiv) {
+                 labelDiv.querySelectorAll('p, .meta, .suggestions, .actions').forEach(el => el.style.display = 'none');
+                 editDiv.style.display = 'block';
+            }
+        };
+         window.cancelEdit = (id) => {
+             const editDiv = document.getElementById(`edit-${id}`);
+             const labelDiv = editDiv?.closest('.node-label');
+             if (editDiv && labelDiv) {
+                  editDiv.style.display = 'none';
+                  labelDiv.querySelectorAll('p, .meta, .suggestions, .actions').forEach(el => el.style.display = ''); // Use empty string to reset display
+             }
+         };
+        window.deleteNode = (id) => { if (confirm(`Delete thought ${id.substring(0,8)}...?`)) { sendMessage({ type: 'delete_thought', payload: { id } }); } };
+        window.saveNodeEdit = (id) => {
+             const editDiv = document.getElementById(`edit-${id}`);
+             if (!editDiv) return;
+             const contentEl = editDiv.querySelector('textarea');
+             const priorityEl = editDiv.querySelector('input[type="number"]');
+             const typeEl = editDiv.querySelector('input[placeholder="Type"]');
+             const tagsEl = editDiv.querySelector('input[placeholder="Tags (comma-sep)"]');
+             let content = contentEl.value;
+             try { if ((content.startsWith('{') && content.endsWith('}')) || (content.startsWith('[') && content.endsWith(']'))) { content = JSON.parse(content); } } catch (e) {}
+             const priority = parseFloat(priorityEl.value);
+             const type = typeEl.value || 'note';
+             const tags = tagsEl.value.split(',').map(t => t.trim()).filter(Boolean);
+             sendMessage({ type: 'update_thought', payload: { id, content, priority, type, metadata: { tags } } });
+             cancelEdit(id);
+        };
+        window.runMemoryTool = (id) => {
+             const node = nodeMap.get(id);
+             if (!node) return logMessage("Node not found.", "error");
+             const query = typeof node.content === 'string' ? node.content.substring(0, 150) : JSON.stringify(node.content).substring(0, 150);
+             if (!query) return logMessage("Node content empty.", "warn");
+             logMessage(`Finding thoughts related to '${query.substring(0,30)}...' (Node ${id.substring(0,8)})`, 'info');
+             sendMessage({ type: 'run_tool', payload: { toolName: 'MemoryTool', params: { query: query, k: 5 }, thoughtId: id } });
+        };
+        window.provideFeedback = (thoughtId, type, value) => {
+             logMessage(`Sending feedback (${type}=${value}) for ${thoughtId.substring(0,8)}...`);
+             sendMessage({ type: 'run_tool', payload: { toolName: 'FeedbackTool', params: { thoughtId, feedback: { type, value } }, thoughtId } });
+             const button = event.target; if(button) { const originalBg = button.style.backgroundColor; button.style.backgroundColor = 'var(--accent-color)'; setTimeout(() => { button.style.backgroundColor = originalBg; }, 500); }
+        };
+        window.addNewThought = () => {
+             const content = prompt("Enter content:", "New Note"); if (content === null) return;
+             const type = prompt("Enter type:", "note"); if (type === null) return;
+             const priority = parseFloat(prompt("Enter priority (0.0-1.0):", "0.5"));
+             sendMessage({ type: 'add_thought', payload: { content, type: type || 'note', priority: isNaN(priority) ? 0.5 : Math.max(0, Math.min(1, priority)), links: [], metadata: {} } });
+        };
+         window.toggleNodeFix = (id) => {
+             const node = nodeMap.get(id);
+             if (!node) return;
+             node.isFixed = !node.isFixed;
+             if (node.isFixed) {
+                 // Fix at current position
+                 node.fx = node.x; node.fy = node.y; node.fz = node.z;
+                 node.vx = node.vy = node.vz = 0; // Stop movement
+             } else {
+                 // Unfix
+                 node.fx = node.fy = node.fz = undefined;
+                 // Maybe give it a small kick?
+                 node.vx = (Math.random() - 0.5) * 5;
+                 node.vy = (Math.random() - 0.5) * 5;
+                 node.vz = (Math.random() - 0.5) * 5;
+             }
+             // Update visual indicator
+             updateNodeObjectPosition(node);
+             // Send update to server to persist fixed state
+             sendMessage({ type: 'update_thought', payload: { id: node.id, metadata: { ui: { fx: node.fx, fy: node.fy, fz: node.fz }}}});
+             logMessage(`Node ${id.substring(0,8)} ${node.isFixed ? 'fixed' : 'unfixed'}`, 'info');
+         };
+
+
+        // --- Interaction & Dragging ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function getIntersectedObject(event) {
+            // Check intersection with CSS3DObjects (requires careful handling)
+            // We can check if the pointer event target is one of our node labels instead
+             let targetElement = event.target;
+             while(targetElement && !targetElement.classList?.contains('node-label')) {
+                 targetElement = targetElement.parentElement;
+             }
+             if (targetElement && targetElement.dataset.nodeId) {
+                  return nodeMap.get(targetElement.dataset.nodeId);
+             }
+             return null; // No node label hit
+        }
+
+        function onPointerDown(event) {
+            event.preventDefault();
+            if (event.button !== 0) return; // Only left click for dragging
+
+            draggedNode = getIntersectedObject(event);
+
+            if (draggedNode) {
+                isDragging = true;
+                controls.enabled = false; // Disable camera controls
+                draggedNode.isFixed = true; // Fix node during drag
+
+                const nodeElement = nodeObjects.get(draggedNode.id)?.element;
+                 if(nodeElement) nodeElement.classList.add('dragging');
+
+
+                // Project onto a plane facing the camera at the node's distance
+                const nodePos = new THREE.Vector3(draggedNode.x, draggedNode.y, draggedNode.z);
+                camera.updateMatrixWorld(); // Ensure camera matrix is up to date
+                dragPlane.setFromNormalAndCoplanarPoint(
+                    camera.getWorldDirection(dragPlane.normal).negate(), // Normal facing camera
+                    nodePos
+                );
+
+                // Calculate intersection point to find offset
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersection = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+                    dragOffset.copy(intersection).sub(nodePos);
+                } else {
+                    // Fallback if intersection fails (shouldn't normally happen)
+                    dragOffset.set(0,0,0);
+                }
+
+                cssContainer.style.cursor = 'grabbing';
+            }
+        }
+
+        function onPointerMove(event) {
+            event.preventDefault();
+            if (!isDragging || !draggedNode) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersection = new THREE.Vector3();
+            if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+                const newPos = intersection.sub(dragOffset);
+                // Update node's fixed position
+                draggedNode.fx = newPos.x;
+                draggedNode.fy = newPos.y;
+                draggedNode.fz = newPos.z;
+                // Also update current position directly for immediate visual feedback
+                draggedNode.x = newPos.x;
+                draggedNode.y = newPos.y;
+                draggedNode.z = newPos.z;
+                 draggedNode.vx = draggedNode.vy = draggedNode.vz = 0; // Stop velocity while dragging
+
+                 // Update the Three.js object immediately
+                 updateNodeObjectPosition(draggedNode);
+                 // Update connected links immediately
+                 graphData.links.forEach(link => {
+                     if (link.source === draggedNode.id || link.target === draggedNode.id) {
+                         updateLinkObjectPosition(link);
+                     }
+                 });
+            }
+        }
+
+        function onPointerUp(event) {
+            if (!isDragging || !draggedNode) return;
+
+             const nodeElement = nodeObjects.get(draggedNode.id)?.element;
+             if(nodeElement) nodeElement.classList.remove('dragging');
+
+            // Send final fixed position to server
+            sendMessage({ type: 'update_thought', payload: { id: draggedNode.id, metadata: { ui: { fx: draggedNode.fx, fy: draggedNode.fy, fz: draggedNode.fz }}}});
+
+            isDragging = false;
+            draggedNode = null;
+            controls.enabled = true;
+            cssContainer.style.cursor = 'default';
+        }
+
+
+        // --- Animation Loop ---
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+            TWEEN.update();
+            controls.update();
+
+            // Run simulation step if not paused
+            if (!isSimPaused) {
+                tickSimulation(1); // Run one simulation step per frame
+            }
+
+            render();
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+            cssRenderer.render(scene, camera);
+        }
+
+        // --- Start ---
+        init();
+
+    </script>
+</body>
+</html>
+<!--```-->
+
+<!--**Key Changes in `index.html` (Client-Side):**-->
+
+<!--1.  **Removed `three-forcegraph`:** All references and usage are gone.-->
+<!--2.  **Custom Simulation State:** Each node object in `graphData.nodes` now stores `x, y, z, vx, vy, vz, fx, fy, fz, isFixed` for the custom physics simulation.-->
+<!--3.  **`nodeMap`:** Added a `Map` for quick node data lookup by ID.-->
+<!--4.  **`linkObjects`:** Added a `Map` to store `THREE.Line` objects representing links.-->
+<!--5.  **`tickSimulation()` Function:** This is the core of the custom layout.-->
+<!--*   Calculates charge (repulsion), link (spring), and centering forces.-->
+<!--*   Applies forces to update node velocities.-->
+<!--*   Applies damping to velocities.-->
+<!--*   Updates node positions based on velocities.-->
+<!--*   Handles `isFixed` nodes (doesn't apply physics, uses `fx`, `fy`, `fz`).-->
+<!--*   Updates the visual positions of `CSS3DObject` nodes and `THREE.Line` links.-->
+<!--*   Calculates and displays simulation "energy" (average kinetic energy) as a rough indicator of stability.-->
+<!--6.  **`animate()` Loop:** Calls `tickSimulation()` if the simulation is not paused.-->
+<!--7.  **Node/Link Object Management:** Functions `createNodeObject`, `createLinkObject`, `updateNodeObjectPosition`, `updateLinkObjectPosition`, `removeNodeObject`, `removeLinkObject` manage the Three.js objects corresponding to the graph data.-->
+<!--8.  **Data Handling (`handleGraphUpdate`, `handleNodeDeletion`):** These functions now update the local `graphData`, `nodeMap`, and manage the creation/deletion/updating of Three.js objects. They also link source/target node objects within the `linkData` for efficient access during simulation.-->
+<!--9.  **Dragging Implementation:** Uses standard pointer events, calculates intersections with a plane facing the camera, updates the node's `fx`, `fy`, `fz` properties, and marks the node as `isFixed`. Sends the final fixed position to the server on drag end.-->
+<!--10. **Fixing Nodes:** Double-clicking a node label now calls `toggleNodeFix`, which sets/unsets the `isFixed` flag and `fx`/`fy`/`fz` coordinates, persisting the state to the server. Fixed nodes have an outline.-->
+<!--11. **Simulation Pause/Step:** Added separate controls for pausing/stepping the client-side simulation (`isSimPaused`) independently of the server-side processing (`isSystemPaused`).-->
+<!--12. **Dependencies:** Only `three`, `OrbitControls`, `CSS3DRenderer`, and `tween.js` are needed via the import map.-->
+
+<!--Now, the layout is entirely controlled by the custom physics simulation running in the client's browser, eliminating the D3 dependency hell.-->

@@ -1,0 +1,81 @@
+
+.systemLog {
+    border: 1px solid #ddd;
+    margin: 20px;
+    border-radius: 5px;
+    overflow: hidden; /* Clip rounded corners */
+}
+
+.statusBar {
+    background-color: #eee;
+    padding: 10px;
+    cursor: pointer;
+    text-align: center;
+    border-bottom: 1px solid #ddd;
+    font-weight: bold;
+    color: #555;
+}
+
+.statusBar:hover {
+    background-color: #e0e0e0;
+}
+
+.logContainer {
+    max-height: 300px; /* Adjust max height as needed */
+    overflow-y: auto; /* Scrollable log area */
+    padding: 10px;
+    background-color: #f9f9f9;
+}
+
+.logMessages {
+    font-family: monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    white-space: pre-wrap; /* Handle line breaks in logs */
+}
+
+.logMessage {
+    padding: 2px 0;
+    border-bottom: 1px dotted #eee;
+}
+
+.logMessage:last-child {
+    border-bottom: none;
+}
+
+.logFilters {
+    padding: 10px 0;
+    display: flex;
+    justify-content: center; /* Center filter buttons */
+    gap: 10px; /* Space between filter buttons */
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 10px;
+}
+
+.filterButton {
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: #555;
+}
+
+.filterButton:hover, .filterButton.activeFilter {
+    background-color: #e0e0e0;
+    border-color: #bbb;
+}
+
+.filterButton.activeFilter {
+    font-weight: bold;
+}
+
+.expanded .statusBar {
+    border-bottom: none; /* No border on status bar when expanded */
+    border-radius: 5px 5px 0 0; /* Rounded top corners when expanded */
+}
+
+.expanded .logContainer {
+    border-top: none; /* No top border for log container when expanded */
+}

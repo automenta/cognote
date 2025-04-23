@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Netention Client-Only Dashboard with Langchain</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1e1e1e; color: #d4d4d4; font-family: monospace; }
+        #container { position: relative; width: 100vw; height: 100vh; }
+        #hud { position: absolute; top: 10px; left: 10px; z-index: 1; }
+        #status { background: rgba(0, 0, 0, 0.5); padding: 5px 10px; border-radius: 3px; margin-bottom: 10px; }
+        .node-overlay { background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: #d4d4d4; font-family: monospace; }
+        #logOutput { position: absolute; bottom: 10px; left: 10px; width: 400px; height: 150px; background-color: rgba(0,0,0,0.5); color: #d4d4d4; border: 1px solid #444; padding: 10px; font-family: monospace; overflow-y: scroll; resize: vertical; }
+        #timeline { width: 200px; margin-top: 10px; }
+        #prompt { background: #2d2d2d; color: #d4d4d4; border: 1px solid #444; padding: 5px; margin-top: 10px; }
+        #apiKeyPrompt { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #333; color: #fff; padding: 20px; border-radius: 5px; z-index: 1000; text-align: center; }
+        #apiKeyInput { margin-bottom: 10px; padding: 8px; border: 1px solid #555; background-color: #444; color: #fff; border-radius: 3px; }
+        #apiKeyButton { padding: 8px 15px; border: none; background-color: #5cb85c; color: white; border-radius: 3px; cursor: pointer; }
+        #apiKeyButton:hover { background-color: #4cae4c; }
+        #apiKeyPrompt.hidden { display: none; }
+
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/20.0.0/tween.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/zod/3.22.4/zod.min.js"></script>
+    <script src="https://threejs.org/examples/js/addons/renderers/CSS3DRenderer.js"></script>
+    <script src="https://threejs.org/examples/js/addons/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/p-limit@4.0.0/dist/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@langchain/core@0.1.20/dist/langchain-core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@langchain/google-genai@0.1.7/dist/langchain-google-genai.min.js"></script>
+
+
+</head>
+<body>
+<div id="container">
+    <div id="hud">
+        <div id="status">Nodes: 0 | Tick: 0</div>
+        <input type="text" id="prompt" placeholder="Enter command...">
+        <div id="log"></div>
+        <input type="range" id="timeline" min="0" max="0" value="0">
+    </div>
+    <textarea id="logOutput" readonly></textarea>
+</div>
+
+<div id="apiKeyPrompt" class="hidden">
+    <h3>Enter Google API Key</h3>
+    <input type="password" id="apiKeyInput" placeholder="Your API Key">
+    <button id="apiKeyButton">Submit</button>
+</div>
+
+<script type="module">
+    // --- Logger Class ---
+    class Logger { /* ... Logger class from previous response ... */ }
+    // --- ErrorHandler Class ---
+    class ErrorHandler { /* ... ErrorHandler class from previous response ... */ }
+    // --- Tools Class and defineTool ---
+    class Tools { /* ... Tools class from previous response ... */ }
+    const defineTool = (toolDefinition) => toolDefinition;
+    // --- Graph Class ---
+    class Graph { /* ... Graph class from previous response ... */ }
+    // --- ExecutionQueue Class ---
+    class ExecutionQueue { /* ... ExecutionQueue class from previous response ... */ }
+    // --- Memory and Interfaces ---
+    class InMemory { /* ... InMemory class from previous response ... */ }
+    // --- UI Class ---
+    class UI { /* ... UI class from previous response ... */ }
+
+    // --- Dashboard Class ---
+    class Dashboard {
+        scene; camera; renderer; cssRenderer; controls; widgets; nodes; ws; hud;
+
+        constructor() { this.setup(); /* No WebSocket in client-only Dashboard */ /* this.ws = new WebSocket(`ws://localhost:${port}`); this.ws.onmessage = (e) => this.update(JSON.parse(e.data)); */ }
+        setup() { document.body.style.cssText = "margin: 0; overflow: hidden; background: #1e1e1e;"; const container = Object.assign(document.createElement("div"), { id: "container", style: "position: relative;" }); document.body.appendChild(container); this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("canvas"), antialias: true }); this.renderer.domElement.id = "canvas"; this.renderer.setSize(window.innerWidth, window.innerHeight); container.appendChild(this.renderer.domElement); this.cssRenderer = new CSS3DRenderer(); this.cssRenderer.domElement.style.cssText = "position: absolute; top: 0;"; this.cssRenderer.setSize(window.innerWidth, window.innerHeight); container.appendChild(this.cssRenderer.domElement); this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); this.camera.position.set(0, 50, 100); this.controls = new OrbitControls(this.camera, this.cssRenderer.domElement); this.controls.enableDamping = true; this.hud = Object.assign(document.createElement("div"), { style: "position: absolute; top: 10px; left: 10px; color: #d4d4d4; font-family: monospace;", innerHTML: `<div id="status">Nodes: 0 | Tick: 0</div>` }); container.appendChild(this.hud); const input = Object.assign(document.createElement("input"), { id: "prompt", style: "background: #2d2d2d; color: #d4d4d4; border: 1px solid #444; padding: 5px; margin-top: 10px;", placeholder: "Enter command...", onkeypress: (e) => e.key === "Enter" && this.handleInput(e.target.value) }); this.hud.appendChild(input); document.head.appendChild(Object.assign(document.createElement("style"), { textContent: `.node-overlay { background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: #d4d4d4; font-family: monospace; }` })); window.addEventListener("resize", () => this.onResize()); this.animate(); this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("canvas"), antialias: true }); this.cssRenderer = new CSS3DRenderer(); this.controls = new OrbitControls(this.camera, this.cssRenderer.domElement); this.widgets = new Map(Object.entries(widgets)); this.nodes = new Map(); this.hud = document.getElementById('hud');
+        }
+        update(data) { if (data.type !== "graph") return; data.nodes.forEach((n) => { if (!this.nodes.has(n.id) && n.content.widget) { const widget = this.widgets.get(n.content.widget); if (widget) this.nodes.set(n.id, widget.render(n, this.scene)); } }); this.hud.querySelector("#status").textContent = `Nodes: ${this.nodes.size} | Tick: ${data.tick}`; }
+        handleInput(cmd) { const [action, ...args] = cmd.trim().split(" "); const system = globalThis.system; if (action === "add") { const desc = args.join(" "); system.memory.store({ id: `cmd-${Date.now()}`, content: { tool: "add", input: { data: { desc, widget: "sphere", size: 5 } } }, graph: [["root", "command"]], memory: [{ type: "user", content: `Added via command: ${desc}`, timestamp: new Date().toISOString() }], state: { status: "pending", priority: 0.5, entropy: 0 }, tools: {}, context: ["root"], ts: new Date().toISOString(), resources: { tokens: 100, cycles: 100 }, logic: { type: "sequential", steps: [] } }).then(() => system.events.emit("update", "root")); } document.getElementById("prompt").value = ""; }
+        animate() { requestAnimationFrame(() => this.animate()); this.controls.update(); this.renderer.render(this.scene, this.camera); this.cssRenderer.render(this.scene, this.camera); }
+        onResize() { this.camera.aspect = window.innerWidth / window.innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(window.innerWidth, window.innerHeight); this.cssRenderer.setSize(window.innerWidth, window.innerHeight); }
+    }
+
+
+    // --- EventEmitter Polyfill ---
+    class EventEmitter { /* ... EventEmitter polyfill from previous response ... */ }
+    // --- pLimit Polyfill ---
+    const pLimit = globalThis.pLimit;
+
+    // --- API Key Handling ---
+    const apiKeyPrompt = document.getElementById('apiKeyPrompt');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const apiKeyButton = document.getElementById('apiKeyButton');
+    const API_KEY_STORAGE_KEY = 'netention_google_api_key';
+    let googleApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+
+    function showApiKeyPrompt() { apiKeyPrompt.classList.remove('hidden'); }
+    function hideApiKeyPrompt() { apiKeyPrompt.classList.add('hidden'); }
+
+    apiKeyButton.addEventListener('click', () => {
+        googleApiKey = apiKeyInput.value.trim();
+        if (googleApiKey) {
+            localStorage.setItem(API_KEY_STORAGE_KEY, googleApiKey);
+            hideApiKeyPrompt();
+            logger.info("API Key stored and prompt hidden.");
+        } else {
+            alert("API Key cannot be empty.");
+        }
+    });
+
+    // --- Tools Definition ---
+    const tools = new Tools();
+    tools.addTool(defineTool({
+        name: "add", description: "Add a new node", schema: window.zod.object({ type: window.zod.string().optional(), data: window.zod.any().optional() }), // Use window.zod
+        apply: async (node, system, input) => { /* ... add tool apply from previous response ... */ }
+    }));
+    tools.addTool(defineTool({
+        name: "llm", description: "Invoke LLM for reasoning", schema: window.zod.object({ prompt: window.zod.string() }), // Use window.zod
+        apply: async (node, system, input) => {
+            if (!googleApiKey) { showApiKeyPrompt(); throw new Error("API Key required for LLM."); }
+            try {
+                const llm = new LangchainGoogleGenAI.ChatGoogleGenerativeAI({ modelName: "gemini-pro", apiKey: googleApiKey });
+                const response = await llm.invoke(input.prompt);
+                return { ...node, history: [...node.history, ["llm", response.content]], resources: [node.resources[0] - 10, node.resources[1]] };
+            } catch (error) {
+                logger.error(`LLM invocation error: ${error.message}`, { component: 'LLMTool', error: error.message });
+                node.state.status = "failed";
+                await system.memory.store(node); // Store failed status
+                throw error; // Re-throw to be caught by process
+            }
+        }
+    }));
+    tools.addTool(defineTool({
+        name: "reflect", description: "Reflect on a note and optimize", schema: window.zod.object({ targetId: window.zod.string() }), // Use window.zod
+        apply: async (node, system, input) => {
+            const target = await system.memory.fetch(input.targetId);
+            const llmTool = tools.getTool("llm");
+            if (!llmTool) { throw new Error("LLM Tool not found for reflection."); }
+            const summaryResponse = await llmTool.apply(node, system, { prompt: `Summarize this note for reflection: ${JSON.stringify(target.content)}` });
+            const summary = summaryResponse.history.at(-1)?.[1] || "No summary generated"; // Extract summary from history
+            const updates = await system.memory.fetch(input.targetId); updates.content.optimized = summary; await system.memory.store(updates);
+            return { ...node, history: [...node.history, ["reflect", input.targetId]] };
+        }
+    }));
+
+    // --- Widgets Definition ---
+    const widgets = { /* ... widgets definition from previous response ... */ };
+
+    // --- System Class ---
+    class System {
+        memory; tools; widgets; events; server; graph; queue; limit; state; ui;
+
+        constructor(memory = new InMemory()) {
+            this.memory = memory; this.tools = tools; this.widgets = new Map(Object.entries(widgets)); this.events = new EventEmitter(); this.server = null; this.graph = new Graph(); this.queue = new ExecutionQueue({ logger, graph: this.graph }); this.limit = pLimit({ limit: 5 }); this.state = { paused: false, tick: 0 }; this.ui = new UI();
+        }
+
+        async start() {
+            this.events = new EventEmitter(); this.events.on("update", (id) => this.limit(() => this.process(id).catch(e => errorHandler.handleNoteError({ id }, e)))); this.run(); await this.seed(); logger.info("System started in client-only mode with Langchain.", { component: "System" });
+        }
+
+        async process(id) { /* ... process method from previous response ... */ }
+
+        async executeLogic(note) { /* ... executeLogic method from previous response ... */ }
+
+        run() { setInterval(() => { this.queue.optimizeSchedule(); const notes = this.queue.executionQueue.values(); for (const id of notes) { this.process(id).catch(e => logger.error(`Run error: ${e.message}`, { id })); this.queue.executionQueue.delete(id); } }, 50); }
+        computePriority(note) { /* ... computePriority method from previous response ... */ }
+        broadcast() { /* ... broadcast method from previous response ... */ }
+        create(id) { /* ... create method from previous response ... */ }
+        async seed() {
+            const root = { id: "root", content: { desc: "Netention Client Root with LLM", widget: "sphere", size: 10 }, graph: [], state: { status: "pending", priority: 1, entropy: 0 }, tools: {}, context: [], ts: new Date().toISOString(), resources: { tokens: 5000, cycles: 5000 }, logic: { type: "sequential", steps: [ { tool: "reflect", input: { targetId: "root" } }, { tool: "llm", input: { prompt: "Hello from Netention client!" } } ] }, memory: [{ type: "system", content: "Root initialized", timestamp: new Date().toISOString() }] }; await this.memory.store(root); this.graph.addNote(root); this.events.emit("update", root.id); }
+    }
+
+
+    // --- Start ---
+    const logger = new Logger(true);
+    const errorHandler = new ErrorHandler({ logger });
+    const system = new System();
+    globalThis.system = system;
+    globalThis.logger = logger;
+    const dashboard = new Dashboard();
+    globalThis.dashboard = dashboard;
+
+    async function main() {
+        logger.info("Starting Netention System (Client-Only with Langchain)...", { component: "main" });
+        await system.start();
+        logger.info("Netention System started and Dashboard initialized (Client-Only with Langchain).", { component: "main" });
+        if (!googleApiKey) { showApiKeyPrompt(); logger.warn("API Key not found in localStorage, prompting user."); }
+    }
+
+    main().catch(e => logger.error(`Main error: ${e.message}`, { component: "main", error: e }));
+
+
+</script>
+<canvas id="canvas" style="position: absolute; top: 0; left: 0;"></canvas>
+<div id="css-renderer" style="position: absolute; top: 0; left: 0;"></div>
+</body>
+</html>

@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence Semantic Notes</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --text-color: #212529;
+            --border-color: #dee2e6;
+            --primary-color: #0d6efd;
+            --secondary-color: #6c757d;
+            --hover-bg: #e9ecef;
+            --selected-bg: #cfe2ff;
+            --sidebar-width: 280px;
+            --header-height: 50px;
+            --padding: 10px;
+            --danger-color: #dc3545;
+            --match-color: #198754;
+            --published-color: #0dcaf0;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden; /* Prevent body scrolling */
+        }
+        #sidebar {
+            width: var(--sidebar-width);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        #sidebar-header {
+            padding: var(--padding);
+            border-bottom: 1px solid var(--border-color);
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-sizing: border-box;
+        }
+        #sidebar-header h2 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+        #new-note-btn {
+            padding: 5px 10px;
+            cursor: pointer;
+            border: 1px solid var(--primary-color);
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        #new-note-btn:hover {
+            opacity: 0.9;
+        }
+        #note-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            overflow-y: auto;
+            flex-grow: 1; /* Take remaining space */
+        }
+        #note-list li {
+            padding: var(--padding);
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        #note-list li:hover {
+            background-color: var(--hover-bg);
+        }
+        #note-list li.selected {
+            background-color: var(--selected-bg);
+        }
+        #note-list li .note-title {
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+            max-width: calc(var(--sidebar-width) - 2 * var(--padding) - 10px); /* Adjust for padding and indicator */
+        }
+        #note-list li .note-snippet {
+            font-size: 0.85em;
+            color: var(--secondary-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: calc(var(--sidebar-width) - 2 * var(--padding) - 10px);
+        }
+        .note-status-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        .note-status-indicator.published { background-color: var(--published-color); }
+        .note-status-indicator.matching { background-color: var(--match-color); }
+        .note-status-indicator.archived { background-color: var(--secondary-color); opacity: 0.6; }
+
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        #editor-header {
+            padding: var(--padding);
+            border-bottom: 1px solid var(--border-color);
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end; /* Align buttons to the right */
+            box-sizing: border-box;
+            gap: 8px;
+        }
+        .header-button {
+            padding: 5px 10px;
+            cursor: pointer;
+            border: 1px solid var(--secondary-color);
+            background-color: white;
+            color: var(--secondary-color);
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .header-button.primary {
+            border-color: var(--primary-color);
+            background-color: var(--primary-color);
+            color: white;
+        }
+        .header-button.danger {
+            border-color: var(--danger-color);
+            background-color: var(--danger-color);
+            color: white;
+        }
+        .header-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #editor-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: var(--padding);
+            overflow-y: auto; /* Allow scrolling within editor area */
+        }
+        #note-content {
+            flex-grow: 1;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            font-size: 1em;
+            line-height: 1.5;
+            resize: none; /* Disable textarea resize handle */
+            margin-bottom: var(--padding);
+        }
+        #tags-container {
+            margin-bottom: var(--padding);
+        }
+        #tags-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 5px;
+        }
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        .tag {
+            background-color: var(--hover-bg);
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            display: inline-flex;
+            align-items: center;
+            cursor: default;
+        }
+        .tag span { margin-right: 4px; }
+        .tag button { /* Remove tag button */
+            background: none;
+            border: none;
+            padding: 0;
+            margin-left: 4px;
+            cursor: pointer;
+            font-size: 1.1em;
+            line-height: 1;
+            color: var(--secondary-color);
+        }
+        .tag button:hover { color: var(--danger-color); }
+
+        #ollama-feedback {
+            border: 1px dashed var(--secondary-color);
+            padding: var(--padding);
+            margin-bottom: var(--padding);
+            background-color: #f8f9fa;
+            font-size: 0.9em;
+            color: var(--secondary-color);
+            display: none; /* Hidden by default */
+        }
+        #ollama-feedback h4 { margin: 0 0 5px 0; }
+        #ollama-feedback pre { white-space: pre-wrap; word-wrap: break-word; }
+
+        #nostr-status {
+            font-size: 0.8em;
+            color: var(--secondary-color);
+            padding: 5px var(--padding);
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #match-list-container {
+            margin-top: 10px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 10px;
+        }
+        #match-list-container h4 { margin: 0 0 5px 0; font-size: 1em; }
+        #match-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 150px; /* Limit height */
+            overflow-y: auto;
+        }
+        #match-list li {
+            border: 1px solid var(--match-color);
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            background-color: #e8fadf;
+        }
+        #match-list li strong { display: block; margin-bottom: 3px; }
+        #match-list li span { font-size: 0.8em; color: var(--secondary-color); }
+
+        /* Simple Embedding Visualization Placeholder */
+        .embedding-viz {
+            width: 10px;
+            height: 10px;
+            display: inline-block;
+            margin-left: 5px;
+            border-radius: 2px;
+            vertical-align: middle;
+            background-color: #ccc; /* Default */
+        }
+        .embedding-viz[style*="background-color"] { border: 1px solid rgba(0,0,0,0.1); }
+
+        /* Checkbox style */
+        .config-toggle {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        .config-toggle input[type="checkbox"] { margin: 0; }
+
+    </style>
+</head>
+<body>
+<aside id="sidebar">
+    <div id="sidebar-header">
+        <h2>Notes</h2>
+        <button id="new-note-btn">New Note</button>
+    </div>
+    <ul id="note-list">
+        <!-- Note items will be populated here -->
+    </ul>
+    <div id="nostr-status">Connecting...</div>
+</aside>
+
+<main id="main-content">
+    <div id="editor-header">
+        <button id="analyze-btn" class="header-button" title="Analyze with Ollama" disabled>Analyze</button>
+        <label class="config-toggle">
+            <input type="checkbox" id="match-toggle-cb" disabled> Find Matches
+        </label>
+        <button id="publish-btn" class="header-button" title="Publish to Nostr" disabled>Publish</button>
+        <button id="save-btn" class="header-button primary" disabled>Save</button>
+        <button id="delete-btn" class="header-button danger" disabled>Delete</button>
+    </div>
+    <div id="editor-container">
+        <textarea id="note-content" placeholder="Start writing your note..." disabled></textarea>
+
+        <div id="tags-container">
+            <label for="tags-input">Tags (e.g., k:keyword, l:location, project:MyProject)</label>
+            <input type="text" id="tags-input" placeholder="Add a tag and press Enter..." disabled>
+            <div class="tag-list" id="current-tags">
+                <!-- Tags will be populated here -->
+            </div>
+        </div>
+
+        <div id="ollama-feedback">
+            <h4>Ollama Analysis</h4>
+            <pre id="ollama-summary"></pre>
+            <div id="ollama-suggested-tags"></div>
+        </div>
+
+        <div id="match-list-container" style="display: none;">
+            <h4>Potential Matches</h4>
+            <ul id="match-list"></ul>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    const wsUrl = `ws://${window.location.host}`;
+    let ws;
+    let notes = [];
+    let currentNoteId = null;
+    let noteChangeTimeout = null;
+    let nostrConfig = { npub: 'Not connected', nsec: null, relays: [] };
+    let matches = new Map(); // Store matches <local_match_id, matchNote>
+
+    // --- DOM Elements ---
+    const noteListEl = document.getElementById('note-list');
+    const newNoteBtn = document.getElementById('new-note-btn');
+    const noteContentEl = document.getElementById('note-content');
+    const tagsInputEl = document.getElementById('tags-input');
+    const currentTagsEl = document.getElementById('current-tags');
+    const saveBtn = document.getElementById('save-btn');
+    const deleteBtn = document.getElementById('delete-btn');
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const publishBtn = document.getElementById('publish-btn');
+    const matchToggleCb = document.getElementById('match-toggle-cb');
+    const ollamaFeedbackEl = document.getElementById('ollama-feedback');
+    const ollamaSummaryEl = document.getElementById('ollama-summary');
+    const ollamaSuggestedTagsEl = document.getElementById('ollama-suggested-tags');
+    const nostrStatusEl = document.getElementById('nostr-status');
+    const matchListContainerEl = document.getElementById('match-list-container');
+    const matchListEl = document.getElementById('match-list');
+
+    // --- Utility Functions ---
+    const getNoteById = (id) => notes.find(n => n.local_id === id);
+
+    const debounce = (func, delay) => {
+        clearTimeout(noteChangeTimeout);
+        noteChangeTimeout = setTimeout(func, delay);
+    };
+
+    const getNoteTitle = (content) => {
+        const firstLine = content.split('\n')[0].trim();
+        return firstLine.length > 0 ? firstLine.substring(0, 50) : 'Untitled Note';
+    };
+
+    const getNoteSnippet = (content) => {
+        const lines = content.split('\n');
+        const snippetLine = lines.length > 1 ? lines[1] : (lines.length === 1 && lines[0].length > 50 ? lines[0].substring(50) : '');
+        return snippetLine.trim().substring(0, 100) || content.substring(0, 100) || 'No content';
+    };
+
+    // Simple hash function for color generation (consistent but varied)
+    const simpleHash = (str) => {
+        let hash = 0;
+        if (!str || str.length === 0) return hash;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash |= 0; // Convert to 32bit integer
+        }
+        return Math.abs(hash);
+    };
+
+    // Generate a color from embedding for visualization
+    const embeddingToColor = (embedding) => {
+        if (!embedding || embedding.length < 3) return '#ccc'; // Default grey
+        // Use first 3 dimensions scaled to 0-255 for RGB
+        // Normalize or scale based on expected range if needed. Assuming ~ -1 to 1 range.
+        const r = Math.floor(Math.max(0, Math.min(255, (embedding[0] + 1) * 127.5)));
+        const g = Math.floor(Math.max(0, Math.min(255, (embedding[1] + 1) * 127.5)));
+        const b = Math.floor(Math.max(0, Math.min(255, (embedding[2] + 1) * 127.5)));
+        // Alternative: Use hash of the full embedding for more variety if needed
+        // const hash = simpleHash(JSON.stringify(embedding));
+        // const r = (hash & 0xFF0000) >> 16;
+        // const g = (hash & 0x00FF00) >> 8;
+        // const b = hash & 0x0000FF;
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    };
+
+
+    // --- UI Rendering ---
+    const renderNoteList = () => {
+        noteListEl.innerHTML = ''; // Clear list
+        const sortedNotes = notes.sort((a, b) => b.updated_at - a.updated_at);
+
+        if (sortedNotes.length === 0) {
+            noteListEl.innerHTML = '<li style="text-align: center; color: var(--secondary-color); cursor: default;">No notes yet.</li>';
+        } else {
+            sortedNotes.forEach(note => {
+                const li = document.createElement('li');
+                li.dataset.id = note.local_id;
+                if (note.local_id === currentNoteId) {
+                    li.classList.add('selected');
+                }
+
+                const title = document.createElement('div');
+                title.className = 'note-title';
+                title.textContent = getNoteTitle(note.content);
+
+                const snippet = document.createElement('div');
+                snippet.className = 'note-snippet';
+                snippet.textContent = getNoteSnippet(note.content);
+
+                const statusIndicator = document.createElement('div');
+                statusIndicator.className = 'note-status-indicator';
+                if (note.config?.isPublished) statusIndicator.classList.add('published');
+                if (note.config?.findMatches) statusIndicator.classList.add('matching');
+                if (note.status === 'archived') statusIndicator.classList.add('archived');
+
+                const embeddingViz = document.createElement('span');
+                embeddingViz.className = 'embedding-viz';
+                if (note.embedding) {
+                    embeddingViz.style.backgroundColor = embeddingToColor(note.embedding);
+                    embeddingViz.title = `Embedding generated (${note.embedding.length} dims)`;
+                } else {
+                    embeddingViz.title = 'No embedding';
+                }
+                title.appendChild(embeddingViz); // Add viz next to title
+
+                li.appendChild(statusIndicator);
+                li.appendChild(title);
+                li.appendChild(snippet);
+
+                li.addEventListener('click', () => selectNote(note.local_id));
+                noteListEl.appendChild(li);
+            });
+        }
+    };
+
+    const renderTags = (tags) => {
+        currentTagsEl.innerHTML = '';
+        Object.entries(tags || {}).forEach(([key, value]) => {
+            const tagEl = document.createElement('div');
+            tagEl.className = 'tag';
+            tagEl.innerHTML = `<span>${key}${value ? ':'+value : ''}</span><button data-key="${key}">×</button>`;
+            tagEl.querySelector('button').addEventListener('click', removeTag);
+            currentTagsEl.appendChild(tagEl);
+        });
+    };
+
+    const renderOllamaFeedback = (analysis) => {
+        if (!analysis) {
+            ollamaFeedbackEl.style.display = 'none';
+            return;
+        }
+        ollamaSummaryEl.textContent = analysis.summary || 'No summary provided.';
+        ollamaSuggestedTagsEl.innerHTML = '<strong>Suggested Tags:</strong> ';
+        if (analysis.suggested_tags && Object.keys(analysis.suggested_tags).length > 0) {
+            Object.keys(analysis.suggested_tags).forEach(tagKey => {
+                const btn = document.createElement('button');
+                btn.textContent = tagKey;
+                btn.style.marginLeft = '5px';
+                btn.style.cursor = 'pointer';
+                btn.title = `Add tag: ${tagKey}`;
+                btn.onclick = () => addTagFromSuggestion(tagKey);
+                ollamaSuggestedTagsEl.appendChild(btn);
+            });
+        } else {
+            ollamaSuggestedTagsEl.innerHTML += 'None';
+        }
+        ollamaFeedbackEl.style.display = 'block';
+    };
+
+    const renderMatchList = () => {
+        matchListEl.innerHTML = '';
+        if (matches.size === 0) {
+            matchListContainerEl.style.display = 'none';
+            return;
+        }
+
+        const currentNote = getNoteById(currentNoteId);
+        const relevantMatches = Array.from(matches.values()).filter(m => m.matched_local_note_id === currentNote?.local_id);
+
+        if (relevantMatches.length === 0) {
+            matchListContainerEl.style.display = 'none';
+            return;
+        }
+
+        relevantMatches.sort((a,b) => b.match_similarity - a.match_similarity); // Sort by similarity
+
+        relevantMatches.forEach(match => {
+            const li = document.createElement('li');
+            li.dataset.matchId = match.local_id; // Use the temp local ID
+            const owner = match.owner_id.substring(0, 8) + '...';
+            const title = getNoteTitle(match.content).substring(0, 40) + '...';
+            const similarityPercent = (match.match_similarity * 100).toFixed(1);
+
+            li.innerHTML = `<strong>${title}</strong> (${similarityPercent}%)<br>
+                                 <span>From: ${owner} | ${new Date(match.created_at).toLocaleString()}</span>`;
+            // Optional: Add click handler to view match content, etc.
+            matchListEl.appendChild(li);
+        });
+
+        matchListContainerEl.style.display = 'block';
+    };
+
+    const updateEditorState = (note) => {
+        if (note) {
+            noteContentEl.value = note.content;
+            noteContentEl.disabled = false;
+            tagsInputEl.disabled = false;
+            saveBtn.disabled = false; // Enable save initially, disable after save
+            deleteBtn.disabled = false;
+            analyzeBtn.disabled = !note.content; // Enable analyze if there's content
+            publishBtn.disabled = !!note.network_id; // Disable if already published
+            publishBtn.textContent = note.network_id ? 'Published' : 'Publish';
+            matchToggleCb.disabled = !note.embedding; // Disable if no embedding
+            matchToggleCb.checked = note.config?.findMatches || false;
+            renderTags(note.tags);
+            renderOllamaFeedback(null); // Clear old feedback
+            renderMatchList(); // Show/hide matches for this note
+        } else {
+            noteContentEl.value = '';
+            noteContentEl.disabled = true;
+            tagsInputEl.value = '';
+            tagsInputEl.disabled = true;
+            currentTagsEl.innerHTML = '';
+            saveBtn.disabled = true;
+            deleteBtn.disabled = true;
+            analyzeBtn.disabled = true;
+            publishBtn.disabled = true;
+            publishBtn.textContent = 'Publish';
+            matchToggleCb.disabled = true;
+            matchToggleCb.checked = false;
+            renderOllamaFeedback(null);
+            matchListContainerEl.style.display = 'none'; // Hide matches
+        }
+    };
+
+    const updateNostrStatus = () => {
+        if (nostrConfig.npub && nostrConfig.npub !== 'Not connected') {
+            nostrStatusEl.textContent = `Nostr Active: ${nostrConfig.npub.substring(0, 12)}...`;
+            nostrStatusEl.title = `Nostr Pubkey: ${nostrConfig.npub}\nRelays: ${nostrConfig.relays.join(', ')}`;
+        } else {
+            nostrStatusEl.textContent = 'Nostr Disconnected';
+            nostrStatusEl.title = '';
+        }
+    };
+
+
+    // --- Event Handlers & Actions ---
+    const selectNote = (id) => {
+        if (currentNoteId === id) return; // Already selected
+        // Deselect previous
+        const previousSelected = noteListEl.querySelector('.selected');
+        if (previousSelected) previousSelected.classList.remove('selected');
+
+        // Select new
+        const newSelected = noteListEl.querySelector(`li[data-id="${id}"]`);
+        if (newSelected) newSelected.classList.add('selected');
+
+        currentNoteId = id;
+        const note = getNoteById(id);
+        updateEditorState(note);
+        console.log(`Selected note: ${id}`);
+    };
+
+    const handleNewNote = () => {
+        sendMessage('createNote', {});
+        // Selection will happen automatically when notes are updated and rendered
+    };
+
+    const handleSaveNote = () => {
+        if (!currentNoteId) return;
+        const note = getNoteById(currentNoteId);
+        if (!note) return;
+
+        const updatedContent = noteContentEl.value;
+        // Tags are updated directly via add/removeTag
+
+        // Avoid saving if nothing changed? (more complex check needed for tags)
+        // if (note.content === updatedContent && /* tags unchanged */) return;
+
+        sendMessage('updateNote', {
+            local_id: currentNoteId,
+            content: updatedContent,
+            tags: note.tags, // Send current tags state
+            config: note.config, // Send current config state
+            // status: note.status // Send if status changes are possible via UI
+        });
+        saveBtn.disabled = true; // Disable save until next change
+        console.log(`Sent update for note: ${currentNoteId}`);
+    };
+
+    const handleDeleteNote = () => {
+        if (!currentNoteId) return;
+        if (confirm(`Are you sure you want to delete "${getNoteTitle(noteContentEl.value)}"?`)) {
+            const idToDelete = currentNoteId;
+            currentNoteId = null; // Deselect
+            updateEditorState(null); // Clear editor
+            sendMessage('deleteNote', { local_id: idToDelete });
+            console.log(`Sent delete request for note: ${idToDelete}`);
+        }
+    };
+
+    const handleAnalyzeNote = () => {
+        if (!currentNoteId) return;
+        analyzeBtn.disabled = true; // Disable during analysis
+        analyzeBtn.textContent = 'Analyzing...';
+        ollamaFeedbackEl.style.display = 'block';
+        ollamaSummaryEl.textContent = 'Processing...';
+        ollamaSuggestedTagsEl.innerHTML = '';
+        sendMessage('analyzeNote', { local_id: currentNoteId });
+    };
+
+    const handlePublishNote = () => {
+        if (!currentNoteId || !nostrConfig.nsec) return; // Need secret key to publish
+        const note = getNoteById(currentNoteId);
+        if (!note || note.network_id) return; // Already published or no note
+
+        if (confirm(`Publish this note publicly to Nostr relays? This cannot be undone easily.`)) {
+            publishBtn.disabled = true;
+            publishBtn.textContent = 'Publishing...';
+            sendMessage('publishNote', { local_id: currentNoteId });
+        }
+    };
+
+    const handleMatchToggle = (event) => {
+        if (!currentNoteId) return;
+        const note = getNoteById(currentNoteId);
+        if (!note || !note.embedding) return; // Cannot toggle without embedding
+
+        const shouldFindMatches = event.target.checked;
+        if (note.config.findMatches === shouldFindMatches) return; // No change
+
+        // Send update immediately
+        sendMessage('updateNote', {
+            local_id: currentNoteId,
+            // No content/tag changes needed here
+            config: { ...note.config, findMatches: shouldFindMatches }
+        });
+        matchToggleCb.disabled = true; // Disable temporarily until server confirms
+        console.log(`Toggled matching to ${shouldFindMatches} for note ${currentNoteId}`);
+    };
+
+
+    const handleNoteInputChange = () => {
+        saveBtn.disabled = false; // Enable save on change
+        analyzeBtn.disabled = !noteContentEl.value; // Enable/disable analyze based on content
+        debounce(handleSaveNote, 1500); // Auto-save after 1.5 seconds of inactivity
+    };
+
+    const handleTagsInput = (event) => {
+        if (event.key === 'Enter' && tagsInputEl.value.trim() !== '') {
+            const tagInput = tagsInputEl.value.trim();
+            addTag(tagInput);
+            tagsInputEl.value = ''; // Clear input
+            event.preventDefault();
+        }
+    };
+
+    const addTag = (tagString) => {
+        if (!currentNoteId) return;
+        const note = getNoteById(currentNoteId);
+        if (!note) return;
+
+        let key, value = "";
+        if (tagString.includes(':')) {
+            const parts = tagString.split(':', 2);
+            key = parts[0].trim();
+            value = parts[1].trim();
+        } else {
+            key = tagString;
+        }
+
+        if (!key) return; // Ignore empty keys
+
+        note.tags = note.tags || {};
+        note.tags[key] = value; // Add or overwrite tag
+
+        renderTags(note.tags);
+        saveBtn.disabled = false; // Enable save as tags changed
+        debounce(handleSaveNote, 500); // Save sooner after tag change
+    };
+
+    const removeTag = (event) => {
+        if (!currentNoteId) return;
+        const note = getNoteById(currentNoteId);
+        if (!note || !note.tags) return;
+
+        const keyToRemove = event.target.dataset.key;
+        if (note.tags.hasOwnProperty(keyToRemove)) {
+            delete note.tags[keyToRemove];
+            renderTags(note.tags);
+            saveBtn.disabled = false; // Enable save as tags changed
+            debounce(handleSaveNote, 500); // Save sooner after tag change
+        }
+    };
+
+    const addTagFromSuggestion = (tagKey) => {
+        addTag(tagKey);
+        // Optionally remove the suggestion button after adding
+        const buttonToRemove = Array.from(ollamaSuggestedTagsEl.querySelectorAll('button')).find(btn => btn.textContent === tagKey);
+        if (buttonToRemove) buttonToRemove.remove();
+    };
+
+
+    // --- WebSocket Logic ---
+    const connectWebSocket = () => {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            nostrStatusEl.textContent = 'Connected, waiting for config...';
+            sendMessage('clientReady'); // Tell server we are ready for data
+        };
+
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            // console.log('Message from server:', message.type, message.payload);
+
+            switch (message.type) {
+                case 'config':
+                    nostrConfig = { ...nostrConfig, ...message.payload.nostr, relays: message.payload.relays || [] };
+                    updateNostrStatus();
+                    console.log('Received config:', nostrConfig);
+                    // If nsec is received, store it carefully (e.g., session storage) if needed for client-side signing (not used here)
+                    break;
+                case 'initialState':
+                    nostrConfig = { ...nostrConfig, ...message.payload.nostr, relays: message.payload.config?.relays || [] };
+                    updateNostrStatus();
+                    notes = message.payload.notes || [];
+                    matches.clear(); // Clear old matches on full refresh
+                    console.log(`Received initial state with ${notes.length} notes.`);
+                    renderNoteList();
+                    // Select the most recently updated note by default, if any
+                    if (notes.length > 0) {
+                        const latestNote = notes.reduce((latest, note) => (!latest || note.updated_at > latest.updated_at) ? note : latest, null);
+                        if (latestNote) {
+                            selectNote(latestNote.local_id);
+                        }
+                    } else {
+                        updateEditorState(null); // Ensure editor is cleared if no notes
+                    }
+                    break;
+                case 'notesUpdated':
+                    notes = message.payload;
+                    const currentNoteStillExists = notes.some(n => n.local_id === currentNoteId);
+                    console.log(`Received notes update (${notes.length} notes). Current note exists: ${currentNoteStillExists}`);
+                    renderNoteList(); // Re-render the list
+                    if (currentNoteStillExists) {
+                        const updatedNote = getNoteById(currentNoteId);
+                        updateEditorState(updatedNote); // Refresh editor if current note updated
+                        // Re-enable match toggle if server confirmed state
+                        if (matchToggleCb.disabled) matchToggleCb.disabled = !updatedNote?.embedding;
+                    } else {
+                        currentNoteId = null; // Current note was deleted
+                        updateEditorState(null); // Clear editor
+                    }
+                    saveBtn.disabled = true; // Assume saved state after update from server
+                    break;
+                case 'ollamaFeedback':
+                    if (message.payload.local_id === currentNoteId) {
+                        console.log('Received Ollama feedback for current note.');
+                        renderOllamaFeedback(message.payload.analysis);
+                        analyzeBtn.disabled = false; // Re-enable button
+                        analyzeBtn.textContent = 'Analyze';
+                        // If tags were suggested, maybe auto-update note state? Or just display? Current: Just display.
+                    }
+                    break;
+                case 'matchFound':
+                    const matchNote = message.payload;
+                    console.log(`Received match: ${matchNote.network_id} for local note ${matchNote.matched_local_note_id}`);
+                    matches.set(matchNote.local_id, matchNote); // Store match using its temp local ID
+                    if (matchNote.matched_local_note_id === currentNoteId) {
+                        renderMatchList(); // Update match list if relevant to current note
+                    }
+                    break;
+                case 'serverError':
+                    console.error('Server Error:', message.payload.message);
+                    alert(`Server Error: ${message.payload.message}`);
+                    // Re-enable buttons that might have been disabled
+                    if (analyzeBtn.textContent === 'Analyzing...') {
+                        analyzeBtn.disabled = false;
+                        analyzeBtn.textContent = 'Analyze';
+                    }
+                    if (publishBtn.textContent === 'Publishing...') {
+                        publishBtn.disabled = false;
+                        publishBtn.textContent = 'Publish';
+                    }
+                    // Potentially reset match toggle state if error related to that
+                    break;
+
+                default:
+                    console.log('Unknown message type:', message.type);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            nostrStatusEl.textContent = 'Connection Error';
+            // Disable UI elements that depend on connection?
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket disconnected. Attempting to reconnect...');
+            nostrStatusEl.textContent = 'Disconnected. Retrying...';
+            // Disable UI?
+            updateEditorState(null); // Clear editor on disconnect?
+            currentNoteId = null;
+            notes = [];
+            renderNoteList();
+            matches.clear();
+            renderMatchList();
+
+            setTimeout(connectWebSocket, 5000); // Retry connection after 5 seconds
+        };
+    };
+
+    const sendMessage = (type, payload) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type, payload }));
+        } else {
+            console.error('WebSocket is not connected.');
+            // Handle error - maybe queue message or alert user
+        }
+    };
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        connectWebSocket();
+
+        // Add event listeners
+        newNoteBtn.addEventListener('click', handleNewNote);
+        saveBtn.addEventListener('click', handleSaveNote);
+        deleteBtn.addEventListener('click', handleDeleteNote);
+        analyzeBtn.addEventListener('click', handleAnalyzeNote);
+        publishBtn.addEventListener('click', handlePublishNote);
+        matchToggleCb.addEventListener('change', handleMatchToggle);
+
+        noteContentEl.addEventListener('input', handleNoteInputChange);
+        tagsInputEl.addEventListener('keydown', handleTagsInput);
+
+        updateEditorState(null); // Initial empty state
+    });
+
+</script>
+</body>
+</html>

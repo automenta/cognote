@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence - Semantic Notes</title>
+    <script src="/util.js"></script> <!-- Include shared utils -->
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; background-color: #f4f4f4; }
+        #sidebar { width: 250px; border-right: 1px solid #ccc; display: flex; flex-direction: column; background-color: #e9e9e9; }
+        #main-content { flex-grow: 1; display: flex; flex-direction: column; padding: 0; }
+        #editor-area { flex-grow: 1; display: flex; flex-direction: column; padding: 15px; background-color: #fff; border-bottom: 1px solid #ccc; }
+        #note-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1;}
+        #note-list li { padding: 10px; border-bottom: 1px solid #ddd; cursor: pointer; }
+        #note-list li:hover { background-color: #d8d8d8; }
+        #note-list li.active { background-color: #c8c8ff; font-weight: bold; }
+        #note-title { font-size: 1.5em; margin-bottom: 10px; border: none; width: 100%; padding: 5px; }
+        #note-content { flex-grow: 1; width: 100%; padding: 10px; border: 1px solid #ccc; box-sizing: border-box; min-height: 200px; margin-bottom: 10px; white-space: pre-wrap; } /* Use contenteditable */
+        #semantic-properties-editor { padding: 10px; border: 1px dashed #aaa; margin-top: 15px; background-color: #fafafa; max-height: 300px; overflow-y: auto; }
+        #semantic-properties-editor h4 { margin-top: 0; margin-bottom: 10px; }
+        .property-row { display: grid; grid-template-columns: 1fr 1fr auto auto auto auto auto auto auto auto; gap: 5px; margin-bottom: 8px; padding: 5px; border: 1px solid #eee; align-items: center; }
+        .property-row label { font-size: 0.8em; font-weight: bold; display: block; margin-bottom: 2px; }
+        .property-row input, .property-row select { padding: 4px; font-size: 0.9em; border: 1px solid #ccc; border-radius: 3px; width: 100%; box-sizing: border-box; }
+        .property-row input[type=checkbox] { width: auto; }
+        .property-row .value-ideal-group { display: flex; gap: 3px; }
+        .property-row button { padding: 3px 6px; font-size: 0.8em; cursor: pointer; background-color: #e0e0e0; border: 1px solid #ccc; border-radius: 3px; }
+        .property-row .remove-prop-btn { background-color: #ffdddd; }
+        .property-source { font-size: 0.7em; color: #666; text-align: right; grid-column: span 2; } /* Spans across ideal value */
+        #add-property-btn { margin-top: 10px; padding: 5px 10px; }
+        #status-bar { padding: 5px 10px; background-color: #eee; border-top: 1px solid #ccc; font-size: 0.8em; color: #333; }
+        #controls { padding: 10px; border-top: 1px solid #ccc; background-color: #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        #controls button { padding: 8px 15px; margin-left: 5px; cursor: pointer; }
+        #analysis-status { font-style: italic; color: #555; font-size: 0.9em; }
+
+        #network-panel { padding: 10px; border-top: 1px solid #ccc; }
+        #network-panel h3 { margin-top: 0; margin-bottom: 5px; }
+        #nostr-status { font-size: 0.9em; margin-bottom: 10px; }
+        #nostr-config input[type=text], #nostr-config input[type=password] { width: 80%; margin-bottom: 5px; padding: 3px; }
+        #nostr-feed { height: 150px; overflow-y: auto; border: 1px solid #ccc; background: #fff; padding: 5px; font-size: 0.8em; margin-bottom: 10px; }
+        .nostr-event { border-bottom: 1px dotted #eee; margin-bottom: 5px; padding-bottom: 5px; }
+        .nostr-event strong { color: #007bff; }
+
+        #matches-panel { padding: 10px; border-top: 1px solid #ccc; flex-grow: 1; overflow-y: auto; }
+        #matches-panel h3 { margin-top: 0; }
+        #matches-list { list-style: none; padding: 0; margin: 0; }
+        .match-item { background-color: #fff; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; font-size: 0.9em; }
+        .match-item strong { color: #28a745; }
+        .match-item .similarity { font-weight: bold; }
+        .match-details { font-size: 0.85em; margin-top: 5px; padding-left: 10px; border-left: 2px solid #eee; }
+        .prop-alignment { margin-bottom: 3px; }
+        .prop-alignment .name { font-style: italic; }
+        .prop-alignment .satisfied { color: green; }
+        .prop-alignment .not-satisfied { color: red; }
+        .prop-alignment .value { font-family: monospace; font-size: 0.9em; }
+
+        /* Semantic Property Specific Styles */
+        .value-real-field { background-color: #e6f3ff; } /* Light blue */
+        .value-ideal-group { background-color: #fff3e0; padding: 3px; border-radius: 3px; } /* Light orange */
+        .property-source.llm { color: #007bff; }
+        .property-source.user { color: #28a745; }
+        .property-source.nostr { color: #ffc107; }
+
+        /* Simple Tabs */
+        .tab-buttons button { padding: 5px 10px; border: 1px solid #ccc; border-bottom: none; background: #eee; cursor: pointer; }
+        .tab-buttons button.active { background: #e9e9e9; font-weight: bold; border-bottom: 1px solid #e9e9e9; position: relative; top: 1px;}
+        .tab-content { border-top: 1px solid #ccc; padding-top: 5px; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+    </style>
+</head>
+<body>
+<div id="sidebar">
+    <div style="padding: 10px; border-bottom: 1px solid #ccc;">
+        <h3>Notes</h3>
+        <button id="new-note-btn">New Note</button>
+    </div>
+    <div class="tab-buttons">
+        <button class="tab-button active" data-tab="notes-tab">Local</button>
+        <button class="tab-button" data-tab="network-tab">Network</button>
+        <button class="tab-button" data-tab="matches-tab">Matches</button>
+    </div>
+    <div class="tab-content">
+        <div id="notes-tab" class="tab-pane active">
+            <ul id="note-list">
+                <!-- Note items will be populated here -->
+            </ul>
+        </div>
+        <div id="network-tab" class="tab-pane">
+            <div id="network-panel">
+                <h3>Nostr Network</h3>
+                <div id="nostr-status">Status: Disconnected</div>
+                <div id="nostr-config">
+                    <label>Relays (comma separated):</label>
+                    <input type="text" id="nostr-relays-input" placeholder="wss://relay.damus.io,...">
+                    <button id="set-relays-btn">Set Relays</button>
+                    <br>
+                    <label>Private Key (optional, keep safe!):</label>
+                    <input type="password" id="nostr-privkey-input">
+                    <button id="set-privkey-btn">Set Key</button>
+                    <button id="generate-key-btn">Generate New Key</button>
+                </div>
+                <div style="margin-top: 10px;">
+                    <label>Subscribe Pubkeys (comma sep):</label>
+                    <input type="text" id="nostr-subscribe-pubkeys" placeholder="pubkey1,pubkey2...">
+                    <button id="subscribe-btn">Subscribe (Kind 1)</button>
+                    <!-- Add filter options here -->
+                </div>
+                <h4>Incoming Events Feed:</h4>
+                <div id="nostr-feed"></div>
+            </div>
+        </div>
+        <div id="matches-tab" class="tab-pane">
+            <div id="matches-panel">
+                <h3>Potential Matches</h3>
+                <button id="find-matches-btn">Find Matches</button>
+                <label> Threshold: <input type="number" id="match-threshold" value="0.7" step="0.05" min="0" max="1" style="width: 50px;"></label>
+                <div id="matches-list"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div id="main-content">
+    <div id="editor-area">
+        <input type="text" id="note-title-dummy" placeholder="Note Title (derived from content/props)" disabled style="background: #eee; font-style: italic;">
+        <div id="note-content" contenteditable="true" placeholder="Start writing your note here..."></div>
+
+        <div id="semantic-properties-editor">
+            <h4>Semantic Properties <span id="analysis-status"></span></h4>
+            <div id="properties-container">
+                <!-- Property rows will be populated here -->
+            </div>
+            <button id="add-property-btn">+ Add Property Manually</button>
+        </div>
+    </div>
+    <div id="controls">
+        <div>
+            <button id="save-note-btn">Save Note</button>
+            <button id="analyze-note-btn" title="Extract properties and generate embedding using LLM">Analyze Note</button>
+            <button id="delete-note-btn">Delete Note</button>
+            <button id="publish-note-btn" title="Publish note content and properties to Nostr">Publish to Nostr</button>
+        </div>
+        <div id="note-config-options">
+            <label><input type="checkbox" id="enable-matching-cb"> Enable Matching</label>
+            <label><input type="checkbox" id="is-template-cb"> Is Template</label>
+        </div>
+    </div>
+    <div id="status-bar">
+        Status: Ready | Local ID: <span id="current-note-id">none</span> | Updated: <span id="last-updated">n/a</span>
+    </div>
+</div>
+
+<script>
+    const ws = new WebSocket(`ws://${window.location.host}`);
+
+    // --- DOM Elements ---
+    const noteList = document.getElementById('note-list');
+    const noteContent = document.getElementById('note-content');
+    // const noteTitle = document.getElementById('note-title'); // Using dummy title for now
+    const saveNoteBtn = document.getElementById('save-note-btn');
+    const newNoteBtn = document.getElementById('new-note-btn');
+    const deleteNoteBtn = document.getElementById('delete-note-btn');
+    const analyzeNoteBtn = document.getElementById('analyze-note-btn');
+    const publishNoteBtn = document.getElementById('publish-note-btn');
+    const analysisStatus = document.getElementById('analysis-status');
+    const currentNoteIdSpan = document.getElementById('current-note-id');
+    const lastUpdatedSpan = document.getElementById('last-updated');
+    const propertiesContainer = document.getElementById('properties-container');
+    const addPropertyBtn = document.getElementById('add-property-btn');
+    const enableMatchingCb = document.getElementById('enable-matching-cb');
+    const isTemplateCb = document.getElementById('is-template-cb');
+
+    // Nostr Elements
+    const nostrStatusDiv = document.getElementById('nostr-status');
+    const nostrRelaysInput = document.getElementById('nostr-relays-input');
+    const setRelaysBtn = document.getElementById('set-relays-btn');
+    const nostrPrivkeyInput = document.getElementById('nostr-privkey-input');
+    const setPrivkeyBtn = document.getElementById('set-privkey-btn');
+    const generateKeyBtn = document.getElementById('generate-key-btn');
+    const nostrSubscribePubkeys = document.getElementById('nostr-subscribe-pubkeys');
+    const subscribeBtn = document.getElementById('subscribe-btn');
+    const nostrFeed = document.getElementById('nostr-feed');
+
+    // Matches Elements
+    const findMatchesBtn = document.getElementById('find-matches-btn');
+    const matchThresholdInput = document.getElementById('match-threshold');
+    const matchesList = document.getElementById('matches-list');
+
+    // Tab Elements
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+
+    // --- State ---
+    let localNotes = [];
+    let currentNote = null; // The Note object being edited
+    let nostrSubscriptions = {}; // Store client-side info about subs { subId: { filter: {...}, status: 'active'|'inactive'|'eose' } }
+
+    // --- WebSocket Communication ---
+    function sendMessage(type, payload) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type, payload }));
+        } else {
+            console.error("WebSocket is not open. State:", ws.readyState);
+            // Optionally queue messages or show an error
+        }
+    }
+
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        updateStatusBar('Connected to server.');
+        sendMessage('getNotes'); // Request initial notes
+        // Request initial Nostr status implicitly handled by server on connect
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            // console.log('Message from server:', message.type);
+
+            switch (message.type) {
+                case 'notesList':
+                    localNotes = message.payload;
+                    renderNoteList();
+                    // If a note was being edited, refresh its state
+                    if (currentNote) {
+                        const updatedCurrentNote = localNotes.find(n => n.local_id === currentNote.local_id);
+                        if (updatedCurrentNote) {
+                            currentNote = updatedCurrentNote;
+                            // Re-render editor only if essential? Avoid losing focus.
+                            // renderNoteEditor(); // Might be too disruptive
+                        } else {
+                            // The current note was deleted elsewhere
+                            clearEditor();
+                        }
+                    }
+                    break;
+                case 'noteUpdated':
+                case 'notePublished': // Handled similarly to updated
+                    // Find and update the note in our local state
+                    const updatedNote = message.payload;
+                    const index = localNotes.findIndex(n => n.local_id === updatedNote.local_id);
+                    if (index > -1) {
+                        localNotes[index] = updatedNote;
+                    } else {
+                        localNotes.push(updatedNote); // Add if it was a new note confirmation
+                    }
+                    renderNoteList(); // Update list highlighting
+                    // If this is the currently edited note, update the editor
+                    if (currentNote && currentNote.local_id === updatedNote.local_id) {
+                        currentNote = updatedNote; // Update state
+                        renderNoteEditor(); // Refresh editor with new data (including properties, status etc.)
+                    }
+                    break;
+                case 'noteDeleted':
+                    localNotes = localNotes.filter(n => n.local_id !== message.payload.local_id);
+                    if (currentNote && currentNote.local_id === message.payload.local_id) {
+                        clearEditor();
+                    }
+                    renderNoteList();
+                    break;
+                case 'analysisStatus':
+                    updateAnalysisStatus(message.payload.noteId, message.payload.status, message.payload.error);
+                    break;
+                case 'nostrStatus':
+                    updateNostrStatus(message.payload);
+                    break;
+                case 'nostrNoteProcessed': // An analyzed Nostr event
+                    renderIncomingNostrNote(message.payload);
+                    break;
+                case 'nostrSubscriptionStatus':
+                    updateNostrSubscriptionStatus(message.payload);
+                    break;
+                case 'matchesFound':
+                    renderMatches(message.payload);
+                    break;
+                case 'embeddingsData':
+                    // Placeholder for visualizing embeddings if needed
+                    console.log("Received embeddings data:", message.payload);
+                    break;
+                case 'error':
+                    console.error('Server Error:', message.payload);
+                    updateStatusBar(`Error: ${message.payload}`, true);
+                    break;
+                default:
+                    console.log('Unknown message type from server:', message.type);
+            }
+        } catch (error) {
+            console.error('Failed to parse message or handle:', event.data, error);
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        updateStatusBar('WebSocket connection error.', true);
+    };
+
+    ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        updateStatusBar('Disconnected from server.', true);
+        // Optionally attempt to reconnect
+    };
+
+    // --- UI Rendering ---
+
+    function renderNoteList() {
+        noteList.innerHTML = ''; // Clear existing list
+        localNotes.sort((a, b) => b.updated_at - a.updated_at); // Sort by most recently updated
+        localNotes.forEach(note => {
+            const li = document.createElement('li');
+            li.textContent = generateNoteTitle(note); // Use helper to generate a title
+            li.dataset.id = note.local_id;
+            if (currentNote && note.local_id === currentNote.local_id) {
+                li.classList.add('active');
+            }
+            li.addEventListener('click', () => loadNoteIntoEditor(note.local_id));
+            noteList.appendChild(li);
+        });
+    }
+
+    function generateNoteTitle(note) {
+        if (note.content) {
+            const firstLine = note.content.trim().split('\n')[0];
+            return firstLine.substring(0, 30) + (firstLine.length > 30 ? '...' : '');
+        }
+        if (note.semantic_properties && note.semantic_properties.length > 0) {
+            return `Note with ${note.semantic_properties.length} props`;
+        }
+        return `Untitled Note (${note.local_id.substring(0, 4)}...)`;
+    }
+
+
+    function renderNoteEditor() {
+        if (!currentNote) {
+            clearEditor();
+            return;
+        }
+        // noteTitle.value = generateNoteTitle(currentNote); // Display generated title
+        noteContent.innerHTML = currentNote.content || ''; // Use innerHTML for contenteditable
+        currentNoteIdSpan.textContent = currentNote.local_id;
+        lastUpdatedSpan.textContent = currentNote.updated_at ? new Date(currentNote.updated_at).toLocaleString() : 'n/a';
+        enableMatchingCb.checked = currentNote.config?.enableMatching ?? true;
+        isTemplateCb.checked = currentNote.config?.isTemplate ?? false;
+        updateStatusBar(`Editing Note ${currentNote.local_id.substring(0,8)}...`);
+
+        renderSemanticProperties();
+    }
+
+    function clearEditor() {
+        currentNote = null;
+        // noteTitle.value = '';
+        noteContent.innerHTML = '';
+        propertiesContainer.innerHTML = ''; // Clear properties
+        currentNoteIdSpan.textContent = 'none';
+        lastUpdatedSpan.textContent = 'n/a';
+        enableMatchingCb.checked = true;
+        isTemplateCb.checked = false;
+        analysisStatus.textContent = '';
+        if (noteList.querySelector('.active')) {
+            noteList.querySelector('.active').classList.remove('active');
+        }
+        updateStatusBar('Ready. Select or create a note.');
+    }
+
+    function updateStatusBar(message, isError = false) {
+        const statusBar = document.getElementById('status-bar');
+        statusBar.textContent = message;
+        statusBar.style.color = isError ? 'red' : '#333';
+    }
+
+    function updateAnalysisStatus(noteId, status, error = null) {
+        if (currentNote && currentNote.local_id === noteId) {
+            if (status === 'started') {
+                analysisStatus.textContent = 'Analyzing...';
+                analyzeNoteBtn.disabled = true;
+            } else if (status === 'completed') {
+                analysisStatus.textContent = 'Analysis complete.';
+                analyzeNoteBtn.disabled = false;
+                // Re-render properties after analysis potentially added new ones
+                // renderSemanticProperties(); // Rendered by noteUpdated handler now
+            } else if (status === 'failed') {
+                analysisStatus.textContent = `Analysis failed: ${error || 'Unknown error'}`;
+                analyzeNoteBtn.disabled = false;
+            }
+        }
+        // Clear status after a few seconds?
+        setTimeout(() => {
+            if (analysisStatus.textContent.includes('Analysis complete') || analysisStatus.textContent.includes('Analysis failed')) {
+                analysisStatus.textContent = '';
+            }
+        }, 5000);
+    }
+
+
+    // --- Semantic Properties Editor ---
+
+    function renderSemanticProperties() {
+        propertiesContainer.innerHTML = ''; // Clear existing
+        if (!currentNote || !currentNote.semantic_properties) return;
+
+        currentNote.semantic_properties.forEach((prop, index) => {
+            const div = document.createElement('div');
+            div.classList.add('property-row');
+            div.dataset.index = index;
+            div.dataset.propertyId = prop.property_id;
+
+            // Define types and predicates
+            const commonTypes = ["string", "number", "date", "datetime", "time", "duration", "boolean", "location", "geolocation", "enum", "url"];
+            const predicatesByType = {
+                "string": ["=", "contains", "starts_with", "ends_with", "is_one_of"],
+                "number": ["=", ">", "<", ">=", "<=", "between", "is_one_of"],
+                "date": ["=", ">", "<", ">=", "<=", "between"],
+                "datetime": ["=", ">", "<", ">=", "<=", "between"],
+                "time": ["=", ">", "<", ">=", "<=", "between"],
+                "duration": ["=", ">", "<", ">=", "<="],
+                "boolean": ["="],
+                "location": ["=", "near", "contains"], // near needs structured value
+                "geolocation": ["=", "near"], // near needs structured value { center: {lat,lon}, radius_km: num }
+                "enum": ["=", "is_one_of"],
+                "url": ["=", "starts_with", "contains"],
+                "default": ["="]
+            };
+
+            const currentPredicates = predicatesByType[prop.type] || predicatesByType["default"];
+
+            div.innerHTML = `
+                    <div>
+                        <label>Name:</label>
+                        <input type="text" class="prop-name" value="${prop.name || ''}" placeholder="Property Name">
+                    </div>
+                    <div>
+                        <label>Type:</label>
+                        <select class="prop-type">
+                            ${commonTypes.map(t => `<option value="${t}" ${prop.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                        </select>
+                    </div>
+                     <div>
+                        <label>Unit:</label>
+                        <input type="text" class="prop-unit" value="${prop.unit || ''}" placeholder="e.g., kg, USD" ${prop.type !== 'number' && prop.type !== 'duration' ? 'disabled' : ''}>
+                    </div>
+                    <div>
+                        <label>Real Value:</label>
+                        <input type="${getInputType(prop.type)}" class="prop-value-real value-real-field" value="${formatValueForInput(prop.value_real, prop.type)}" placeholder="Actual Value">
+                    </div>
+                    <div class="value-ideal-group">
+                        <div>
+                            <label>Ideal Predicate:</label>
+                            <select class="prop-ideal-predicate">
+                                <option value="">-- None --</option>
+                                ${currentPredicates.map(p => `<option value="${p}" ${prop.value_ideal?.predicate === p ? 'selected' : ''}>${p}</option>`).join('')}
+                            </select>
+                        </div>
+                         <div>
+                            <label>Ideal Value(s):</label>
+                            <input type="${getInputType(prop.type)}" class="prop-ideal-value" value="${formatValueForInput(prop.value_ideal?.value, prop.type)}" placeholder="Desired (e.g., 5, >10, [A,B])">
+                            <!-- Need better input for ranges, lists, geo etc. -->
+                         </div>
+                    </div>
+                     <div>
+                        <label title="Confidence (0-1)">Conf:</label>
+                        <input type="number" class="prop-confidence" value="${prop.confidence || ''}" step="0.05" min="0" max="1" title="LLM Confidence" ${prop.source !== 'llm_extracted' ? 'disabled' : ''}>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                         <button class="remove-prop-btn" title="Remove Property">X</button>
+                    </div>
+                    <div class="property-source ${prop.source === 'llm_extracted' ? 'llm' : (prop.source === 'user_defined' ? 'user' : 'nostr')}">
+                        Source: ${prop.source || 'unknown'}
+                    </div>
+                `;
+            propertiesContainer.appendChild(div);
+
+            // Add event listeners for changes within the row
+            div.querySelector('.prop-name').addEventListener('change', handlePropertyChange);
+            div.querySelector('.prop-type').addEventListener('change', handlePropertyChange); // Type change might need re-render of predicate/value inputs
+            div.querySelector('.prop-unit').addEventListener('change', handlePropertyChange);
+            div.querySelector('.prop-value-real').addEventListener('change', handlePropertyChange);
+            div.querySelector('.prop-ideal-predicate').addEventListener('change', handlePropertyChange);
+            div.querySelector('.prop-ideal-value').addEventListener('change', handlePropertyChange);
+            div.querySelector('.prop-confidence').addEventListener('change', handlePropertyChange);
+            div.querySelector('.remove-prop-btn').addEventListener('click', removeProperty);
+        });
+    }
+
+    function getInputType(propType) {
+        switch (propType) {
+            case 'number': return 'number';
+            case 'date': return 'date';
+            case 'datetime': return 'datetime-local';
+            case 'time': return 'time';
+            case 'boolean': return 'checkbox'; // Render checkbox differently maybe? Input for now.
+            case 'url': return 'url';
+            default: return 'text';
+        }
+    }
+
+    function formatValueForInput(value, propType) {
+        if (value === null || value === undefined) return '';
+        if (propType === 'boolean') return value ? 'true' : 'false'; // Handle boolean explicitly
+        if (Array.isArray(value)) return JSON.stringify(value); // Simple display for arrays (e.g., enum 'is_one_of', number 'between')
+        if (typeof value === 'object') return JSON.stringify(value); // Simple display for objects (e.g., geolocation)
+        if ((propType === 'date' || propType === 'datetime') && !isNaN(new Date(value))) {
+            const d = new Date(value);
+            if (propType === 'date') return d.toISOString().split('T')[0];
+            if (propType === 'datetime') {
+                // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+                const pad = (num) => num.toString().padStart(2, '0');
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            }
+        }
+        return String(value);
+    }
+
+    function parseValueFromInput(inputValue, propType) {
+        if (inputValue === null || inputValue === undefined || inputValue.trim() === '') return null;
+
+        try {
+            switch (propType) {
+                case 'number':
+                    // Handle potential 'between' or 'is_one_of' array input
+                    if (inputValue.startsWith('[') && inputValue.endsWith(']')) {
+                        return JSON.parse(inputValue).map(Number);
+                    }
+                    return parseFloat(inputValue);
+                case 'boolean': return inputValue.toLowerCase() === 'true' || inputValue === 'on'; // Handle checkbox/text 'true'
+                case 'date':
+                case 'datetime':
+                    // Handle potential 'between' array input
+                    if (inputValue.startsWith('[') && inputValue.endsWith(']')) {
+                        return JSON.parse(inputValue); // Assume already ISO strings
+                    }
+                    // Attempt to parse single date/datetime
+                    const date = new Date(inputValue);
+                    return isNaN(date.getTime()) ? null : date.toISOString(); // Store as ISO string
+                case 'enum': // Usually used with 'is_one_of' predicate
+                case 'string': // Could be 'is_one_of'
+                    if (inputValue.startsWith('[') && inputValue.endsWith(']')) {
+                        try { return JSON.parse(inputValue); } catch { /* fall through */ }
+                    }
+                    return String(inputValue); // Default string handling
+                case 'geolocation':
+                case 'location': // Could have structured value for 'near'
+                    if (inputValue.startsWith('{') && inputValue.endsWith('}')) {
+                        try { return JSON.parse(inputValue); } catch { /* fall through */ }
+                    }
+                    return String(inputValue); // Default string handling
+                default: return inputValue; // Return as string if no specific parsing needed
+            }
+        } catch (e) {
+            console.warn(`Could not parse input value '${inputValue}' for type ${propType}:`, e);
+            return inputValue; // Return original string on complex parse error
+        }
+    }
+
+    function handlePropertyChange(event) {
+        if (!currentNote) return;
+        const row = event.target.closest('.property-row');
+        const index = parseInt(row.dataset.index, 10);
+        if (isNaN(index) || index >= currentNote.semantic_properties.length) return;
+
+        const prop = currentNote.semantic_properties[index];
+
+        // Update the specific field that changed
+        const className = event.target.classList[0]; // Assumes first class identifies the field
+        const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+
+        switch (className) {
+            case 'prop-name': prop.name = value; break;
+            case 'prop-type':
+                prop.type = value;
+                // Clear incompatible fields or update predicate options?
+                prop.unit = (value === 'number' || value === 'duration') ? prop.unit : undefined; // Keep unit only if relevant
+                if (prop.value_ideal) prop.value_ideal.predicate = ''; // Reset predicate on type change
+                renderSemanticProperties(); // Re-render to update predicate dropdown, input types etc.
+                return; // Exit early as re-render handles further updates
+            case 'prop-unit': prop.unit = value; break;
+            case 'prop-value-real': prop.value_real = parseValueFromInput(value, prop.type); break;
+            case 'prop-ideal-predicate':
+                if (!prop.value_ideal && value) prop.value_ideal = { predicate: '', value: null }; // Init ideal obj if needed
+                if (prop.value_ideal) prop.value_ideal.predicate = value;
+                if (!value && prop.value_ideal) prop.value_ideal = null; // Remove ideal object if predicate cleared
+                break;
+            case 'prop-ideal-value':
+                if (!prop.value_ideal && value) prop.value_ideal = { predicate: '', value: null }; // Init ideal obj if predicate not set but value entered
+                if (prop.value_ideal) prop.value_ideal.value = parseValueFromInput(value, prop.type);
+                break;
+            case 'prop-confidence': prop.confidence = value ? parseFloat(value) : undefined; break;
+        }
+
+        console.log("Property updated:", prop);
+        // Maybe mark note as dirty, enable save button?
+        saveNoteBtn.style.fontWeight = 'bold'; // Indicate unsaved changes
+    }
+
+    function addPropertyManually() {
+        if (!currentNote) {
+            alert("Please select or create a note first.");
+            return;
+        }
+        if (!currentNote.semantic_properties) {
+            currentNote.semantic_properties = [];
+        }
+        currentNote.semantic_properties.push({
+            property_id: generateUUID(), // Use client-side util
+            name: `new_property_${currentNote.semantic_properties.length + 1}`,
+            type: "string",
+            unit: undefined,
+            value_real: null,
+            value_ideal: null,
+            source: "user_defined",
+            confidence: undefined,
+            enum_values: undefined,
+        });
+        renderSemanticProperties(); // Re-render the editor
+        saveNoteBtn.style.fontWeight = 'bold'; // Indicate unsaved changes
+    }
+
+    function removeProperty(event) {
+        if (!currentNote) return;
+        const row = event.target.closest('.property-row');
+        const index = parseInt(row.dataset.index, 10);
+        if (!isNaN(index) && index < currentNote.semantic_properties.length) {
+            currentNote.semantic_properties.splice(index, 1);
+            renderSemanticProperties(); // Re-render
+            saveNoteBtn.style.fontWeight = 'bold'; // Indicate unsaved changes
+        }
+    }
+
+    // --- Nostr UI Handlers ---
+
+    function updateNostrStatus(status) {
+        nostrStatusDiv.textContent = `Status: ${status.connected ? 'Connected' : 'Disconnected'} | Pubkey: ${status.pubkey ? status.pubkey.substring(0, 10) + '...' : 'Not set'}`;
+        nostrStatusDiv.style.color = status.connected ? 'green' : 'red';
+        nostrRelaysInput.value = status.relays.join(',');
+    }
+
+    function renderIncomingNostrNote(note) {
+        // Add to the simple feed for now
+        const div = document.createElement('div');
+        div.classList.add('nostr-event');
+        const maxContent = 150;
+        const displayContent = (note.content || '').substring(0, maxContent) + ((note.content || '').length > maxContent ? '...' : '');
+        const propsSummary = note.semantic_properties?.length > 0
+            ? ` | Props: ${note.semantic_properties.map(p => `${p.name}${p.value_real !== null ? `=${JSON.stringify(p.value_real)}` : ''}`).slice(0,3).join(', ')}...`
+            : '';
+
+        div.innerHTML = `
+                <strong>${note.owner_id.substring(0, 8)}...</strong> (${new Date(note.created_at).toLocaleTimeString()}):
+                <p style="margin: 2px 0;">${displayContent}${propsSummary}</p>
+                <small>ID: ${note.network_id.substring(0, 10)}... | Embed: ${note.embedding ? 'Yes' : 'No'}</small>
+            `;
+        // Add to top of feed
+        nostrFeed.insertBefore(div, nostrFeed.firstChild);
+
+        // Limit feed size (optional)
+        const maxFeedItems = 100;
+        while (nostrFeed.children.length > maxFeedItems) {
+            nostrFeed.removeChild(nostrFeed.lastChild);
+        }
+    }
+
+    function updateNostrSubscriptionStatus(payload) {
+        const { subId, status, filter } = payload;
+        if (status === 'active') {
+            nostrSubscriptions[subId] = { filter, status };
+            console.log(`Subscription ${subId} is active for filter:`, filter);
+            // Optionally disable subscribe button or indicate active subs
+        } else if (status === 'inactive') {
+            if (nostrSubscriptions[subId]) {
+                nostrSubscriptions[subId].status = 'inactive';
+            }
+            console.log(`Subscription ${subId} is now inactive.`);
+        } else if (status === 'eose') {
+            if (nostrSubscriptions[subId]) {
+                nostrSubscriptions[subId].status = 'eose';
+            }
+            console.log(`Subscription ${subId} reached EOSE.`);
+        }
+        // Update UI to show active subscriptions? (Not implemented here)
+    }
+
+
+    // --- Matching UI Handlers ---
+
+    function renderMatches(matches) {
+        matchesList.innerHTML = ''; // Clear previous matches
+        if (!matches || matches.length === 0) {
+            matchesList.innerHTML = '<li>No matches found.</li>';
+            return;
+        }
+
+        matches.forEach(match => {
+            const li = document.createElement('li');
+            li.classList.add('match-item');
+
+            const noteA = localNotes.find(n => n.local_id === match.noteA_id);
+            // Note B could be local or from Nostr (check format of noteB_id)
+            const noteB_is_nostr = match.noteB_id.startsWith('nostr-');
+            const noteB_local_id = noteB_is_nostr ? match.noteB_id : match.noteB_id; // Use directly if local UUID
+            const noteB_display_id = noteB_is_nostr ? `Nostr: ${match.noteB_id.substring(6, 12)}...` : `Local: ${match.noteB_id.substring(0, 6)}...`;
+            const owner_display = match.noteB_owner ? ` (Owner: ${match.noteB_owner.substring(0,8)}...)` : '';
+
+            li.innerHTML = `
+                    <strong>Match:</strong> ${generateNoteTitle(noteA)} <=> ${noteB_display_id}${owner_display}<br>
+                    <span class="similarity">Embedding Similarity: ${match.similarity.toFixed(4)}</span>
+                    <div class="match-details">
+                        ${renderAlignmentDetails('A Ideal vs B Real', match.alignment_A_ideal_vs_B_real)}
+                        ${renderAlignmentDetails('B Ideal vs A Real', match.alignment_B_ideal_vs_A_real)}
+                    </div>
+                `;
+            li.addEventListener('click', () => {
+                // Maybe load note A or try to fetch/display note B?
+                console.log("Clicked match:", match);
+                loadNoteIntoEditor(match.noteA_id); // Load local note A
+                // Could add logic to fetch/display Nostr note B if clicked
+            });
+            matchesList.appendChild(li);
+        });
+    }
+
+    function renderAlignmentDetails(title, alignment) {
+        if (!alignment || !alignment.details || alignment.details.length === 0) {
+            return `<p>${title}: No alignment applicable (e.g., no ideal properties).</p>`;
+        }
+        const overallStatus = alignment.satisfied ? '<span class="satisfied">(Satisfied)</span>' : '<span class="not-satisfied">(Not Satisfied)</span>';
+        let detailsHtml = `<p><strong>${title}:</strong> ${overallStatus}</p><ul>`;
+        alignment.details.forEach(detail => {
+            const statusClass = detail.satisfied ? 'satisfied' : 'not-satisfied';
+            const realValueDisplay = detail.real_value_B !== null ? `<span class="value">${JSON.stringify(detail.real_value_B)}</span>` : '<i>(missing)</i>';
+            const idealValueDisplay = `<span class="value">${detail.ideal_spec.predicate} ${JSON.stringify(detail.ideal_spec.value)}</span>`;
+            const reason = !detail.satisfied && detail.reason ? ` (${detail.reason})` : '';
+
+            detailsHtml += `<li class="prop-alignment ${statusClass}">
+                     <span class="name">${detail.property_name}</span>:
+                     Ideal ${idealValueDisplay}, Real ${realValueDisplay} -> ${detail.satisfied ? 'OK' : 'FAIL'}${reason}
+                 </li>`;
+        });
+        detailsHtml += '</ul>';
+        return detailsHtml;
+    }
+
+
+    // --- Event Listeners ---
+
+    newNoteBtn.addEventListener('click', () => {
+        clearEditor();
+        currentNote = { // Create a temporary client-side representation
+            local_id: null, // Will be assigned by server on first save
+            content: '',
+            semantic_properties: [],
+            embedding: null,
+            status: 'active',
+            config: { isPublished: false, enableMatching: true, isTemplate: false },
+            created_at: Date.now(),
+            updated_at: Date.now(),
+        };
+        renderNoteEditor();
+        noteContent.focus();
+        saveNoteBtn.style.fontWeight = 'normal'; // Fresh note, no unsaved changes yet
+    });
+
+    saveNoteBtn.addEventListener('click', () => {
+        if (!currentNote) {
+            // If editor was cleared but save is clicked, maybe create new?
+            alert("No note loaded to save. Click 'New Note' first.");
+            return;
+        };
+
+        // Gather data from the editor
+        const noteData = {
+            local_id: currentNote.local_id, // Null if new
+            content: noteContent.innerHTML, // Get HTML content if using rich text, or textContent
+            semantic_properties: currentNote.semantic_properties, // Already updated in state by handlePropertyChange
+            status: currentNote.status, // Keep existing status unless changed
+            config: {
+                isPublished: currentNote.config?.isPublished || false, // Preserve published status
+                enableMatching: enableMatchingCb.checked,
+                isTemplate: isTemplateCb.checked
+            }
+        };
+        console.log("Sending saveNote:", noteData);
+        sendMessage('saveNote', noteData);
+        saveNoteBtn.style.fontWeight = 'normal'; // Mark as saved
+    });
+
+    deleteNoteBtn.addEventListener('click', () => {
+        if (!currentNote || !currentNote.local_id) {
+            alert("No saved note selected to delete.");
+            return;
+        }
+        if (confirm(`Are you sure you want to delete note ${currentNote.local_id}?`)) {
+            sendMessage('deleteNote', { local_id: currentNote.local_id });
+            // UI cleared by noteDeleted message handler
+        }
+    });
+
+    analyzeNoteBtn.addEventListener('click', () => {
+        if (!currentNote || !currentNote.local_id) {
+            alert("Please save the note before analyzing.");
+            return;
+        }
+        // Ensure latest content is saved before analyzing? Or send current content?
+        // Let's assume we analyze the *saved* state. User should save first if changes were made.
+        // Alternatively, save implicitly:
+        /*
+        const noteData = { ... }; // Gather data like in saveNoteBtn handler
+        sendMessage('saveNote', noteData); // Save first
+        // Analysis request should probably wait for save confirmation? Complex flow.
+        // Simpler: Analyze last saved state.
+        */
+        console.log(`Requesting analysis for Note ${currentNote.local_id}`);
+        sendMessage('analyzeNote', { local_id: currentNote.local_id });
+        analysisStatus.textContent = 'Analysis requested...';
+    });
+
+    publishNoteBtn.addEventListener('click', () => {
+        if (!currentNote || !currentNote.local_id) {
+            alert("Please save the note before publishing.");
+            return;
+        }
+        if (!currentNote.config?.isPublished) {
+            if (confirm(`Publish note ${currentNote.local_id} to Nostr? This is public.`)) {
+                sendMessage('publishNote', { local_id: currentNote.local_id });
+            }
+        } else {
+            alert("This note has already been published (Network ID: " + currentNote.network_id + "). Republishing not implemented here.");
+            // Could implement republishing (update) logic if needed
+        }
+    });
+
+    addPropertyBtn.addEventListener('click', addPropertyManually);
+
+    enableMatchingCb.addEventListener('change', () => {
+        if (currentNote) {
+            currentNote.config.enableMatching = enableMatchingCb.checked;
+            saveNoteBtn.style.fontWeight = 'bold'; // Mark unsaved change
+        }
+    });
+    isTemplateCb.addEventListener('change', () => {
+        if (currentNote) {
+            currentNote.config.isTemplate = isTemplateCb.checked;
+            saveNoteBtn.style.fontWeight = 'bold'; // Mark unsaved change
+        }
+    });
+
+    // Nostr UI Event Listeners
+    setRelaysBtn.addEventListener('click', () => {
+        const relays = nostrRelaysInput.value.split(',').map(r => r.trim()).filter(r => r.startsWith('wss://'));
+        if (relays.length > 0) {
+            sendMessage('setNostrRelays', { relays });
+        } else {
+            alert("Please enter valid WebSocket relay URLs (wss://), comma-separated.");
+        }
+    });
+
+    setPrivkeyBtn.addEventListener('click', () => {
+        const privkey = nostrPrivkeyInput.value.trim();
+        if (privkey.length === 64 && /^[a-f0-9]{64}$/.test(privkey)) { // Basic hex validation
+            sendMessage('setNostrKeys', { privkey });
+            nostrPrivkeyInput.value = ''; // Clear after sending
+        } else {
+            alert("Invalid Nostr private key format. Should be 64 hex characters.");
+        }
+    });
+
+    generateKeyBtn.addEventListener('click', () => {
+        // Note: nostr-tools is not directly available client-side without bundling/imports
+        // This button would ideally trigger a server request to generate keys, or use a client-side library.
+        // Placeholder:
+        alert("Key generation needs nostr-tools. For demo, generate externally and paste or request server feature.");
+        // Example using window.crypto if available (less standard for Nostr keys):
+        // const pkBytes = window.crypto.getRandomValues(new Uint8Array(32));
+        // const pkHex = Array.from(pkBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        // nostrPrivkeyInput.value = pkHex;
+    });
+
+    subscribeBtn.addEventListener('click', () => {
+        const pubkeys = nostrSubscribePubkeys.value.split(',').map(p => p.trim()).filter(p => p.length > 0);
+        if (pubkeys.length > 0) {
+            const filter = {
+                kinds: [1], // Subscribe to text notes (Kind 1)
+                authors: pubkeys,
+                limit: 50 // Limit initial load
+            };
+            sendMessage('subscribeNostr', filter);
+        } else {
+            alert("Please enter at least one Nostr public key (pubkey) to subscribe to.");
+        }
+        // Add unsubscribe UI later if needed
+    });
+
+
+    // Matches UI Event Listeners
+    findMatchesBtn.addEventListener('click', () => {
+        const threshold = parseFloat(matchThresholdInput.value);
+        if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+            alert("Invalid threshold value. Must be between 0 and 1.");
+            return;
+        }
+        // Find matches for the currently selected note, or all notes if none selected?
+        // Let's match the current note against others.
+        const noteId = currentNote ? currentNote.local_id : null;
+        if (!noteId) {
+            alert("Select a note to find matches for, or implement 'match all'.");
+            return;
+        }
+        sendMessage('getMatches', { noteId: noteId, threshold: threshold });
+        matchesList.innerHTML = '<li>Finding matches...</li>';
+    });
+
+    // Tab Switching Logic
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const targetTab = button.dataset.tab;
+
+            // Deactivate all buttons and panes
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabPanes.forEach(pane => pane.classList.remove('active'));
+
+            // Activate the clicked button and corresponding pane
+            button.classList.add('active');
+            document.getElementById(targetTab).classList.add('active');
+        });
+    });
+
+
+    // --- Initialization ---
+    function loadNoteIntoEditor(local_id) {
+        const noteToLoad = localNotes.find(note => note.local_id === local_id);
+        if (noteToLoad) {
+            // Check for unsaved changes before switching? (Simple version doesn't)
+            currentNote = noteToLoad;
+            renderNoteEditor();
+            // Highlight in list
+            document.querySelectorAll('#note-list li').forEach(li => {
+                li.classList.toggle('active', li.dataset.id === local_id);
+            });
+        } else {
+            console.error("Note not found:", local_id);
+            clearEditor();
+        }
+    }
+
+    // Initial setup
+    clearEditor(); // Start with a clean editor
+
+</script>
+</body>
+</html>

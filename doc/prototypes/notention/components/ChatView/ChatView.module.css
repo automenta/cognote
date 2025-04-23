@@ -1,0 +1,152 @@
+.chatView {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.chatHeader {
+    padding: 10px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #ccc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chatActions {
+    display: flex;
+    gap: 10px;
+}
+
+.messagesContainer {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.inputArea {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #ccc;
+}
+
+.inputArea input {
+    flex-grow: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-right: 10px;
+}
+
+.inputArea button {
+    padding: 8px 12px;
+    border: none;
+    background-color: #007bff;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.inputArea button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.message {
+    padding: 8px;
+    margin-bottom: 5px;
+    border-radius: 4px;
+}
+
+.message.user {
+    background-color: #e2f0ff;
+    text-align: right;
+}
+
+.message.system {
+    background-color: #f0f0f0;
+}
+
+.placeholder {
+    text-align: center;
+    padding: 20px;
+    color: #888;
+}
+
+.noteEditorInline {
+    padding: 20px;
+    border: 1px solid #ccc;
+    margin: 10px;
+    border-radius: 5px;
+}
+
+.inlineEditorActions {
+    margin-top: 10px;
+    text-align: right;
+}
+
+.toolSection {
+    padding: 10px;
+    border-top: 1px solid #ccc;
+}
+
+.toolSelector {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.toolSelector ul {
+    list-style: none;
+    padding: 0;
+}
+
+.toolSelector li {
+    padding: 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+}
+
+.toolSelector li:last-child {
+    border-bottom: none;
+}
+
+.toolSelector li:hover {
+    background-color: #f0f0f0;
+}
+
+.toolSelector li.selected {
+    background-color: #d4e6f1;
+}
+
+.toolDescription {
+    font-size: 0.8em;
+    color: #777;
+    margin-top: 5px;
+}
+
+.toolInputForm {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.inputGroup {
+    margin-bottom: 10px;
+}
+
+.inputGroup label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.inputGroup input,
+.inputGroup textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}

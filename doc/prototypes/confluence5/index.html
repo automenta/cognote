@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence - Semantic Notes</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --primary-color: #4a90e2;
+            --secondary-color: #333;
+            --border-color: #444;
+            --highlight-bg: #2a2a2a;
+            --input-bg: #252525;
+            --error-color: #e74c3c;
+            --success-color: #2ecc71;
+            --ideal-color: #f39c12; /* Orange for ideal values */
+            --real-color: #2ecc71;  /* Green for real values */
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: 250px;
+            background-color: var(--secondary-color);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #editor-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow: hidden;
+        }
+        #rich-text-editor {
+            flex-grow: 1;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            overflow-y: auto;
+            min-height: 150px; /* Ensure minimum height */
+            white-space: pre-wrap; /* Preserve whitespace and wrap */
+        }
+        #semantic-property-editor {
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            background-color: var(--highlight-bg);
+            border-radius: 4px;
+            max-height: 300px; /* Limit height */
+            overflow-y: auto;
+        }
+        #semantic-property-editor h3, #analysis-suggestions h3, #match-display h3 {
+            margin-top: 0;
+            color: var(--primary-color);
+            font-size: 1.1em;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+        .property-item, .suggestion-item, .match-item {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background-color: var(--secondary-color);
+            font-size: 0.9em;
+        }
+        .property-item input, .property-item select {
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            padding: 4px 6px;
+            margin: 2px 5px 2px 0;
+            box-sizing: border-box;
+        }
+        .property-item input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        .property-item button, button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 5px;
+        }
+        .property-item button:hover, button:hover {
+            opacity: 0.9;
+        }
+        .delete-prop-btn { background-color: var(--error-color); }
+        .accept-suggestion-btn { background-color: var(--success-color); }
+
+        #note-list, #nostr-feed, #match-display {
+            margin-bottom: 15px;
+        }
+        #note-list h3, #nostr-feed h3, #match-display h3 {
+            margin-top: 0;
+            margin-bottom: 5px;
+            color: var(--primary-color);
+            font-size: 1em;
+            padding-bottom: 3px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .note-list-item, .nostr-event-item {
+            padding: 8px 5px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .note-list-item:hover, .nostr-event-item:hover {
+            background-color: var(--highlight-bg);
+        }
+        .note-list-item.active {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: bold;
+        }
+        #status-bar {
+            padding: 5px 15px;
+            background-color: var(--secondary-color);
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8em;
+            color: #aaa;
+            text-align: right;
+        }
+        .toolbar {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .toolbar button { margin-right: 5px; }
+        .value-real { color: var(--real-color); font-weight: bold; }
+        .value-ideal { color: var(--ideal-color); font-style: italic; }
+        .property-source { font-size: 0.8em; color: #aaa; margin-left: 10px; }
+        .confidence-score { font-size: 0.8em; color: #bbb; }
+        .match-details p { margin: 2px 0; }
+        .match-similarity { font-weight: bold; }
+        .match-property { margin-left: 15px; font-size: 0.9em; }
+
+        #analysis-suggestions {
+            border: 1px dashed var(--primary-color);
+            padding: 10px;
+            margin-top: 10px;
+            background-color: rgba(74, 144, 226, 0.1);
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .suggestion-item button { font-size: 0.8em; padding: 3px 6px;}
+
+    </style>
+</head>
+<body>
+<div id="sidebar">
+    <button id="new-note-btn">New Note</button>
+    <div id="note-list">
+        <h3>Local Notes</h3>
+        <div id="notes-container"></div>
+    </div>
+    <div id="nostr-feed">
+        <h3>Nostr Feed (Recent)</h3>
+        <div id="nostr-events-container"></div>
+        <!-- Add filter controls later -->
+    </div>
+    <div id="match-display">
+        <h3>Potential Matches</h3>
+        <div id="matches-container"></div>
+    </div>
+    <div id="schema-display" style="font-size: 0.8em; margin-top: auto; color: #aaa;">
+        <h3>Emergent Schema</h3>
+        <pre id="schema-content" style="white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow-y: auto;"></pre>
+    </div>
+    <div id="identity-display" style="font-size: 0.8em; color: #aaa; margin-top: 5px; word-wrap: break-word;">
+        Nostr PubKey: <span id="nostr-pubkey"></span>
+    </div>
+</div>
+
+<div id="main-content">
+    <div id="editor-area">
+        <div class="toolbar">
+            <button id="save-note-btn" disabled>Save Changes</button>
+            <button id="analyze-text-btn" disabled>Analyze Text (LLM)</button>
+            <button id="delete-note-btn" disabled>Delete Note</button>
+            <button id="publish-nostr-btn" disabled>Publish to Nostr</button>
+            <button id="gen-embedding-btn" disabled>Gen Embedding</button>
+            <button id="trigger-match-btn">Find Matches</button>
+            <span id="note-status" style="margin-left: 15px; font-size: 0.9em; color: #ccc;"></span>
+        </div>
+        <div id="rich-text-editor" contenteditable="true" spellcheck="false"></div>
+        <div id="analysis-suggestions" style="display: none;">
+            <h3>LLM Analysis Suggestions</h3>
+            <div id="suggestions-container"></div>
+        </div>
+        <div id="semantic-property-editor">
+            <h3>Semantic Properties</h3>
+            <div id="properties-container"></div>
+            <button id="add-property-btn" disabled>+ Add Property Manually</button>
+        </div>
+    </div>
+    <div id="status-bar">
+        Status: <span id="connection-status">Connecting...</span> | Last Save: <span id="last-save-time">Never</span>
+    </div>
+</div>
+
+<script type="module">
+    // Use top-level await or an async IIFE if needed for module imports
+    // For simplicity, assuming util.js exports are available globally after import if not using modules
+    // However, using type="module" is cleaner.
+
+    const ws = new WebSocket(`ws://${window.location.host}`);
+
+    // DOM Elements
+    const connectionStatus = document.getElementById('connection-status');
+    const notesContainer = document.getElementById('notes-container');
+    const nostrEventsContainer = document.getElementById('nostr-events-container');
+    const matchesContainer = document.getElementById('matches-container');
+    const schemaContent = document.getElementById('schema-content');
+    const nostrPubkeyEl = document.getElementById('nostr-pubkey');
+    const editor = document.getElementById('rich-text-editor');
+    const propertiesContainer = document.getElementById('properties-container');
+    const suggestionsContainer = document.getElementById('suggestions-container');
+    const analysisSuggestionsEl = document.getElementById('analysis-suggestions');
+    const newNoteBtn = document.getElementById('new-note-btn');
+    const saveNoteBtn = document.getElementById('save-note-btn');
+    const analyzeTextBtn = document.getElementById('analyze-text-btn');
+    const deleteNoteBtn = document.getElementById('delete-note-btn');
+    const publishNostrBtn = document.getElementById('publish-nostr-btn');
+    const genEmbeddingBtn = document.getElementById('gen-embedding-btn');
+    const triggerMatchBtn = document.getElementById('trigger-match-btn');
+    const addPropertyBtn = document.getElementById('add-property-btn');
+    const lastSaveTimeEl = document.getElementById('last-save-time');
+    const noteStatusEl = document.getElementById('note-status');
+
+
+    // State
+    let currentNote = null;
+    let localNotes = new Map(); // Map<local_id, Note>
+    let nostrNotesCache = new Map(); // Map<network_id, Note> - Cache for display/lookup
+    let suggestedProperties = []; // Array<SemanticProperty>
+    let hasUnsavedChanges = false;
+
+
+    // --- WebSocket Handlers ---
+    ws.onopen = () => {
+        connectionStatus.textContent = 'Connected';
+        connectionStatus.style.color = 'var(--success-color)';
+    };
+
+    ws.onclose = () => {
+        connectionStatus.textContent = 'Disconnected';
+        connectionStatus.style.color = 'var(--error-color)';
+        disableEditor(); // Disable editing if connection lost
+    };
+
+    ws.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        connectionStatus.textContent = 'Error';
+        connectionStatus.style.color = 'var(--error-color)';
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            console.log('Message from server:', message.type);
+
+            switch (message.type) {
+                case 'identity':
+                    nostrPubkeyEl.textContent = message.payload.pubkey.substring(0, 10) + '...';
+                    break;
+                case 'notesList':
+                    localNotes = new Map(message.payload.map(note => [note.local_id, note]));
+                    renderNoteList();
+                    break;
+                case 'noteCreated':
+                case 'noteUpdated':
+                case 'notePublished':
+                    const note = message.payload;
+                    localNotes.set(note.local_id, note);
+                    renderNoteList();
+                    // If the updated note is the currently open one, refresh editor
+                    if (currentNote && currentNote.local_id === note.local_id) {
+                        loadNoteIntoEditor(note); // Reload with fresh data (incl. embedding status)
+                        lastSaveTimeEl.textContent = new Date(note.updated_at).toLocaleTimeString();
+                        hasUnsavedChanges = false; // Saved
+                        updateToolbar();
+                    }
+                    break;
+                case 'noteDeleted':
+                    localNotes.delete(message.payload);
+                    if (currentNote && currentNote.local_id === message.payload) {
+                        clearEditor();
+                    }
+                    renderNoteList();
+                    break;
+                case 'analysisComplete':
+                    if (currentNote && currentNote.local_id === message.payload.noteId) {
+                        suggestedProperties = message.payload.properties;
+                        renderAnalysisSuggestions();
+                    }
+                    break;
+                case 'analysisFailed':
+                    if (currentNote && currentNote.local_id === message.payload.noteId) {
+                        alert('LLM analysis failed. Please check server logs.');
+                        // Optionally clear old suggestions
+                        suggestedProperties = [];
+                        renderAnalysisSuggestions();
+                    }
+                    break;
+                case 'schemaUpdate':
+                    schemaContent.textContent = JSON.stringify(message.payload, null, 2);
+                    break;
+                case 'nostrEventProcessed':
+                    const nostrNote = message.payload;
+                    nostrNotesCache.set(nostrNote.network_id, nostrNote); // Cache it
+                    renderNostrEvent(nostrNote); // Add to UI
+                    break;
+                case 'matchesFound':
+                    renderMatches(message.payload); // Payload: [{ sourceNoteId, matches: [{ note, similarity, propertyMatchDetails }] }]
+                    break;
+                default:
+                    console.log('Unknown message type received:', message.type);
+            }
+        } catch (error) {
+            console.error('Failed to process message from server:', event.data, error);
+        }
+    };
+
+    // --- UI Rendering ---
+
+    function renderNoteList() {
+        notesContainer.innerHTML = ''; // Clear existing list
+        const sortedNotes = Array.from(localNotes.values()).sort((a, b) => b.updated_at - a.updated_at);
+        sortedNotes.forEach(note => {
+            const div = document.createElement('div');
+            div.classList.add('note-list-item');
+            div.textContent = note.content.substring(0, 30) || '[Untitled Note]';
+            div.dataset.id = note.local_id;
+            if (currentNote && currentNote.local_id === note.local_id) {
+                div.classList.add('active');
+            }
+            div.onclick = () => {
+                if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard them?")) {
+                    return;
+                }
+                loadNoteIntoEditor(note);
+            };
+            notesContainer.appendChild(div);
+        });
+    }
+
+    function renderNostrEvent(note) {
+        // Add to top of the list, limit total displayed?
+        const maxEvents = 50;
+        const div = document.createElement('div');
+        div.classList.add('nostr-event-item');
+        div.dataset.id = note.network_id;
+        div.title = `From: ${note.owner_id}\n${new Date(note.network_ts).toLocaleString()}`;
+        div.textContent = note.content.substring(0, 40) || '[Empty Nostr Note]';
+
+        // Optional: Add click handler to view details / potentially import
+        div.onclick = () => {
+            // Simple alert for now, could open a modal or separate view
+            alert(`Nostr Note ${note.network_id}:\n\n${note.content}\n\nProperties:\n${JSON.stringify(note.semantic_properties, null, 2)}`);
+        };
+
+        nostrEventsContainer.insertBefore(div, nostrEventsContainer.firstChild);
+        if (nostrEventsContainer.children.length > maxEvents) {
+            nostrEventsContainer.removeChild(nostrEventsContainer.lastChild);
+        }
+    }
+
+    function renderMatches(matchesData) {
+        matchesContainer.innerHTML = ''; // Clear previous matches
+        if (!matchesData || matchesData.length === 0) {
+            matchesContainer.textContent = 'No matches found yet.';
+            return;
+        }
+
+        matchesData.forEach(matchGroup => {
+            const sourceNote = localNotes.get(matchGroup.sourceNoteId) || nostrNotesCache.get(matchGroup.sourceNoteId);
+            const sourceTitle = sourceNote ? (sourceNote.content.substring(0, 20) || (sourceNote.local_id ? '[Local Note]' : '[Nostr Note]')) : `Note ${matchGroup.sourceNoteId.substring(0,6)}...`;
+
+            const groupHeader = document.createElement('h4');
+            groupHeader.textContent = `Matches for: ${sourceTitle}`;
+            groupHeader.style.margin = '10px 0 5px 0';
+            matchesContainer.appendChild(groupHeader);
+
+            matchGroup.matches.forEach(match => {
+                const matchNote = match.note; // This could be local or Nostr
+                const targetTitle = matchNote.content.substring(0, 30) || (matchNote.local_id ? '[Local Note]' : '[Nostr Note]');
+                const isLocalMatch = !!matchNote.local_id;
+
+                const div = document.createElement('div');
+                div.classList.add('match-item');
+
+                const titleEl = document.createElement('strong');
+                titleEl.textContent = targetTitle;
+                if (isLocalMatch) {
+                    titleEl.style.cursor = 'pointer';
+                    titleEl.onclick = () => {
+                        if (localNotes.has(matchNote.local_id)) {
+                            if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard them?")) return;
+                            loadNoteIntoEditor(localNotes.get(matchNote.local_id));
+                        }
+                    };
+                }
+                div.appendChild(titleEl);
+
+                const detailsDiv = document.createElement('div');
+                detailsDiv.classList.add('match-details');
+                detailsDiv.innerHTML = `<p>Similarity: <span class="match-similarity">${match.similarity.toFixed(3)}</span> ${isLocalMatch ? '(Local)' : '(Nostr)'}</p>`;
+
+                if (match.propertyMatchDetails.matches.length > 0) {
+                    detailsDiv.innerHTML += `<p><strong>Property Alignment:</strong></p>`;
+                    match.propertyMatchDetails.matches.forEach(propMatch => {
+                        detailsDiv.innerHTML += `<p class="match-property">- ${propMatch.property_name}: <span class="value-ideal">${JSON.stringify(propMatch.ideal)}</span> satisfied by <span class="value-real">${JSON.stringify(propMatch.real)}</span></p>`;
+                    });
+                }
+                if (match.propertyMatchDetails.mismatches.length > 0) {
+                    detailsDiv.innerHTML += `<p><strong>Property Mismatches:</strong></p>`;
+                    match.propertyMatchDetails.mismatches.forEach(propMismatch => {
+                        detailsDiv.innerHTML += `<p class="match-property">- ${propMismatch.property_name}: Ideal <span class="value-ideal">${JSON.stringify(propMismatch.ideal)}</span> not satisfied.</p>`;
+                    });
+                }
+
+
+                div.appendChild(detailsDiv);
+                matchesContainer.appendChild(div);
+            });
+        });
+    }
+
+    function renderAnalysisSuggestions() {
+        suggestionsContainer.innerHTML = '';
+        if (!suggestedProperties || suggestedProperties.length === 0) {
+            analysisSuggestionsEl.style.display = 'none';
+            return;
+        }
+
+        analysisSuggestionsEl.style.display = 'block';
+
+        suggestedProperties.forEach((prop, index) => {
+            const div = document.createElement('div');
+            div.classList.add('suggestion-item');
+            div.innerHTML = `
+                    <strong>${prop.name}</strong> (Type: ${prop.type}${prop.unit ? ` [${prop.unit}]` : ''})<br>
+                    ${prop.value_real !== null ? `  Real: <span class="value-real">${JSON.stringify(prop.value_real)}</span><br>` : ''}
+                    ${prop.value_ideal ? `  Ideal: <span class="value-ideal">${prop.value_ideal.predicate} ${JSON.stringify(prop.value_ideal.value)}</span><br>` : ''}
+                    <span class="property-source">${prop.source}</span>
+                    ${prop.confidence ? `<span class="confidence-score">(Confidence: ${(prop.confidence * 100).toFixed(0)}%)</span>` : ''}
+                `;
+            const acceptBtn = document.createElement('button');
+            acceptBtn.textContent = 'Accept';
+            acceptBtn.classList.add('accept-suggestion-btn');
+            acceptBtn.onclick = () => {
+                acceptSuggestion(index);
+            };
+            div.appendChild(acceptBtn);
+            suggestionsContainer.appendChild(div);
+        });
+    }
+
+    function renderSemanticProperties() {
+        propertiesContainer.innerHTML = '';
+        if (!currentNote) return;
+
+        currentNote.semantic_properties.forEach((prop, index) => {
+            const div = document.createElement('div');
+            div.classList.add('property-item');
+            div.dataset.index = index;
+            div.dataset.id = prop.property_id;
+
+            // Simplified editor - allows editing core fields
+            div.innerHTML = `
+                    <input type="text" class="prop-name" value="${prop.name}" placeholder="Name">
+                    <select class="prop-type">
+                        ${['string', 'number', 'boolean', 'date', 'geolocation', 'duration', 'color', 'enum'].map(t => `<option value="${t}" ${prop.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    </select>
+                    <input type="text" class="prop-unit" value="${prop.unit || ''}" placeholder="Unit (opt.)" style="width: 60px;">
+                    <button class="delete-prop-btn" data-index="${index}">X</button>
+                    <br>
+                    <label>Real: <input type="text" class="prop-value-real" value="${prop.value_real !== null ? JSON.stringify(prop.value_real) : ''}" placeholder="Actual Value (JSON)"></label>
+                    <br>
+                    <label>Ideal:
+                        <select class="prop-ideal-predicate">
+                            <option value="" ${!prop.value_ideal ? 'selected' : ''}>-</option>
+                            ${['=', '>', '<', '>=', '<=', 'between', 'contains', 'is_one_of', 'starts_with', 'near'].map(p => `<option value="${p}" ${prop.value_ideal?.predicate === p ? 'selected' : ''}>${p}</option>`).join('')}
+                        </select>
+                        <input type="text" class="prop-ideal-value" value="${prop.value_ideal ? JSON.stringify(prop.value_ideal.value) : ''}" placeholder="Ideal Value (JSON)">
+                    </label>
+                    <br>
+                    <span class="property-source">Source: ${prop.source}</span>
+                     ${prop.confidence ? `<span class="confidence-score">(Confidence: ${(prop.confidence * 100).toFixed(0)}%)</span>` : ''}
+                `;
+
+            propertiesContainer.appendChild(div);
+        });
+
+        // Add event listeners for changes within properties
+        propertiesContainer.querySelectorAll('input, select').forEach(el => {
+            el.addEventListener('change', handlePropertyChange);
+            el.addEventListener('input', handlePropertyChange); // For text inputs
+        });
+        propertiesContainer.querySelectorAll('.delete-prop-btn').forEach(btn => {
+            btn.addEventListener('click', handleDeleteProperty);
+        });
+    }
+
+
+    // --- Editor Logic ---
+
+    function loadNoteIntoEditor(note) {
+        currentNote = note;
+        editor.textContent = note.content; // Use textContent for simple text, innerHTML if rich text needed
+        renderSemanticProperties();
+        updateToolbar();
+        renderNoteList(); // Update active item highlight
+        analysisSuggestionsEl.style.display = 'none'; // Hide old suggestions
+        suggestedProperties = [];
+        matchesContainer.innerHTML = 'Run "Find Matches" to see results.'; // Clear matches for new note
+        lastSaveTimeEl.textContent = note.updated_at ? new Date(note.updated_at).toLocaleTimeString() : 'Never';
+        hasUnsavedChanges = false;
+        noteStatusEl.textContent = `ID: ${note.local_id.substring(0, 8)} | Status: ${note.status} | Published: ${note.config.isPublished ? 'Yes (' + (note.network_id?.substring(0,6) || 'Error') + '...)' : 'No'} | Embedding: ${note.embedding ? 'Yes' : 'No'}`;
+    }
+
+    function clearEditor() {
+        currentNote = null;
+        editor.textContent = '';
+        propertiesContainer.innerHTML = '';
+        analysisSuggestionsEl.style.display = 'none';
+        suggestedProperties = [];
+        updateToolbar();
+        renderNoteList(); // Remove active highlight
+        lastSaveTimeEl.textContent = 'N/A';
+        noteStatusEl.textContent = 'No note selected.';
+        hasUnsavedChanges = false;
+    }
+
+    function disableEditor() {
+        editor.contentEditable = false;
+        saveNoteBtn.disabled = true;
+        analyzeTextBtn.disabled = true;
+        deleteNoteBtn.disabled = true;
+        publishNostrBtn.disabled = true;
+        addPropertyBtn.disabled = true;
+        genEmbeddingBtn.disabled = true;
+        // Maybe allow 'New Note'?
+    }
+
+    function updateToolbar() {
+        const hasNote = !!currentNote;
+        saveNoteBtn.disabled = !hasNote || !hasUnsavedChanges || ws.readyState !== WebSocket.OPEN;
+        analyzeTextBtn.disabled = !hasNote || ws.readyState !== WebSocket.OPEN;
+        deleteNoteBtn.disabled = !hasNote || ws.readyState !== WebSocket.OPEN;
+        publishNostrBtn.disabled = !hasNote || currentNote?.config.isPublished || ws.readyState !== WebSocket.OPEN; // Disable if already published
+        addPropertyBtn.disabled = !hasNote;
+        genEmbeddingBtn.disabled = !hasNote || !!currentNote?.embedding || ws.readyState !== WebSocket.OPEN; // Disable if embedding exists
+    }
+
+    // --- Event Handlers ---
+
+    newNoteBtn.onclick = () => {
+        if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard them?")) {
+            return;
+        }
+        sendMessage('createNote', {});
+        // The new note will be created server-side and sent back via 'noteCreated'
+        // We can optionally clear the editor immediately for responsiveness
+        clearEditor();
+    };
+
+    saveNoteBtn.onclick = () => {
+        if (!currentNote || !hasUnsavedChanges) return;
+
+        // Update note object from UI before sending
+        currentNote.content = editor.textContent; // Or innerHTML if rich text
+        // Properties are updated via handlePropertyChange directly on currentNote
+
+        sendMessage('updateNote', currentNote);
+        // Server will respond with 'noteUpdated', which handles UI update
+    };
+
+    analyzeTextBtn.onclick = () => {
+        if (!currentNote) return;
+        sendMessage('analyzeText', { noteId: currentNote.local_id, text: editor.textContent });
+        analysisSuggestionsEl.style.display = 'block';
+        suggestionsContainer.innerHTML = '<i>Analyzing with LLM...</i>'; // Show loading state
+    };
+
+    deleteNoteBtn.onclick = () => {
+        if (!currentNote || !confirm(`Are you sure you want to delete note "${currentNote.content.substring(0, 20)}..."?`)) return;
+        sendMessage('deleteNote', currentNote.local_id);
+        // Server responds with 'noteDeleted'
+    };
+
+    publishNostrBtn.onclick = () => {
+        if (!currentNote || currentNote.config.isPublished) return;
+        if (hasUnsavedChanges && !confirm("You have unsaved changes that won't be published unless saved first. Publish anyway?")) {
+            return;
+        }
+        sendMessage('publishNote', currentNote.local_id);
+        // Server responds with 'notePublished' or potentially an error
+    };
+
+    genEmbeddingBtn.onclick = () => {
+        if (!currentNote || currentNote.embedding) return;
+        sendMessage('generateEmbedding', currentNote.local_id);
+        genEmbeddingBtn.disabled = true; // Disable temporarily
+        noteStatusEl.textContent += ' (Generating Embedding...)';
+    };
+
+    triggerMatchBtn.onclick = () => {
+        sendMessage('triggerFullMatch', {});
+        matchesContainer.innerHTML = '<i>Finding matches...</i>';
+    };
+
+    addPropertyBtn.onclick = () => {
+        if (!currentNote) return;
+        // Add a new empty property to the note's list and re-render
+        // Use a utility function if available, otherwise create structure here
+        const newProp = {
+            property_id: `temp_${Date.now()}`, // Temporary ID until saved
+            name: '',
+            type: 'string',
+            unit: undefined,
+            enum_values: undefined,
+            value_real: null,
+            value_ideal: null,
+            source: 'user_defined',
+            confidence: undefined,
+        };
+        currentNote.semantic_properties.push(newProp);
+        renderSemanticProperties();
+        markUnsaved();
+    };
+
+    editor.oninput = () => {
+        markUnsaved();
+    };
+
+    function markUnsaved() {
+        if (!currentNote) return;
+        hasUnsavedChanges = true;
+        updateToolbar();
+    }
+
+    function handlePropertyChange(event) {
+        if (!currentNote) return;
+        const target = event.target;
+        const itemDiv = target.closest('.property-item');
+        const index = parseInt(itemDiv.dataset.index, 10);
+        const prop = currentNote.semantic_properties[index];
+
+        if (!prop) return;
+
+        const field = target.classList.contains('prop-name') ? 'name' :
+            target.classList.contains('prop-type') ? 'type' :
+                target.classList.contains('prop-unit') ? 'unit' :
+                    target.classList.contains('prop-value-real') ? 'value_real' :
+                        target.classList.contains('prop-ideal-predicate') ? 'ideal_predicate' :
+                            target.classList.contains('prop-ideal-value') ? 'ideal_value' : null;
+
+        if (field) {
+            let value = target.value;
+
+            // Handle JSON parsing for values
+            if (field === 'value_real' || field === 'ideal_value') {
+                try {
+                    value = value.trim() ? JSON.parse(value) : null;
+                } catch (e) {
+                    // Keep as string if JSON parse fails? Or mark as error?
+                    // For simplicity, keep the string but maybe add validation later
+                    console.warn(`Invalid JSON input for ${field}: ${value}`);
+                    // Optionally add visual feedback here
+                }
+            }
+
+            if (field === 'ideal_predicate') {
+                if (!prop.value_ideal && value) prop.value_ideal = { predicate: value, value: null };
+                else if (prop.value_ideal) prop.value_ideal.predicate = value;
+                if (!value && prop.value_ideal) prop.value_ideal = null; // Clear ideal if predicate removed
+            } else if (field === 'ideal_value') {
+                if (!prop.value_ideal) prop.value_ideal = { predicate: '', value: value }; // Create if doesn't exist
+                else prop.value_ideal.value = value;
+            } else if (field === 'unit') {
+                prop[field] = value || undefined; // Store empty unit as undefined
+            }
+            else {
+                prop[field] = value;
+            }
+
+            // If type changes, maybe clear/validate unit or ideal predicate? Add later.
+
+            markUnsaved();
+        }
+    }
+
+    function handleDeleteProperty(event) {
+        if (!currentNote) return;
+        const index = parseInt(event.target.dataset.index, 10);
+        currentNote.semantic_properties.splice(index, 1);
+        renderSemanticProperties(); // Re-render to update indices and remove element
+        markUnsaved();
+    }
+
+    function acceptSuggestion(index) {
+        if (!currentNote || !suggestedProperties[index]) return;
+
+        const propToAdd = { ...suggestedProperties[index] }; // Clone suggestion
+        propToAdd.property_id = `temp_${Date.now()}`; // Give temporary ID
+
+        // Check for existing property with the same name (simple check)
+        const existingPropIndex = currentNote.semantic_properties.findIndex(p => p.name === propToAdd.name);
+
+        if (existingPropIndex !== -1) {
+            // Option: Overwrite, Merge, or Ignore? Let's merge/overwrite for simplicity
+            // Merge: Keep existing ID, update values if different/missing
+            const existingProp = currentNote.semantic_properties[existingPropIndex];
+            existingProp.type = propToAdd.type ?? existingProp.type;
+            existingProp.unit = propToAdd.unit ?? existingProp.unit;
+            // Overwrite values if provided in suggestion, otherwise keep existing
+            if (propToAdd.value_real !== null) existingProp.value_real = propToAdd.value_real;
+            if (propToAdd.value_ideal !== null) existingProp.value_ideal = propToAdd.value_ideal;
+            existingProp.source = propToAdd.source; // Update source
+            existingProp.confidence = propToAdd.confidence; // Update confidence
+            console.log(`Merged suggestion into existing property: ${propToAdd.name}`);
+
+        } else {
+            // Add as new property
+            currentNote.semantic_properties.push(propToAdd);
+            console.log(`Added new property from suggestion: ${propToAdd.name}`);
+        }
+
+
+        // Remove the suggestion from the list and re-render suggestions
+        suggestedProperties.splice(index, 1);
+        renderAnalysisSuggestions();
+
+        // Re-render the main properties editor and mark unsaved
+        renderSemanticProperties();
+        markUnsaved();
+    }
+
+
+    // --- Utility Functions ---
+    function sendMessage(type, payload) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type, payload }));
+        } else {
+            console.error('WebSocket is not open. Cannot send message:', type);
+            alert('Connection lost. Please refresh the page.');
+        }
+    }
+
+    // --- Initialization ---
+    updateToolbar(); // Set initial state of buttons
+
+    // Request initial data on load (handled by server 'connection' event)
+
+</script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+
+.taskList {
+    width: 300px;
+    height: calc(100vh - 50px); /* Adjust height as needed */
+    border-right: 1px solid #ddd;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    background-color: #f9f9f9;
+}
+
+.taskList h2 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.taskListActions {
+    margin-bottom: 10px;
+}
+
+.taskListActions button {
+    margin-right: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    border-radius: 4px;
+}
+
+.taskListActions button:hover {
+    background-color: #f0f0f0;
+}
+
+.taskListActions .deleteButton {
+    background-color: #f44336;
+    color: white;
+    border: none;
+}
+
+.taskListActions .deleteButton:hover {
+    background-color: #d32f2f;
+}
+
+.taskListFilters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.taskListFilters select {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: white;
+}
+
+.taskListItems {
+    overflow-y: auto;
+    flex-grow: 1; /* Make task list scrollable within its container */
+}

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Netention Ultra Dev</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1e1e1e; color: #d4d4d4; font-family: monospace; }
+        #container { position: relative; width: 100%; height: 100vh; }
+        #hud { position: absolute; top: 10px; left: 10px; z-index: 1; }
+        #status { background: rgba(0, 0, 0, 0.5); padding: 5px 10px; border-radius: 3px; }
+        #prompt, #apiKey { background: #2d2d2d; color: #d4d4d4; border: 1px solid #444; padding: 5px; width: 200px; margin-top: 10px; }
+        #timeline { width: 200px; margin-top: 10px; }
+        .node-overlay { background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: #d4d4d4; pointer-events: auto; min-width: 100px; text-align: center; }
+        .node-overlay h3 { margin: 0 0 5px 0; font-size: 14px; }
+        .node-overlay p { margin: 2px 0; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div id="container">
+    <div id="hud">
+        <div id="status">Nodes: 0 | Tick: 0</div>
+        <input id="apiKey" placeholder="Enter Google API Key...">
+        <input id="prompt" placeholder="Enter command...">
+        <input type="range" id="timeline" min="0" max="0" value="0">
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.min.js"></script>
+<script src="https://unpkg.com/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.134.0/examples/js/renderers/CSS3DRenderer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@langchain/google-genai@0.0.23/dist/index.min.js"></script>
+
+<script>
+    // Access ChatGoogleGenerativeAI from window.LangChain
+    const ChatGoogleGenerativeAI = window.LangChain ? window.LangChain.ChatGoogleGenerativeAI : null;
+    if (!ChatGoogleGenerativeAI) console.error("LangChain library not loaded correctly.");
+
+    // Core Interfaces
+    const Node = {
+        id: "", value: {}, actions: [], links: [], history: [], priority: 0.5,
+        resources: [1000, 1000], timestamp: "", status: "pending", memory: []
+    };
+
+    // Logger
+    const logger = { debug: console.log, info: console.log, error: console.error };
+
+    // Memory Implementation
+    class InMemory {
+        constructor() { this.store = new Map(); }
+        async store(node) { this.store.set(node.id, node); }
+        async fetch(id) { const n = this.store.get(id); if (!n) throw new Error(`Node ${id} not found`); return n; }
+        async list() { return [...this.store.values()]; }
+    }
+
+    // LLM Setup
+    let llm = null;
+    function getLLM() {
+        const apiKey = localStorage.getItem("googleApiKey");
+        if (!apiKey) throw new Error("No API key set. Please enter one in the HUD.");
+        if (!ChatGoogleGenerativeAI) throw new Error("ChatGoogleGenerativeAI not available.");
+        if (!llm) llm = new ChatGoogleGenerativeAI({ model: "gemini-2.0-flash", apiKey });
+        return llm;
+    }
+
+    // Tools Definition
+    const tools = new Map();
+    tools.set("add", {
+        name: "add",
+        apply: async (node, system, input) => {
+            const id = `${input.type || "node"}-${Date.now()}`;
+            const newNode = { ...Node, id, value: input.data || {}, links: [[node.id, 0.5]], timestamp: new Date().toISOString(), memory: [{ type: "system", content: `Created by ${node.id}`, timestamp: new Date().toISOString() }] };
+            await system.memory.store(newNode);
+            system.graph.set(newNode.id, newNode);
+            return { ...node, links: [...node.links, [id, 0.5]], history: [...node.history, [id, "added"]] };
+        }
+    });
+    tools.set("llm", {
+        name: "llm",
+        apply: async (node, system, input) => {
+            try {
+                const response = await getLLM().invoke(input.prompt);
+                return { ...node, history: [...node.history, ["llm", response.text || response]], resources: [node.resources[0] - 10, node.resources[1]] };
+            } catch (e) {
+                logger.error(`LLM error: ${e.message}`);
+                return { ...node, history: [...node.history, ["llm", `Error: ${e.message}`]] };
+            }
+        }
+    });
+    tools.set("generateTool", {
+        name: "generateTool",
+        apply: async (node, system, input) => {
+            const toolDef = { name: input.name, apply: new Function("node", "system", "input", input.code) };
+            tools.set(input.name, toolDef);
+            return { ...node, history: [...node.history, ["generateTool", input.name]] };
+        }
+    });
+    tools.set("reflect", {
+        name: "reflect",
+        apply: async (node, system, input) => {
+            const target = await system.memory.fetch(input.targetId);
+            const summary = await getLLM().invoke(`Optimize this node: ${JSON.stringify(target)}`);
+            return { ...node, history: [...node.history, ["reflect", input.targetId]] };
+        }
+    });
+    tools.set("ui", {
+        name: "ui",
+        apply: async (node, system, input) => {
+            dashboard.updateWidget(input.id, { color: input.color, text: input.text });
+            return { ...node, history: [...node.history, ["ui", input.id]] };
+        }
+    });
+    tools.set("graph", {
+        name: "graph",
+        apply: async (node, system, input) => {
+            const nodes = await system.memory.list();
+            switch (input.operation) {
+                case "neighbors": return { ...node, history: [...node.history, ["graph", node.links.map(l => l[0])]] };
+                case "path": {
+                    const start = node.id, end = input.target, visited = new Set(), queue = [[start]], paths = [];
+                    while (queue.length) {
+                        const [path] = queue.shift(), last = path.at(-1);
+                        if (last === end) paths.push(path);
+                        if (!visited.has(last)) {
+                            visited.add(last);
+                            const n = await system.memory.fetch(last);
+                            n.links.forEach(l => queue.push([...path, l[0]]));
+                        }
+                    }
+                    return { ...node, history: [...node.history, ["graph", paths[0] || []]] };
+                }
+                case "connect": {
+                    const target = await system.memory.fetch(input.target);
+                    target.links.push([node.id, 0.5]);
+                    await system.memory.store(target);
+                    return { ...node, links: [...node.links, [input.target, 0.5]], history: [...node.history, ["graph", "connected"]] };
+                }
+            }
+            return node;
+        }
+    });
+    tools.set("plan", {
+        name: "plan",
+        apply: async (node, system, input) => {
+            const steps = [];
+            if (input.goal.includes("connect")) {
+                const [, from, to] = input.goal.match(/connect (\w+) to (\w+)/) || [];
+                if (from && to) steps.push({ tool: "graph", input: { operation: "connect", target: to } });
+            } else if (input.goal.includes("ui")) {
+                steps.push({ tool: "ui", input: { widget: "sphere", id: node.id, color: 0xff00ff } });
+            }
+            node.actions = steps;
+            await system.memory.store(node);
+            return { ...node, history: [...node.history, ["plan", steps]] };
+        }
+    });
+    tools.set("reason", {
+        name: "reason",
+        apply: async (node, system, input) => {
+            const nodes = await system.memory.list();
+            const premiseTrue = nodes.some(n => new Function("n", `return ${input.premise}`)(n));
+            const result = premiseTrue && new Function("n", `return ${input.conclusion}`)(node);
+            return { ...node, history: [...node.history, ["reason", result]] };
+        }
+    });
+
+    // System Class
+    class System {
+        constructor() {
+            this.memory = new InMemory();
+            this.tools = tools;
+            this.graph = new Map();
+            this.queue = new Set();
+            this.state = { paused: false, tick: 0 };
+            this.events = new EventEmitter();
+        }
+
+        async start() {
+            this.events.on("update", id => this.process(id).catch(e => logger.error(`Process error: ${e.message}`)));
+            this.run();
+            await this.seed();
+        }
+
+        async process(id) {
+            if (this.state.paused) return this.memory.fetch(id);
+            let node = await this.memory.fetch(id).catch(() => this.create(id));
+            if (node.resources[0] <= 0) return node;
+            node.status = "running";
+            await this.memory.store(node);
+
+            for (const action of node.actions) {
+                const tool = this.tools.get(action.value.tool) || { apply: async n => n };
+                try {
+                    node = await tool.apply(node, this, action.value.input || {});
+                    node.timestamp = new Date().toISOString();
+                    node.resources[1]--;
+                    node.memory.push({ type: "tool", content: `${tool.name} applied`, timestamp: new Date().toISOString() });
+                    await this.memory.store(node);
+                    this.queue.add(node.id);
+                    this.events.emit("update", node.id);
+                } catch (e) {
+                    node.status = "failed";
+                    node.memory.push({ type: "error", content: e.message, timestamp: new Date().toISOString() });
+                    await this.memory.store(node);
+                    throw e;
+                }
+            }
+            node.status = "completed";
+            await this.memory.store(node);
+            this.state.tick++;
+            return node;
+        }
+
+        run() {
+            setInterval(() => {
+                for (const id of this.queue) {
+                    this.process(id).catch(e => logger.error(`Run error: ${e.message}`));
+                    this.queue.delete(id);
+                }
+            }, 50);
+        }
+
+        create(id) {
+            const node = { ...Node, id, value: { desc: "New Node" }, timestamp: new Date().toISOString(), memory: [{ type: "system", content: "Node created", timestamp: new Date().toISOString() }] };
+            this.graph.set(id, node);
+            return node;
+        }
+
+        async seed() {
+            const root = {
+                ...Node, id: "root", value: { desc: "Netention Ultra Root", widget: "sphere", size: 10 }, priority: 1, resources: [5000, 5000], timestamp: new Date().toISOString(),
+                memory: [{ type: "system", content: "Root initialized", timestamp: new Date().toISOString() }],
+                actions: [
+                    { ...Node, id: "toolGen", value: { tool: "generateTool", input: { name: "testTool", code: "return {...node, value: {...node.value, test: 'done'}}" } } },
+                    { ...Node, id: "reflect", value: { tool: "reflect", input: { targetId: "root" } } },
+                    { ...Node, id: "plan", value: { tool: "plan", input: { goal: "connect root to graphmaster" } } }
+                ]
+            };
+            await this.memory.store(root);
+            this.graph.set(root.id, root);
+            this.events.emit("update", root.id);
+
+            await this.tools.get("add").apply(root, this, { type: "task", data: { desc: "GraphMaster", widget: "sphere" } });
+            await this.tools.get("add").apply(root, this, { type: "task", data: { desc: "UIBuilder", widget: "sphere", actions: [{ value: { tool: "ui", input: { id: "uibuilder", color: 0xffff00 } } }] } });
+            await this.tools.get("add").apply(root, this, { type: "task", data: { desc: "LLMThinker", actions: [{ value: { tool: "llm", input: { prompt: "Suggest a task" } } }] } });
+        }
+    }
+
+    // Dashboard Class
+    class Dashboard {
+        constructor() {
+            this.scene = new THREE.Scene();
+            this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            this.renderer = new THREE.WebGLRenderer({ antialias: true });
+            this.cssRenderer = new THREE.CSS3DRenderer();
+            this.controls = new THREE.OrbitControls(this.camera, this.cssRenderer.domElement);
+            this.widgets = new Map();
+            this.edges = new Map();
+            this.history = [];
+            this.timeIndex = -1;
+            this.setup();
+        }
+
+        setup() {
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+            this.cssRenderer.domElement.style.position = "absolute";
+            this.cssRenderer.domElement.style.top = "0";
+            document.getElementById("container").append(this.renderer.domElement, this.cssRenderer.domElement);
+            this.camera.position.set(0, 50, 100);
+            this.controls.enableDamping = true;
+
+            document.getElementById("apiKey").addEventListener("keypress", e => {
+                if (e.key === "Enter") {
+                    localStorage.setItem("googleApiKey", e.target.value);
+                    e.target.value = "";
+                    alert("API Key saved to localStorage!");
+                }
+            });
+            document.getElementById("prompt").addEventListener("keypress", e => {
+                if (e.key === "Enter") this.handleInput(e.target.value);
+            });
+            document.getElementById("timeline").addEventListener("input", e => this.render(this.history[+e.target.value]));
+            window.addEventListener("resize", () => this.onResize());
+            this.animate();
+        }
+
+        update(data) {
+            const nodes = data.nodes.map(n => ({
+                id: n.id, label: n.value.desc || "Untitled", status: n.status, priority: n.priority,
+                color: n.status === "completed" ? 0x00ff00 : n.status === "failed" ? 0xff0000 : 0xffff00,
+                value: n.memory.at(-1)?.content
+            }));
+            const edges = data.nodes.flatMap(n => n.links.map(l => ({ source: n.id, target: l[0] })));
+            this.render({ nodes, edges });
+            document.getElementById("status").textContent = `Nodes: ${this.widgets.size} | Tick: ${data.tick}`;
+        }
+
+        render({ nodes, edges }) {
+            const nodeMap = new Map(nodes.map(n => [n.id, n]));
+            const edgeKeys = new Set(edges.map(e => `${e.source}-${e.target}`));
+            for (const [id] of this.widgets) if (!nodeMap.has(id)) this.removeWidget(id);
+            for (const [key] of this.edges) if (!edgeKeys.has(key)) this.removeEdge(key);
+
+            nodes.forEach(n => {
+                if (!this.widgets.has(n.id)) {
+                    const mesh = new THREE.Mesh(new THREE.SphereGeometry(n.priority * 5 || 5), new THREE.MeshBasicMaterial({ color: n.color }));
+                    const div = document.createElement("div");
+                    div.className = "node-overlay";
+                    div.innerHTML = `<h3>${n.label}</h3><p>${n.status} | ${n.value || ""}</p>`;
+                    const overlay = new THREE.CSS3DObject(div);
+                    mesh.position.set(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
+                    overlay.position.copy(mesh.position);
+                    this.scene.add(mesh, overlay);
+                    this.widgets.set(n.id, { mesh, overlay });
+                } else {
+                    const w = this.widgets.get(n.id);
+                    w.mesh.material.color.set(n.color);
+                    w.overlay.element.innerHTML = `<h3>${n.label}</h3><p>${n.status} | ${n.value || ""}</p>`;
+                }
+            });
+
+            edges.forEach(e => {
+                const key = `${e.source}-${e.target}`;
+                if (!this.edges.has(key) && this.widgets.has(e.source) && this.widgets.has(e.target)) {
+                    const s = this.widgets.get(e.source).mesh.position;
+                    const t = this.widgets.get(e.target).mesh.position;
+                    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([s, t]), new THREE.LineBasicMaterial({ color: 0xffffff }));
+                    line.userData = { source: e.source, target: e.target };
+                    this.scene.add(line);
+                    this.edges.set(key, line);
+                }
+            });
+
+            this.history.push({ nodes, edges, time: Date.now() });
+            this.timeIndex = this.history.length - 1;
+            document.getElementById("timeline").max = this.timeIndex;
+            document.getElementById("timeline").value = this.timeIndex;
+        }
+
+        updateWidget(id, { color, text }) {
+            const w = this.widgets.get(id);
+            if (!w) return;
+            if (color) w.mesh.material.color.set(color);
+            if (text) w.overlay.element.innerHTML = `<h3>${w.overlay.element.querySelector("h3").textContent}</h3><p>${text}</p>`;
+        }
+
+        removeWidget(id) {
+            const w = this.widgets.get(id);
+            this.scene.remove(w.mesh, w.overlay);
+            this.widgets.delete(id);
+        }
+
+        removeEdge(key) {
+            this.scene.remove(this.edges.get(key));
+            this.edges.delete(key);
+        }
+
+        handleInput(cmd) {
+            const [action, ...args] = cmd.trim().split(" ");
+            const root = { id: "root" };
+            if (action === "add") {
+                const desc = args.join(" ");
+                system.tools.get("add").apply(root, system, { data: { desc, widget: "sphere" } })
+                    .then(() => system.events.emit("update", "root"));
+            } else if (action === "connect") {
+                const [from, to] = args;
+                system.tools.get("graph").apply({ id: from }, system, { operation: "connect", target: to })
+                    .then(() => system.events.emit("update", from));
+            } else if (action === "llm") {
+                const prompt = args.join(" ");
+                system.tools.get("llm").apply(root, system, { prompt })
+                    .then(() => system.events.emit("update", "root"));
+            } else if (action === "generate") {
+                const [name, ...codeParts] = args;
+                const code = codeParts.join(" ");
+                system.tools.get("generateTool").apply(root, system, { name, code })
+                    .then(() => system.events.emit("update", "root"));
+            }
+            document.getElementById("prompt").value = "";
+        }
+
+        animate() {
+            requestAnimationFrame(() => this.animate());
+            this.controls.update();
+            const repulsion = 100, attraction = 0.05, damping = 0.9;
+            const nodes = [...this.widgets.entries()];
+            for (let i = 0; i < nodes.length; i++) {
+                const [id1, w1] = nodes[i], p1 = w1.mesh.position;
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const [, w2] = nodes[j], p2 = w2.mesh.position, dir = p1.clone().sub(p2), dist = Math.max(dir.length(), 0.1);
+                    dir.normalize().multiplyScalar(repulsion / (dist * dist));
+                    p1.add(dir); p2.sub(dir);
+                }
+            }
+            for (const [, e] of this.edges) {
+                const s = this.widgets.get(e.userData.source)?.mesh.position;
+                const t = this.widgets.get(e.userData.target)?.mesh.position;
+                if (s && t) {
+                    const dir = t.clone().sub(s), dist = dir.length();
+                    dir.normalize().multiplyScalar(attraction * dist);
+                    s.add(dir); t.sub(dir);
+                    e.geometry.setFromPoints([s, t]);
+                }
+            }
+            for (const [, w] of this.widgets) w.mesh.position.multiplyScalar(damping);
+            this.renderer.render(this.scene, this.camera);
+            this.cssRenderer.render(this.scene, this.camera);
+            TWEEN.update();
+        }
+
+        onResize() {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    }
+
+    // EventEmitter Polyfill
+    class EventEmitter {
+        constructor() { this.listeners = new Map(); }
+        on(event, fn) { this.listeners.set(event, (this.listeners.get(event) || []).concat(fn)); }
+        emit(event, ...args) { (this.listeners.get(event) || []).forEach(fn => fn(...args)); }
+    }
+
+    // Main Execution
+    const system = new System();
+    const dashboard = new Dashboard();
+    system.start().then(() => {
+        setInterval(() => dashboard.update({ nodes: [...system.graph.values()], tick: system.state.tick }), 500);
+    });
+</script>
+</body>
+</html>

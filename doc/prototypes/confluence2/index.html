@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence - Semantic Notes</title>
+    <!-- Quill CSS -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --text-color: #212529;
+            --primary-color: #007bff;
+            --secondary-color: #6c757d;
+            --border-color: #dee2e6;
+            --hover-bg: #e9ecef;
+            --active-bg: #d1d5db;
+            --sidebar-width: 280px;
+            --header-height: 50px;
+            --gap: 10px;
+            --radius: 4px;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: var(--sidebar-width);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: #fff;
+        }
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        #editor-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: var(--gap);
+            overflow: hidden; /* Prevent editor overflow issues */
+        }
+        #editor {
+            height: calc(100% - 150px); /* Adjust based on controls below */
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background-color: #fff;
+            margin-bottom: var(--gap);
+        }
+        /* Make Quill toolbar sticky */
+        .ql-toolbar {
+            position: sticky;
+            top: 0;
+            background-color: #fff;
+            z-index: 1;
+            border-top-left-radius: var(--radius);
+            border-top-right-radius: var(--radius);
+        }
+        .ql-container {
+            height: calc(100% - 42px); /* Adjust based on toolbar height */
+            overflow-y: auto;
+        }
+
+        #note-controls {
+            padding: var(--gap);
+            border-top: 1px solid var(--border-color);
+            background-color: var(--bg-color);
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--gap);
+            align-items: center;
+        }
+        #note-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        #note-controls button, #new-note-btn {
+            padding: 5px 10px;
+            border: 1px solid var(--secondary-color);
+            background-color: #fff;
+            color: var(--secondary-color);
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        #note-controls button:hover, #new-note-btn:hover {
+            background-color: var(--secondary-color);
+            color: #fff;
+        }
+        #note-controls button.primary, #new-note-btn {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+        #note-controls button.primary:hover, #new-note-btn:hover {
+            background-color: var(--primary-color);
+            color: #fff;
+        }
+
+
+        #note-list-container, #activity-container, #friends-container, #matches-container {
+            overflow-y: auto;
+            padding: var(--gap);
+        }
+        #note-list-container h3, #activity-container h3, #friends-container h3, #matches-container h3 {
+            margin-top: 0;
+            margin-bottom: var(--gap);
+            font-size: 1em;
+            color: var(--secondary-color);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+
+        .note-item, .activity-item, .match-item {
+            padding: 8px var(--gap);
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+            transition: background-color 0.2s;
+        }
+        .note-item:hover, .match-item:hover {
+            background-color: var(--hover-bg);
+        }
+        .note-item.active {
+            background-color: var(--active-bg);
+            font-weight: bold;
+        }
+        .note-item-content {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex-grow: 1;
+            margin-right: 10px; /* Space before indicators */
+        }
+        .note-indicators {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.8em;
+            color: var(--secondary-color);
+        }
+        .embedding-vis {
+            width: 15px;
+            height: 15px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 1px;
+            border: 1px solid var(--border-color);
+        }
+        .embedding-vis div {
+            width: 100%;
+            height: 100%;
+        }
+        .status-icon { /* For ~, ~>>, ~[n] */
+            font-weight: bold;
+            min-width: 20px; /* Ensure space for count */
+            text-align: right;
+        }
+
+        #llm-feedback {
+            font-size: 0.85em;
+            color: var(--secondary-color);
+            margin-top: var(--gap);
+            border: 1px dashed var(--border-color);
+            padding: 8px;
+            border-radius: var(--radius);
+            background-color: #fff;
+            min-height: 50px;
+        }
+        #llm-feedback strong { color: var(--primary-color); }
+        #llm-feedback ul { margin: 5px 0 0 15px; padding: 0; }
+        #llm-feedback li { margin-bottom: 3px; }
+
+        .tag {
+            display: inline-block;
+            background-color: var(--hover-bg);
+            color: var(--secondary-color);
+            padding: 2px 6px;
+            border-radius: var(--radius);
+            font-size: 0.8em;
+            margin-right: 4px;
+            margin-bottom: 4px; /* Allow wrapping */
+        }
+        .tag.k { background-color: #cfe2ff; color: #0a58ca; } /* Keyword */
+        .tag.a { background-color: #d1e7dd; color: #146c43; } /* Action */
+        .tag.type { background-color: #f8d7da; color: #842029; } /* Type */
+        .tag.l { background-color: #fff3cd; color: #664d03; } /* Location */
+
+        #network-status {
+            padding: var(--gap);
+            font-size: 0.8em;
+            color: var(--secondary-color);
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+        #sidebar-toggle {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            background: rgba(255,255,255,0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            display: none; /* Initially hidden, shown when sidebar is collapsible */
+        }
+
+        /* Basic responsiveness */
+        @media (max-width: 768px) {
+            /* Make sidebar collapsible - more complex JS needed for toggle */
+            /* For now, just reduce width */
+            :root { --sidebar-width: 200px; }
+            .note-item-content { max-width: 120px; } /* Prevent long titles pushing indicators */
+        }
+
+    </style>
+</head>
+<body>
+<!-- <button id="sidebar-toggle">☰</button> --> <!-- Placeholder for future toggle -->
+
+<div id="sidebar">
+    <div style="padding: var(--gap); border-bottom: 1px solid var(--border-color);">
+        <button id="new-note-btn" class="primary" style="width: 100%;">+ New Note</button>
+    </div>
+    <div id="note-list-container">
+        <h3>Notes</h3>
+        <div id="note-list"></div>
+    </div>
+    <div id="matches-container">
+        <h3>Matches</h3>
+        <div id="match-list"></div>
+    </div>
+    <!-- <div id="friends-container"> -->
+    <!-- <h3>Friends</h3> -->
+    <!-- <div id="friend-list"></div> -->
+    <!-- </div> -->
+    <div id="activity-container" style="flex-grow: 1;"> <!-- Takes remaining space -->
+        <h3>Network Activity</h3>
+        <div id="activity-log" style="font-size: 0.8em; color: var(--secondary-color); line-height: 1.4;"></div>
+    </div>
+    <div id="network-status">Connecting...</div>
+</div>
+
+<div id="main-content">
+    <div id="editor-container">
+        <div id="editor"></div>
+        <div id="llm-feedback">
+            <p>LLM feedback will appear here...</p>
+            <strong>Suggested Tags:</strong> <span id="suggested-tags">None</span><br>
+            <strong>Clarification Prompts:</strong> <ul id="clarification-prompts"><li>None</li></ul>
+        </div>
+        <div id="note-controls">
+            <button id="save-note-btn" class="primary">Save</button>
+            <button id="analyze-note-btn">Analyze</button>
+            <label>
+                <input type="checkbox" id="publish-checkbox"> Publish
+            </label>
+            <label>
+                <input type="checkbox" id="match-checkbox"> Find Matches
+            </label>
+            <div id="current-tags" style="margin-left: auto;">Tags: <span id="tags-display"></span></div>
+            <button id="delete-note-btn" style="margin-left: 10px;">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- Quill JS -->
+<script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+<!-- App Utilities -->
+
+<!-- App Logic -->
+<script type="module">
+    import { generateUUID, escapeHtml, debounce, generateEmbeddingVis } from "./util.js";
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    //const wsUrl = `${wsProtocol}//${window.location.host}`;
+    const wsUrl = `${wsProtocol}//localhost:8080`;
+    const socket = new WebSocket(wsUrl);
+
+    const noteListEl = document.getElementById('note-list');
+    const matchListEl = document.getElementById('match-list');
+    const activityLogEl = document.getElementById('activity-log');
+    const networkStatusEl = document.getElementById('network-status');
+    const llmFeedbackEl = document.getElementById('llm-feedback');
+    const suggestedTagsEl = document.getElementById('suggested-tags');
+    const clarificationPromptsEl = document.getElementById('clarification-prompts');
+    const tagsDisplayEl = document.getElementById('tags-display');
+    const saveNoteBtn = document.getElementById('save-note-btn');
+    const analyzeNoteBtn = document.getElementById('analyze-note-btn');
+    const deleteNoteBtn = document.getElementById('delete-note-btn');
+    const newNoteBtn = document.getElementById('new-note-btn');
+    const publishCheckbox = document.getElementById('publish-checkbox');
+    const matchCheckbox = document.getElementById('match-checkbox');
+
+    let quill;
+    let currentNoteId = null;
+    let notesCache = new Map(); // local_id -> Note object
+    let debounceSave;
+
+    // --- Quill Setup ---
+    const setupQuill = () => {
+        quill = new Quill('#editor', {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    ['link', 'blockquote', 'code-block'],
+                    ['clean']
+                ]
+            }
+        });
+
+        // Debounced save on text change
+        debounceSave = debounce(() => {
+            if (currentNoteId) saveCurrentNote();
+        }, 1500); // Save 1.5 seconds after user stops typing
+
+        quill.on('text-change', (delta, oldDelta, source) => {
+            if (source === 'user') {
+                debounceSave();
+                // Indicate unsaved changes maybe?
+            }
+        });
+    };
+
+    // --- WebSocket Handlers ---
+    socket.onopen = () => {
+        console.log('WebSocket connected');
+        networkStatusEl.textContent = 'Connected';
+        socket.send(JSON.stringify({ type: 'getNotes' })); // Request initial notes
+    };
+
+    socket.onclose = () => {
+        console.log('WebSocket disconnected');
+        networkStatusEl.textContent = 'Disconnected. Attempting to reconnect...';
+        // Implement basic reconnection logic
+        setTimeout(() => window.location.reload(), 5000);
+    };
+
+    socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        networkStatusEl.textContent = 'Connection Error';
+    };
+
+    socket.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            // console.log('WS Received:', message); // Debug
+
+            switch (message.type) {
+                case 'notesListUpdate':
+                    updateNoteListView(message.data);
+                    break;
+                case 'noteUpdateConfirm': // Received after save/analysis
+                    updateNoteDetails(message.data);
+                    // Update cache and potentially list item if semantic data changed
+                    notesCache.set(message.data.local_id, message.data);
+                    renderNoteItem(message.data); // Re-render the specific item in the list
+                    break;
+                case 'noteDeleteConfirm':
+                    if (currentNoteId === message.data.local_id) {
+                        clearEditor();
+                    }
+                    // List update is handled by notesListUpdate broadcast
+                    break;
+                case 'llmFeedback':
+                    displayLLMFeedback(message.data);
+                    break;
+                case 'networkActivity':
+                    logNetworkActivity(message.data);
+                    break;
+                case 'newMatch':
+                    addMatchResult(message.data);
+                    logNetworkActivity(`New Match Found! (Score: ${message.data.tags?.similarity_score || 'N/A'})`);
+                    break;
+                case 'identityUpdate':
+                    networkStatusEl.textContent = message.data
+                        ? `Connected | ID: ${message.data.substring(0, 12)}...`
+                        : 'Connected | Nostr keys not loaded';
+                    break;
+                case 'error':
+                    console.error('Server Error:', message.data);
+                    logNetworkActivity(`Server Error: ${message.data}`);
+                    alert(`Server Error: ${message.data}`); // Simple error feedback
+                    break;
+                default:
+                    console.log('Unknown message type:', message.type);
+            }
+        } catch (error) {
+            console.error('Failed to process WebSocket message:', error);
+        }
+    };
+
+    // --- UI Update Functions ---
+
+    const createTagElement = (tagKey, tagValue) => {
+        const span = document.createElement('span');
+        const keyPart = tagKey.split(':')[0]; // e.g., 'k', 'a', 'type'
+        span.classList.add('tag', keyPart);
+        // Display boolean true as just the key:value, string values as key:value
+        span.textContent = typeof tagValue === 'boolean' && tagValue ? tagKey : `${tagKey}:${tagValue}`;
+        // Add tooltip or interaction later if needed
+        return span;
+    };
+
+    const renderNoteItem = (note) => {
+        let item = document.getElementById(`note-${note.local_id}`);
+        const isNew = !item;
+        if (isNew) {
+            item = document.createElement('div');
+            item.id = `note-${note.local_id}`;
+            item.classList.add('note-item');
+            item.addEventListener('click', () => loadNoteIntoEditor(note.local_id));
+        }
+
+        // Determine title (first line of content, stripped of HTML)
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = note.content;
+        const title = (tempDiv.textContent || tempDiv.innerText || 'Untitled Note').split('\n')[0].trim().substring(0, 50) || 'Untitled Note';
+
+        // Indicators
+        const hasEmbedding = note.embedding && note.embedding.length > 0;
+        const isPublished = note.config?.isPublished;
+        const isMatching = note.config?.findMatches;
+        const matchCount = Array.from(notesCache.values()).filter(n => n.tags?.type === 'match_result' && n.tags?.local_note_id === note.local_id).length;
+
+        let statusIndicator = '';
+        if (isMatching) statusIndicator = `~[${matchCount}]`;
+        else if (isPublished) statusIndicator = '~>>';
+        else if (hasEmbedding) statusIndicator = '~';
+
+        // Embedding Visualization
+        const visColors = generateEmbeddingVis(note.embedding); // From util.js
+        const visGrid = visColors.map(color => `<div style="background-color: ${color};"></div>`).join('');
+
+        item.innerHTML = `
+                <div class="note-item-content">${escapeHtml(title)}</div>
+                <div class="note-indicators">
+                     ${hasEmbedding ? `<div class="embedding-vis" title="Semantic Embedding Analyzed">${visGrid}</div>` : ''}
+                    <span class="status-icon" title="${isPublished ? 'Published' : hasEmbedding ? 'Analyzed' : ''} ${isMatching ? `| Finding Matches (${matchCount})` : ''}">${statusIndicator}</span>
+                </div>
+            `;
+
+        if (isNew) {
+            noteListEl.appendChild(item); // Add new items
+        }
+
+        // Update active state
+        if (note.local_id === currentNoteId) {
+            document.querySelectorAll('.note-item.active').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+        }
+
+        return item; // Return the element for potential sorting
+    };
+
+
+    const updateNoteListView = (notesData) => {
+        notesCache.clear();
+        const sortedNotes = notesData
+            .filter(note => note.tags?.type !== 'match_result') // Exclude match results from main list
+            .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0)); // Sort by most recently updated
+
+        noteListEl.innerHTML = ''; // Clear existing list
+        matchListEl.innerHTML = ''; // Clear match list too
+
+        sortedNotes.forEach(note => {
+            notesCache.set(note.local_id, note);
+            renderNoteItem(note); // Add note to the main list
+        });
+
+        // Populate match list separately
+        notesData
+            .filter(note => note.tags?.type === 'match_result')
+            .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+            .forEach(matchNote => addMatchResult(matchNote));
+
+        // If no note is selected, or selected note was deleted, select the first one
+        if (!currentNoteId || !notesCache.has(currentNoteId)) {
+            if (sortedNotes.length > 0) {
+                loadNoteIntoEditor(sortedNotes[0].local_id);
+            } else {
+                clearEditor(); // No notes left
+            }
+        } else {
+            // Reselect current note to apply active class correctly after full refresh
+            const currentItem = document.getElementById(`note-${currentNoteId}`);
+            if (currentItem) currentItem.classList.add('active');
+        }
+    };
+
+    const addMatchResult = (matchNote) => {
+        let item = document.getElementById(`match-${matchNote.local_id}`);
+        if (item) item.remove(); // Remove if exists to re-add at top
+
+        item = document.createElement('div');
+        item.id = `match-${matchNote.local_id}`;
+        item.classList.add('match-item');
+        // Basic display: snippet and score
+        const snippet = (matchNote.content || 'Match Result').substring(0, 100) + '...';
+        const score = matchNote.tags?.similarity_score || 'N/A';
+        const candidateOwner = matchNote.tags?.candidate_owner_id ? nip19.npubEncode(matchNote.tags.candidate_owner_id) : 'Unknown';
+
+        item.innerHTML = `
+                <div>
+                    Score: ${score} | ${escapeHtml(snippet)}
+                    <br><small>Owner: ${escapeHtml(candidateOwner.substring(0,12))}...</small>
+                </div>
+                <button class="contact-btn" data-npub="${escapeHtml(candidateOwner)}" style="font-size: 0.8em; padding: 2px 5px;">Contact</button>
+             `;
+        // Prepend to show newest first
+        matchListEl.prepend(item);
+
+        // Add contact button listener
+        const contactBtn = item.querySelector('.contact-btn');
+        if (contactBtn) {
+            contactBtn.onclick = (e) => {
+                e.stopPropagation(); // Prevent triggering note selection
+                initiateContact(contactBtn.dataset.npub);
+            };
+        }
+    };
+
+    const initiateContact = async (recipientNpub) => {
+        if (!recipientNpub || recipientNpub === 'Unknown') {
+            alert("Cannot contact unknown owner.");
+            return;
+        }
+        const message = prompt(`Enter message to send to ${recipientNpub.substring(0,12)}... (will be NIP-04 encrypted):`);
+        if (message) {
+            try {
+                // We need nostr-tools nip04 here, but it's server-side.
+                // Ask server to encrypt and send.
+                // Ideally, encryption happens client-side if SK is available, but spec keeps SK server-side.
+                // Let's *simulate* asking the server. The server needs the raw message.
+                // In a real NIP-04, client would encrypt using shared secret.
+                // For this example, we'll send the raw message and recipient to server for encryption.
+                // THIS IS NOT SECURE NIP-04 but demonstrates the flow.
+                // A proper implementation would need nip04 on the client or a secure way to get the shared secret.
+
+                // TEMPORARY: Ask server to perform NIP-04 encryption and send
+                // This requires the server to have nip04.encrypt and the target pubkey.
+                // Let's adjust the server message handler for 'sendMessage'
+                // For now, just log the intent
+                console.warn("NIP-04 Contact simulation: Sending raw message to server for encryption/sending.");
+                logNetworkActivity(`Attempting to send DM to ${recipientNpub.substring(0,12)}...`);
+
+                // We need nip04 on the client to do this *properly*.
+                // Since we can't easily import nostr-tools' nip04 in vanilla browser JS without bundling,
+                // we'll fake it by sending the raw message to the server.
+                // The server *must* have the recipient's public key to do nip04.encrypt.
+                // Let's assume the server can fetch the pubkey if needed, or we pass it.
+                // The matchNote contains `candidate_owner_id` (pubkey hex).
+
+                // Let's just send the raw message and npub, server handles encryption (less secure but works for demo)
+                const recipientPubkey = notesCache.get(matchListEl.querySelector('.match-item').id.replace('match-',''))?.tags?.candidate_owner_id; // Get pubkey from match note
+                if (!recipientPubkey) {
+                    alert("Could not find recipient public key.");
+                    return;
+                }
+
+                // *** THIS IS A SIMPLIFIED FLOW ***
+                // We need the server's public key to properly use NIP-04 encrypt
+                // Let's pretend we have it or the server handles it fully
+                // Sending raw message for server-side encryption:
+                socket.send(JSON.stringify({
+                    type: 'sendMessage',
+                    data: {
+                        recipientNpub: recipientNpub, // Send npub for server lookup/confirmation
+                        // The server should really use nip04.encrypt(serverSK, recipientPubkey, message)
+                        // But we'll just send the raw message for this example
+                        rawMessage: message // Server needs to handle encryption
+                    }
+                }));
+
+                // --> Server needs modification to handle `rawMessage` and do the nip04.encrypt step.
+                // Let's modify server.js 'sendMessage' case...
+                // **Server modification done.** Now send the encrypted message.
+
+                // We need nip04.encrypt *here* if we have the private key.
+                // Let's assume server handles it.
+
+            } catch (error) {
+                console.error("Error initiating contact:", error);
+                alert("Error initiating contact: " + error.message);
+            }
+        }
+    };
+
+
+    const loadNoteIntoEditor = (local_id) => {
+        if (!notesCache.has(local_id)) {
+            console.error("Note not found in cache:", local_id);
+            clearEditor();
+            return;
+        }
+        if (!quill) setupQuill(); // Ensure Quill is initialized
+
+        const note = notesCache.get(local_id);
+        currentNoteId = local_id;
+
+        // Prevent recursive trigger of text-change
+        const currentContent = quill.getContents();
+        // Basic check if content differs significantly (avoids unnecessary updates)
+        // Quill delta comparison is more robust but complex. Simple length check for now.
+        if (JSON.stringify(currentContent) !== JSON.stringify(quill.clipboard.convert(note.content))) {
+            quill.root.innerHTML = note.content; // Set content directly
+        }
+
+        // Update controls
+        publishCheckbox.checked = note.config?.isPublished || false;
+        matchCheckbox.checked = note.config?.findMatches || false;
+        matchCheckbox.disabled = !publishCheckbox.checked; // Can only match if published
+
+        // Update tags display
+        tagsDisplayEl.innerHTML = '';
+        if (note.tags && Object.keys(note.tags).length > 0) {
+            Object.entries(note.tags).forEach(([key, value]) => {
+                tagsDisplayEl.appendChild(createTagElement(key, value));
+            });
+        } else {
+            tagsDisplayEl.textContent = 'None';
+        }
+
+        // Highlight in list
+        document.querySelectorAll('.note-item.active').forEach(el => el.classList.remove('active'));
+        const listItem = document.getElementById(`note-${local_id}`);
+        if (listItem) listItem.classList.add('active');
+
+        // Clear previous LLM feedback for the new note
+        clearLLMFeedback();
+        // Maybe trigger analysis automatically if note lacks embedding? Or rely on manual Analyze button.
+        if (!note.embedding && note.content.trim()) {
+            llmFeedbackEl.innerHTML = '<p>Note content changed or not analyzed. Click "Analyze" for semantic features.</p>';
+        }
+    };
+
+    const updateNoteDetails = (note) => {
+        // This function is called when the server confirms an update
+        // It mainly updates the controls and potentially the list item if the currently viewed note was updated
+        if (note.local_id === currentNoteId) {
+            publishCheckbox.checked = note.config?.isPublished || false;
+            matchCheckbox.checked = note.config?.findMatches || false;
+            matchCheckbox.disabled = !publishCheckbox.checked;
+
+            // Update tags display
+            tagsDisplayEl.innerHTML = '';
+            if (note.tags && Object.keys(note.tags).length > 0) {
+                Object.entries(note.tags).forEach(([key, value]) => {
+                    tagsDisplayEl.appendChild(createTagElement(key, value));
+                });
+            } else {
+                tagsDisplayEl.textContent = 'None';
+            }
+        }
+        // Re-render the item in the list to reflect any status changes (icons, etc.)
+        renderNoteItem(note);
+    };
+
+
+    const clearEditor = () => {
+        if (!quill) setupQuill();
+        currentNoteId = null;
+        quill.setContents([]); // Clear editor content
+        publishCheckbox.checked = false;
+        matchCheckbox.checked = false;
+        matchCheckbox.disabled = true;
+        tagsDisplayEl.textContent = 'None';
+        clearLLMFeedback();
+        document.querySelectorAll('.note-item.active').forEach(el => el.classList.remove('active'));
+    };
+
+    const displayLLMFeedback = (feedback) => {
+        // Check if feedback is for the currently viewed note
+        if (feedback.local_id === currentNoteId) {
+            suggestedTagsEl.innerHTML = ''; // Clear previous
+            if (feedback.tags && Object.keys(feedback.tags).length > 0) {
+                Object.entries(feedback.tags).forEach(([key, value]) => {
+                    // Only show suggested tags not already present? Or show all? Show all for now.
+                    const tagEl = createTagElement(key, value);
+                    tagEl.style.cursor = 'pointer'; // Indicate clickable
+                    tagEl.title = 'Click to add this tag';
+                    tagEl.onclick = () => addTagToCurrentNote(key, value);
+                    suggestedTagsEl.appendChild(tagEl);
+                });
+            } else {
+                suggestedTagsEl.textContent = 'None';
+            }
+
+            clarificationPromptsEl.innerHTML = ''; // Clear previous
+            if (feedback.prompts && feedback.prompts.length > 0) {
+                feedback.prompts.forEach(prompt => {
+                    const li = document.createElement('li');
+                    li.textContent = prompt;
+                    clarificationPromptsEl.appendChild(li);
+                });
+            } else {
+                const li = document.createElement('li');
+                li.textContent = 'Content seems clear.';
+                clarificationPromptsEl.appendChild(li);
+            }
+            llmFeedbackEl.style.display = 'block'; // Ensure visible
+        }
+    };
+
+    const clearLLMFeedback = () => {
+        suggestedTagsEl.textContent = 'None';
+        clarificationPromptsEl.innerHTML = '<li>None</li>';
+        llmFeedbackEl.querySelector('p')?.remove(); // Remove initial placeholder if exists
+    }
+
+    const addTagToCurrentNote = (key, value) => {
+        if (!currentNoteId) return;
+        const note = notesCache.get(currentNoteId);
+        if (note) {
+            note.tags = note.tags || {};
+            note.tags[key] = value; // Add or overwrite the tag
+            notesCache.set(currentNoteId, note); // Update cache
+            loadNoteIntoEditor(currentNoteId); // Reload to show updated tags
+            saveCurrentNote(); // Save the change
+        }
+    };
+
+    const logNetworkActivity = (message) => {
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = document.createElement('div');
+        logEntry.textContent = `[${timestamp}] ${message}`;
+        // Prepend to show newest first, limit log length
+        activityLogEl.insertBefore(logEntry, activityLogEl.firstChild);
+        if (activityLogEl.children.length > 50) {
+            activityLogEl.removeChild(activityLogEl.lastChild);
+        }
+    };
+
+    // --- Actions ---
+    const saveCurrentNote = () => {
+        if (!currentNoteId || !quill) return;
+
+        const note = notesCache.get(currentNoteId) || {}; // Get existing or default
+        const content = quill.root.innerHTML; // Get HTML content
+        const isPublished = publishCheckbox.checked;
+        const findMatches = matchCheckbox.checked;
+
+        // Check if anything actually changed (content or config)
+        const configChanged = note.config?.isPublished !== isPublished || note.config?.findMatches !== findMatches;
+        // Simple content check; Quill delta comparison is better but more complex
+        const contentChanged = note.content !== content;
+
+        if (!contentChanged && !configChanged) {
+            // console.log("No changes detected, skipping save.");
+            return;
+        }
+
+        const noteData = {
+            local_id: currentNoteId,
+            content: content,
+            // Tags are updated via loadNoteIntoEditor based on cache, or added via LLM feedback click
+            tags: note.tags || {},
+            config: {
+                isPublished: isPublished,
+                findMatches: findMatches && isPublished, // Only allow matching if published
+            }
+            // Server handles embedding, timestamps, network_id etc.
+        };
+        socket.send(JSON.stringify({ type: 'saveNote', data: noteData }));
+        console.log("Saving note:", currentNoteId);
+    };
+
+    const createNewNote = () => {
+        const newId = generateUUID(); // From util.js
+        const newNote = {
+            local_id: newId,
+            content: '<p>New Note</p>',
+            tags: {},
+            status: 'active',
+            config: { isPublished: false, findMatches: false },
+            // Server will set created_at, updated_at, embedding etc. on first save
+        };
+        // Add to cache immediately for selection
+        notesCache.set(newId, newNote);
+        // Add to list view optimistically
+        renderNoteItem(newNote);
+        // Load into editor
+        loadNoteIntoEditor(newId);
+        // Send to server to persist (will trigger analysis if needed)
+        socket.send(JSON.stringify({ type: 'saveNote', data: newNote }));
+    };
+
+    const deleteCurrentNote = () => {
+        if (!currentNoteId) return;
+        if (confirm('Are you sure you want to delete this note?')) {
+            socket.send(JSON.stringify({ type: 'deleteNote', data: { local_id: currentNoteId } }));
+            // UI update (clearing editor, removing from list) will happen on confirmation from server
+        }
+    };
+
+    const analyzeCurrentNote = () => {
+        if (!currentNoteId) return;
+        saveCurrentNote(); // Save first to ensure server has latest content
+        socket.send(JSON.stringify({ type: 'analyzeNote', data: { local_id: currentNoteId } }));
+        llmFeedbackEl.innerHTML = '<p>Requesting analysis from LLM...</p>';
+    };
+
+
+    // --- Event Listeners ---
+    newNoteBtn.addEventListener('click', createNewNote);
+    saveNoteBtn.addEventListener('click', saveCurrentNote);
+    analyzeNoteBtn.addEventListener('click', analyzeCurrentNote);
+    deleteNoteBtn.addEventListener('click', deleteCurrentNote);
+
+    publishCheckbox.addEventListener('change', () => {
+        matchCheckbox.disabled = !publishCheckbox.checked;
+        if (!publishCheckbox.checked) {
+            matchCheckbox.checked = false; // Turn off matching if unpublished
+        }
+        saveCurrentNote(); // Save config change
+    });
+
+    matchCheckbox.addEventListener('change', () => {
+        if (matchCheckbox.checked && !publishCheckbox.checked) {
+            alert("Note must be published to enable matching.");
+            matchCheckbox.checked = false;
+            return;
+        }
+        saveCurrentNote(); // Save config change
+    });
+
+
+    // --- Initial Load ---
+    setupQuill(); // Initialize Quill editor on page load
+
+</script>
+</body>
+</html>

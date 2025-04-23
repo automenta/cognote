@@ -1,0 +1,3191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Netention Ultra (Client-Side Synthesis v2.5 - Hybridized)</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a; --text-color: #e0e0e0; --hud-bg: rgba(15, 15, 15, 0.85);
+            --input-bg: #252525; --border-color: #4a4a4a; --link-color: #606060;
+            --highlight-color: #00aaff; --error-color: #ff5555; --warn-color: #ffae42;
+            --info-color: #66aaff; --debug-color: #999999; --success-color: #33cc77;
+            --running-color: #ffff4d; --pending-color: var(--info-color); --paused-color: #bbbbbb;
+        }
+        body { margin: 0; overflow: hidden; background: var(--bg-color); color: var(--text-color); font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; }
+        #container { position: relative; width: 100%; height: 100vh; }
+        #hud {
+            position: absolute; top: 10px; left: 10px; z-index: 10; background: var(--hud-bg);
+            padding: 12px 15px; border-radius: 6px; max-width: 350px; display: flex; flex-direction: column;
+            gap: 10px; border: 1px solid var(--border-color); box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            backdrop-filter: blur(3px);
+        }
+        #status { font-size: 12px; border-bottom: 1px dashed var(--border-color); padding-bottom: 5px; margin-bottom: 5px; white-space: nowrap; }
+        #prompt-input {
+            background: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color);
+            padding: 8px 10px; width: 100%; display: block; box-sizing: border-box; border-radius: 4px;
+            font-family: inherit; font-size: 13px;
+        }
+        #prompt-input:focus { border-color: var(--highlight-color); outline: none; }
+        #timeline-container { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
+        #timeline-slider { width: 100%; cursor: pointer; height: 5px; }
+        #timeline-label { font-size: 11px; display: block; margin-bottom: 4px; color: #aaa; }
+        .overlay {
+            background: rgba(30, 30, 30, 0.9);
+            padding: 8px 12px; border-radius: 5px; color: var(--text-color);
+            pointer-events: auto; cursor: pointer; min-width: 140px; max-width: 300px; text-align: left;
+            font-size: 11px; border: 1px solid var(--border-color); box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            transition: border-color 0.2s, transform 0.2s, background-color 0.2s; transform-origin: center center;
+        }
+        .overlay:hover { border-color: var(--highlight-color); transform: scale(1.05); z-index: 1; background-color: rgba(45, 45, 45, 0.95); }
+        .overlay h3 {
+            margin: 0 0 5px 0; font-size: 13px; font-weight: bold; word-wrap: break-word;
+            color: var(--highlight-color); border-bottom: 1px solid #444; padding-bottom: 3px;
+        }
+        .overlay .status-line { margin: 3px 0; font-size: 10px; color: #bbb; display: flex; justify-content: space-between; }
+        .overlay .status-line .status { font-weight: bold; display: inline-block; padding: 1px 4px; border-radius: 3px; color: #111; font-size: 9px; text-transform: uppercase; }
+        .overlay .status-line .prio { color: #ccc; }
+        .overlay .details {
+            margin-top: 5px; font-size: 10px; color: #ccc; max-height: 70px;
+            overflow-y: auto; background: rgba(10, 10, 10, 0.7); padding: 5px 7px; border-radius: 3px; word-wrap: break-word;
+            scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; white-space: pre-wrap;
+        }
+        .overlay .details::-webkit-scrollbar { width: 5px; }
+        .overlay .details::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 3px; }
+        .overlay .details::-webkit-scrollbar-track { background: transparent; }
+
+        .status-running, .status-line .status-running { background-color: var(--running-color); }
+        .status-failed, .status-line .status-failed { background-color: var(--error-color); }
+        .status-completed, .status-line .status-completed { background-color: var(--success-color); }
+        .status-pending, .status-line .status-pending { background-color: var(--pending-color); }
+        .status-paused, .status-line .status-paused { background-color: var(--paused-color); }
+        .overlay.status-running { border-left: 4px solid var(--running-color); }
+        .overlay.status-failed { border-left: 4px solid var(--error-color); }
+        .overlay.status-completed { border-left: 4px solid var(--success-color); }
+        .overlay.status-pending { border-left: 4px solid var(--pending-color); }
+        .overlay.status-paused { border-left: 4px solid var(--paused-color); }
+    </style>
+</head>
+<body>
+<div id="container">
+    <div id="hud">
+        <div id="status">Nodes: 0 | Edges: 0 | Tick: 0 | Running: 0</div>
+        <input type="text" id="prompt-input" placeholder="Type 'help' for commands...">
+        <div id="timeline-container">
+            <label id="timeline-label" for="timeline-slider">History:</label>
+            <input type="range" id="timeline-slider" min="0" max="0" value="0" disabled>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.0/examples/jsm/",
+        "tween": "https://cdnjs.cloudflare.com/ajax/libs/tween.js/25.0.0/tween.esm.js"
+      }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import TWEEN from 'tween';
+
+    // --- Configuration & Constants ---
+    const CONFIG = {
+        MAX_HISTORY: 150,
+        NODE_SIZE_MIN: 2.5,
+        NODE_SIZE_MAX: 25,
+        NODE_SIZE_DEFAULT: 6,
+        NODE_PRIORITY_DEFAULT: 50,
+        NODE_CYCLES_DEFAULT: 1000,
+        NODE_TOKENS_DEFAULT: 1000,
+        SIM_REPULSION: 180,      // Increased for better separation
+        SIM_ATTRACTION: 0.03,    // Slightly decreased
+        SIM_DAMPING: 0.94,
+        SIM_EDGE_LENGTH: 90,     // Increased for better separation
+        LOGIC_BASE_COST: 0.1,
+        TOOL_CYCLE_COST: 1.0,
+        LOOP_ITER_COST: 0.5,
+        MAX_LOOP_ITER: 100,
+        MAX_SCHEDULE_DELAY: 24 * 60 * 60 * 1000, // 1 day
+        UI_UPDATE_DEBOUNCE: 50,
+    };
+
+    // --- Global State ---
+    const logger = createLogger();
+    let globalTick = 0;
+    /** @type {UI | null} */
+    let dashboard = null;
+    /** @type {Memory | null} */
+    let memory = null;
+    /** @type {Map<string, Tool>} */
+    const tools = new Map();
+    /** @type {Map<string, Command>} */
+    const commandRegistry = new Map();
+    /** @type {Set<string>} */
+    const runningNotes = new Set();
+    /** @type {number | null} */
+    let uiUpdateTimeout = null;
+
+    // --- Type Definitions (JSDoc) ---
+    /** @typedef {'pending' | 'running' | 'completed' | 'failed' | 'paused'} NoteStatus */
+    /** @typedef {object} NoteValue General key-value store for note data. Incl: desc, type, color, size, widget, result, content, etc. */
+    /** @typedef {object} NoteState Current execution state: status, priority, stepIndex? */
+    /** @typedef {object} NoteGraphEdge Link to another note: target, rel? */
+    /** @typedef {object} NoteMemoryEntry Log entry: type, content, timestamp, stepId? */
+    /** @typedef {object} NoteResources Consumable resources: cycles, tokens. */
+    /** @typedef {object} LogicStep Defines a single step: id?, tool, input? */
+    /** @typedef {object} LogicBase Base structure for logic blocks: type */
+    /** @typedef {LogicBase & { steps: LogicStep[] }} SequentialLogic */ // Use ComposeTool
+    /** @typedef {LogicBase & { condition_expr: string; then_branch: LogicStep[]; else_branch?: LogicStep[] }} ConditionalLogic */ // Use IfElseTool
+    /** @typedef {LogicBase & { count: number; body: Logic }} LoopLogic */
+    /** @typedef {LogicBase & any } DirectToolLogic Allows tool name as type, other props as input */
+    /** @typedef {SequentialLogic | ConditionalLogic | LoopLogic | DirectToolLogic} Logic */
+    /** @typedef {object} Note Core data structure: id, value?, logic?, graph?, state, memory?, resources?, context?, timestamp. */
+    /** @typedef {object} ToolContext Context for tools: note, memory, ui, tools, logger, runNote */
+    /** @typedef {{status: 'done' | 'failed' | 'running' | 'paused', result?: any, content?: any, cost?: number}} ToolResult */
+    /** @typedef {(args: Record<string, any>) => Promise<void>} CommandHandler */
+    /** @typedef {{ handler: CommandHandler, help: string, description: string }} Command */
+
+    // --- Logger Utility ---
+    function createLogger() {
+        const getCssColor = (varName) => getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        return {
+            info: (...args) => console.log(`%c[INFO]`, `color: ${getCssColor('--info-color')}`, ...args),
+            debug: (...args) => console.log(`%c[DEBUG]`, `color: ${getCssColor('--debug-color')}`, ...args),
+            warn: (...args) => console.warn(`%c[WARN]`, `color: ${getCssColor('--warn-color')}`, ...args),
+            error: (...args) => console.error(`%c[ERROR]`, `color: ${getCssColor('--error-color')}; font-weight: bold;`, ...args),
+            success: (...args) => console.log(`%c[SUCCESS]`, `color: ${getCssColor('--success-color')}`, ...args),
+        };
+    }
+
+    // --- Base Tool Class ---
+    class Tool {
+        name = 'BaseTool';
+        description = 'Base tool class';
+        cycleCost = CONFIG.TOOL_CYCLE_COST;
+        /** @param {any} input @param {ToolContext} ctx @returns {Promise<ToolResult>} */
+        async execute(input, ctx) { throw new Error("Tool.execute must be implemented by subclass."); }
+    }
+
+    // --- Memory Store ---
+    class Memory extends Map {
+        /** @param {Note} n */
+        async save(n) {
+            if (!n || !n.id) { logger.error("Attempted to save invalid note:", n); return; }
+            n.timestamp = new Date().toISOString();
+            // Ensure core structures exist with defaults
+            n.value = n.value ?? {};
+            n.graph = n.graph ?? [];
+            n.memory = n.memory ?? [];
+            n.context = n.context ?? [];
+            n.state = n.state ?? { status: 'pending', priority: CONFIG.NODE_PRIORITY_DEFAULT };
+            n.state.status = n.state.status ?? 'pending';
+            n.state.priority = n.state.priority ?? CONFIG.NODE_PRIORITY_DEFAULT;
+            n.resources = n.resources ?? { tokens: CONFIG.NODE_TOKENS_DEFAULT, cycles: CONFIG.NODE_CYCLES_DEFAULT };
+            n.resources.tokens = n.resources.tokens ?? CONFIG.NODE_TOKENS_DEFAULT;
+            n.resources.cycles = n.resources.cycles ?? CONFIG.NODE_CYCLES_DEFAULT;
+
+            const clonedNote = structuredClone(n);
+            this.set(n.id, clonedNote);
+            logger.debug(`Saved note ${n.id} (Status: ${n.state.status}, Cycles: ${n.resources.cycles?.toFixed(1)})`);
+
+            // Debounced UI Update
+            if (uiUpdateTimeout) clearTimeout(uiUpdateTimeout);
+            uiUpdateTimeout = setTimeout(() => {
+                handleNoteUpdate(n.id).catch(e => logger.error(`Debounced update error ${n.id}: ${e.message}`));
+                uiUpdateTimeout = null;
+            }, CONFIG.UI_UPDATE_DEBOUNCE);
+        }
+        /** @param {string} id @returns {Promise<Note>} */
+        async load(id) {
+            const n = this.get(id);
+            if (!n) throw new Error(`Note ${id} not found.`);
+            return structuredClone(n);
+        }
+        /** @returns {Promise<Note[]>} */
+        async all() { return [...this.values()].map(n => structuredClone(n)); }
+        /** @returns {Promise<string[]>} */
+        async listIds() { return [...this.keys()]; }
+    }
+
+    // --- Tool Implementations (Hybridized & Consolidated) ---
+
+    class StubTool extends Tool {
+        constructor(name, description = "Tool requires backend or complex implementation.") {
+            super();
+            this.name = name;
+            this.description = description;
+            this.cycleCost = 0.1; // Lower cost for stub
+        }
+        async execute(input, { logger: ctxLogger, note, memory: globalMemory }) {
+            const message = `Tool '${this.name}' (STUB) called on ${note.id}. Input: ${JSON.stringify(input)?.substring(0, 100)}...`;
+            ctxLogger.warn(message);
+            note.memory.push({ type: 'stub_call', content: { name: this.name, input }, timestamp: new Date().toISOString() });
+            await globalMemory.save(note);
+            return { status: "done", result: message, cost: this.cycleCost };
+        }
+    }
+
+    class KnowTool extends Tool {
+        name = "know"; description = "Creates or updates a note."; cycleCost = 1.5;
+        async execute({ content }, { memory: ctxMemory, note: currentNote, runNote: ctxRunNote, logger: ctxLogger }) {
+            const noteId = content.id ?? `${content.value?.type ?? 'note'}-${Date.now()}`;
+            let noteToSave;
+            let isNew = false;
+            let existingNote = null;
+            try { existingNote = await ctxMemory.load(noteId); } catch { isNew = true; }
+
+            if (existingNote) { // Update existing note
+                noteToSave = { ...existingNote };
+                if (content.value) noteToSave.value = { ...noteToSave.value, ...content.value };
+                if (content.logic !== undefined) noteToSave.logic = content.logic; // Allow setting logic to null
+                if (content.graph) noteToSave.graph = content.graph; // Replace graph if provided
+                if (content.state) noteToSave.state = { ...noteToSave.state, ...content.state };
+                if (content.resources) noteToSave.resources = { ...noteToSave.resources, ...content.resources };
+                if (content.context) noteToSave.context = content.context; // Replace context if provided
+                noteToSave.memory.push({ type: 'update', content: `By know from ${currentNote?.id ?? 'system'}`, timestamp: new Date().toISOString() });
+                ctxLogger.info(`KnowTool: Updating ${noteId}`);
+            } else { // Create new note
+                noteToSave = {
+                    id: noteId,
+                    value: content.value ?? { desc: `Note ${noteId}` },
+                    logic: content.logic ?? null,
+                    graph: content.graph ?? [],
+                    state: content.state ?? { status: "pending", priority: CONFIG.NODE_PRIORITY_DEFAULT },
+                    memory: [{ type: 'creation', content: `By know from ${currentNote?.id ?? 'system'}`, timestamp: new Date().toISOString() }],
+                    context: content.context ?? (currentNote ? [currentNote.id] : []),
+                    timestamp: new Date().toISOString(),
+                    resources: content.resources ?? { tokens: CONFIG.NODE_TOKENS_DEFAULT, cycles: CONFIG.NODE_CYCLES_DEFAULT },
+                    // Allow storing arbitrary top-level properties if provided in content
+                    ...(Object.fromEntries(Object.entries(content).filter(([k]) => !['id', 'value', 'logic', 'graph', 'state', 'memory', 'context', 'timestamp', 'resources'].includes(k))))
+                };
+                isNew = true;
+                ctxLogger.info(`KnowTool: Creating ${noteId}`);
+            }
+            noteToSave.timestamp = new Date().toISOString(); // Always update timestamp
+
+            // Link parent if context includes it
+            if (currentNote && noteToSave.context?.includes(currentNote.id)) {
+                try {
+                    const parent = await ctxMemory.load(currentNote.id);
+                    if (!parent.graph.some(g => g.target === noteToSave.id)) {
+                        parent.graph.push({ target: noteToSave.id, rel: isNew ? "created" : "linked" });
+                        await ctxMemory.save(parent);
+                    }
+                } catch (e) { ctxLogger.warn(`KnowTool: Failed link parent ${currentNote.id}: ${e.message}`); }
+            }
+            await ctxMemory.save(noteToSave);
+
+            // Auto-run if new/pending and has logic
+            if (noteToSave.logic && (noteToSave.state.status === 'pending' || (isNew && !['failed', 'completed', 'paused'].includes(noteToSave.state.status)))) {
+                setTimeout(() => ctxRunNote(noteToSave.id).catch(e => ctxLogger.error(`Error running ${noteToSave.id} after know: ${e.message}`)), 10);
+            }
+            return { status: "done", result: `Note ${noteToSave.id} ${isNew ? 'created' : 'updated'}.`, content: { id: noteToSave.id }, cost: this.cycleCost };
+        }
+    } tools.set("know", new KnowTool());
+
+    class AddTool extends Tool {
+        name = "add"; description = "Adds a new node. Wrapper for 'know'."; cycleCost = 1.6;
+        async execute({ id, type = "node", desc, parentId, logic, state, ...data }, ctx) {
+            const knowTool = ctx.tools.get('know');
+            if (!knowTool) return { status: "failed", result: "'know' tool missing." };
+
+            const parentContextId = parentId ?? ctx.note?.id;
+            const newNoteContent = {
+                id, // Allow specifying ID
+                value: { type, desc: desc ?? `New ${type}`, widget: 'sphere', size: CONFIG.NODE_SIZE_DEFAULT, ...data },
+                context: parentContextId ? [parentContextId] : [],
+                logic,
+                state
+            };
+            const result = await knowTool.execute({ content: newNoteContent }, ctx);
+            return { ...result, cost: this.cycleCost + (result.cost ?? 0) };
+        }
+    } tools.set("add", new AddTool());
+
+    class GraphTool extends Tool {
+        name = "graph"; description = "Graph ops: connect, disconnect, neighbors, path, query, search, traverse."; cycleCost = 1.2;
+        async execute({ operation, source, target, rel = "linked", query, mode = 'bfs', limit = 50, depth = 10, searchIn = ['id', 'value.desc', 'value.type'], includeDetails = false }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger } = ctx;
+            const sourceId = source || note?.id;
+            if (!sourceId && ['connect', 'disconnect', 'neighbors', 'path', 'traverse', 'search'].includes(operation)) {
+                return { status: "failed", result: `Graph op '${operation}' needs source ID.` };
+            }
+            let sourceNote;
+            if (sourceId) {
+                try { sourceNote = await ctxMemory.load(sourceId); }
+                catch (e) { return { status: "failed", result: `Source node ${sourceId} not found.` }; }
+            }
+            const allNotes = await ctxMemory.all();
+            const findNode = (id) => allNotes.find(n => n.id === id);
+            let cost = this.cycleCost;
+
+            try {
+                switch (operation) {
+                    case "connect": {
+                        if (!sourceNote || !target || !findNode(target)) return { status:"failed", result:"Connect requires valid source & target IDs."};
+                        if (!sourceNote.graph.some(g => g.target === target && g.rel === rel)) {
+                            sourceNote.graph.push({ target: target, rel: rel });
+                            sourceNote.memory.push({ type: 'graph_connect', content: { target, rel }, timestamp: new Date().toISOString() });
+                            await ctxMemory.save(sourceNote);
+                            return { status: "done", result: `Connected ${sourceId} -> ${target}`, cost };
+                        }
+                        return { status: "done", result: `Connection ${sourceId} -> ${target} (rel: ${rel}) already exists.`, cost: cost * 0.5 };
+                    }
+                    case "disconnect": {
+                        if (!sourceNote || !target) return { status:"failed", result:"Disconnect requires source & target IDs."};
+                        const initialLength = sourceNote.graph.length;
+                        sourceNote.graph = sourceNote.graph.filter(g => !(g.target === target && (!rel || g.rel === rel))); // If rel provided, match it
+                        if (sourceNote.graph.length < initialLength) {
+                            sourceNote.memory.push({ type: 'graph_disconnect', content: { target, rel }, timestamp: new Date().toISOString() });
+                            await ctxMemory.save(sourceNote);
+                            return { status: "done", result: `Disconnected ${sourceId} from ${target} ${rel ? `(rel: ${rel})` : ''}`, cost };
+                        }
+                        return { status: "done", result: `No connection ${sourceId} -> ${target} ${rel ? `(rel: ${rel})` : ''} found`, cost: cost * 0.5 };
+                    }
+                    case "neighbors": {
+                        if (!sourceNote) return { status: "failed", result: "Neighbors needs source ID." };
+                        return { status: "done", result: sourceNote.graph.map(g => g.target), cost };
+                    }
+                    case "path": {
+                        if (!sourceNote || !target || !findNode(target)) return { status:"failed", result:"Path requires valid source & target IDs."};
+                        const visited = new Set();
+                        const queue = [{ path: [sourceId], current: sourceId }];
+                        let foundPath = null;
+                        cost += 0.1; // Base pathfinding cost
+                        let iterations = 0;
+                        const maxIterations = allNotes.length * 5; // Safety break
+
+                        while (queue.length > 0 && iterations < maxIterations) {
+                            const { path, current } = queue.shift();
+                            iterations++;
+                            if (current === target) { foundPath = path; break; }
+                            if (visited.has(current)) continue;
+                            visited.add(current);
+                            cost += 0.01; // Cost per node visited
+
+                            const node = findNode(current);
+                            if (node) {
+                                node.graph.forEach(edge => {
+                                    if (!visited.has(edge.target) && findNode(edge.target)) {
+                                        queue.push({ path: [...path, edge.target], current: edge.target });
+                                    }
+                                });
+                            }
+                        }
+                        if(iterations >= maxIterations) logger.warn(`Pathfinding ${sourceId} -> ${target} hit iteration limit ${maxIterations}`);
+                        return { status: "done", result: foundPath ?? [], cost };
+                    }
+                    case "query": case "filter": {
+                        if (!query) return { status:"failed", result:"Query/Filter requires a 'query' JS expression string."};
+                        cost += 0.1;
+                        let results;
+                        try {
+                            // More robust filtering function
+                            const fn = new Function("n", `try { return !!(${query}); } catch(e) { return false; }`);
+                            results = allNotes.filter(n => fn(n)).map(n => n.id);
+                            cost += allNotes.length * 0.01;
+                        } catch (e) { return { status: "failed", result: `Filter expression error: ${e.message}` }; }
+                        return { status: "done", result: results, cost };
+                    }
+                    case "search": {
+                        if (!query) return { status: "failed", result: "Search requires 'query' text." };
+                        cost += 0.2;
+                        const startNodeId = sourceId ?? allNotes[0]?.id;
+                        if (!startNodeId || !findNode(startNodeId)) return { status:"failed", result:`Search start node ${startNodeId} not found.`};
+
+                        const visited = new Set();
+                        const queue = [{ id: startNodeId, d: 0 }];
+                        const results = [];
+                        const lowerQuery = query.toLowerCase();
+                        let count = 0;
+                        let visitedCount = 0;
+                        const maxVisited = limit * 15; // Safety break
+
+                        while (queue.length > 0 && count < limit && visitedCount < maxVisited) {
+                            const { id, d } = queue.shift();
+                            if (!id || visited.has(id) || d > depth) continue;
+                            const node = findNode(id);
+                            if (!node) continue;
+                            visited.add(id);
+                            visitedCount++;
+                            cost += 0.02;
+
+                            let match = false;
+                            const check = (val) => val != null && String(val).toLowerCase().includes(lowerQuery);
+
+                            // Search in specified fields
+                            searchIn.forEach(fieldPath => {
+                                if(match) return;
+                                const keys = fieldPath.split('.');
+                                let currentVal = node;
+                                try { for (const key of keys) { currentVal = currentVal[key]; } } catch { currentVal = undefined; }
+                                if (check(currentVal)) match = true;
+                            });
+                            // Generic value search if specified and no match yet
+                            if (!match && searchIn.includes('value')) { try { if (JSON.stringify(node.value)?.toLowerCase().includes(lowerQuery)) match = true; } catch {} }
+
+
+                            if (match) {
+                                results.push({ id: id, desc: node.value?.desc ?? 'N/A', depth: d });
+                                count++;
+                            }
+
+                            node.graph.forEach(edge => {
+                                if (!visited.has(edge.target) && findNode(edge.target)) {
+                                    queue.push({ id: edge.target, d: d + 1 });
+                                }
+                            });
+                        }
+                        if(visitedCount >= maxVisited) logger.warn(`Search from ${startNodeId} hit visited limit ${maxVisited}`);
+                        return { status: "done", result: results, cost };
+                    }
+                    case "traverse": {
+                        if (!sourceNote) return { status: "failed", result: "Traverse requires source ID." };
+                        cost += 0.1;
+                        const visited = new Set();
+                        const stackOrQueue = [sourceId]; // Use array as stack (push/pop) or queue (push/shift)
+                        const path = [];
+                        let count = 0;
+                        const maxCount = limit * 2; // Safety break
+
+                        while (stackOrQueue.length > 0 && count < limit && visited.size < maxCount) {
+                            const currentId = mode === 'dfs' ? stackOrQueue.pop() : stackOrQueue.shift();
+                            if (!currentId || visited.has(currentId)) continue;
+                            const node = findNode(currentId);
+                            if (!node) continue;
+
+                            visited.add(currentId);
+                            cost += 0.01;
+                            path.push(includeDetails ? { id: currentId, desc: node.value?.desc, type: node.value?.type } : currentId);
+                            count++;
+
+                            const neighbors = node.graph.map(e => e.target).filter(id => !visited.has(id) && findNode(id));
+                            if (mode === 'dfs') {
+                                stackOrQueue.push(...neighbors.reverse()); // Add neighbors in reverse for typical DFS stack order
+                            } else { // bfs
+                                stackOrQueue.push(...neighbors);
+                            }
+                        }
+                        if(visited.size >= maxCount) logger.warn(`Traversal from ${sourceId} hit visited limit ${maxCount}`);
+                        return { status: "done", result: path, cost };
+                    }
+                    default:
+                        return { status: "failed", result: `Unknown graph operation: '${operation}'` };
+                }
+            } catch (error) {
+                logger.error(`GraphTool Error (Op: ${operation}, Src: ${sourceId}): ${error.message}`, error);
+                return { status: "failed", result: `GraphTool failed: ${error.message}` };
+            }
+        }
+    } tools.set("graph", new GraphTool());
+
+    class InspectTool extends Tool {
+        name = "inspect"; description = "Inspects note: summary, detail, full, logic, memory, metrics, diagnose."; cycleCost = 0.5;
+        async execute({ targetId, level = 'detail', query }, { note, memory: ctxMemory, logger: ctxLogger, tools: ctxTools, runNote }) {
+            const idToInspect = targetId || note?.id;
+            if (!idToInspect) return { status: "failed", result: "Inspect requires targetId or context note." };
+            let cost = this.cycleCost;
+
+            try {
+                const targetNote = await ctxMemory.load(idToInspect);
+                let result = {};
+                let allNotes; // Lazily load if needed
+
+                switch (level) {
+                    case 'summary':
+                        cost += 0.1;
+                        result = {
+                            id: targetNote.id,
+                            desc: targetNote.value?.desc,
+                            type: targetNote.value?.type,
+                            status: targetNote.state.status,
+                            cycles: targetNote.resources.cycles?.toFixed(1),
+                            memLen: targetNote.memory?.length ?? 0,
+                            graphLen: targetNote.graph?.length ?? 0
+                        };
+                        break;
+                    case 'logic':
+                        cost += 0.2;
+                        result = { id: targetNote.id, logic: targetNote.logic };
+                        break;
+                    case 'memory': {
+                        cost += 0.1 + (targetNote.memory?.length ?? 0) * 0.01;
+                        let mem = targetNote.memory ?? [];
+                        if(query) {
+                            try {
+                                const lowerQuery = query.toLowerCase();
+                                mem = mem.filter(m => JSON.stringify(m).toLowerCase().includes(lowerQuery));
+                                cost += (targetNote.memory?.length ?? 0) * 0.01; // Extra cost for filtering
+                            } catch {}
+                        }
+                        result = { id: targetNote.id, memoryCount: mem.length, memory: mem.slice(-20) }; // Return last 20 matching/all
+                        break;
+                    }
+                    case 'metrics': {
+                        cost += 0.6;
+                        allNotes = await ctxMemory.all();
+                        const nodesCount = allNotes.length;
+                        let totalEdges = 0;
+                        const edgeSet = new Set();
+                        allNotes.forEach(n => n.graph?.forEach(edge => {
+                            const k = `${n.id}->${edge.target}`;
+                            if (!edgeSet.has(k)) { totalEdges++; edgeSet.add(k); }
+                        }));
+                        const outDegree = targetNote.graph?.length ?? 0;
+                        const inDegree = allNotes.filter(n => n.graph?.some(edge => edge.target === idToInspect)).length;
+                        result = {
+                            id: targetNote.id,
+                            metrics: {
+                                totalNodes: nodesCount,
+                                totalEdges,
+                                averageDegree: nodesCount > 0 ? (totalEdges * 2) / nodesCount : 0,
+                                target: { id: idToInspect, outDegree, inDegree, status: targetNote.state.status, desc: targetNote.value?.desc }
+                            }
+                        };
+                        break;
+                    }
+                    case 'diagnose': {
+                        cost += 0.8;
+                        allNotes = await ctxMemory.all(); // Needed for in-degree
+                        const inDegree = allNotes.filter(n => n.graph?.some(e => e.target === idToInspect)).length;
+                        const logicDesc = targetNote.logic ? (targetNote.logic.type ?? 'Custom') : 'None';
+                        const logicParts = targetNote.logic ? (targetNote.logic.steps?.length ?? (targetNote.logic.toolChain?.length ?? (targetNote.logic.body ? 'Loop/Cond' : 1))) : 'N/A';
+
+                        const analysis = [
+                            `**Diagnostic Report for '${targetNote.value?.desc ?? idToInspect}' (ID: ${idToInspect})**`,
+                            `--------------------------------------------------`,
+                            `**Status:** ${targetNote.state.status} | **Priority:** ${targetNote.state.priority}`,
+                            `**Logic:** ${logicDesc} (${logicParts} parts)`,
+                            `**Memory Entries:** ${targetNote.memory?.length ?? 0}`,
+                            `**Outgoing Links:** ${targetNote.graph?.length ?? 0} (${targetNote.graph?.map(g => g.target).join(', ') ?? ''})`,
+                            `**Incoming Links:** ${inDegree}`,
+                            `**Resources:** Cycles=${targetNote.resources.cycles?.toFixed(1)}, Tokens=${targetNote.resources.tokens}`,
+                            `**Last Updated:** ${new Date(targetNote.timestamp).toLocaleString()}`,
+                            `**Context:** ${targetNote.context?.join(', ') ?? 'None'}`,
+                            `**Value Keys:** ${Object.keys(targetNote.value ?? {}).join(', ')}`,
+                        ];
+                        const errors = (targetNote.memory ?? []).filter(m => m.type === 'error').slice(-5);
+                        if (errors.length > 0) {
+                            analysis.push("\n**Recent Errors:**");
+                            errors.forEach((e, i) => analysis.push(`  ${i+1}. [${new Date(e.timestamp).toLocaleTimeString()}] ${String(e.content).substring(0, 150)}...`));
+                        }
+                        result = { id: idToInspect, report: analysis.join('\n') };
+                        logger.info(`\n${result.report}\n`); // Log report to console as well
+                        break;
+                    }
+                    case 'full':
+                        cost += 0.5;
+                        result = targetNote; // Return the full, cloned note object
+                        break;
+                    case 'detail': default: {
+                        cost += 0.3;
+                        allNotes = await ctxMemory.all(); // Needed for in-degree
+                        const inDegree = allNotes.filter(n => n.graph?.some(e => e.target === idToInspect)).length;
+                        const errorCount = (targetNote.memory ?? []).filter(m => m.type === 'error').length;
+                        result = {
+                            id: targetNote.id,
+                            desc: targetNote.value?.desc,
+                            type: targetNote.value?.type,
+                            status: targetNote.state.status,
+                            priority: targetNote.state.priority,
+                            logicType: targetNote.logic?.type,
+                            graphOut: targetNote.graph?.length ?? 0,
+                            graphIn: inDegree,
+                            memLen: targetNote.memory?.length ?? 0,
+                            errorCount: errorCount,
+                            resources: targetNote.resources,
+                            timestamp: targetNote.timestamp,
+                            context: targetNote.context,
+                            lastMemType: targetNote.memory?.slice(-1)[0]?.type,
+                            valueKeys: Object.keys(targetNote.value ?? {})
+                        };
+                        break;
+                    }}
+
+                // Log result if called from console/externally, or add to calling note's memory
+                if (!note) {
+                    logger.debug(`Inspect Result (${level}) for ${idToInspect}:\n`, result);
+                } else {
+                    const summary = JSON.stringify(result)?.substring(0, 150) + '...';
+                    note.memory.push({ type: 'inspect_run', content: { targetId: idToInspect, level, summary }, timestamp: new Date().toISOString() });
+                    await ctxMemory.save(note);
+                }
+                return { status: "done", result: result, cost };
+            } catch (e) {
+                logger.error(`Inspect error (Target: ${idToInspect}, Level: ${level}): ${e.message}`);
+                return { status: "failed", result: `Inspect error: ${e.message}` };
+            }
+        }
+    } tools.set("inspect", new InspectTool());
+
+    class ModifyNoteTool extends Tool {
+        name = "modify"; description = "Modifies note properties (value, state, etc.) using updates or JSON Patch."; cycleCost = 1.5;
+        /** @param {{ target?: string; updates?: { key: string; value: any; isCode?: boolean }[]; patch?: any[] }} input */
+        async execute({ target, updates, patch }, ctx) {
+            const { note, memory: ctxMemory, tools: ctxTools, logger: ctxLogger } = ctx;
+            const targetId = target || note?.id;
+            if (!targetId) return { status: "failed", result: "Modify needs targetId." };
+            if (!updates && !patch) return { status: "failed", result: "Modify needs 'updates' or 'patch'." };
+            let cost = this.cycleCost;
+
+            try {
+                const noteToModify = await ctxMemory.load(targetId);
+                const changes = [];
+
+                // Apply key/value updates
+                if (updates && Array.isArray(updates)) {
+                    for (const u of updates) {
+                        cost += 0.2;
+                        let finalValue = u.value;
+                        if (u.isCode && typeof u.value === 'string') {
+                            cost += 0.5;
+                            logger.warn(`Modify eval code for ${targetId}.${u.key}: ${u.value}`);
+                            const evalExprTool = ctxTools.get('eval_expr');
+                            if (!evalExprTool) throw new Error("Modify requires EvalExprTool for code evaluation.");
+                            // Pass target note context to eval_expr
+                            const evalResult = await evalExprTool.execute({ expr: u.value }, { ...ctx, note: noteToModify });
+                            if (evalResult?.status === 'failed') throw new Error(`Code eval failed for key '${u.key}': ${evalResult.result}`);
+                            finalValue = evalResult?.result;
+                            cost += evalResult.cost ?? 0;
+                        }
+
+                        // Safe nested property setting
+                        const keys = u.key.split('.');
+                        let current = noteToModify;
+                        let applied = false;
+                        for (let i = 0; i < keys.length - 1; i++) {
+                            const k = keys[i];
+                            if (current[k] === undefined || current[k] === null || typeof current[k] !== 'object') {
+                                // If path doesn't exist and we are not at the final segment, create intermediate objects
+                                if (typeof current === 'object' && current !== null) {
+                                    current[k] = {};
+                                } else {
+                                    throw new Error(`Path creation failed: Cannot set property '${k}' on non-object path.`);
+                                }
+                            }
+                            current = current[k];
+                        }
+
+                        if (typeof current === 'object' && current !== null) {
+                            const finalKey = keys[keys.length - 1];
+                            const oldValue = current[finalKey];
+                            current[finalKey] = finalValue;
+                            changes.push({ key: u.key, from: oldValue, to: finalValue });
+                            applied = true;
+                        } else {
+                            throw new Error(`Cannot set final key '${keys[keys.length-1]}' on non-object path '${keys.slice(0,-1).join('.')}'`);
+                        }
+                        if (!applied) logger.warn(`Modify update for '${u.key}' was not applied to ${targetId}.`);
+                    }
+                }
+
+                // Apply JSON Patch (Basic implementation)
+                if (patch && Array.isArray(patch)) {
+                    cost += patch.length * 0.3;
+                    logger.warn(`Modify applying JSON Patch to ${targetId} (Basic Ops: replace, add).`);
+                    patch.forEach(op => {
+                        const segments = op.path.split('/').slice(1).map(s => s.replace(/~1/g, '/').replace(/~0/g, '~')); // Decode JSON Pointer escapes
+                        let current = noteToModify;
+                        for (let i = 0; i < segments.length - 1; i++) {
+                            current = current?.[segments[i]];
+                            if (current === undefined) throw new Error(`Invalid Patch path: ${op.path} - segment '${segments[i]}' not found.`);
+                        }
+                        const finalSeg = segments[segments.length - 1];
+
+                        if (op.op === 'replace') {
+                            if (current && typeof current === 'object' && finalSeg in current) {
+                                changes.push({ path: op.path, from: current[finalSeg], to: op.value });
+                                current[finalSeg] = op.value;
+                            } else { throw new Error(`Invalid Patch 'replace': Path ${op.path} not found or target not object.`); }
+                        } else if (op.op === 'add') {
+                            if (current && typeof current === 'object') {
+                                changes.push({ path: op.path, to: op.value });
+                                // Basic add: assumes object target, replaces if exists, adds if not
+                                current[finalSeg] = op.value;
+                            } else { throw new Error(`Invalid Patch 'add' target: Path ${op.path} target not object.`); }
+                        } else if (op.op === 'remove') {
+                            if (current && typeof current === 'object' && finalSeg in current) {
+                                changes.push({ path: op.path, from: current[finalSeg] });
+                                delete current[finalSeg];
+                            } else { throw new Error(`Invalid Patch 'remove': Path ${op.path} not found.`); }
+                        }
+                        else { logger.warn(`Unsupported Patch op: ${op.op} at ${op.path}`); }
+                    });
+                }
+
+                noteToModify.memory.push({ type: 'note_modify', content: { targetId, changes: changes.map(c => c.key || c.path).join(', ') }, timestamp: new Date().toISOString() });
+                await ctxMemory.save(noteToModify);
+                return { status: "done", result: `Modified ${changes.length} properties on ${targetId}`, cost };
+            } catch (e) {
+                logger.error(`Modify error (Target: ${targetId}): ${e.message}`);
+                return { status: "failed", result: `Modify error: ${e.message}` };
+            }
+        }
+    } tools.set("modify", new ModifyNoteTool());
+
+    class EvalExprTool extends Tool {
+        name = "eval_expr"; description = "Evaluates simple JS expression safely. No async/await."; cycleCost = 0.3;
+        async execute({ expr, ctx = {} }, toolCtx) {
+            // Stricter safety check
+            if (!expr || expr.length > 1000 || /Function\(|eval\(|async |await |import |require|process|window|document|XMLHttpRequest|fetch\(/.test(expr)) {
+                return { status: "failed", result: "Expression rejected (complexity/safety)." };
+            }
+            toolCtx.logger.warn(`EvalExpr: ${expr}`);
+            try {
+                // Expose specific, safe context properties
+                const safeCtx = {
+                    note: toolCtx.note, // The note object is passed, use with caution
+                    // memory: toolCtx.memory, // Avoid passing full memory access
+                    // tools: toolCtx.tools, // Avoid passing tool access
+                    // ui: toolCtx.ui, // Avoid passing UI access
+                    // logger: toolCtx.logger, // Avoid passing logger access
+                    globalTick: globalTick,
+                    Math: Math, // Allow Math functions
+                    Date: Date, // Allow Date functions
+                    JSON: JSON, // Allow JSON functions
+                    ...ctx // Allow caller-provided safe context
+                };
+                const keys = Object.keys(safeCtx);
+                const values = Object.values(safeCtx);
+                // Using Function constructor is generally safer than direct eval
+                const fn = new Function(...keys, `return (${expr})`);
+                const result = fn(...values);
+                return { status: "done", result: result, cost: this.cycleCost + expr.length * 0.005 };
+            } catch (error) {
+                toolCtx.logger.error(`EvalExpr error executing "${expr}": ${error.message}`);
+                return { status: "failed", result: `EvalExpr execution error: ${error.message}` };
+            }
+        }
+    } tools.set("eval_expr", new EvalExprTool());
+
+    class EvalTool extends Tool {
+        name = "eval"; description = "Executes arbitrary JS code block (Async/Await ok). CAUTION! High Risk!"; cycleCost = 2.0;
+        async execute({ code }, ctx) {
+            ctx.logger.error(`!!! DANGEROUS EvalTool execution requested by ${ctx.note?.id ?? 'unknown'} !!!`);
+            ctx.logger.warn(`EvalTool ${ctx.note?.id}: ${code.substring(0,150)}...`);
+            let cost = this.cycleCost + code.length * 0.01;
+            let executionNote = ctx.note; // Capture the note state before execution
+
+            try {
+                // Provide the full context, as this tool is inherently powerful/dangerous
+                const func = new Function("note", "memory", "tools", "ui", "logger", "runNote", `return (async () => { ${code} })();`);
+                const result = await func(executionNote, ctx.memory, ctx.tools, ctx.ui, ctx.logger, ctx.runNote);
+
+                // Reload the note as the eval code might have modified it via memory.save
+                try { executionNote = await ctx.memory.load(executionNote.id); } catch { /* Note might have been deleted */ }
+
+                if (executionNote) {
+                    executionNote.memory.push({ type: 'eval_execution', content: { code: code.substring(0, 100), result_summary: JSON.stringify(result)?.substring(0, 100) }, timestamp: new Date().toISOString() });
+                    await ctx.memory.save(executionNote);
+                }
+
+                // If result includes a cost, add it
+                if(result && typeof result === 'object' && typeof result.cost === 'number') {
+                    cost += result.cost;
+                }
+                return { status: "done", result: result, cost };
+            } catch (e) {
+                ctx.logger.error(`Eval error during execution for ${executionNote?.id}: ${e.message}`, e);
+                // Try to save error state to the note
+                if (executionNote) {
+                    try {
+                        const errorNote = await ctx.memory.load(executionNote.id); // Reload again just in case
+                        errorNote.state.status = 'failed';
+                        errorNote.memory.push({ type: 'error', content: `Eval failed: ${e.message}. Code: ${code.substring(0,100)}...`, timestamp: new Date().toISOString() });
+                        await ctx.memory.save(errorNote);
+                    } catch (saveError) {
+                        ctx.logger.error(`Failed to save eval error state for ${executionNote.id}: ${saveError.message}`);
+                    }
+                }
+                return { status: "failed", result: `Eval execution error: ${e.message}` };
+            }
+        }
+    } tools.set("eval", new EvalTool());
+
+    tools.set("compose", new (class extends Tool {
+        name = "compose"; description = "Executes a sequence of tool steps."; cycleCost = 0.5;
+        async execute({ toolChain }, ctx) {
+            if (!Array.isArray(toolChain) || toolChain.length === 0) {
+                return { status: "failed", result: "'toolChain' array with steps is required." };
+            }
+            const results = [];
+            let currentNote = ctx.note; // Start with the context note
+            let totalCost = this.cycleCost;
+            ctx.logger.info(`Compose: Starting ${toolChain.length} steps for ${currentNote.id}`);
+
+            for (let i = 0; i < toolChain.length; i++) {
+                const step = toolChain[i];
+                const toolName = step.tool || step.toolName; // Allow both keys
+                const input = step.input ?? {};
+                const stepId = step.id ?? `step_${i}`;
+
+                // Refresh note state before each step
+                try { currentNote = await ctx.memory.load(currentNote.id); }
+                catch (e) { return { status: "failed", result: `Compose failed: Note ${currentNote.id} disappeared.`}; }
+
+                // Check if execution should continue
+                if (currentNote.state.status !== 'running') {
+                    ctx.logger.warn(`Compose: Stopping early for ${currentNote.id}, status is ${currentNote.state.status}`);
+                    return { status: currentNote.state.status, result: results }; // Return current status
+                }
+                if (currentNote.resources.cycles <= 0) {
+                    ctx.logger.error(`Compose: Stopping ${currentNote.id}, out of cycles before step ${i} (${toolName}).`);
+                    currentNote.state.status = 'failed';
+                    currentNote.memory.push({ type: 'error', content: `Halted compose: 0 cycles before step ${stepId}.`, timestamp: new Date().toISOString() });
+                    await ctx.memory.save(currentNote);
+                    return { status: "failed", result: results };
+                }
+
+                const tool = ctx.tools.get(toolName);
+                if (!tool) {
+                    ctx.logger.error(`Compose Error: Tool '${toolName}' not found for step ${stepId} in ${currentNote.id}.`);
+                    results.push({stepId, toolName, status:"failed", error:"Tool not found"});
+                    currentNote.state.status = 'failed';
+                    currentNote.memory.push({ type: 'error', content: `Compose step ${stepId} fail: Tool '${toolName}' not found.`, timestamp: new Date().toISOString() });
+                    await ctx.memory.save(currentNote);
+                    return { status:"failed", result: results};
+                }
+
+                ctx.logger.debug(`Compose Step ${i} (${stepId}): Executing ${toolName} for ${currentNote.id}`);
+                currentNote.memory.push({ type: 'step_start', content: { toolName, stepId }, timestamp: new Date().toISOString() });
+                // Don't save here, save after execution
+
+                try {
+                    // Execute the tool with the current note's context
+                    const stepResult = await tool.execute(input, { ...ctx, note: currentNote });
+
+                    // Reload note state immediately after tool execution
+                    try { currentNote = await ctx.memory.load(currentNote.id); }
+                    catch (e) { return { status: "failed", result: `Compose failed post-step: Note ${currentNote.id} disappeared.`}; }
+
+
+                    const cost = stepResult?.cost ?? tool.cycleCost ?? CONFIG.TOOL_CYCLE_COST;
+                    totalCost += cost;
+                    // Cycle deduction happens in executeLogic/runNote, tool result cost is informational here primarily
+                    // or needs careful handling to avoid double deduction if tools modify resources directly.
+                    // Let's assume base cost is deducted by caller, and tool reports *additional* cost.
+                    // Modify executeLogic to handle this? For now, just log cumulative cost.
+
+                    const status = stepResult?.status ?? 'unknown';
+                    currentNote.memory.push({ type: 'step_end', content: `${toolName} (${stepId}) status: ${status} (${cost.toFixed(1)} cyc reported).`, stepId, timestamp: new Date().toISOString() });
+                    results.push({ stepId, toolName, status, result: stepResult?.result });
+
+                    await ctx.memory.save(currentNote); // Save state after step completion record
+
+                    // Handle non-'done' statuses
+                    if (status === 'failed') {
+                        ctx.logger.error(`Compose: Step ${stepId} (${toolName}) failed for ${currentNote.id}.`);
+                        // State should have been set to 'failed' by the tool or executeLogic wrapper
+                        return { status: "failed", result: results };
+                    }
+                    if (status === 'paused') {
+                        ctx.logger.info(`Compose: Paused ${currentNote.id} at step ${stepId} (${toolName}).`);
+                        // State should have been set to 'paused' by the tool or executeLogic wrapper
+                        return { status: "paused", result: results };
+                    }
+                    // Continue loop if status is 'done' or 'running' (though running usually implies async task started)
+
+                } catch (error) {
+                    ctx.logger.error(`Compose Error during step ${i} (${toolName}) for ${currentNote.id}: ${error.message}`, error);
+                    try {
+                        currentNote = await ctx.memory.load(currentNote.id); // Reload to save error state
+                        currentNote.state.status = 'failed';
+                        currentNote.memory.push({ type: 'error', content: `Compose step ${stepId} (${toolName}) critical error: ${error.message}`, stepId, timestamp: new Date().toISOString() });
+                        await ctx.memory.save(currentNote);
+                    } catch (saveError) {
+                        ctx.logger.error(`Failed to save error state after compose step failure for ${currentNote.id}: ${saveError.message}`);
+                    }
+                    results.push({ stepId, toolName, status: "failed", error: error.message });
+                    return { status: "failed", result: results };
+                }
+            }
+            ctx.logger.success(`Compose: Finished all ${toolChain.length} steps for ${currentNote.id}`);
+            // If compose completes fully, the final status is determined by runNote based on note state
+            return { status: "done", result: results, cost: totalCost };
+        }
+    })());
+
+    tools.set("if_else", new (class extends Tool {
+        name = "if_else"; description = "Conditional execution using eval_expr and compose."; cycleCost = 0.8;
+        async execute({ condition_expr, then_branch, else_branch = [] }, ctx) {
+            const evalTool = ctx.tools.get('eval_expr');
+            const composeTool = ctx.tools.get('compose');
+            if (!evalTool || !composeTool) return { status: "failed", result: "IfElse requires EvalExprTool and ComposeTool." };
+
+            ctx.logger.debug(`IfElse: Evaluating condition for ${ctx.note.id}: ${condition_expr}`);
+            let conditionIsTrue = false;
+            let conditionCost = 0;
+            let conditionEvalResult = null;
+
+            try {
+                const evalResult = await evalTool.execute({ expr: condition_expr }, ctx);
+                conditionCost = evalResult.cost ?? 0;
+                conditionEvalResult = evalResult.result; // Store the actual result
+                if (evalResult?.status === 'failed') throw new Error(`Condition evaluation failed: ${evalResult.result}`);
+                conditionIsTrue = Boolean(evalResult?.result); // Evaluate truthiness
+                ctx.logger.debug(`IfElse: Condition result is ${conditionIsTrue} (Value: ${conditionEvalResult})`);
+
+                // Log evaluation result
+                const currentNote = await ctx.memory.load(ctx.note.id);
+                currentNote.memory.push({ type: 'if_else_eval', content: { condition: condition_expr, result: conditionIsTrue, value: conditionEvalResult }, timestamp: new Date().toISOString() });
+                await ctx.memory.save(currentNote);
+
+            } catch (e) {
+                ctx.logger.error(`IfElse condition evaluation error for ${ctx.note.id}: ${e.message}`);
+                return { status: "failed", result: `Condition evaluation error: ${e.message}` };
+            }
+
+            const branchToExecute = conditionIsTrue ? then_branch : else_branch;
+            const branchName = conditionIsTrue ? 'then' : 'else';
+
+            if (!Array.isArray(branchToExecute) || branchToExecute.length === 0) {
+                ctx.logger.debug(`IfElse: Condition was ${conditionIsTrue}, empty '${branchName}' branch for ${ctx.note.id}.`);
+                return { status: "done", result: `Condition ${conditionIsTrue}, empty '${branchName}' branch executed.`, cost: this.cycleCost + conditionCost };
+            }
+
+            ctx.logger.debug(`IfElse: Executing '${branchName}' branch (${branchToExecute.length} steps) for ${ctx.note.id}.`);
+            // Execute the chosen branch using compose
+            const branchResult = await composeTool.execute({ toolChain: branchToExecute }, ctx);
+
+            // Combine costs and return the result of the executed branch
+            return {
+                ...branchResult,
+                cost: this.cycleCost + conditionCost + (branchResult.cost ?? 0)
+            };
+        }
+    })());
+
+    tools.set("log", new (class extends Tool {
+        name = "log"; description = "Logs message to console and note memory. Can evaluate simple expressions."; cycleCost = 0.2;
+        async execute({ message, level = 'info' }, ctx) {
+            let finalMessage = message;
+            let evalCost = 0;
+            let evaluated = false;
+
+            // Try evaluation if message seems like an expression
+            if (typeof message === 'string' && (message.includes('note.') || message.includes('globalTick') || /[`'"]/.test(message) === false)) { // Heuristic: might be expression
+                try {
+                    const evalTool = ctx.tools.get('eval_expr');
+                    if (evalTool) {
+                        const evalCtx = { ...ctx }; // Use current tool context for eval
+                        const evalResult = await evalTool.execute({ expr: message }, evalCtx);
+                        evalCost = evalResult.cost ?? 0;
+                        if (evalResult.status === 'done') {
+                            finalMessage = evalResult.result;
+                            evaluated = true;
+                        } else {
+                            finalMessage = `Log Eval Failed: ${evalResult.result}`;
+                            level = 'error'; // Force level to error on eval fail
+                        }
+                    }
+                } catch (e) {
+                    finalMessage = `Log Eval Error: ${e.message}`;
+                    level = 'error';
+                    // Don't add evalCost here as it failed early
+                }
+            }
+
+            const validLevel = ['info', 'warn', 'error', 'debug', 'success'].includes(level) ? level : 'info';
+
+            // Log to console
+            ctx.logger[validLevel](`[Log Tool - ${ctx.note.id}]:`, finalMessage);
+
+            // Log to note memory
+            try {
+                const noteToUpdate = await ctx.memory.load(ctx.note.id);
+                noteToUpdate.memory.push({
+                    type: 'log_entry',
+                    content: { level: validLevel, message: String(finalMessage).substring(0, 500), evaluated }, // Limit message size
+                    timestamp: new Date().toISOString()
+                });
+                await ctx.memory.save(noteToUpdate);
+            } catch (e) {
+                ctx.logger.error(`LogTool: Failed to save log entry to note ${ctx.note.id}: ${e.message}`);
+                // Continue anyway, console log succeeded
+            }
+
+            return { status: "done", result: "Message logged.", cost: this.cycleCost + evalCost };
+        }
+    })());
+
+    tools.set("ui", new (class extends Tool {
+        name = "ui"; description = "Updates visual attributes (color, size, etc) via modify tool."; cycleCost = 0.4;
+        async execute({ id, color, text, value, size, widget, ...rest }, ctx) {
+            const modifyTool = ctx.tools.get('modify');
+            if (!modifyTool) return { status: "failed", result: "UITool requires ModifyNoteTool." };
+
+            const targetId = id || ctx.note?.id;
+            if (!targetId) return { status: "failed", result: "UITool needs targetId." };
+
+            const updates = [];
+            if (color !== undefined) updates.push({ key: 'value.color', value: color });
+            if (text !== undefined) updates.push({ key: 'value.desc', value: text }); // Update 'desc' for text
+            if (size !== undefined) updates.push({ key: 'value.size', value: size });
+            if (widget !== undefined) updates.push({ key: 'value.widget', value: widget });
+
+            // Handle general 'value' update - merge if object, set 'result' if primitive
+            if (value !== undefined) {
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Merge object properties into value
+                    Object.entries(value).forEach(([k, v]) => updates.push({ key: `value.${k}`, value: v }));
+                } else {
+                    // Set as 'value.result' if not an object
+                    updates.push({ key: 'value.result', value: value });
+                }
+            }
+
+            // Add any remaining properties directly into the 'value' object
+            Object.entries(rest).forEach(([k, v]) => updates.push({ key: `value.${k}`, value: v }));
+
+            if (updates.length === 0) {
+                return { status: "done", result: "No UI changes specified.", cost: 0.1 };
+            }
+
+            // Call the modify tool
+            const result = await modifyTool.execute({ target: targetId, updates }, ctx);
+
+            // Return the result from modify, adjusting the cost
+            return {
+                ...result,
+                cost: this.cycleCost + (result.cost ?? 0) // Add UITool's base cost
+            };
+        }
+    })());
+
+    class ForkTool extends Tool {
+        name = "fork"; description = "Creates a copy (fork) of a target note, optionally modifying it."; cycleCost = 2.0;
+        async execute({ target, modifications = {} }, { note, memory: ctxMemory, runNote: ctxRunNote, logger: ctxLogger }) {
+            const targetId = target || note?.id; // Default to forking the current note
+            if (!targetId) return { status: "failed", result: "Fork requires targetId or context note."};
+
+            try {
+                const noteToFork = await ctxMemory.load(targetId);
+                const clone = structuredClone(noteToFork);
+
+                // --- Apply modifications and reset state ---
+                clone.id = modifications.id ?? `${noteToFork.id}-fork-${Date.now() % 10000}`;
+                // Ensure unique ID if generated one already exists (rare but possible)
+                while(ctxMemory.has(clone.id)) {
+                    clone.id = `${noteToFork.id}-fork-${Date.now() % 10000}-${Math.random().toString(16).substring(2,6)}`;
+                }
+
+                clone.context = [noteToFork.id]; // Set context to original note ID
+                clone.state = {
+                    status: "pending", // Forked notes start as pending by default
+                    priority: noteToFork.state.priority, // Inherit priority by default
+                    ...(modifications.state ?? {}) // Allow overriding state
+                };
+                clone.timestamp = new Date().toISOString();
+                clone.memory = [{ type: 'creation', content: `Forked from ${noteToFork.id}`, timestamp: new Date().toISOString() }]; // Reset memory
+                clone.resources = {
+                    tokens: CONFIG.NODE_TOKENS_DEFAULT, // Reset resources by default
+                    cycles: CONFIG.NODE_CYCLES_DEFAULT,
+                    ...(modifications.resources ?? {}) // Allow overriding resources
+                };
+
+                // Apply value modifications (merge)
+                if (modifications.value) {
+                    clone.value = { ...clone.value, ...modifications.value };
+                }
+                // Apply logic modification (replace)
+                if (modifications.logic !== undefined) {
+                    clone.logic = modifications.logic;
+                }
+                // Apply graph modification (replace)
+                if (modifications.graph !== undefined) {
+                    clone.graph = modifications.graph;
+                }
+                // Ensure description reflects it's a fork if not overridden
+                if (!modifications.value?.desc && clone.value?.desc) {
+                    clone.value.desc = `Fork of: ${clone.value.desc}`;
+                }
+
+
+                // --- Update original note ---
+                if (!noteToFork.graph.some(e => e.target === clone.id)) {
+                    noteToFork.graph.push({ target: clone.id, rel: "forked_to" });
+                }
+                noteToFork.memory.push({ type: 'fork_created', content: { targetId: clone.id }, timestamp: new Date().toISOString()});
+                await ctxMemory.save(noteToFork);
+
+                // --- Save and potentially run the new note ---
+                await ctxMemory.save(clone);
+                logger.success(`ForkTool: Forked ${targetId} -> ${clone.id}`);
+
+                if (clone.state.status === 'pending' && clone.logic) {
+                    logger.info(`ForkTool: Triggering run for new fork ${clone.id}`);
+                    // Run asynchronously
+                    setTimeout(() => ctxRunNote(clone.id).catch(e => ctxLogger.error(`Run fork ${clone.id} failed: ${e.message}`)), 0);
+                }
+
+                return { status: "done", result: `Forked ${targetId} to ${clone.id}`, content: { forkedNoteId: clone.id }, cost: this.cycleCost };
+            } catch (e) {
+                logger.error(`Fork error (Target: ${targetId}): ${e.message}`);
+                return { status: "failed", result: `Fork error: ${e.message}` };
+            }
+        }
+    } tools.set("fork", new ForkTool());
+
+    class LLMTool extends Tool {
+        name = "llm"; description = "Simulates LLM call (STUB). Returns placeholder text or attempts simple tasks via eval/plan generation."; cycleCost = 1.5; // Stub cost
+        async execute({ prompt, contextNoteIds = [], persona = "helpful assistant", generateFormat = 'text' }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger, tools: ctxTools, runNote } = ctx;
+            ctxLogger.info(`LLMTool (STUB) called on ${note.id}. Persona: ${persona}`);
+            ctxLogger.debug(`LLM Prompt: "${String(prompt).substring(0, 150)}..."`);
+
+            let contextInfo = "";
+            if(contextNoteIds.length > 0) {
+                // Future: Fetch context note summaries
+                contextInfo = ` | Context IDs: ${contextNoteIds.join(', ')}`;
+            }
+
+            let response;
+            const promptLower = String(prompt).toLowerCase();
+
+            // Basic stubbed responses based on keywords
+            if (promptLower.includes("generate javascript code") || promptLower.includes("write code") || generateFormat === 'code') {
+                response = `// [STUB] Generated JS Code for: ${String(prompt).substring(0, 50)}...\nconsole.log("LLM Stub Code Execution for ${note.id}", new Date());\nreturn { success: true, message: "Stub code ran" };`;
+                if (note.value) note.value.generatedCode = response; // Store in value if possible
+            }
+            else if (promptLower.startsWith("evaluate:")) {
+                const expr = String(prompt).substring(9).trim();
+                const evalTool = ctxTools.get('eval_expr');
+                if (evalTool) {
+                    const evalResult = await evalTool.execute({ expr }, ctx);
+                    response = `[STUB] Evaluation Result for "${expr}": ${evalResult.result}`;
+                } else {
+                    response = `[STUB] Cannot evaluate: EvalExprTool not found.`;
+                }
+            }
+            else if (promptLower.startsWith("plan:") || generateFormat === 'plan') {
+                const goal = String(prompt).substring(5).trim();
+                // Generate a simple stub plan as a JSON string (or object if requested)
+                const planSteps = [
+                    { tool: "log", input: { message: `Starting stub plan for: ${goal.substring(0,30)}...` } },
+                    { tool: "inspect", input: { targetId: note.id, level: "summary" } },
+                    { tool: "log", input: { message: "Stub plan finished." } }
+                ];
+                response = { type: "compose", toolChain: planSteps }; // Return as object for potential direct use
+                // If text format requested, stringify
+                if (generateFormat === 'text') response = JSON.stringify(response, null, 2);
+
+                // Optionally try to set the note's logic directly if format is plan
+                if (generateFormat === 'plan' && note.logic === null) {
+                    try { note.logic = response; logger.info(`LLM Stub: Directly setting logic for ${note.id} based on plan generation.`); } catch {}
+                }
+            }
+            else { // Default text response
+                response = `[STUB] LLM (${persona}) response to: "${String(prompt).substring(0, 50)}..."${contextInfo}. Basic stub.`;
+            }
+
+            // Update note memory and value
+            note.memory.push({ type: 'llm_stub_call', content: { prompt, persona, contextNoteIds, responseSummary: JSON.stringify(response)?.substring(0, 150) }, timestamp: new Date().toISOString() });
+            if (note.value) note.value.lastLLMResult = response; // Store full response
+            await ctxMemory.save(note);
+
+            return { status: "done", result: response, cost: this.cycleCost };
+        }
+    } tools.set("llm", new LLMTool());
+
+    class GenerateToolTool extends Tool {
+        name = "generateTool"; description = "Dynamically creates new tool via Function constructor. CAUTION! High Risk!"; cycleCost = 5.0;
+        async execute({ name, description, code }, { tools: currentTools, logger: ctxLogger }) {
+            ctxLogger.error(`!!! DANGEROUS GenerateTool execution requested !!! Tool: '${name}'`);
+            try {
+                if (currentTools.has(name)) { return { status: "failed", result: `Tool '${name}' already exists.` }; }
+                if (!/^[a-zA-Z0-9_]+$/.test(name)) { return { status: "failed", result: `Invalid tool name '${name}'. Use alphanumeric and underscores only.` }; }
+                if (!description || !code) { return { status: "failed", result: `Tool generation requires name, description, and code.` }; }
+
+                // Basic safety check on code (very limited)
+                if(/process|window|document|XMLHttpRequest|fetch\s*\(/.test(code)) {
+                    logger.error(`GenerateTool: Rejecting code for '${name}' due to potentially harmful keywords.`);
+                    return { status: "failed", result: `Code rejected for safety reasons.` };
+                }
+
+                // Create the execute function from the provided code string
+                // This function must return a Promise<ToolResult>
+                const executeFunc = new Function("input", "ctx", `return (async () => { ${code} })();`);
+
+                // Define the new tool class dynamically
+                class DynamicTool extends Tool {
+                    constructor() {
+                        super();
+                        this.name = name;
+                        this.description = description;
+                        // Use a default cycle cost, could be made configurable via input
+                        this.cycleCost = CONFIG.TOOL_CYCLE_COST * 1.5; // Slightly higher default cost
+                    }
+
+                    async execute(input, ctx) {
+                        ctx.logger.info(`Executing dynamically generated tool '${name}'`);
+                        try {
+                            // Call the function created from the user's code
+                            const result = await executeFunc(input, ctx);
+
+                            // Ensure the result adheres to ToolResult structure
+                            if (typeof result !== 'object' || !result.status) {
+                                ctx.logger.warn(`Dynamic tool '${name}' returned non-standard result:`, result);
+                                return { status: "done", result: result ?? "Dynamic tool finished (non-standard result).", cost: this.cycleCost };
+                            }
+                            ctx.logger.success(`Dynamic tool '${name}' finished with status: ${result.status}`);
+                            return { cost: this.cycleCost + (result.cost ?? 0), ...result }; // Ensure cost is included
+
+                        } catch(error) {
+                            ctx.logger.error(`Error executing dynamic tool '${name}': ${error.message}`, error);
+                            return { status: "failed", result: `Dynamic tool execution error: ${error.message}` };
+                        }
+                    }
+                }
+
+                // Instantiate and register the new tool
+                currentTools.set(name, new DynamicTool());
+                ctxLogger.success(`Successfully generated and registered tool '${name}'`);
+                return { status: "done", result: `Tool '${name}' generated and registered.`, cost: this.cycleCost };
+
+            } catch (e) {
+                ctxLogger.error(`GenerateTool failed for '${name}': ${e.message}`, e);
+                return { status: "failed", result: `Tool generation critical error: ${e.message}` };
+            }
+        }
+    } tools.set("generateTool", new GenerateToolTool());
+
+    class ReflectTool extends Tool {
+        name = "reflect"; description = "Simulates reflection on note history/state via inspection and stub LLM call."; cycleCost = 1.8;
+        async execute({ targetId, reflectionPrompt = "Analyze current state and recent memory. Suggest improvements or next steps." }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger, tools: ctxTools, runNote } = ctx;
+            const idToReflect = targetId || note.id;
+            let cost = this.cycleCost;
+
+            try {
+                const inspectTool = ctxTools.get('inspect');
+                const llmTool = ctxTools.get('llm'); // Using the stub LLM
+                if (!inspectTool || !llmTool) {
+                    return { status:"failed", result:"Reflection requires InspectTool and LLMTool." };
+                }
+
+                ctxLogger.info(`ReflectTool: Starting reflection by ${note.id} on target ${idToReflect}`);
+
+                // 1. Inspect the target note (detail level seems appropriate)
+                const inspectResult = await inspectTool.execute({ targetId: idToReflect, level: 'detail' }, ctx);
+                cost += inspectResult.cost ?? 0;
+                if (inspectResult.status === 'failed') {
+                    throw new Error(`Inspection failed during reflection process: ${inspectResult.result}`);
+                }
+                const noteDetails = inspectResult.result;
+
+                // 2. Inspect recent memory (last 10 entries)
+                const memoryResult = await inspectTool.execute({ targetId: idToReflect, level: 'memory' }, ctx);
+                cost += memoryResult.cost ?? 0;
+                const recentMemory = memoryResult.result?.memory ?? [];
+
+
+                // 3. Construct prompt for the LLM (stub)
+                const contextForLLM = `
+Reflection Task: ${reflectionPrompt}
+
+Target Note (${idToReflect}) Details:
+${JSON.stringify(noteDetails, null, 2)}
+
+Target Note Recent Memory:
+${JSON.stringify(recentMemory, null, 2)}
+
+Provide analysis and actionable suggestions based on the above.
+                 `.trim();
+
+                // 4. Call the LLM (stub)
+                ctxLogger.debug(`ReflectTool: Calling LLM stub for reflection.`);
+                const llmResponse = await llmTool.execute(
+                    { prompt: contextForLLM, persona: "reflective analyst" },
+                    ctx // Use the current context for the LLM call as well
+                );
+                cost += llmResponse.cost ?? 0;
+
+                // 5. Log the reflection result in the *calling* note's memory
+                const callingNote = await ctxMemory.load(note.id); // Reload calling note
+                callingNote.memory.push({
+                    type: 'reflection_result',
+                    content: {
+                        targetId: idToReflect,
+                        prompt: reflectionPrompt,
+                        reflection: llmResponse.result // Store the LLM's (stubbed) reflection
+                    },
+                    timestamp: new Date().toISOString()
+                });
+                // Optionally store reflection in calling note's value
+                if(callingNote.value) callingNote.value[`lastReflectionOn_${idToReflect}`] = llmResponse.result;
+                await ctxMemory.save(callingNote);
+
+                ctxLogger.success(`ReflectTool: Reflection on ${idToReflect} completed.`);
+                return { status: "done", result: llmResponse.result, cost };
+
+            } catch (e) {
+                logger.error(`Reflection error (Target: ${idToReflect}): ${e.message}`);
+                // Attempt to log error to calling note
+                try {
+                    const errorNote = await ctxMemory.load(note.id);
+                    errorNote.memory.push({ type: 'error', content: `Reflection failed for ${idToReflect}: ${e.message}`, timestamp: new Date().toISOString()});
+                    await ctxMemory.save(errorNote);
+                } catch {}
+                return { status: "failed", result: `Reflection error: ${e.message}` };
+            }
+        }
+    } tools.set("reflect", new ReflectTool());
+
+    class ScheduleTool extends Tool {
+        name = "schedule"; description = "Schedules future execution of a note (re-run) or custom logic."; cycleCost = 0.5;
+        async execute({ noteId, delayMs, time, runLogic }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger, tools: ctxTools, runNote: ctxRunNote } = ctx;
+            const targetNoteId = noteId || ctx.note?.id; // Default to scheduling the current note
+            if(!targetNoteId) return { status: "failed", result: "Schedule needs target noteId or context note." };
+
+            let actualDelayMs = delayMs;
+
+            // Calculate delay from specific time if provided
+            if (time) {
+                try {
+                    const targetTime = new Date(time).getTime();
+                    actualDelayMs = targetTime - Date.now();
+                    if (actualDelayMs < 0) {
+                        return { status: "failed", result: `Scheduled time ${time} is in the past.` };
+                    }
+                } catch (e) { return { status: "failed", result: `Invalid time format: ${time}. Use ISO 8601.` }; }
+            }
+
+            if (typeof actualDelayMs !== 'number' || actualDelayMs < 0) {
+                return { status: "failed", result: "Schedule requires a valid non-negative delayMs or a future time." };
+            }
+
+            actualDelayMs = Math.min(actualDelayMs, CONFIG.MAX_SCHEDULE_DELAY); // Cap the delay
+
+            const scheduleId = `sched-${targetNoteId}-${Date.now() % 10000}`;
+            ctx.logger.info(`Scheduling task ${scheduleId} for target ${targetNoteId} in ${Math.round(actualDelayMs/1000)} seconds.`);
+
+            // Use setTimeout for client-side scheduling
+            setTimeout(async () => {
+                ctx.logger.info(`Executing scheduled task ${scheduleId} for target ${targetNoteId}`);
+                let targetNote;
+                try {
+                    targetNote = await ctxMemory.load(targetNoteId);
+                } catch (e) {
+                    ctx.logger.error(`Scheduled task ${scheduleId} failed: Target note ${targetNoteId} not found.`);
+                    // Optionally log this failure somewhere persistent?
+                    return;
+                }
+
+                // Log start of scheduled execution in the target note's memory
+                targetNote.memory.push({ type: 'scheduled_exec_start', content: { scheduleId, scheduledBy: note?.id ?? 'unknown' }, timestamp: new Date().toISOString() });
+                await ctxMemory.save(targetNote); // Save immediately before execution attempt
+
+                try {
+                    if (runLogic) {
+                        ctx.logger.debug(`Scheduled task ${scheduleId}: Executing custom logic on ${targetNoteId}.`);
+                        // Execute the provided logic object within the target note's context
+                        // Note: The context passed here uses the *original* caller's tools/logger etc, but the targetNote
+                        await executeLogic(runLogic, { ...ctx, note: targetNote });
+                    } else {
+                        // Default behavior: Trigger a re-run of the target note
+                        ctx.logger.debug(`Scheduled task ${scheduleId}: Triggering re-run for ${targetNoteId}.`);
+
+                        // Check status before setting to pending
+                        if (targetNote.state.status === 'running') {
+                            ctx.logger.warn(`Scheduled run ${scheduleId} skipped for ${targetNoteId}: Note is already running.`);
+                            targetNote.memory.push({ type: 'schedule_run_skipped', content: { scheduleId, reason: 'already running' }, timestamp: new Date().toISOString() });
+                            await ctxMemory.save(targetNote);
+                        } else if (targetNote.logic) {
+                            targetNote.state.status = 'pending';
+                            targetNote.memory.push({ type: 'scheduled_run_triggered', content: { scheduleId }, timestamp: new Date().toISOString() });
+                            await ctxMemory.save(targetNote);
+                            await ctxRunNote(targetNoteId); // Await the trigger, though runNote itself is async internally
+                        } else {
+                            ctx.logger.warn(`Scheduled run ${scheduleId} skipped for ${targetNoteId}: Note has no logic.`);
+                            targetNote.memory.push({ type: 'schedule_run_skipped', content: { scheduleId, reason: 'no logic' }, timestamp: new Date().toISOString() });
+                            await ctxMemory.save(targetNote);
+                        }
+                    }
+
+                    // Log successful completion (if it didn't fail during execution)
+                    const finalTargetNote = await ctxMemory.load(targetNoteId); // Reload state
+                    if (finalTargetNote.state.status !== 'failed') { // Only log end if not failed
+                        finalTargetNote.memory.push({ type: 'scheduled_exec_end', content: { scheduleId, finalStatus: finalTargetNote.state.status }, timestamp: new Date().toISOString() });
+                        await ctxMemory.save(finalTargetNote);
+                    }
+
+                } catch (execError) {
+                    ctx.logger.error(`Error during scheduled execution ${scheduleId} for ${targetNoteId}: ${execError.message}`, execError);
+                    // Try to log the error to the target note
+                    try {
+                        const errorNote = await ctxMemory.load(targetNoteId);
+                        errorNote.state.status = 'failed'; // Mark as failed
+                        errorNote.memory.push({ type: 'error', content: `Scheduled execution ${scheduleId} failed: ${execError.message}`, timestamp: new Date().toISOString() });
+                        await ctxMemory.save(errorNote);
+                    } catch (saveError) {
+                        ctx.logger.error(`Failed to save error state for scheduled task ${scheduleId} on ${targetNoteId}: ${saveError.message}`);
+                    }
+                }
+            }, actualDelayMs);
+
+            // Log the scheduling action in the *calling* note's memory
+            if (note) { // Only log if called from within a note's context
+                const callingNote = await ctxMemory.load(note.id);
+                callingNote.memory.push({ type: 'schedule_set', content: { scheduleId, target: targetNoteId, delayMs: actualDelayMs, hasLogic: !!runLogic }, timestamp: new Date().toISOString() });
+                await ctxMemory.save(callingNote);
+            }
+
+            return { status: "done", result: `Task ${scheduleId} scheduled for ${targetNoteId} in ${actualDelayMs.toFixed(0)}ms.`, cost: this.cycleCost };
+        }
+    } tools.set("schedule", new ScheduleTool());
+
+    class PlanTool extends Tool {
+        name = "plan"; description = "Generates simple plan (sequence of tool steps) for goal. Basic stub version."; cycleCost = 1.0;
+        async execute({ goal }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger } = ctx;
+            let cost = this.cycleCost;
+            ctxLogger.info(`PlanTool (Basic Stub): Generating plan for goal "${goal}" on ${note.id}`);
+
+            const steps = [];
+            const goalLower = String(goal).toLowerCase();
+
+            // Very basic keyword-based plan generation (stub implementation)
+            if (goalLower.includes("connect")) {
+                // Try to parse: connect X to Y [with rel R]
+                const match = goal.match(/connect\s+(\S+)\s+to\s+(\S+)(?:\s+with\s+rel\s+(\S+))?/i);
+                if (match?.[1] && match?.[2]) {
+                    steps.push({ tool: "graph", input: { operation: "connect", source: match[1], target: match[2], rel: match[3] } });
+                    steps.push({ tool: "log", input: { message: `Plan: Executed connection ${match[1]} -> ${match[2]}` } });
+                } else {
+                    steps.push({ tool: "log", input: { message: `Plan: Could not parse connect goal: ${goal}`, level: 'warn' } });
+                }
+                cost += 0.5;
+            }
+            else if (goalLower.includes("display") || goalLower.includes("visualize") || goalLower.includes("show")) {
+                steps.push({ tool: "log", input: { message: `Plan: Creating UI update for: ${goal}` } });
+                steps.push({ tool: "ui", input: { id: note.id, color: "#ffff00", text: `Visualizing: ${goal.substring(0,25)}...`, size: (note.value?.size ?? CONFIG.NODE_SIZE_DEFAULT) * 1.2 } });
+                cost += 0.4;
+            }
+            else if (goalLower.includes("add note") || goalLower.includes("create note")) {
+                const match = goal.match(/(?:add|create) note(?:\s+|:\s*)"?([^"]*)"?/i);
+                const desc = match?.[1]?.trim() || `Note generated for goal: ${goal.substring(0, 30)}`;
+                steps.push({ tool: "add", input: { desc: desc, parentId: note.id, type: 'task', state: { priority: (note.state.priority ?? 50) - 5} } }); // Slightly lower priority
+                cost += 0.6;
+            }
+            else if (goalLower.includes("analyze") || goalLower.includes("diagnose") || goalLower.includes("inspect")) {
+                const match = goal.match(/(?:analyze|diagnose|inspect)\s+(\S+)/i);
+                const target = match?.[1] ?? note.id; // Default to inspecting self
+                steps.push({ tool: "inspect", input: { targetId: target, level: 'diagnose' } });
+                steps.push({ tool: "log", input: { message: `Plan: Completed diagnosis of ${target}. Result in memory/console.` } });
+                cost += 0.8;
+            }
+            else {
+                // Default: Use LLM stub to *attempt* generating a plan, then try to execute it via eval (high risk, often fails with stub)
+                steps.push({ tool: "log", input: { message: `Plan: Using LLM stub to generate plan for: ${goal}`, level: 'info' } });
+                steps.push({ tool: "llm", input: { prompt: `Generate a JSON plan (using tools like add, graph, modify, inspect, ui, log) for the goal: ${goal}`, generateFormat: 'plan' } });
+                steps.push({ tool: "log", input: { message: `Plan: LLM stub returned potential plan.`, level: 'debug' } });
+                // Add a step to potentially execute the generated plan IF it was stored in value.lastLLMResult and is valid logic
+                steps.push({ tool: "eval", input: { code: `
+                    const planResult = note.value?.lastLLMResult;
+                    if (planResult && typeof planResult === 'object' && planResult.type === 'compose' && Array.isArray(planResult.toolChain)) {
+                        logger.info('Plan: Attempting to execute LLM-generated plan for ' + note.id);
+                        note.logic = planResult; // Overwrite current logic with the plan
+                        note.state.status = 'pending'; // Set to pending to re-run with new logic
+                        await memory.save(note);
+                        // No need to call runNote here, just setting to pending is enough for next cycle or manual run
+                        return { status: 'done', result: 'LLM plan set as logic, will run.', cost: 1.5 };
+                    } else {
+                        logger.warn('Plan: LLM result was not a valid plan structure. Goal: ${goal}');
+                        return { status: 'failed', result: 'LLM did not return a usable plan.', cost: 0.1 };
+                    }
+                `}});
+                cost += 3.0; // Higher cost for LLM + Eval attempt
+            }
+
+            // If the plan didn't involve the LLM/Eval route, set the generated steps as the note's logic
+            if (!steps.some(s => s.tool === 'eval' || s.tool === 'llm')) {
+                note.logic = { type: "compose", toolChain: steps };
+                note.state.status = 'pending'; // Mark for execution
+                logger.info(`PlanTool: Set generated ${steps.length}-step plan as logic for ${note.id}.`);
+            } else {
+                logger.info(`PlanTool: Plan for ${note.id} involves LLM/Eval, logic might be set dynamically.`);
+            }
+
+            // Log plan generation completion
+            note.memory.push({ type: "plan_generated", content: { goal, stepsCount: steps.length, method: steps.some(s => s.tool === 'eval') ? 'LLM/Eval' : 'Keyword' }, timestamp: new Date().toISOString() });
+            await ctxMemory.save(note); // Save changes (potentially new logic and memory entry)
+
+            // Return the generated steps (even if logic was set)
+            return { status: "done", result: steps, cost };
+        }
+    } tools.set("plan", new PlanTool());
+
+    class ReasonTool extends Tool {
+        name = "reason"; description = "Evaluates premise(s) & conclusion using eval_expr across notes or context."; cycleCost = 1.0;
+        async execute({ premise, conclusion }, ctx) {
+            const { note, memory: ctxMemory, tools: ctxTools, logger: ctxLogger } = ctx;
+            const evalTool = ctxTools.get('eval_expr');
+            if (!evalTool) return { status: "failed", result: "ReasonTool requires EvalExprTool." };
+
+            let cost = this.cycleCost;
+            const premises = Array.isArray(premise) ? premise : [premise];
+            if (premises.length === 0 || !conclusion) {
+                return { status: "failed", result: "ReasonTool requires at least one premise and a conclusion expression." };
+            }
+
+            const premiseResults = {};
+            let allPremisesMet = true;
+
+            try {
+                ctxLogger.debug(`ReasonTool (${note.id}): Evaluating ${premises.length} premises...`);
+                for (const p of premises) {
+                    cost += 0.1; // Cost per premise check
+                    let premiseMet = false;
+                    // Evaluate premise against the *current* note's context first
+                    const premiseEvalContext = { ...ctx }; // Use current tool context
+
+                    const r = await evalTool.execute({ expr: p }, premiseEvalContext);
+                    cost += r.cost ?? 0;
+                    if (r?.status === 'done' && Boolean(r.result)) {
+                        premiseMet = true;
+                    }
+                    // Maybe extend to check against *all* notes? This could be very expensive.
+                    // For now, check only in the current note's context.
+                    // Can use `graph.query` tool beforehand if broader check is needed.
+
+                    premiseResults[p] = premiseMet;
+                    if (!premiseMet) {
+                        allPremisesMet = false;
+                        ctxLogger.debug(`ReasonTool (${note.id}): Premise failed: ${p}`);
+                        break; // Stop checking premises if one fails
+                    } else {
+                        ctxLogger.debug(`ReasonTool (${note.id}): Premise succeeded: ${p}`);
+                    }
+                }
+            } catch (e) {
+                ctxLogger.error(`ReasonTool premise evaluation error for ${note.id}: ${e.message}`);
+                return { status: "failed", result: `Premise evaluation error: ${e.message}` };
+            }
+
+            let conclusionIsTrue = false;
+            if (allPremisesMet) {
+                ctxLogger.debug(`ReasonTool (${note.id}): All premises met. Evaluating conclusion: ${conclusion}`);
+                try {
+                    const conclusionEvalContext = { ...ctx }; // Use current tool context
+                    const r = await evalTool.execute({ expr: conclusion }, conclusionEvalContext);
+                    cost += r.cost ?? 0;
+                    if (r?.status === 'failed') throw new Error(r.result);
+                    conclusionIsTrue = Boolean(r.result);
+                    ctxLogger.debug(`ReasonTool (${note.id}): Conclusion result: ${conclusionIsTrue}`);
+                } catch (e) {
+                    ctxLogger.error(`ReasonTool conclusion evaluation error for ${note.id}: ${e.message}`);
+                    return { status: "failed", result: `Conclusion evaluation error: ${e.message}` };
+                }
+            } else {
+                ctxLogger.debug(`ReasonTool (${note.id}): Not all premises met, conclusion not evaluated.`);
+            }
+
+            const finalResult = allPremisesMet && conclusionIsTrue;
+
+            // Store results in the note's value and memory
+            note.value = { ...(note.value ?? {}), reasonResult: finalResult, premiseResults, conclusionResult: conclusionIsTrue };
+            note.memory.push({ type: 'reasoning_step', content: { premise, conclusion, finalResult, premiseResults }, timestamp: new Date().toISOString()});
+            await ctxMemory.save(note);
+
+            return { status: "done", result: finalResult, cost };
+        }
+    } tools.set("reason", new ReasonTool());
+
+    class DefineConceptTool extends Tool {
+        name = "define_concept"; description = "Adds/updates concept definition in a specified meta-note (default 'root')."; cycleCost = 0.8;
+        async execute({ concept_name, definition, metaNoteId = 'root', details = {} }, ctx) {
+            const { note, memory: ctxMemory, logger: ctxLogger } = ctx;
+            if (!concept_name || !definition) {
+                return { status: "failed", result: "DefineConcept requires 'concept_name' and 'definition'." };
+            }
+
+            try {
+                let metaNote;
+                try {
+                    metaNote = await ctxMemory.load(metaNoteId);
+                } catch (e) {
+                    // If metaNote doesn't exist, create it? Or fail? Let's fail for now.
+                    logger.error(`DefineConcept error: Meta-note '${metaNoteId}' not found.`);
+                    return { status: "failed", result: `Meta-note '${metaNoteId}' for concept definition not found.` };
+                }
+
+                // Ensure value and concepts structure exists
+                if (!metaNote.value) metaNote.value = {};
+                if (!metaNote.value.concepts) metaNote.value.concepts = {};
+
+                // Add or update the concept definition
+                metaNote.value.concepts[concept_name] = {
+                    definition,
+                    details,
+                    definedBy: note?.id ?? 'system', // Record who defined it
+                    definedAt: new Date().toISOString()
+                };
+
+                // Log the definition in the meta-note's memory
+                metaNote.memory.push({
+                    type: 'concept_defined',
+                    content: { concept_name: concept_name, definedBy: note?.id ?? 'system' },
+                    timestamp: new Date().toISOString()
+                });
+                await ctxMemory.save(metaNote);
+
+                const successMsg = `Concept '${concept_name}' defined/updated in meta-note '${metaNoteId}'.`;
+                ctxLogger.success(successMsg);
+
+                // Log confirmation in the calling note's memory (if applicable)
+                if (note) {
+                    const callingNote = await ctxMemory.load(note.id);
+                    callingNote.memory.push({ type: 'action_confirm', content: { action: 'define_concept', target: metaNoteId, concept: concept_name }, timestamp: new Date().toISOString()});
+                    await ctxMemory.save(callingNote);
+                }
+
+                return { status: "done", result: successMsg, cost: this.cycleCost };
+
+            } catch (e) {
+                logger.error(`DefineConcept error for '${concept_name}' in '${metaNoteId}': ${e.message}`);
+                return { status: "failed", result: `DefineConcept error: ${e.message}` };
+            }
+        }
+    } tools.set("define_concept", new DefineConceptTool());
+
+    class RunTool extends Tool {
+        name = "run"; description = "Sets target note status to 'pending' to trigger its execution if it has logic."; cycleCost = 0.5;
+        async execute({ id, noteId }, ctx) {
+            const targetId = id ?? noteId; // Allow either property name
+            if (!targetId) return { status: "failed", result: "RunTool requires target 'id' or 'noteId'." };
+
+            try {
+                const noteToRun = await ctx.memory.load(targetId);
+
+                if (noteToRun.state.status === 'running') {
+                    logger.warn(`RunTool: Note ${targetId} is already running.`);
+                    return { status: "done", result: `Note ${targetId} already running.`, cost: 0.1 };
+                }
+                if (!noteToRun.logic) {
+                    logger.warn(`RunTool: Note ${targetId} has no logic to run.`);
+                    return { status: "done", result: `Note ${targetId} has no logic.`, cost: 0.1 };
+                }
+
+                noteToRun.state.status = 'pending';
+                noteToRun.memory.push({ type: 'run_tool_trigger', content: { triggeredBy: ctx.note?.id ?? 'system' }, timestamp: new Date().toISOString() });
+                await ctx.memory.save(noteToRun);
+
+                logger.info(`RunTool: Set ${targetId} to pending, execution will be triggered.`);
+                // The actual execution is handled by the main loop or scheduler picking up 'pending' notes.
+                // We *could* directly call runNote, but setting to pending is safer and fits the model better.
+                // Optionally, trigger runNote immediately if needed for faster response:
+                setTimeout(() => ctx.runNote(targetId).catch(e => ctx.logger.error(`RunTool failed triggering ${targetId}: ${e.message}`)), 0);
+
+
+                return { status: "done", result: `Set ${targetId} to pending for execution.`, cost: this.cycleCost };
+            } catch (e) {
+                ctx.logger.error(`RunTool error for target ${targetId}: ${e.message}`);
+                return { status: "failed", result: `RunTool error: ${e.message}` };
+            }
+        }
+    } tools.set("run", new RunTool());
+
+
+    // --- Register Remaining Stubbed Tools ---
+    const toolsToStub = [
+        'collaborate', 'sendMessage', 'receiveMessage', 'computer_monitor', 'browser_use',
+        'fetchExternal', 'webSearch', 'computer_use', 'implement_tool', 'test_gen', 'test_run',
+        'update_system', 'mcp', 'summarize', 'ml_predict', 'ml_train', 'rag', 'plan_optimize',
+        'astar', 'knowNote', 'user_input' // Add more potential future tools here
+    ];
+    toolsToStub.forEach(name => {
+        if (!tools.has(name)) {
+            tools.set(name, new StubTool(name));
+        }
+    });
+    logger.info(`Initialized ${tools.size} tools (${tools.size - toolsToStub.filter(t=>tools.get(t) instanceof StubTool).length} active, ${toolsToStub.filter(t=>tools.get(t) instanceof StubTool).length} stubs).`);
+    logger.debug(`Available tools: ${[...tools.keys()].sort().join(', ')}`);
+
+    // --- Execution Logic ---
+    /** Main entry point to run a note's logic */
+    async function runNote(id) {
+        if (runningNotes.has(id)) {
+            logger.warn(`RunNote: Skip ${id}, already running.`);
+            return;
+        }
+        logger.debug(`RunNote: Acquiring lock for ${id}`);
+        runningNotes.add(id);
+        let note;
+        try {
+            note = await memory.load(id);
+
+            // Check status and resources *after* loading
+            if (note.state.status !== 'pending' && note.state.status !== 'running') { // Allow re-entry if somehow stuck in running? No, pending only.
+                logger.debug(`RunNote: Skip ${id}, status is ${note.state.status} (not pending).`);
+                return; // Only run notes that are pending
+            }
+            if (note.resources.cycles <= 0) {
+                logger.warn(`RunNote: Halting ${id}, out of cycles.`);
+                note.state.status = 'failed';
+                note.memory.push({ type: 'error', content: 'Halted: Out of cycles at start of run.', timestamp: new Date().toISOString() });
+                await memory.save(note);
+                return;
+            }
+
+            // Mark as running and deduct base cost
+            note.state.status = 'running';
+            note.resources.cycles -= CONFIG.LOGIC_BASE_COST;
+            note.memory.push({ type: 'execution_start', content: `Tick ${globalTick}, Cycles ${note.resources.cycles.toFixed(1)}`, timestamp: new Date().toISOString() });
+            await memory.save(note); // Save state before execution
+
+            if (note.logic) {
+                logger.debug(`RunNote: Executing logic for ${id}`);
+                await executeLogic(note.logic, { note, memory, ui: dashboard, tools, logger, runNote });
+                // Reload note state after logic execution finishes or pauses/fails
+                note = await memory.load(id);
+            } else {
+                logger.debug(`RunNote: ${id} has no logic, marking as completed.`);
+                note.state.status = 'completed';
+            }
+
+            // Finalize state if still running (i.e., logic completed fully without error/pause)
+            if (note.state.status === 'running') {
+                note.state.status = 'completed';
+                note.memory.push({ type: 'execution_end', content: `Completed naturally at Tick ${globalTick}`, timestamp: new Date().toISOString() });
+                await memory.save(note);
+                logger.success(`RunNote: Finished ${id}, status set to completed.`);
+            } else {
+                // Logic set the state to failed, paused, or completed itself
+                logger.info(`RunNote: Finished ${id} with final status ${note.state.status}.`);
+            }
+
+        } catch (error) {
+            logger.error(`RunNote critical error for ${id}: ${error.message}`, error);
+            // Attempt to mark the note as failed
+            try {
+                const errNote = await memory.load(id); // Reload note to update
+                errNote.state.status = 'failed';
+                errNote.memory.push({ type: 'error', content: `CRITICAL RunNote Error: ${error.message}`, timestamp: new Date().toISOString() });
+                await memory.save(errNote);
+            } catch (saveError) {
+                logger.error(`Failed to save critical error state for note ${id}: ${saveError.message}`);
+            }
+        } finally {
+            logger.debug(`RunNote: Releasing lock for ${id}`);
+            runningNotes.delete(id);
+            globalTick++; // Increment global tick after a run attempt completes or fails
+            updateStatusDisplay(); // Update HUD status
+        }
+    }
+
+    /** Executes a logic block (tool call, loop, etc.), manages costs and state transitions */
+    async function executeLogic(logic, ctx) {
+        let currentNote = ctx.note; // Use the note passed in the context
+        // No need to reload here, runNote loaded it before calling
+
+        if (currentNote.state.status !== 'running') {
+            ctx.logger.warn(`ExecuteLogic: Skip ${currentNote.id}, status is ${currentNote.state.status} (expected running).`);
+            return;
+        }
+
+        // Base cost for logic execution step (like loop iter or single tool) is deducted by caller (runNote or loop logic)
+        ctx.logger.debug(`ExecuteLogic: Type '${logic?.type ?? 'Unknown'}' for ${currentNote.id}. Cycles remaining: ${currentNote.resources.cycles.toFixed(1)}`);
+
+        try {
+            if (!logic || !logic.type) {
+                throw new Error("Invalid or missing logic structure.");
+            }
+
+            let toolResult = null; // Store result from tool execution
+
+            if (logic.type === "loop") {
+                if (!logic.body || typeof logic.count !== 'number' || logic.count <= 0) {
+                    ctx.logger.warn(`Loop in ${currentNote.id} is invalid (missing body or count). Skipping.`);
+                    return; // Don't fail, just skip invalid loop
+                }
+                const loopCount = Math.min(logic.count, CONFIG.MAX_LOOP_ITER); // Cap iterations
+                ctx.logger.debug(`Starting loop for ${currentNote.id}, ${loopCount} iterations.`);
+
+                for (let i = 0; i < loopCount; i++) {
+                    // Reload note state at the beginning of each iteration
+                    currentNote = await ctx.memory.load(currentNote.id);
+                    ctx.note = currentNote; // Update context note
+
+                    if (currentNote.state.status !== 'running') {
+                        ctx.logger.warn(`Loop for ${currentNote.id} stopping at iter ${i+1}: Status changed to ${currentNote.state.status}.`);
+                        return; // Exit loop if state changed
+                    }
+
+                    // Check and deduct cost for this iteration
+                    if (currentNote.resources.cycles < CONFIG.LOOP_ITER_COST) {
+                        currentNote.state.status = 'failed';
+                        currentNote.memory.push({ type: 'error', content: `Halted loop at iteration ${i + 1}: Insufficient cycles.`, timestamp: new Date().toISOString() });
+                        await ctx.memory.save(currentNote);
+                        ctx.logger.error(`Loop for ${currentNote.id} failed at iter ${i+1}: Out of cycles.`);
+                        return; // Exit loop and mark failed
+                    }
+                    currentNote.resources.cycles -= CONFIG.LOOP_ITER_COST;
+                    currentNote.memory.push({ type: 'loop_iteration', content: { iteration: i + 1, total: loopCount }, timestamp: new Date().toISOString() });
+                    await ctx.memory.save(currentNote); // Save state before executing body
+
+                    ctx.logger.debug(`Loop Iter ${i+1}/${loopCount} for ${currentNote.id}. Cycles: ${currentNote.resources.cycles.toFixed(1)}`);
+                    await executeLogic(logic.body, ctx); // Recursively execute loop body
+
+                    // Check status after body execution (executeLogic reloads note state)
+                    // No need to manually reload here as the recursive call's final state is handled by runNote/outer logic
+                    const postIterNote = await ctx.memory.load(currentNote.id); // Need to reload to check status *after* body execution
+                    if (postIterNote.state.status !== 'running') {
+                        ctx.logger.warn(`Loop for ${currentNote.id} ending after iter ${i+1} due to status change: ${postIterNote.state.status}.`);
+                        return; // Exit loop if body changed state
+                    }
+                }
+                ctx.logger.debug(`Loop finished naturally for ${currentNote.id} after ${loopCount} iterations.`);
+                return; // Loop completed successfully
+            }
+
+            // Default case: Assume logic.type is a Tool Name
+            const toolName = logic.type;
+            const tool = ctx.tools.get(toolName);
+            if (!tool) {
+                throw new Error(`Tool '${toolName}' not found.`);
+            }
+
+            // Prepare input, excluding the 'type' property
+            const input = { ...logic };
+            delete input.type;
+
+            // Execute the tool
+            toolResult = await tool.execute(input, ctx);
+
+            // --- Post Tool Execution Handling ---
+            if (toolResult) {
+                // Reload note state *after* tool execution completes
+                currentNote = await ctx.memory.load(ctx.note.id);
+                ctx.note = currentNote; // Update context
+
+                // Deduct reported cost (if any) - Treat reported cost as *total* cost for the operation
+                // Base cost was already deducted by runNote/loop. Avoid double counting?
+                // Let's assume reported cost is TOTAL, so deduct the difference from base if applicable?
+                // Simpler: Assume tools accurately report their full cost. Caller deducts base, tool deducts its own?
+                // Sticking to: Caller deducts base, Tool reports cost, Log total. Cycle updates happen via memory.save.
+                // Let's refine: runNote deducts base. Tools calculate & report cost. Modify deducts based on report.
+                const reportedCost = toolResult.cost ?? tool.cycleCost ?? CONFIG.TOOL_CYCLE_COST;
+                // Ensure cycles don't go below zero from tool cost report (though check should happen in tool ideally)
+                // We won't directly modify cycles here; memory.save handles the state from the tool's execution context.
+                // The logger just shows the reported cost.
+                ctx.logger.debug(`Tool ${toolName} reported cost: ${reportedCost.toFixed(1)}. Cycles now ~${currentNote.resources.cycles.toFixed(1)} (after save)`);
+
+                // Store result in value, excluding large/complex tools like compose/if_else
+                if (toolResult.status !== 'failed' && !['compose', 'if_else', 'loop'].includes(toolName)) {
+                    const resultKey = `last_${toolName}_result`;
+                    // Ensure value object exists
+                    if (!currentNote.value) currentNote.value = {};
+                    // Store a summary or limited size result
+                    let resultToStore = toolResult.result;
+                    try {
+                        const resultString = JSON.stringify(resultToStore);
+                        if (resultString && resultString.length > 500) { // Limit stored result size
+                            resultToStore = resultString.substring(0, 500) + "...(truncated)";
+                        }
+                    } catch { resultToStore = String(resultToStore).substring(0, 500) + "...(truncated)"; }
+
+                    currentNote.value[resultKey] = resultToStore;
+                    // Don't log this automatically to memory, tool should do it if important
+                    // currentNote.memory.push({ type: 'tool_result_stored', content: { tool: toolName, key: resultKey }, timestamp: new Date().toISOString() });
+                }
+
+                // Handle non-'done' statuses reported by the tool
+                if (toolResult.status === 'failed') {
+                    currentNote.state.status = 'failed';
+                    currentNote.memory.push({ type: 'error', content: `Tool '${toolName}' reported failure. Result: ${JSON.stringify(toolResult.result)?.substring(0, 150)}`, timestamp: new Date().toISOString() });
+                    ctx.logger.error(`Tool '${toolName}' execution failed for ${currentNote.id}.`);
+                } else if (toolResult.status === 'paused') {
+                    currentNote.state.status = 'paused';
+                    currentNote.memory.push({ type: 'execution_paused', content: `Paused by tool ${toolName}`, timestamp: new Date().toISOString() });
+                    ctx.logger.info(`Execution paused for ${currentNote.id} by tool ${toolName}.`);
+                }
+                // If status is 'done' or 'running', let the outer loop/runNote handle final state.
+
+                await ctx.memory.save(currentNote); // Save the updated state after tool handling
+            } else {
+                ctx.logger.warn(`Tool ${toolName} for ${currentNote.id} did not return a result object.`);
+                // Reload state just in case, though ideally tool should return something
+                currentNote = await ctx.memory.load(ctx.note.id);
+                ctx.note = currentNote;
+            }
+
+        } catch (error) {
+            ctx.logger.error(`ExecuteLogic error (Logic Type: ${logic?.type}, Note: ${ctx.note?.id}): ${error.message}`, error);
+            // Attempt to mark note as failed
+            try {
+                currentNote = await ctx.memory.load(ctx.note.id); // Reload to save error state
+                currentNote.state.status = 'failed';
+                currentNote.memory.push({ type: 'error', content: `Logic execution failed (Type: ${logic?.type}): ${error.message}`, timestamp: new Date().toISOString() });
+                await ctx.memory.save(currentNote);
+            } catch (saveError) {
+                ctx.logger.error(`Failed to save error state after logic execution failure for ${ctx.note?.id}: ${saveError.message}`);
+            }
+            // Error is implicitly propagated up to runNote
+        }
+    }
+
+    // --- UI Class (3D Visualization) ---
+    class UI {
+        scene = new THREE.Scene();
+        camera;
+        renderer; // WebGL
+        cssRenderer = new CSS3DRenderer(); // For HTML overlays
+        controls;
+        widgets = new Map(); // Map<noteId, { mesh: THREE.Mesh, overlay: CSS3DObject, lastUpdate: number }>
+        edges = new Map(); // Map<edgeKey, THREE.Line>
+        history = []; // Array<{ nodes: Note[], edges: Edge[], time: number }>
+        timeIndex = -1; // Current index in history, -1 means live
+        container;
+        hud;
+        timelineSlider;
+        timelineLabel;
+        lastRenderData = null;
+        isTimelineDragging = false;
+        sceneLight;
+        ambientLight;
+        raycaster = new THREE.Raycaster();
+        pointer = new THREE.Vector2();
+        selectedNodeId = null;
+        groundPlane;
+        clock = new THREE.Clock(); // For delta time calculation
+
+        constructor() {
+            this.container = document.getElementById("container");
+            this.hud = document.getElementById("hud");
+            this.timelineSlider = document.getElementById("timeline-slider");
+            this.timelineLabel = document.getElementById("timeline-label");
+
+            // Camera
+            this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000); // Increased far plane
+            this.camera.position.set(0, 120, 250); // Adjusted initial camera position
+
+            // WebGL Renderer
+            try {
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", logarithmicDepthBuffer: true });
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setClearColor(new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim()));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                if (!this.renderer.getContext()) throw new Error('WebGL context unavailable.');
+                this.container.appendChild(this.renderer.domElement);
+                logger.success("WebGL Renderer initialized.");
+            } catch (e) {
+                logger.error("WebGL initialization failed:", e);
+                this.container.innerHTML = `<p style='color:var(--error-color);padding:20px;'><b>Error:</b> WebGL failed to initialize. Your browser might not support it or it might be disabled. ${e.message}</p>`;
+                this.renderer = null; // Mark renderer as unavailable
+                return; // Stop initialization if WebGL fails
+            }
+
+            // CSS3D Renderer (for overlays)
+            this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+            this.cssRenderer.domElement.style.position = "absolute";
+            this.cssRenderer.domElement.style.top = "0";
+            this.cssRenderer.domElement.style.pointerEvents = "none"; // Let WebGL canvas handle clicks primarily
+            this.cssRenderer.domElement.style.zIndex = "1"; // Ensure CSS3D is behind HUD
+            this.container.appendChild(this.cssRenderer.domElement);
+
+            // Lighting
+            this.ambientLight = new THREE.AmbientLight(0xcccccc, 0.8); // Slightly brighter ambient
+            this.scene.add(this.ambientLight);
+            this.sceneLight = new THREE.DirectionalLight(0xffffff, 1.2); // Slightly brighter directional
+            this.sceneLight.position.set(80, 150, 50);
+            this.sceneLight.castShadow = true;
+            this.sceneLight.shadow.mapSize.set(2048, 2048); // Higher res shadow map
+            this.sceneLight.shadow.camera = new THREE.OrthographicCamera(-200, 200, 200, -200, 10, 400); // Adjust shadow camera bounds
+            this.scene.add(this.sceneLight);
+            this.scene.add(this.sceneLight.target); // Required for positioning target
+            this.sceneLight.target.position.set(0,0,0); // Target the origin
+            // Optional: visualize shadow camera
+            // this.scene.add(new THREE.CameraHelper(this.sceneLight.shadow.camera));
+
+            // Ground Plane
+            const groundGeo = new THREE.PlaneGeometry(3000, 3000); // Larger ground
+            const groundMat = new THREE.ShadowMaterial({ opacity: 0.35 }); // Slightly darker shadow
+            this.groundPlane = new THREE.Mesh(groundGeo, groundMat);
+            this.groundPlane.rotation.x = -Math.PI / 2;
+            this.groundPlane.position.y = -CONFIG.NODE_SIZE_MAX * 1.5; // Position relative to max node size
+            this.groundPlane.receiveShadow = true;
+            this.scene.add(this.groundPlane);
+
+            // Controls
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.08; // Adjusted damping
+            this.controls.minDistance = 10;
+            this.controls.maxDistance = 1500;
+            this.controls.target.set(0, 10, 0); // Target slightly above ground
+            this.controls.update();
+
+            // Event Listeners
+            window.addEventListener('resize', this.onResize.bind(this), false);
+            // Use pointerdown on renderer element for raycasting
+            this.renderer.domElement.addEventListener('pointerdown', this.onCanvasPointerDown.bind(this), false);
+            this.setupTimelineControls();
+
+            // Start animation loop
+            this.animate();
+        }
+
+        // --- Interaction Methods ---
+        onCanvasPointerDown(event) {
+            if (!this.renderer || this.isTimelineDragging || event.button !== 0) return; // Ignore if dragging timeline or not left click
+
+            // Calculate pointer position in normalized device coordinates (-1 to +1)
+            this.pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+            this.pointer.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+            // Update the picking ray with the camera and pointer position
+            this.raycaster.setFromCamera(this.pointer, this.camera);
+            this.raycaster.params.Line.threshold = 0.5; // Adjust threshold for line intersection if needed
+            this.raycaster.params.Points.threshold = 1.0; // Adjust threshold for point intersection if needed
+
+            // Collect meshes from widgets for intersection test
+            const meshes = [...this.widgets.values()].map(w => w.mesh).filter(Boolean);
+            const intersects = this.raycaster.intersectObjects(meshes, false); // false = don't test descendants
+
+            let clickedNodeId = null;
+            if (intersects.length > 0) {
+                // Find the note ID associated with the closest intersected mesh
+                const intersectedMesh = intersects[0].object;
+                for (const [id, widget] of this.widgets.entries()) {
+                    if (widget.mesh === intersectedMesh) {
+                        clickedNodeId = id;
+                        break;
+                    }
+                }
+            }
+
+            this.selectNode(clickedNodeId); // Select the node (or null to deselect)
+        }
+
+        selectNode(nodeId) {
+            // If clicked same node again, maybe cycle inspect levels or just return
+            if (this.selectedNodeId === nodeId && nodeId !== null) {
+                logger.debug(`Node ${nodeId} already selected.`);
+                // Optional: Cycle inspection level or re-inspect?
+                // tools.get('inspect')?.execute({ targetId: this.selectedNodeId, level: 'next_level?' }, ...);
+                return;
+            }
+
+            // Deselect previously selected node
+            if (this.selectedNodeId && this.widgets.has(this.selectedNodeId)) {
+                const oldWidget = this.widgets.get(this.selectedNodeId);
+                if (oldWidget?.mesh?.material?.emissive) {
+                    oldWidget.mesh.material.emissive.setHex(0x000000); // Turn off emissive
+                }
+                if (oldWidget?.overlay) {
+                    // Reset overlay style via _updateOverlay
+                    this._updateOverlay(oldWidget.overlay, oldWidget.mesh.userData, false);
+                }
+            }
+
+            this.selectedNodeId = nodeId;
+
+            // Select new node
+            if (this.selectedNodeId && this.widgets.has(this.selectedNodeId)) {
+                const newWidget = this.widgets.get(this.selectedNodeId);
+                logger.info(`Selected Node: ${this.selectedNodeId}`, newWidget.mesh.userData?.value?.desc);
+
+                // Highlight mesh
+                if (newWidget.mesh?.material) {
+                    // Ensure material has emissive property before setting
+                    if (!newWidget.mesh.material.emissive) {
+                        newWidget.mesh.material.emissive = new THREE.Color(0x000000);
+                    }
+                    newWidget.mesh.material.emissive.setHex(0x999999); // Set emissive highlight
+                }
+                // Update overlay style via _updateOverlay
+                if (newWidget.overlay) {
+                    this._updateOverlay(newWidget.overlay, newWidget.mesh.userData, true);
+                }
+
+                // Trigger inspection of the selected node
+                tools.get('inspect')?.execute({ targetId: this.selectedNodeId, level: 'detail' }, { note: null, memory, tools, logger, ui: this, runNote })
+                    .catch(e => logger.error(`Inspect on select failed for ${this.selectedNodeId}:`, e));
+
+                // Smoothly tween camera target to the selected node
+                if (newWidget.mesh) {
+                    new TWEEN.Tween(this.controls.target)
+                        .to(newWidget.mesh.position.clone(), 700) // Duration 700ms
+                        .easing(TWEEN.Easing.Quadratic.Out) // Smooth easing
+                        .start();
+                }
+            } else {
+                logger.info("Selection cleared.");
+            }
+        }
+
+        setupTimelineControls() {
+            this.timelineSlider.addEventListener('input', () => {
+                if (this.history.length > 0) {
+                    this.timeIndex = +this.timelineSlider.value;
+                    this.render(this.history[this.timeIndex], true); // Render historical state
+                    this.updateTimelineLabel();
+                }
+            });
+            this.timelineSlider.addEventListener('mousedown', () => {
+                this.isTimelineDragging = true;
+                if (this.controls) this.controls.enabled = false; // Disable camera control during drag
+                logger.debug("Timeline drag start");
+            });
+            this.timelineSlider.addEventListener('mouseup', () => {
+                this.isTimelineDragging = false;
+                if (this.controls) this.controls.enabled = true; // Re-enable camera control
+                logger.debug("Timeline drag end");
+                // Optional: Snap back to live view if desired, or stay on historical view
+                // if (this.timeIndex !== this.history.length - 1) { ... }
+            });
+        }
+
+        updateTimelineLabel() {
+            let label = '(Live)';
+            if (this.timeIndex >= 0 && this.history[this.timeIndex]) {
+                const timestamp = new Date(this.history[this.timeIndex].time).toLocaleTimeString();
+                label = `(${this.timeIndex + 1}/${this.history.length}) @ ${timestamp}`;
+            }
+            this.timelineLabel.textContent = `History: ${label}`;
+        }
+
+        // --- Core Animation Loop & Simulation ---
+        animate() {
+            requestAnimationFrame(this.animate.bind(this));
+            if (!this.renderer) return; // Don't animate if renderer failed
+
+            const deltaTime = this.clock.getDelta(); // Get time since last frame
+
+            // Only run physics simulation if not scrubbing timeline
+            if (!this.isTimelineDragging) {
+                this.simulateLayout(deltaTime);
+            }
+
+            TWEEN.update(); // Update active tweens (camera, scale, color)
+            this.controls.update(); // Update orbit controls (applies damping)
+
+            // Smoothly move overlays towards their mesh positions (Lerp)
+            this.widgets.forEach(widget => {
+                if (widget.overlay && widget.mesh) {
+                    widget.overlay.position.lerp(widget.mesh.position, 0.1); // Adjust lerp factor for speed
+                }
+            });
+
+            // Render both scenes
+            this.renderer.render(this.scene, this.camera);
+            this.cssRenderer.render(this.scene, this.camera);
+        }
+
+        simulateLayout(deltaTime) {
+            const nodes = [...this.widgets.values()];
+            if (nodes.length < 2) return; // No simulation needed for 0 or 1 node
+
+            // Frame-rate independent damping factor
+            const damping = Math.pow(CONFIG.SIM_DAMPING, deltaTime * 60); // Adjust 60 if base frame rate differs
+
+            // --- Repulsion Forces ---
+            for (let i = 0; i < nodes.length; i++) {
+                const w1 = nodes[i];
+                if (!w1.mesh) continue;
+                const p1 = w1.mesh.position;
+                // Accumulate force for node i
+                const totalForce = new THREE.Vector3(0, 0, 0);
+
+                for (let j = 0; j < nodes.length; j++) { // Check against *all* other nodes
+                    if(i === j) continue;
+                    const w2 = nodes[j];
+                    if (!w2.mesh) continue;
+                    const p2 = w2.mesh.position;
+
+                    const direction = new THREE.Vector3().subVectors(p1, p2);
+                    const distanceSq = Math.max(direction.lengthSq(), 1); // Avoid division by zero, ensure min distance effect
+                    // Force magnitude inversely proportional to square of distance
+                    const forceMagnitude = (CONFIG.SIM_REPULSION / distanceSq);
+                    const forceVector = direction.normalize().multiplyScalar(forceMagnitude);
+                    totalForce.add(forceVector);
+                }
+                // Apply accumulated force (scaled by deltaTime)
+                p1.add(totalForce.multiplyScalar(deltaTime));
+            }
+
+            // --- Attraction Forces (Edges) ---
+            for (const edge of this.edges.values()) {
+                const sourceWidget = this.widgets.get(edge.userData.source);
+                const targetWidget = this.widgets.get(edge.userData.target);
+
+                if (sourceWidget?.mesh && targetWidget?.mesh) {
+                    const posSource = sourceWidget.mesh.position;
+                    const posTarget = targetWidget.mesh.position;
+
+                    const direction = new THREE.Vector3().subVectors(posTarget, posSource);
+                    const distance = Math.max(direction.length(), 0.1); // Avoid issues at zero distance
+
+                    // Spring force: proportional to displacement from desired edge length
+                    const displacement = distance - CONFIG.SIM_EDGE_LENGTH;
+                    const forceMagnitude = CONFIG.SIM_ATTRACTION * displacement; // Can be negative (attraction) or positive (repulsion if too close)
+
+                    const forceVector = direction.normalize().multiplyScalar(forceMagnitude * deltaTime);
+
+                    // Apply half force to each node
+                    posSource.add(forceVector.clone().multiplyScalar(0.5));
+                    posTarget.sub(forceVector.clone().multiplyScalar(0.5));
+                }
+            }
+
+            // --- Damping & Constraints ---
+            const minY = (this.groundPlane?.position.y ?? -CONFIG.NODE_SIZE_MAX * 1.5);
+            for (const widget of this.widgets.values()) {
+                if (widget.mesh) {
+                    // Apply velocity damping
+                    widget.mesh.position.multiplyScalar(damping); // This acts like friction
+
+                    // Optional: Add a slight pull towards center (0, y, 0) to prevent drifting too far
+                    // const centerPullStrength = 0.001;
+                    // widget.mesh.position.x *= (1.0 - centerPullStrength * deltaTime);
+                    // widget.mesh.position.z *= (1.0 - centerPullStrength * deltaTime);
+
+                    // Ground constraint: Prevent nodes from going below ground + their radius
+                    const nodeRadius = this._calculateNodeSize(widget.mesh.userData);
+                    const groundLimit = minY + nodeRadius;
+                    if (widget.mesh.position.y < groundLimit) {
+                        widget.mesh.position.y = groundLimit;
+                        // Optional: Zero out vertical velocity component if needed
+                    }
+                }
+            }
+
+            // Update edge geometry after positions change
+            this.updateEdgeGeometry();
+        }
+
+        updateEdgeGeometry() {
+            for (const edgeLine of this.edges.values()) {
+                const sourceWidget = this.widgets.get(edgeLine.userData.source);
+                const targetWidget = this.widgets.get(edgeLine.userData.target);
+
+                if (sourceWidget?.mesh && targetWidget?.mesh) {
+                    const posSource = sourceWidget.mesh.position;
+                    const posTarget = targetWidget.mesh.position;
+                    const positions = edgeLine.geometry.attributes.position.array;
+
+                    positions[0] = posSource.x; positions[1] = posSource.y; positions[2] = posSource.z;
+                    positions[3] = posTarget.x; positions[4] = posTarget.y; positions[5] = posTarget.z;
+
+                    edgeLine.geometry.attributes.position.needsUpdate = true;
+                    edgeLine.geometry.computeBoundingSphere(); // Needed for raycasting/frustum culling
+                }
+            }
+        }
+
+        // --- Scene Rendering Logic ---
+        render(data, isFromHistory = false) {
+            if (!this.renderer || !data) return; // Don't render if no renderer or data
+            // Prevent live updates while user is interacting with timeline
+            if (this.isTimelineDragging && !isFromHistory) return;
+
+            logger.debug(`Render triggered. Source: ${isFromHistory ? 'History' : 'Live'}. Nodes: ${data.nodes.length}, Edges: ${data.edges.length}`);
+            this.lastRenderData = data; // Store for potential reference
+            const { nodes, edges } = data;
+
+            const nodeMap = new Map(nodes.map(n => [n.id, n]));
+            const edgeKeys = new Set(edges.map(e => `${e.source}-${e.target}-${e.rel ?? ''}`)); // Include rel in key? Maybe just source-target
+
+            // --- Sync Widgets (Nodes) ---
+            const currentWidgetIds = new Set(this.widgets.keys());
+
+            // Remove widgets for nodes that no longer exist
+            currentWidgetIds.forEach(id => {
+                if (!nodeMap.has(id)) {
+                    this._removeWidget(id);
+                }
+            });
+
+            // Add or update widgets for current nodes
+            nodes.forEach(nodeData => {
+                const existingWidget = this.widgets.get(nodeData.id);
+                if (existingWidget) {
+                    this._updateWidget(existingWidget, nodeData);
+                } else {
+                    this._createWidget(nodeData, edges); // Pass all edges for initial positioning context
+                }
+            });
+
+            // --- Sync Edges ---
+            const currentEdgeKeys = new Set(this.edges.keys());
+
+            // Remove edges that no longer exist
+            currentEdgeKeys.forEach(key => {
+                const [source, target] = key.split('-'); // Simple split assumes no hyphen in IDs
+                const exists = edges.some(e => e.source === source && e.target === target);
+                if (!exists) {
+                    this._removeEdge(key);
+                }
+            });
+
+            // Add new edges
+            edges.forEach(edgeData => {
+                const key = `${edgeData.source}-${edgeData.target}`; // Use simple source-target key
+                if (!this.edges.has(key) && this.widgets.has(edgeData.source) && this.widgets.has(edgeData.target)) { // Check widgets exist
+                    this._createEdge(edgeData);
+                }
+                // TODO: Update edge properties (color, thickness based on rel?) if needed
+            });
+
+            // --- Update History Timeline ---
+            if (!isFromHistory && !this.isTimelineDragging) {
+                // Debounce history saving? Or save every render? Let's save every live render.
+                // Ensure deep clone for history entries
+                const historyEntry = {
+                    nodes: nodes.map(n => structuredClone(n)),
+                    edges: edges.map(e => structuredClone(e)),
+                    time: Date.now()
+                };
+                if (this.history.length >= CONFIG.MAX_HISTORY) {
+                    this.history.shift(); // Remove oldest entry
+                }
+                this.history.push(historyEntry);
+                this.timeIndex = this.history.length - 1; // Point to the latest entry
+
+                // Update slider range and value
+                this.timelineSlider.max = String(this.timeIndex);
+                this.timelineSlider.value = String(this.timeIndex);
+                this.timelineSlider.disabled = this.history.length <= 1;
+                this.updateTimelineLabel();
+            } else if (isFromHistory) {
+                // Ensure slider and label reflect the historical index being viewed
+                this.timelineSlider.value = String(this.timeIndex);
+                this.updateTimelineLabel();
+            }
+
+            updateStatusDisplay(); // Update HUD info
+        }
+
+        // --- Private Render Helper Methods ---
+        _removeWidget(id) {
+            const widget = this.widgets.get(id);
+            if (widget) {
+                if (widget.mesh) {
+                    this.scene.remove(widget.mesh);
+                    widget.mesh.geometry?.dispose(); // Dispose geometry
+                    // Dispose material(s) - check if array or single
+                    if(Array.isArray(widget.mesh.material)) {
+                        widget.mesh.material.forEach(m => m.dispose());
+                    } else {
+                        widget.mesh.material?.dispose();
+                    }
+                }
+                if (widget.overlay) {
+                    widget.overlay.element.remove(); // Remove HTML element
+                    this.scene.remove(widget.overlay); // Remove CSS3DObject wrapper
+                }
+                this.widgets.delete(id);
+                if(this.selectedNodeId === id) this.selectedNodeId = null; // Clear selection if removed
+                logger.debug(`UI Removed widget ${id}`);
+            }
+        }
+
+        _removeEdge(key) {
+            const edgeLine = this.edges.get(key);
+            if (edgeLine) {
+                this.scene.remove(edgeLine);
+                edgeLine.geometry?.dispose();
+                edgeLine.material?.dispose();
+                this.edges.delete(key);
+                logger.debug(`UI Removed edge ${key}`);
+            }
+        }
+
+        _createWidget(nodeData, allEdges) {
+            const nodeSize = this._calculateNodeSize(nodeData);
+            const geometry = this._createMeshGeometry(nodeData.value?.widget ?? 'sphere', nodeSize);
+            const material = new THREE.MeshStandardMaterial({
+                color: getNodeColor(nodeData),
+                metalness: 0.3,
+                roughness: 0.6,
+                emissive: 0x000000 // Default no emissive glow
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = false; // Nodes typically don't receive shadows well unless complex shapes
+            mesh.position.copy(this._calculateInitialPosition(nodeData, allEdges));
+            mesh.userData = nodeData; // Store full node data for reference
+
+            // Create CSS3D Overlay
+            const div = document.createElement("div");
+            div.className = "overlay"; // Base class
+            div.style.pointerEvents = 'auto'; // Enable pointer events on the overlay itself
+            // Add listener to select node when overlay is clicked/tapped
+            div.addEventListener('pointerdown', (e) => {
+                e.stopPropagation(); // Prevent triggering canvas click
+                this.selectNode(nodeData.id);
+            });
+
+            const overlay = new CSS3DObject(div);
+            overlay.position.copy(mesh.position); // Initial position
+            overlay.userData = { noteId: nodeData.id }; // Store ID for reference
+
+            this.scene.add(mesh);
+            this.scene.add(overlay);
+            const widget = { mesh, overlay, lastUpdate: 0 };
+            this.widgets.set(nodeData.id, widget);
+            logger.debug(`UI Created widget ${nodeData.id} (${nodeData.value?.widget ?? 'sphere'})`);
+
+            // Update overlay content and initial state styles
+            this._updateOverlay(overlay, nodeData, this.selectedNodeId === nodeData.id);
+
+            // Entrance animation (scale up)
+            mesh.scale.set(0.1, 0.1, 0.1);
+            new TWEEN.Tween(mesh.scale)
+                .to({ x: 1, y: 1, z: 1 }, 700)
+                .easing(TWEEN.Easing.Elastic.Out)
+                .start();
+        }
+
+        _createEdge(edgeData) {
+            const sourceWidget = this.widgets.get(edgeData.source);
+            const targetWidget = this.widgets.get(edgeData.target);
+            // Ensure widgets exist before creating edge mesh
+            if (sourceWidget?.mesh && targetWidget?.mesh) {
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(2 * 3); // 2 points, 3 coordinates each
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+                const material = new THREE.LineBasicMaterial({
+                    color: new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--link-color').trim()),
+                    transparent: true,
+                    opacity: 0.6,
+                    linewidth: 1 // Note: linewidth > 1 may not work on all platforms
+                });
+
+                const line = new THREE.Line(geometry, material);
+                line.userData = { source: edgeData.source, target: edgeData.target, rel: edgeData.rel };
+                line.frustumCulled = false; // Prevent lines disappearing at edges of view
+
+                // Set initial positions
+                const posSource = sourceWidget.mesh.position;
+                const posTarget = targetWidget.mesh.position;
+                positions[0] = posSource.x; positions[1] = posSource.y; positions[2] = posSource.z;
+                positions[3] = posTarget.x; positions[4] = posTarget.y; positions[5] = posTarget.z;
+                geometry.attributes.position.needsUpdate = true;
+                geometry.computeBoundingSphere();
+
+                this.scene.add(line);
+                const key = `${edgeData.source}-${edgeData.target}`;
+                this.edges.set(key, line);
+                logger.debug(`UI Created edge ${key}`);
+            } else {
+                logger.warn(`UI Skip edge creation ${edgeData.source}-${edgeData.target}: One or both widgets missing.`);
+            }
+        }
+
+        _updateWidget(widget, nodeData) {
+            const { mesh, overlay } = widget;
+            const nodeSize = this._calculateNodeSize(nodeData);
+            const nodeWidgetType = nodeData.value?.widget ?? 'sphere';
+
+            // --- Geometry Update Check ---
+            const currentGeometry = mesh.geometry;
+            const requiresNewGeometry = this._checkGeometryChange(currentGeometry, nodeWidgetType, nodeSize);
+
+            if (requiresNewGeometry) {
+                const newGeometry = this._createMeshGeometry(nodeWidgetType, nodeSize);
+                currentGeometry?.dispose(); // Dispose old geometry
+                mesh.geometry = newGeometry;
+                mesh.scale.set(1, 1, 1); // Reset scale if geometry changes
+                logger.debug(`Recreated geometry for ${nodeData.id} (Type: ${nodeWidgetType}, Size: ${nodeSize.toFixed(1)})`);
+            } else {
+                // --- Scale Tweening (if geometry type is same but size differs) ---
+                // This part is tricky if geometry doesn't store size consistently. Let's simplify:
+                // If geometry type is the same, assume scale tweening is less critical than color/overlay.
+                // We *could* store the base size in userData and tween scale, but let's skip for now.
+                // const baseSize = mesh.userData?.baseSize ?? nodeSize; // Need to store baseSize on creation
+                // const targetScale = Math.max(0.1, nodeSize / baseSize);
+                // if (Math.abs(mesh.scale.x - targetScale) > 0.05) {
+                //    new TWEEN.Tween(mesh.scale).to({ x: targetScale, y: targetScale, z: targetScale }, 300).easing(TWEEN.Easing.Quadratic.Out).start();
+                // }
+            }
+
+            // --- Color Tweening ---
+            const targetColorHex = getNodeColor(nodeData);
+            try {
+                const targetColor = new THREE.Color(targetColorHex);
+                // Check if material exists and has color property
+                if (mesh.material && mesh.material.color && !mesh.material.color.equals(targetColor)) {
+                    new TWEEN.Tween(mesh.material.color)
+                        .to(targetColor, 400) // Duration 400ms
+                        .start();
+                }
+            } catch (e) { logger.warn(`Invalid target color '${targetColorHex}' for node ${nodeData.id}`); }
+
+            // --- Emissive Highlight Update ---
+            const isSelected = this.selectedNodeId === nodeData.id;
+            const targetEmissiveHex = isSelected ? 0x999999 : 0x000000;
+            if (mesh.material && mesh.material.emissive) {
+                if (mesh.material.emissive.getHex() !== targetEmissiveHex) {
+                    mesh.material.emissive.setHex(targetEmissiveHex);
+                }
+            } else if (mesh.material && targetEmissiveHex !== 0x000000) {
+                // Add emissive property if missing and needs highlight
+                mesh.material.emissive = new THREE.Color(targetEmissiveHex);
+                mesh.material.needsUpdate = true; // Important!
+            }
+
+
+            // --- Update Overlay Content & Style ---
+            this._updateOverlay(overlay, nodeData, isSelected);
+
+            // --- Update UserData ---
+            mesh.userData = nodeData; // Keep mesh userData updated
+            overlay.userData.noteId = nodeData.id; // Update overlay userData if needed
+
+            widget.lastUpdate = Date.now();
+        }
+
+        _updateOverlay(overlay, nodeData, isSelected = false) {
+            const overlayElement = overlay.element;
+            if (!overlayElement) return; // Guard against missing element
+
+            const label = nodeData.value?.desc || nodeData.id;
+            const status = nodeData.state?.status || 'unknown';
+            const priority = nodeData.state?.priority;
+
+            // --- Generate Value Summary ---
+            let valueSummary = '';
+            if (nodeData.value) {
+                try {
+                    const relevantValues = {};
+                    const preferredKeys = ['result', 'llmResult', 'reasonResult', 'generatedCode', 'status', 'error', 'message']; // Prioritize these
+                    const excludeKeys = ['desc', 'widget', 'color', 'size', ...preferredKeys];
+                    let count = 0;
+                    const maxItems = 3;
+
+                    // Add preferred keys first
+                    for (const key of preferredKeys) {
+                        if (nodeData.value[key] !== undefined && nodeData.value[key] !== null && count < maxItems) {
+                            relevantValues[key] = nodeData.value[key];
+                            count++;
+                        }
+                    }
+                    // Add other keys if space permits
+                    if (count < maxItems) {
+                        for (const key in nodeData.value) {
+                            if (!excludeKeys.includes(key) && nodeData.value[key] !== undefined && nodeData.value[key] !== null) {
+                                relevantValues[key] = nodeData.value[key];
+                                count++;
+                                if (count >= maxItems) break;
+                            }
+                        }
+                    }
+
+                    if (Object.keys(relevantValues).length > 0) {
+                        valueSummary = JSON.stringify(relevantValues);
+                        if (valueSummary.length > 180) { // Truncate long summaries
+                            valueSummary = valueSummary.substring(0, 180) + '...}';
+                        }
+                    }
+                } catch (e) { valueSummary = "{Serialization Error}"; }
+            }
+
+            // Sanitize for HTML injection
+            const safeLabel = label.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const safeValueSummary = valueSummary.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+            const statusUpper = status.toUpperCase();
+            const prioString = priority !== undefined ? `P:${priority}` : '';
+            const statusClass = `status-${status}`; // CSS class for status styling
+
+            // --- Construct Inner HTML ---
+            const newHTML = `<h3>${safeLabel}</h3>
+                              <div class="status-line">
+                                 <span class="status ${statusClass}">${statusUpper}</span>
+                                 ${prioString ? `<span class="prio">${prioString}</span>` : ''}
+                              </div>
+                              ${safeValueSummary && safeValueSummary !== '{}'
+                ? `<div class="details" title="${safeValueSummary.replace(/"/g, '&quot;')}">${safeValueSummary}</div>`
+                : ''}`;
+
+            // Update DOM only if content changed
+            if (overlayElement.innerHTML !== newHTML) {
+                overlayElement.innerHTML = newHTML;
+            }
+
+            // --- Update Overlay Classes and Styles for Selection/Status ---
+            const targetClassName = `overlay ${statusClass}`;
+            if (overlayElement.className !== targetClassName) {
+                overlayElement.className = targetClassName; // Set class based on status
+            }
+
+            // Apply selection styles directly (could also use CSS classes)
+            overlayElement.style.borderColor = isSelected ? 'var(--highlight-color)' : ''; // Use default border if not selected
+            overlayElement.style.transform = isSelected ? 'scale(1.05)' : ''; // Scale up slightly if selected
+            overlayElement.style.zIndex = isSelected ? '3' : ''; // Bring selected overlay to front
+
+            // Ensure pointer events are enabled
+            overlayElement.style.pointerEvents = 'auto';
+        }
+
+        _calculateNodeSize(nodeData) {
+            const sizeValue = nodeData.value?.size;
+            const priority = nodeData.state?.priority;
+            let calculatedSize = CONFIG.NODE_SIZE_DEFAULT;
+
+            if (typeof sizeValue === 'number' && !isNaN(sizeValue)) {
+                calculatedSize = sizeValue;
+            } else if (typeof priority === 'number' && !isNaN(priority)) {
+                // Scale size based on priority (e.g., 0-100 maps to min-max size)
+                const priorityScale = Math.max(0, Math.min(100, priority)) / 100;
+                calculatedSize = CONFIG.NODE_SIZE_MIN + (CONFIG.NODE_SIZE_MAX - CONFIG.NODE_SIZE_MIN) * priorityScale;
+            }
+            // Clamp size within defined limits
+            return Math.max(CONFIG.NODE_SIZE_MIN, Math.min(CONFIG.NODE_SIZE_MAX, calculatedSize));
+        }
+
+        _createMeshGeometry(widgetType = 'sphere', size) {
+            // Ensure size is reasonable
+            const clampedSize = Math.max(0.1, size);
+            try {
+                switch(widgetType) {
+                    case 'box': return new THREE.BoxGeometry(clampedSize * 1.6, clampedSize * 1.6, clampedSize * 1.6);
+                    case 'cone': return new THREE.ConeGeometry(clampedSize, clampedSize * 2, 16); // Base radius, height, segments
+                    case 'torus': return new THREE.TorusGeometry(clampedSize * 0.8, clampedSize * 0.3, 8, 24); // Radius, tube radius, radial segments, tubular segments
+                    case 'octahedron': return new THREE.OctahedronGeometry(clampedSize, 0); // Radius, detail
+                    case 'dodecahedron': return new THREE.DodecahedronGeometry(clampedSize, 0); // Radius, detail
+                    case 'sphere': default: return new THREE.SphereGeometry(clampedSize, 16, 12); // Radius, width segments, height segments
+                }
+            } catch (e) {
+                logger.error(`Failed to create geometry type '${widgetType}' with size ${clampedSize}: ${e.message}`);
+                // Fallback to sphere
+                return new THREE.SphereGeometry(CONFIG.NODE_SIZE_DEFAULT, 16, 12);
+            }
+        }
+
+        _checkGeometryChange(currentGeo, newType, newSize) {
+            if (!currentGeo || !currentGeo.parameters) return true; // If no current geo or params, needs creation
+
+            const params = currentGeo.parameters;
+            const clampedNewSize = Math.max(0.1, newSize);
+
+            // Check type compatibility
+            if (newType === 'box' && !(currentGeo instanceof THREE.BoxGeometry)) return true;
+            if (newType === 'sphere' && !(currentGeo instanceof THREE.SphereGeometry)) return true;
+            if (newType === 'cone' && !(currentGeo instanceof THREE.ConeGeometry)) return true;
+            if (newType === 'torus' && !(currentGeo instanceof THREE.TorusGeometry)) return true;
+            if (newType === 'octahedron' && !(currentGeo instanceof THREE.OctahedronGeometry)) return true;
+            if (newType === 'dodecahedron' && !(currentGeo instanceof THREE.DodecahedronGeometry)) return true;
+            // Add checks for other types...
+
+            // Check size compatibility (approximate check based on primary dimension)
+            let currentPrimaryDimension;
+            if (params.radius !== undefined) currentPrimaryDimension = params.radius;
+            else if (params.width !== undefined) currentPrimaryDimension = params.width / 1.6; // Box width approx relates to sphere radius
+            else if (params.height !== undefined) currentPrimaryDimension = params.height / 2.0; // Cone height approx relates
+            // Add more heuristics for other shapes... Torus radius?
+            else return true; // If we can't determine current size, recreate
+
+            // Recreate if size differs significantly (e.g., by more than 10%)
+            if (Math.abs(currentPrimaryDimension - clampedNewSize) / clampedNewSize > 0.1) return true;
+
+            return false; // Geometry type and size are compatible enough
+        }
+
+        _calculateInitialPosition(nodeData, allEdges) {
+            // Start with a random position within a wider area, slightly above ground
+            const baseRadius = 300;
+            const randomAngle = Math.random() * Math.PI * 2;
+            const randomRadius = Math.sqrt(Math.random()) * baseRadius; // Spread more evenly than linear random
+            let initialPos = new THREE.Vector3(
+                Math.cos(randomAngle) * randomRadius,
+                this._calculateNodeSize(nodeData) + Math.random() * 20, // Start slightly elevated
+                Math.sin(randomAngle) * randomRadius
+            );
+
+            // Try to position near parent if one exists and is already placed
+            const parentEdge = allEdges?.find(e => e.target === nodeData.id);
+            if (parentEdge) {
+                const parentWidget = this.widgets.get(parentEdge.source);
+                if (parentWidget?.mesh) {
+                    const parentPos = parentWidget.mesh.position;
+                    const offset = new THREE.Vector3(
+                        (Math.random() - 0.5) * CONFIG.SIM_EDGE_LENGTH * 0.8, // Offset within approx edge length
+                        (Math.random() - 0.5) * CONFIG.SIM_EDGE_LENGTH * 0.3,
+                        (Math.random() - 0.5) * CONFIG.SIM_EDGE_LENGTH * 0.8
+                    );
+                    initialPos = parentPos.clone().add(offset);
+
+                    // Ensure not *too* close to parent
+                    if (initialPos.distanceTo(parentPos) < CONFIG.NODE_SIZE_MIN * 2) {
+                        initialPos.add(new THREE.Vector3(CONFIG.NODE_SIZE_MIN * 2, 0, 0));
+                    }
+                }
+            }
+
+            // Ensure initial position is above the ground plane + node radius
+            const minY = (this.groundPlane?.position.y ?? -CONFIG.NODE_SIZE_MAX * 1.5) + this._calculateNodeSize(nodeData);
+            initialPos.y = Math.max(initialPos.y, minY);
+
+            return initialPos;
+        }
+
+        onResize() {
+            if (!this.renderer) return;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            this.camera.aspect = width / height;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(width, height);
+            this.cssRenderer.setSize(width, height);
+            logger.debug(`Resized to ${width}x${height}`);
+        }
+    }
+
+    // --- Utility Functions ---
+    /** Prepares node and edge data suitable for the UI render method. */
+    function formatNotesForUI(notes) {
+        // Map notes to include necessary fields for rendering and interaction
+        const uiNodes = notes.map(n => ({
+            id: n.id,
+            value: n.value, // Include value for desc, color, size, widget, overlay details
+            state: n.state, // Include state for status, priority -> size/overlay style
+            timestamp: n.timestamp // Potentially useful for overlay or history
+            // No need to include full memory, logic, context etc. unless UI needs it
+        }));
+
+        const uiEdgesSet = new Set();
+        const uiEdges = [];
+        const nodeIds = new Set(notes.map(n => n.id));
+
+        // Create edge list, ensuring both source and target nodes exist in the current set
+        notes.forEach(n => {
+            (n.graph || []).forEach(edge => {
+                if (nodeIds.has(edge.target)) { // Ensure target exists
+                    const key = `${n.id}-${edge.target}`; // Simple key for now
+                    // Avoid duplicate edges in the list sent to UI if multiple rels exist?
+                    // For now, allow multiple lines if graph has them, but key prevents duplicates in _createEdge
+                    // if (!uiEdgesSet.has(key)) {
+                    uiEdges.push({ source: n.id, target: edge.target, rel: edge.rel });
+                    //    uiEdgesSet.add(key);
+                    //}
+                }
+            });
+        });
+        return { nodes: uiNodes, edges: uiEdges };
+    }
+
+    /** Determines the color for a node based on its properties or status. */
+    function getNodeColor(note) {
+        // 1. Explicit color in value takes highest priority
+        if (note.value?.color !== undefined) {
+            try {
+                // Validate the color format (basic check)
+                new THREE.Color(note.value.color);
+                return note.value.color;
+            } catch {
+                logger.warn(`Invalid color format '${note.value.color}' on node ${note.id}. Using default.`);
+            }
+        }
+
+        // 2. Fallback to status-based color
+        const status = note.state?.status;
+        const root = document.documentElement; // Cache root element access?
+        switch (status) {
+            case "running":   return getComputedStyle(root).getPropertyValue('--running-color').trim();
+            case "completed": return getComputedStyle(root).getPropertyValue('--success-color').trim();
+            case "failed":    return getComputedStyle(root).getPropertyValue('--error-color').trim();
+            case "pending":   return getComputedStyle(root).getPropertyValue('--pending-color').trim();
+            case "paused":    return getComputedStyle(root).getPropertyValue('--paused-color').trim();
+            default:          return '#aaaaaa'; // Default grey for unknown status
+        }
+    }
+
+    /** Updates the status text in the HUD. */
+    function updateStatusDisplay() {
+        const statusElement = document.getElementById("status");
+        if (statusElement && dashboard && memory) {
+            const nodeCount = dashboard.widgets.size;
+            const edgeCount = dashboard.edges.size;
+            const runningCount = runningNotes.size;
+            statusElement.textContent = `Nodes: ${nodeCount} | Edges: ${edgeCount} | Tick: ${globalTick} | Running: ${runningCount}`;
+        }
+    }
+
+    /** Handles updates triggered by memory saves (debounced). */
+    async function handleNoteUpdate(updatedId) {
+        // This function is called debounced via memory.save()
+        logger.debug(`HandleNoteUpdate triggered for ${updatedId} (debounced).`);
+        if (!dashboard || !memory || dashboard.isTimelineDragging) {
+            logger.debug(`Skipping render update for ${updatedId} (UI busy or not ready).`);
+            return;
+        }
+        try {
+            const notes = await memory.all();
+            const graphData = formatNotesForUI(notes);
+            dashboard.render(graphData, false); // Render live data
+        } catch (error) {
+            logger.error(`Error during handleNoteUpdate for ${updatedId}: ${error.message}`, error);
+        }
+    }
+
+    // --- User Input Handling & Command Registry ---
+
+    /** Runs a tool asynchronously, providing default context if not called from a note. */
+    const runAsyncTool = (toolName, args, callingNoteContext = null) => {
+        const tool = tools.get(toolName);
+        if (!tool) {
+            logger.error(`Command failed: Tool '${toolName}' not found.`);
+            return;
+        }
+
+        // Establish context: Use provided context or create a default one if run from console
+        const toolCtx = callingNoteContext ?? {
+            note: null, // Indicate no specific note context for console commands
+            memory,
+            tools,
+            logger,
+            runNote,
+            ui: dashboard
+        };
+
+        logger.info(`Executing Tool '${toolName}' via command...`);
+        // Execute asynchronously using setTimeout to avoid blocking input/UI
+        setTimeout(() => {
+            tool.execute(args, toolCtx)
+                .then(result => {
+                    logger.info(`Tool '${toolName}' finished. Status: ${result.status}` +
+                        (result.result ? `, Result: ${JSON.stringify(result.result).substring(0, 100)}...` : ''));
+                    // Console commands might need manual UI update trigger if they change state
+                    // handleNoteUpdate('multiple?'); // Might be needed if console command modified notes
+                })
+                .catch(error => {
+                    logger.error(`Tool '${toolName}' execution failed: ${error.message}`, error);
+                });
+        }, 0);
+    };
+
+    /** Registers a user command for the console input. */
+    function registerCommand(name, handler, description, helpArgs = '') {
+        if (commandRegistry.has(name)) {
+            logger.warn(`Command "${name}" is being redefined.`);
+        }
+        commandRegistry.set(name, { handler, description, help: helpArgs });
+    }
+
+    // --- Register Core Commands ---
+    registerCommand('help', async () => {
+        logger.info("--- Netention Ultra Command Menu ---");
+        logger.info("Usage: <command> [argName=value]... OR <command> <positionalArg>");
+        logger.info("Values: Use quotes for strings with spaces (\"example value\"). JSON for objects/arrays ({ \"key\": 1 }).");
+        logger.info("Available Commands:");
+        const groupedCommands = {};
+        commandRegistry.forEach((cmd, name) => {
+            const category = name.includes('graph') ? 'Graph' :
+                name.includes('inspect') || name === 'log' ? 'Inspection' :
+                    name.includes('add') || name.includes('know') || name.includes('modify') || name.includes('fork') || name.includes('define') ? 'Modification' :
+                        name.includes('run') || name.includes('schedule') || name.includes('call') ? 'Execution' :
+                            name.includes('plan') || name.includes('reason') || name.includes('reflect') || name.includes('llm') ? 'Agent/AI' :
+                                name.includes('eval') || name.includes('generateTool') ? 'Meta/System' : 'Other';
+            if (!groupedCommands[category]) groupedCommands[category] = [];
+            groupedCommands[category].push({name, cmd});
+        });
+
+        Object.keys(groupedCommands).sort().forEach(category => {
+            logger.info(`\n[ ${category} ]`);
+            groupedCommands[category].sort((a,b) => a.name.localeCompare(b.name)).forEach(({name, cmd}) => {
+                logger.info(`  ${name.padEnd(15)} ${cmd.help.padEnd(40)} - ${cmd.description}`);
+            });
+        });
+        logger.info("------------------------------------");
+    }, "Show this help menu.");
+
+    registerCommand('add', (args) => runAsyncTool('add', args), "Add a new node.", '[type=t] ["Desc"] [key=v...] [parentId=id] [logic={...}]');
+    registerCommand('know', (args) => runAsyncTool('know', { content: args }), "Create or update node by ID.", 'id=noteId [value={...}] [logic={...}]...');
+    registerCommand('graph', (args) => runAsyncTool('graph', args), "Perform graph operations.", 'op=<...> source=id [target=id] [rel=r] [query="js"]...');
+    registerCommand('run', async (args) => {
+        const noteId = args.id ?? args._; // Allow positional ID
+        if (!noteId) { logger.warn("Run command needs a node ID."); return; }
+        try {
+            const noteToRun = await memory.load(noteId);
+            if (noteToRun.state.status === 'running') { logger.warn(`Note ${noteId} is already running.`); return; }
+            if (!noteToRun.logic) { logger.warn(`Note ${noteId} has no logic to run.`); return; }
+
+            logger.info(`Manually setting ${noteId} to pending for execution.`);
+            noteToRun.state.status = 'pending';
+            noteToRun.memory.push({ type: 'manual_run_trigger', content: { command: args }, timestamp: new Date().toISOString() });
+            await memory.save(noteToRun);
+            // Trigger runNote async
+            setTimeout(() => runNote(noteId).catch(e => logger.error(`Manual run trigger failed for ${noteId}: ${e.message}`)), 0);
+        } catch (e) { logger.error(`Failed to initiate run for ${noteId}: ${e.message}`); }
+    }, "Trigger execution of a node.", '<id>');
+    registerCommand('inspect', (args) => {
+        const noteId = args.id ?? args._; // Allow positional ID
+        const level = args.level ?? 'detail';
+        if (!noteId) { logger.warn("Inspect command needs a node ID."); return; }
+        // Select node in UI if possible
+        if (dashboard) dashboard.selectNode(noteId);
+        // Run inspect tool (result logged to console by tool if no calling note)
+        runAsyncTool('inspect', { targetId: noteId, level: level, query: args.query });
+    }, "Inspect node details.", '<id> [level=detail|summary|full|logic|memory|metrics|diagnose] [query=...]');
+    registerCommand('modify', (args) => {
+        const targetId = args.target ?? args.id ?? args._; // Allow target=, id=, or positional
+        if (!targetId) { logger.warn("Modify command needs a target ID (target=<id> or positional)."); return; }
+
+        const updates = [];
+        const patch = args.patch; // Allow direct JSON patch input via patch='[...]'
+        const reservedKeys = ['_', 'id', 'target', 'patch', 'level']; // Args to ignore as direct updates
+
+        if (!patch) {
+            // Collect key=value pairs from arguments, excluding reserved keys
+            for (const key in args) {
+                if (!reservedKeys.includes(key) && !key.endsWith('_iscode')) { // Check for isCode flag separately
+                    updates.push({
+                        key: key,
+                        value: args[key],
+                        isCode: args[`${key}_iscode`] === true // Check for specific isCode flag
+                    });
+                }
+            }
+        }
+
+        if (updates.length === 0 && !patch) {
+            logger.warn("Modify needs key=value pairs (e.g., value.desc=\"New Name\") or a JSON patch (patch='[{...}]').");
+            return;
+        }
+        runAsyncTool('modify', { target: targetId, updates: updates.length > 0 ? updates : undefined, patch });
+    }, "Modify node properties.", 'target=<id> <key=value> [key_isCode=true]... OR patch=\'[JSON Patch]\'');
+    registerCommand('call', async (args) => {
+        const { target: targetId, tool: toolName, input } = args;
+        if (!targetId || !toolName) { logger.warn("Call command requires target=<id> and tool=<name> arguments."); return; }
+
+        const tool = tools.get(toolName);
+        if (!tool) { logger.warn(`Tool '${toolName}' not found.`); return; }
+
+        try {
+            const targetNote = await memory.load(targetId);
+            // Create context specific to this call, using the target note
+            const ctx = { note: targetNote, memory, tools, logger, runNote, ui: dashboard };
+            logger.info(`Manually calling tool '${toolName}' on node ${targetId}...`);
+            // Await the result here since it's a direct manual call
+            const result = await tool.execute(input ?? {}, ctx);
+            logger.info(`Manual call finished. Status: ${result.status}` + (result.result ? `, Result: ${JSON.stringify(result.result).substring(0, 100)}...` : ''));
+        } catch (e) { logger.error(`Manual tool call failed: ${e.message}`); }
+    }, "Execute a tool in context of a node.", 'target=<id> tool=<name> [input={...}]');
+    registerCommand('define', (args) => runAsyncTool('define_concept', args), "Define a concept in a meta-note.", 'concept_name="Name" definition="Text" [metaNoteId=root] [details={...}]');
+    registerCommand('schedule', (args) => runAsyncTool('schedule', args), "Schedule future execution.", '[noteId=id] [delayMs=ms | time=ISOString] [runLogic={...}]');
+    registerCommand('fork', (args) => runAsyncTool('fork', args), "Create a copy (fork) of a node.", '[target=id] [modifications={...}]');
+    registerCommand('plan', (args) => runAsyncTool('plan', args), "Generate plan logic for a goal.", 'goal="Describe objective"');
+    registerCommand('log', (args) => runAsyncTool('log', args), "Log a message.", 'message="Text or expression" [level=info|warn|error|debug]');
+    // Add other tool commands as needed...
+    registerCommand('evalexpr', (args) => runAsyncTool('eval_expr', args), "Safely evaluate simple JS expression.", 'expr="JS expression" [ctx={...}]');
+    registerCommand('eval', (args) => runAsyncTool('eval', args), "DANGEROUS: Execute arbitrary JS.", 'code="JS code block"');
+
+    /** Parses and handles user text input from the prompt. */
+    function handleUserInput(command) {
+        command = command.trim();
+        if (!command) return;
+        logger.info(`Input Command: ${command}`);
+
+        const inputElement = document.getElementById('prompt-input');
+        if (inputElement) inputElement.value = ''; // Clear input field
+
+        // Improved argument parsing (handles quotes, basic JSON)
+        // Regex to match: sequences of non-whitespace/non-quote chars, or quoted strings
+        const parts = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+        const action = parts[0]?.toLowerCase();
+        if (!action) return;
+
+        const cmd = commandRegistry.get(action);
+        if (!cmd) {
+            logger.warn(`Unknown command: '${action}'. Type 'help' for available commands.`);
+            return;
+        }
+
+        // Parse arguments (key=value or positional)
+        const args = {};
+        const positionalArgs = [];
+        parts.slice(1).forEach(part => {
+            const eqIndex = part.indexOf('=');
+            if (eqIndex > 0) { // Key=Value pair
+                const key = part.substring(0, eqIndex).trim().toLowerCase(); // Normalize key
+                let valueStr = part.substring(eqIndex + 1).trim();
+                let value;
+
+                // Handle quoted strings
+                if ((valueStr.startsWith('"') && valueStr.endsWith('"')) || (valueStr.startsWith("'") && valueStr.endsWith("'"))) {
+                    value = valueStr.slice(1, -1);
+                }
+                // Handle numbers
+                else if (!isNaN(Number(valueStr)) && valueStr.trim() !== '') {
+                    value = Number(valueStr);
+                }
+                // Handle booleans
+                else if (valueStr.toLowerCase() === 'true') { value = true; }
+                else if (valueStr.toLowerCase() === 'false') { value = false; }
+                // Handle null
+                else if (valueStr.toLowerCase() === 'null') { value = null; }
+                // Handle JSON (basic attempt)
+                else if ((valueStr.startsWith('{') && valueStr.endsWith('}')) || (valueStr.startsWith('[') && valueStr.endsWith(']'))) {
+                    try { value = JSON.parse(valueStr); }
+                    catch (e) {
+                        logger.warn(`Could not parse argument "${key}" value as JSON, treating as string: ${valueStr}`);
+                        value = valueStr; // Fallback to string if JSON parse fails
+                    }
+                }
+                // Default to string
+                else { value = valueStr; }
+                args[key] = value;
+
+            } else { // Positional argument
+                // Remove quotes if present
+                if ((part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"))) {
+                    positionalArgs.push(part.slice(1, -1));
+                } else {
+                    positionalArgs.push(part);
+                }
+            }
+        });
+
+        // Handle positional argument (often used for ID)
+        if (positionalArgs.length > 0) {
+            args._ = positionalArgs[0]; // Store first positional arg as '_'
+            args._all = positionalArgs; // Store all positional args
+            // Convention: If 'id' or 'target' not set, use first positional arg
+            if (args.id === undefined && args.target === undefined) {
+                // Only assign to 'id' if it seems like a common target command
+                if (['run', 'inspect', 'modify', 'fork', 'call'].includes(action)) {
+                    args.id = positionalArgs[0];
+                }
+            }
+        }
+
+        // Execute the command handler
+        try {
+            cmd.handler(args);
+        } catch (e) {
+            logger.error(`Error executing command "${action}": ${e.message}`, e);
+        }
+    }
+
+    // --- Initialization ---
+    async function main() {
+        logger.info(`Initializing Netention Ultra Client v${'2.5-revised'}...`);
+        memory = new Memory();
+        dashboard = new UI();
+
+        // Crucial check: If UI (WebGL) failed to initialize, stop here.
+        if (!dashboard?.renderer) {
+            logger.error("UI Initialization Failed. Aborting simulation start.");
+            // Optionally update HUD or display a message in the container
+            const statusEl = document.getElementById('status');
+            if(statusEl) statusEl.textContent = "Error: UI Initialization Failed.";
+            const promptEl = document.getElementById('prompt-input');
+            if(promptEl) promptEl.disabled = true;
+            return;
+        }
+
+        // --- Seed Note Definition ---
+        // Demonstrates agentic capabilities: planning, self-modification, interaction.
+        const rootNote = {
+            id: "root",
+            value: { desc: "System Root / Metaprogrammer", widget: "dodecahedron", size: 15, color: "#ffcc00", type: "metaprogramming_agent" },
+            graph: [],
+            state: { status: "pending", priority: 100 },
+            memory: [{ type: 'creation', content: 'System bootstrap.', timestamp: new Date().toISOString()}],
+            timestamp: new Date().toISOString(),
+            resources: { tokens: 10000, cycles: 10000 },
+            logic: {
+                type: "compose",
+                toolChain: [
+                    { id:"log_start", tool: "log", input: { message: "'Root agent starting initialization sequence. Tick: ' + globalTick", level: "success" } },
+                    { id:"define_core", tool: "define_concept", input: { concept_name: "Agent", definition: "An autonomous entity capable of perception, reasoning, and action within the environment." } },
+                    { id:"add_generator", tool: "add", input: {
+                            id:"agent_task_generator",
+                            desc: "Generative Agent (Tasks)", type: "agent", parentId: "root", color: "#00aaff", size: 10, widget: "cone",
+                            logic: { type: "loop", count: 2, body: { type: "compose", toolChain: [ // Run only twice initially
+                                        { tool: "llm", input: { prompt: "Suggest a simple task for another agent (e.g., 'inspect root', 'define concept X', 'connect A to B')", persona: "task master" }},
+                                        { tool: "add", input: { parentId: "agent_task_generator", desc: "note.value?.lastLLMResult ?? 'Generated Task'", type: "task", color: "#ff8800", size: 6, state: { priority: 40 } } }
+                                    ]}}
+                        }},
+                    { id:"add_analyzer", tool: "add", input: {
+                            id:"agent_system_analyzer",
+                            desc: "Analyzer Agent (System Health)", type: "agent", parentId: "root", color: "#cc66ff", size: 10, widget: "octahedron",
+                            logic: { type: "compose", toolChain: [
+                                    { tool: "log", input: { message: "Analyzer: Starting health check cycle." } },
+                                    { tool: "inspect", input: { targetId: "root", level: "metrics" } }, // Inspect overall system
+                                    { tool: "graph", input: { operation: "query", query:"n.state.status==='failed' || n.resources.cycles < 10" } }, // Find failed or low-cycle notes
+                                    { tool: "log", input: { message: "'Analyzer: Found ' + (note.value?.last_graph_result?.length ?? 0) + ' potentially problematic notes.'", level: "warn" } },
+                                    // Future: Add logic to handle/report problematic notes
+                                    { tool: "schedule", input: { delayMs: 30000, noteId: "agent_system_analyzer" } } // Reschedule self
+                                ]}
+                        }},
+                    { id:"add_reflector", tool: "add", input: {
+                            id:"agent_reflector",
+                            desc: "Reflective Agent", type: "agent", parentId: "root", color: "#66ff99", size: 9, widget: "torus",
+                            logic: { type: "compose", toolChain: [
+                                    { tool: "log", input: { message: "Reflector: Beginning self-reflection cycle." } },
+                                    { tool: "reflect", input: { targetId: "root", reflectionPrompt: "Analyze root node state and recent activity. Suggest one improvement to the system structure or behavior." } },
+                                    { tool: "log", input: { message: "'Reflector: Reflection complete. Suggestion logged.'", level: "info" } },
+                                    // Future: Parse suggestion and attempt to implement it via modify/plan/eval
+                                    { tool: "schedule", input: { delayMs: 60000, noteId: "agent_reflector" } } // Reschedule self
+                                ]}
+                        }},
+                    { id:"connect_agents", tool: "graph", input: { operation: "connect", source: "root", target: "agent_task_generator", rel: "manages" } },
+                    { id:"connect_agents2", tool: "graph", input: { operation: "connect", source: "root", target: "agent_system_analyzer", rel: "manages" } },
+                    { id:"connect_agents3", tool: "graph", input: { operation: "connect", source: "root", target: "agent_reflector", rel: "manages" } },
+                    { id:"run_generator", tool: "run", input: { id: "agent_task_generator" } },
+                    { id:"run_analyzer", tool: "run", input: { id: "agent_system_analyzer" } },
+                    { id:"run_reflector", tool: "run", input: { id: "agent_reflector" } },
+                    { id:"log_end", tool: "log", input: { message: "Root initialization complete. Core agents launched.", level: "success" } },
+                ]
+            }
+        };
+        await memory.save(rootNote);
+
+        // Setup User Input Listener
+        const inputElement = document.getElementById('prompt-input');
+        if (inputElement) {
+            inputElement.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && inputElement.value) {
+                    handleUserInput(inputElement.value);
+                }
+            });
+        } else {
+            logger.error("Prompt input element (#prompt-input) not found in the DOM.");
+        }
+
+        logger.info("Initialization complete. System is running. Type 'help' in the console.");
+
+        // Initial run of the root note after a short delay
+        setTimeout(() => runNote("root").catch(e => logger.error(`Initial execution of root note failed: ${e.message}`)), 500);
+    }
+
+    // --- Global Error Handling ---
+    window.addEventListener('error', (event) => {
+        logger.error('Unhandled Global Error:', event.error || event.message, event);
+        // Optionally display a persistent error message to the user?
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        logger.error('Unhandled Promise Rejection:', event.reason);
+    });
+
+    // --- Start the Application ---
+    main().catch(e => {
+        logger.error("Fatal Initialization Error:", e);
+        const container = document.getElementById('container');
+        if (container) {
+            container.innerHTML = `<div style='padding: 30px; color: var(--error-color);'>
+                 <h2>Fatal Initialization Error</h2>
+                 <p>The application could not start. Please check the developer console for details.</p>
+                 <p><strong>Error:</strong> ${e.message}</p>
+             </div>`;
+        } else {
+            // Fallback if container isn't even available
+            document.body.innerHTML = `<h2>Fatal Initialization Error</h2><p>${e.message}</p>`;
+        }
+    });
+
+</script>
+</body>
+</html>

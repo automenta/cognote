@@ -1,0 +1,40 @@
+
+.noteEditor {
+    display: flex;
+    flex-direction: column;
+    width: 100%; /* Take full width of its container */
+}
+
+.editorTextarea {
+    font-family: monospace;
+    font-size: 0.9em;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    min-height: 200px; /* Minimum height for the textarea */
+    resize: vertical; /* Allow vertical resizing */
+}
+
+.editorActions {
+    text-align: right; /* Align buttons to the right */
+}
+
+.editorActions button {
+    margin-left: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    border-radius: 4px;
+}
+
+.editorActions button:hover {
+    background-color: #f0f0f0;
+}
+
+.validationError {
+    color: #f44336; /* Error color */
+    margin-top: 5px;
+    font-size: 0.85em;
+}

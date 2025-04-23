@@ -1,0 +1,18 @@
+
+.uiView {
+    flex-grow: 1;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 5px;
+    margin: 20px;
+    border: 1px solid #ddd;
+}
+
+.uiView h2 {
+    color: #555;
+    margin-bottom: 15px;
+}
+
+.viewContent {
+    padding: 10px 0;
+}
