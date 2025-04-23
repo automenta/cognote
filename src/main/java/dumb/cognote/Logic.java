@@ -633,7 +633,71 @@ public class Logic {
 
             @Override
             public void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy) {
-                System.err.println("Contradiction resolution not implemented. Strategy: " + strategy + ", Conflicting: " + contradiction.conflictingAssertionIds());
+                lock.writeLock().lock(); // Acquire lock to safely access assertions map
+                try {
+                    Set<String> conflictingIds = contradiction.conflictingAssertionIds();
+                    System.err.printf("TMS Contradiction Resolution (Strategy: %s) for IDs: %s%n", strategy, conflictingIds);
+
+                    switch (strategy) {
+                        case LOG_ONLY -> {
+                            // Already logged when detected, just return
+                            System.err.println("Strategy LOG_ONLY: No assertions retracted.");
+                        }
+                        case RETRACT_WEAKEST -> {
+                            List<Assertion> activeConflicts = conflictingIds.stream()
+                                    .map(assertions::get)
+                                    .filter(Objects::nonNull)
+                                    .filter(Assertion::isActive)
+                                    .toList();
+
+                            if (activeConflicts.isEmpty()) {
+                                System.err.println("Strategy RETRACT_WEAKEST: No active conflicting assertions found.");
+                                return;
+                            }
+
+                            // Find the minimum priority among active conflicts
+                            double minPri = activeConflicts.stream()
+                                    .mapToDouble(Assertion::pri)
+                                    .min()
+                                    .orElseThrow(); // Should not happen if activeConflicts is not empty
+
+                            // Find assertions with the minimum priority
+                            List<Assertion> weakestAssertions = activeConflicts.stream()
+                                    .filter(a -> Double.compare(a.pri(), minPri) == 0)
+                                    .toList();
+
+                            Set<String> idsToRetract = new HashSet<>();
+
+                            if (weakestAssertions.size() > 1) {
+                                // If there's a tie in priority, retract the oldest ones
+                                long maxTimestamp = weakestAssertions.stream()
+                                        .mapToLong(Assertion::timestamp)
+                                        .max()
+                                        .orElseThrow(); // Should not happen
+
+                                weakestAssertions.stream()
+                                        .filter(a -> a.timestamp() == maxTimestamp)
+                                        .map(Assertion::id)
+                                        .forEach(idsToRetract::add);
+                                System.err.printf("Strategy RETRACT_WEAKEST: Tie in priority (%.3f), retracting %d oldest assertions.%n", minPri, idsToRetract.size());
+
+                            } else {
+                                // Only one weakest assertion, retract it
+                                idsToRetract.add(weakestAssertions.getFirst().id());
+                                System.err.printf("Strategy RETRACT_WEAKEST: Retracting weakest assertion with priority %.3f.%n", minPri);
+                            }
+
+                            // Retract the identified assertions.
+                            // Note: retractInternal modifies the maps while holding the lock.
+                            // We collect IDs first, then retract.
+                            // Retracting might deactivate others, potentially resolving the contradiction
+                            // or causing new ones. The TMS handles dependency updates.
+                            idsToRetract.forEach(id -> retractInternal(id, "ContradictionResolution", new HashSet<>()));
+                        }
+                    }
+                } finally {
+                    lock.writeLock().unlock(); // Release lock
+                }
             }
 
             @Override
