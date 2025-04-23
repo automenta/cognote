@@ -1,12 +1,12 @@
 package dumb.cognote;
 
+import dev.langchain4j.model.chat.ChatResponse;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
-import javax.swing.border.TitledBorder;
+import javax.swing.border.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
@@ -14,6 +14,9 @@ import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
 import java.awt.*;
 import java.awt.event.*;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -264,7 +267,7 @@ class UI extends JFrame {
                 });
     }
 
-    private <T> void performNoteActionAsync(String actionName, NoteAsyncAction<T> asyncAction, BiConsumer<T, Cog.Note> successCallback, BiConsumer<Throwable, Cog.Note> failureCallback) {
+    private <T extends ChatResponse> void performNoteActionAsync(String actionName, NoteAsyncAction<T> asyncAction, BiConsumer<T, Cog.Note> successCallback, BiConsumer<Throwable, Cog.Note> failureCallback) {
         ofNullable(currentNote).filter(_ -> cog != null).filter(n -> !Cog.GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id))
                 .ifPresent(n -> {
                     updateStatus(actionName + " Note: " + n.title);
@@ -465,7 +468,7 @@ class UI extends JFrame {
     enum AttachmentType {FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION, LLM_INFO, LLM_ERROR, QUERY_SENT, QUERY_RESULT, OTHER}
 
     @FunctionalInterface
-    interface NoteAsyncAction<T> {
+    interface NoteAsyncAction<T extends ChatResponse> {
         CompletableFuture<T> execute(String taskId, Cog.Note note);
     }
 
@@ -720,9 +723,6 @@ class UI extends JFrame {
         void addNoteToList(Cog.Note note) {
             addNoteToListInternal(note);
         }
-        private void removeNoteAction() {
-            performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
-        }
 
         private void addNoteToListInternal(Cog.Note note) {
             if (findNoteById(note.id).isEmpty()) {
@@ -800,32 +800,15 @@ class UI extends JFrame {
                 return cog.lm.text2kifAsync(taskId, note.text, note.id);
             }, (chatResponse, note) -> {
                 // Success handler now receives ChatResponse
-                // Extract the final content from the response
-                var finalContent = chatResponse.content();
-                if (finalContent != null && !finalContent.isBlank()) {
-                    // Parse the KIF and emit as external input
-                    try {
-                        Logic.KifParser.parseKif(finalContent).forEach(term -> {
-                            if (term instanceof Logic.KifList list) {
-                                // Emit as external input, targeting the note's KB
-                                cog.events.emit(new Cog.ExternalInputEvent(list, "llm:" + note.id, note.id));
-                            } else {
-                                System.err.println("LLM KIF output contained non-list term: " + term.toKif());
-                            }
-                        });
-                    } catch (Logic.KifParser.ParseException e) {
-                        System.err.println("LLM KIF output parse error for note " + note.id + ": " + e.getMessage());
-                        // Optionally add an error attachment
-                        var errorVm = UI.AttachmentViewModel.forLlm(
-                                Cog.generateId(Cog.ID_PREFIX_LLM_ITEM + "kif_parse_error"),
-                                note.id, "KIF Parse Error: " + e.getMessage() + "\nOutput:\n" + finalContent,
-                                UI.AttachmentType.LLM_ERROR, System.currentTimeMillis(), note.id, UI.LlmStatus.ERROR
-                        );
-                        cog.events.emit(new Cog.LlmInfoEvent(errorVm));
-                    }
-                } else {
-                     System.out.println("LLM KIF generation for note " + note.id + " returned empty content.");
+                // The KIF assertions should have been added by the tool call within the LLM interaction.
+                // We don't need to parse the final text content here unless the LLM failed to use the tool.
+                // For now, just log success.
+                System.out.println("LLM KIF generation task completed for note " + note.id + ". Check attachments for results added by tool.");
+                // Optionally, check chatResponse.content() for any final message from the LLM
+                if (chatResponse.content() != null && !chatResponse.content().isBlank()) {
+                     System.out.println("LLM final message: " + chatResponse.content());
                 }
+
             }, UI::handleLlmFailure); // Failure handler remains the same
         }
 
@@ -928,106 +911,6 @@ class UI extends JFrame {
                      System.out.println("LLM question generation for note " + n.id + " returned empty content.");
                 }
             }, UI::handleLlmFailure);
-        }
-    }
-    class EditorPanel extends JPanel {
-        public final JTextArea noteEditor = new JTextArea();
-        final JTextField noteTitleField = new JTextField();
-        private boolean isUpdatingTitleField = false;
-
-        EditorPanel() {
-            setLayout(new BorderLayout());
-            noteEditor.setLineWrap(true);
-            noteEditor.setWrapStyleWord(true);
-            var titlePanel = new JPanel(new BorderLayout());
-            titlePanel.add(new JLabel("Title: "), BorderLayout.WEST);
-            titlePanel.add(noteTitleField, BorderLayout.CENTER);
-            titlePanel.setBorder(new EmptyBorder(5, 5, 5, 5));
-            add(titlePanel, BorderLayout.NORTH);
-            add(new JScrollPane(noteEditor), BorderLayout.CENTER);
-            setupActionListeners();
-        }
-
-        private void setupActionListeners() {
-            noteEditor.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id))
-                    currentNote.text = noteEditor.getText();
-            });
-            noteEditor.addFocusListener(new FocusAdapter() {
-                @Override
-                public void focusLost(FocusEvent e) {
-                    saveCurrentNote();
-                }
-            });
-            noteTitleField.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (!isUpdatingTitleField && currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id) && !Cog.CONFIG_NOTE_ID.equals(currentNote.id)) {
-                    currentNote.title = noteTitleField.getText();
-                    noteTitleUpdated(currentNote); // Notify outer UI
-                }
-            });
-        }
-
-        void updateForSelection(Cog.Note note, boolean isGlobal, boolean isConfig) {
-            var noteSelected = (note != null);
-            var isEditableNoteContent = noteSelected && !isGlobal;
-            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig;
-            isUpdatingTitleField = true;
-            noteTitleField.setText(noteSelected ? note.title : "");
-            noteTitleField.setEditable(isEditableNoteTitle);
-            noteTitleField.setEnabled(noteSelected && !isGlobal);
-            isUpdatingTitleField = false;
-            noteEditor.setText(noteSelected ? note.text : "");
-            noteEditor.setEditable(isEditableNoteContent);
-            noteEditor.setEnabled(isEditableNoteContent);
-            noteEditor.getHighlighter().removeAllHighlights();
-            noteEditor.setCaretPosition(0);
-        }
-
-        void setControlsEnabled(boolean enabled, boolean noteSelected, boolean isGlobal, boolean isConfig) {
-            noteTitleField.setEnabled(enabled && noteSelected && !isGlobal);
-            noteTitleField.setEditable(enabled && noteSelected && !isGlobal && !isConfig);
-            noteEditor.setEnabled(enabled && noteSelected && !isGlobal);
-            noteEditor.setEditable(enabled && noteSelected && !isGlobal);
-        }
-
-        void clearEditor() {
-            noteTitleField.setText("");
-            noteEditor.setText("");
-        }
-
-        void highlightAffectedNoteText(Logic.Assertion assertion, AttachmentStatus status) {
-            if (cog == null || currentNote == null || Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id) || Cog.CONFIG_NOTE_ID.equals(currentNote.id))
-                return;
-            var displayNoteId = assertion.sourceNoteId();
-            if (displayNoteId == null && assertion.derivationDepth() > 0)
-                displayNoteId = cog.context.findCommonSourceNodeId(assertion.justificationIds());
-            if (displayNoteId == null && !Cog.GLOBAL_KB_NOTE_ID.equals(assertion.kb())) displayNoteId = assertion.kb();
-            if (currentNote.id.equals(displayNoteId)) {
-                var searchTerm = extractHighlightTerm(assertion.kif());
-                if (searchTerm == null || searchTerm.isBlank()) return;
-                var highlighter = noteEditor.getHighlighter();
-                Highlighter.HighlightPainter painter = switch (status) {
-                    case ACTIVE -> new DefaultHighlighter.DefaultHighlightPainter(new Color(200, 255, 200));
-                    case RETRACTED, INACTIVE ->
-                            new DefaultHighlighter.DefaultHighlightPainter(new Color(255, 200, 200));
-                    case EVICTED -> new DefaultHighlighter.DefaultHighlightPainter(Color.LIGHT_GRAY);
-                };
-                try {
-                    var text = noteEditor.getText();
-                    var pos = text.toLowerCase().indexOf(searchTerm.toLowerCase());
-                    while (pos >= 0) {
-                        highlighter.addHighlight(pos, pos + searchTerm.length(), painter);
-                        pos = text.toLowerCase().indexOf(searchTerm.toLowerCase(), pos + 1);
-                    }
-                } catch (BadLocationException e) { /* Ignore */ }
-            }
-        }
-
-        private String extractHighlightTerm(Logic.KifList kif) {
-            return kif.terms().stream().filter(Logic.KifAtom.class::isInstance).map(Logic.KifAtom.class::cast).map(Logic.KifAtom::value)
-                    .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
-                    .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT))
-                    .findFirst().orElse(null);
         }
     }
 

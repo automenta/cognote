@@ -1,5 +1,6 @@
 package dumb.cognote;
 
+import dev.langchain4j.model.chat.ChatResponse;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -230,6 +231,7 @@ public class Cog {
         plugins.loadPlugin(new IO.StatusUpdaterPlugin(statusEvent -> updateStatusLabel(statusEvent.statusMessage())));
         plugins.loadPlugin(new IO.WebSocketBroadcasterPlugin(this));
         plugins.loadPlugin(new IO.UiUpdatePlugin(ui));
+        plugins.loadPlugin(new TaskDecompositionPlugin()); // Add the new plugin
 
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
@@ -758,6 +760,7 @@ public class Cog {
                 switch (event) {
                     case AssertionAddedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), event);
                     case TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), event);
+                    case ExternalInputEvent eiEvent -> handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
                     default -> {
                     }
                 }
@@ -955,6 +958,7 @@ public class Cog {
                                 case KIF_OP_IMPLIES, KIF_OP_EQUIV -> handleRuleInput(list, event.sourceId());
                                 case KIF_OP_EXISTS -> handleExistsInput(list, event.sourceId(), event.targetNoteId());
                                 case KIF_OP_FORALL -> handleForallInput(list, event.sourceId(), event.targetNoteId());
+                                case "goal" -> { /* Handled by TaskDecompositionPlugin */ }
                                 default -> handleStandardAssertionInput(list, event.sourceId(), event.targetNoteId());
                             }
                         }, () -> handleStandardAssertionInput(list, event.sourceId(), event.targetNoteId())
