@@ -22,6 +22,10 @@ import dev.langchain4j.model.chat.ChatResponse;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.stream.Stream;
+import dev.langchain4j.model.tool.ToolParameter;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 
 
 public class LM {
@@ -68,7 +72,7 @@ public class LM {
     // Modify the llmAsync method signature and implementation
     // Change return type to ChatResponse
     // Add List<ToolSpecification> parameter
-    CompletableFuture<ChatResponse> llmAsync(String taskId, String prompt, String interactionType, String noteId, List<ToolSpecification> toolSpecifications) {
+    CompletableFuture<ChatResponse> llmAsync(String taskId, String prompt, String interactionType, String noteId, List<ToolSpecification> toolSpecifications, List<ChatMessage> history) {
         if (chatModel == null) {
             var errorMsg = interactionType + " Error: LLM not configured.";
             // Update UI status for the task
@@ -76,51 +80,89 @@ public class LM {
             return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
         }
 
+        // Add the current user prompt to the history for this turn if it's the first message
+        var currentHistory = new java.util.ArrayList<>(history);
+        if (history.isEmpty()) {
+             currentHistory.add(UserMessage.from(prompt));
+        } else {
+             // If history is not empty, assume the initial prompt was already added
+             // and subsequent messages are AI/Tool messages from previous turns.
+             // This simplifies the loop logic; the initial prompt is only added once.
+        }
+
+
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
-            cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Waiting for LLM...");
+            cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Sending to LLM...");
 
             try {
-                // Pass tool specifications to the generate call
-                ChatResponse response = chatModel.generate(prompt, toolSpecifications.toArray(new ToolSpecification[0]));
+                // Generate response with current history and tools
+                ChatResponse response = chatModel.generate(currentHistory, toolSpecifications);
 
-                // Update UI status based on response type (text or tool call)
+                // Process the response
                 if (response.toolExecutionRequests() != null && !response.toolExecutionRequests().isEmpty()) {
-                     cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Tool call requested...");
-                } else if (response.content() != null && !response.content().isBlank()) {
-                     cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Text response received...");
-                } else {
-                     cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + ": Empty response.");
-                }
+                    // LLM wants to call tools
+                    cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": LLM requested tool call(s)...");
 
-                return response;
+                    var toolResults = new java.util.ArrayList<ChatMessage>();
+                    toolResults.add(response.aiMessage()); // Add the AI message containing tool requests to history
+
+                    for (ToolExecutionRequest toolRequest : response.toolExecutionRequests()) {
+                        cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Executing Tool: " + toolRequest.toolName() + "...");
+                        System.out.println("Executing Tool: " + toolRequest.toolName() + " with arguments: " + toolRequest.arguments());
+
+                        // Execute the tool call synchronously
+                        String toolResult = tools.executeToolCall(toolRequest);
+
+                        System.out.println("Tool Result: " + toolResult);
+                        cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Tool Result: " + toolResult);
+
+                        // Add the tool result message to history
+                        toolResults.add(ToolExecutionResultMessage.from(toolRequest.toolName(), toolRequest.id(), toolResult));
+                    }
+
+                    // Recursively call llmAsync with updated history including tool calls and results
+                    // This creates the multi-turn tool interaction loop
+                    // Add a depth limit to prevent infinite loops
+                    int currentDepth = history.size(); // Simple depth based on message count
+                    final int MAX_TOOL_CALL_DEPTH = 10; // Limit the number of tool call turns
+
+                    if (currentDepth / 2 >= MAX_TOOL_CALL_DEPTH) { // Each tool turn adds ~2 messages (AI request + User result)
+                         var errorMsg = interactionType + ": Max tool call depth reached.";
+                         cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, errorMsg);
+                         throw new RuntimeException(errorMsg);
+                    }
+
+                    // Continue the conversation with the tool results
+                    currentHistory.addAll(toolResults);
+                    return llmAsync(taskId, prompt, interactionType, noteId, toolSpecifications, currentHistory).join(); // Wait for the next turn's result
+
+                } else if (response.content() != null && !response.content().isBlank()) {
+                    // LLM provided a final text response
+                    cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + ": Received final response.");
+                    currentHistory.add(response.aiMessage()); // Add the final AI message to history
+                    // The returned ChatResponse now contains the full history up to this point
+                    return response;
+
+                } else {
+                    // Empty response, task finished without content or tool calls
+                    cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + ": Received empty response.");
+                    return response;
+                }
 
             } catch (Exception e) {
                 var cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
                 if (cause instanceof InterruptedException) Thread.currentThread().interrupt();
-                // Update UI status for the task error
                 cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " Error: " + cause.getMessage());
                 throw new CompletionException("LLM API communication or processing error (" + interactionType + ")", cause);
             }
-        }, cog.events.exe);
+        }, cog.events.exe); // Use the event executor for async processing
     }
 
-    // Remove the following methods:
-    // void handleLlmResponse(String taskId, String noteId, String interactionType, String kifPredicate, String response, Throwable ex, BiConsumer<String, String> successHandler)
-    // void handleLlmKifResponse(String taskId, String noteId, String kifResult, Throwable ex)
-    // void handleLlmGenericResponse(String taskId, String noteId, String interactionType, String response, Throwable ex, String kifPredicate)
-    // void handleLlmEnhancementResponse(String taskId, String noteId, String response, Throwable ex)
+    // Update existing LLM action methods to use the new llmAsync signature
+    // They now return CompletableFuture<ChatResponse> and need to extract content
 
-    // The methods below (enhanceNoteWithLlmAsync, summarizeNoteWithLlmAsync, etc.)
-    // currently call the old handleLlm...Response methods.
-    // They will need to be updated in a future step to handle the ChatResponse
-    // returned by the new llmAsync method. For now, they are left as-is but will
-    // likely cause compilation errors or runtime issues until updated.
-    // This is expected as per the request to defer the full integration.
-    // You can comment them out temporarily if needed for compilation, but the
-    // instruction is just to remove the handlers they call.
-
-    public CompletableFuture<String> enhanceNoteWithLlmAsync(String taskId, Cog.Note n) {
+    public CompletableFuture<ChatResponse> enhanceNoteWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 You are a helpful assistant. Please revise and enhance the following note for clarity, conciseness, and improved structure. Keep the core meaning intact.
                 Focus on improving readability and flow. Correct any grammatical errors or awkward phrasing.
@@ -130,15 +172,14 @@ public class LM {
                 "%s"
 
                 Enhanced Note:""".formatted(n.text);
-        // This call needs to be updated to handle ChatResponse
-        var future = llmAsync(taskId, finalPrompt, "Note Enhancement", n.id, List.of()); // No tools for this task yet
+        // Pass empty history initially
+        var future = llmAsync(taskId, finalPrompt, "Note Enhancement", n.id, tools.discoverAndGetToolSpecifications(), new java.util.ArrayList<>());
         activeLlmTasks.put(taskId, future);
-        // This completion handler needs to be updated
-        future.whenCompleteAsync((response, ex) -> { /* handle ChatResponse */ }, cog.events.exe);
-        return future.thenApply(ChatResponse::content); // Placeholder: assumes text response
+        // The UI handler will now process the ChatResponse
+        return future;
     }
 
-    public CompletableFuture<String> summarizeNoteWithLlmAsync(String taskId, Cog.Note n) {
+    public CompletableFuture<ChatResponse> summarizeNoteWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Summarize the following note in one or two concise sentences. Output ONLY the summary.
 
@@ -146,15 +187,14 @@ public class LM {
                 "%s"
 
                 Summary:""".formatted(n.text);
-        // This call needs to be updated to handle ChatResponse
-        var future = llmAsync(taskId, finalPrompt, "Note Summarization", n.id, List.of()); // No tools for this task yet
+        // Pass empty history initially
+        var future = llmAsync(taskId, finalPrompt, "Note Summarization", n.id, tools.discoverAndGetToolSpecifications(), new java.util.ArrayList<>());
         activeLlmTasks.put(taskId, future);
-        // This completion handler needs to be updated
-        future.whenCompleteAsync((response, ex) -> { /* handle ChatResponse */ }, cog.events.exe);
-        return future.thenApply(ChatResponse::content); // Placeholder: assumes text response
+        // The UI handler will now process the ChatResponse
+        return future;
     }
 
-    public CompletableFuture<String> keyConceptsWithLlmAsync(String taskId, Cog.Note n) {
+    public CompletableFuture<ChatResponse> keyConceptsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.
 
@@ -162,15 +202,14 @@ public class LM {
                 "%s"
 
                 Key Concepts:""".formatted(n.text);
-        // This call needs to be updated to handle ChatResponse
-        var future = llmAsync(taskId, finalPrompt, "Key Concept Identification", n.id, List.of()); // No tools for this task yet
+        // Pass empty history initially
+        var future = llmAsync(taskId, finalPrompt, "Key Concept Identification", n.id, tools.discoverAndGetToolSpecifications(), new java.util.ArrayList<>());
         activeLlmTasks.put(taskId, future);
-        // This completion handler needs to be updated
-        future.whenCompleteAsync((response, ex) -> { /* handle ChatResponse */ }, cog.events.exe);
-        return future.thenApply(ChatResponse::content); // Placeholder: assumes text response
+        // The UI handler will now process the ChatResponse
+        return future;
     }
 
-    public CompletableFuture<String> generateQuestionsWithLlmAsync(String taskId, Cog.Note n) {
+    public CompletableFuture<ChatResponse> generateQuestionsWithLlmAsync(String taskId, Cog.Note n) {
         var finalPrompt = """
                 Based on the following note, generate 1-3 insightful questions that could lead to further exploration or clarification. Output ONLY the questions, each on a new line starting with '- '.
 
@@ -178,15 +217,14 @@ public class LM {
                 "%s"
 
                 Questions:""".formatted(n.text);
-        // This call needs to be updated to handle ChatResponse
-        var future = llmAsync(taskId, finalPrompt, "Question Generation", n.id, List.of()); // No tools for this task yet
+        // Pass empty history initially
+        var future = llmAsync(taskId, finalPrompt, "Question Generation", n.id, tools.discoverAndGetToolSpecifications(), new java.util.ArrayList<>());
         activeLlmTasks.put(taskId, future);
-        // This completion handler needs to be updated
-        future.whenCompleteAsync((response, ex) -> { /* handle ChatResponse */ }, cog.events.exe);
-        return future.thenApply(ChatResponse::content); // Placeholder: assumes text response
+        // The UI handler will now process the ChatResponse
+        return future;
     }
 
-    public CompletableFuture<String> text2kifAsync(String taskId, String noteText, String noteId) {
+    public CompletableFuture<ChatResponse> text2kifAsync(String taskId, String noteText, String noteId) {
         var finalPrompt = """
                 Convert the following note into a set of concise SUMO KIF assertions (standard Lisp-like syntax, e.g., (instance MyCat Cat)).
                 Output ONLY the KIF assertions, each on a new line, enclosed in parentheses.
@@ -202,12 +240,11 @@ public class LM {
                 "%s"
 
                 KIF Assertions:""".formatted(noteText);
-        // This call needs to be updated to handle ChatResponse
-        var future = llmAsync(taskId, finalPrompt, "KIF Generation", noteId, List.of()); // No tools for this task yet
+        // Pass empty history initially
+        var future = llmAsync(taskId, finalPrompt, "KIF Generation", noteId, tools.discoverAndGetToolSpecifications(), new java.util.ArrayList<>());
         activeLlmTasks.put(taskId, future);
-        // This completion handler needs to be updated
-        future.whenCompleteAsync((kifResult, ex) -> { /* handle ChatResponse */ }, cog.events.exe);
-        return future.thenApply(ChatResponse::content); // Placeholder: assumes text response
+        // The UI handler will now process the ChatResponse
+        return future;
     }
 
 
@@ -254,8 +291,8 @@ public class LM {
 
         // Example Tool Method: Add a KIF assertion to the global KB
         // LangChain4j will expect a JSON object like {"kifAssertion": "..."}
-        @Tool(name = "add_kif_assertion", description = "Add a KIF assertion string to the global knowledge base. Input is the KIF assertion string.")
-        public String addKifAssertion(String kifAssertion) {
+        @Tool(name = "add_kif_assertion", description = "Add a KIF assertion string to a knowledge base. Input is a JSON object with 'kif_assertion' (string) and optional 'target_kb_id' (string, defaults to global KB).")
+        public String addKifAssertion(@ToolParameter(name = "kif_assertion", description = "The KIF assertion string to add.") String kifAssertion, @ToolParameter(name = "target_kb_id", description = "Optional ID of the knowledge base (note ID) to add the assertion to. Defaults to global KB if not provided.") @Nullable String targetKbId) {
             try {
                 var terms = Logic.KifParser.parseKif(kifAssertion);
                 if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
@@ -267,17 +304,20 @@ public class LM {
                     var isOriented = isEq && list.size() == 3 && list.get(1).weight() > list.get(2).weight();
                     var type = list.containsSkolemTerm() ? Logic.AssertionType.SKOLEMIZED : Logic.AssertionType.GROUND;
                     var pri = LM.LLM_ASSERTION_BASE_PRIORITY / (1.0 + list.weight());
-                    var sourceId = "llm-tool:add_kif_assertion"; // Simple source ID for now
+                    var sourceId = "llm-tool:add_kif_assertion";
 
-                    var pa = new Logic.PotentialAssertion(list, pri, java.util.Set.of(), sourceId, isEq, isNeg, isOriented, null, type, java.util.List.of(), 0); // null targetNoteId for global KB
+                    // Use the provided targetNoteId, defaulting to global if null or empty
+                    var finalTargetKbId = (targetKbId == null || targetKbId.trim().isEmpty()) ? Cog.GLOBAL_KB_NOTE_ID : targetKbId.trim();
+
+                    var pa = new Logic.PotentialAssertion(list, pri, java.util.Set.of(), sourceId, isEq, isNeg, isOriented, finalTargetKbId, type, java.util.List.of(), 0);
                     var committedAssertion = cog.context.tryCommit(pa, sourceId);
 
                     if (committedAssertion != null) {
-                        System.out.println("Tool 'add_kif_assertion' successfully added: " + committedAssertion.toKifString());
-                        return "Assertion added successfully: " + committedAssertion.toKifString();
+                        System.out.println("Tool 'add_kif_assertion' successfully added: " + committedAssertion.toKifString() + " to KB " + committedAssertion.kb());
+                        return "Assertion added successfully: " + committedAssertion.toKifString() + " [ID: " + committedAssertion.id() + "]";
                     } else {
-                        System.out.println("Tool 'add_kif_assertion' failed to add assertion (might be duplicate or trivial): " + list.toKif());
-                        return "Assertion not added (might be duplicate or trivial).";
+                        System.out.println("Tool 'add_kif_assertion' failed to add assertion (might be duplicate, trivial, or KB full): " + list.toKif());
+                        return "Assertion not added (might be duplicate, trivial, or KB full).";
                     }
                 }
                 return "Error: Invalid KIF format provided.";
@@ -286,6 +326,63 @@ public class LM {
                 return "Error parsing KIF: " + e.getMessage();
             } catch (Exception e) {
                 System.err.println("Error executing tool 'add_kif_assertion': " + e.getMessage());
+                e.printStackTrace();
+                return "Error executing tool: " + e.getMessage();
+            }
+        }
+
+        // Add the getNoteText tool method
+        @Tool(name = "get_note_text", description = "Retrieve the full text content of a specific note by its ID.")
+        public String getNoteText(@ToolParameter(name = "note_id", description = "The ID of the note to retrieve text from.") String noteId) {
+            if (cog == null || cog.ui == null) {
+                return "Error: System UI not available.";
+            }
+            return cog.ui.findNoteById(noteId)
+                    .map(note -> note.text)
+                    .orElse("Error: Note with ID '" + noteId + "' not found.");
+        }
+
+        // Add the findAssertions tool method
+        @Tool(name = "find_assertions", description = "Query the knowledge base for assertions matching a KIF pattern. Returns a list of bindings found.")
+        public String findAssertions(@ToolParameter(name = "kif_pattern", description = "The KIF pattern to query the knowledge base with.") String kifPattern, @ToolParameter(name = "target_kb_id", description = "Optional ID of the knowledge base (note ID) to query. Defaults to global KB if not provided.") @Nullable String targetKbId) {
+            if (cog == null) {
+                return "Error: System not available.";
+            }
+            try {
+                var terms = Logic.KifParser.parseKif(kifPattern);
+                if (terms.size() != 1 || !(terms.getFirst() instanceof Logic.KifList patternList)) {
+                    return "Error: Invalid KIF pattern format. Must be a single KIF list.";
+                }
+
+                // Use the provided targetNoteId, defaulting to global if null or empty
+                var finalTargetKbId = (targetKbId == null || targetKbId.trim().isEmpty()) ? Cog.GLOBAL_KB_NOTE_ID : targetKbId.trim();
+
+                // Execute the query synchronously via Cog
+                var queryId = Cog.generateId(Cog.ID_PREFIX_QUERY + "tool_");
+                var query = new Cog.Query(queryId, Cog.QueryType.ASK_BINDINGS, patternList, finalTargetKbId, Map.of());
+                var answer = cog.executeQuerySync(query); // Call the new sync method
+
+                if (answer.status() == Cog.QueryStatus.SUCCESS) {
+                    if (answer.bindings().isEmpty()) {
+                        return "Query successful, but no matching assertions found.";
+                    } else {
+                        // Format bindings for LLM consumption
+                        return "Query successful. Found " + answer.bindings().size() + " bindings:\n" +
+                               answer.bindings().stream()
+                                       .map(b -> b.entrySet().stream()
+                                               .map(e -> e.getKey().name() + " = " + e.getValue().toKif())
+                                               .collect(Collectors.joining(", ")))
+                                       .collect(Collectors.joining("\n"));
+                    }
+                } else {
+                    return "Query failed with status " + answer.status() + ". " + (answer.explanation() != null ? "Details: " + answer.explanation().details() : "");
+                }
+
+            } catch (Logic.KifParser.ParseException e) {
+                System.err.println("Error parsing KIF pattern in tool 'find_assertions': " + e.getMessage());
+                return "Error parsing KIF pattern: " + e.getMessage();
+            } catch (Exception e) {
+                System.err.println("Error executing tool 'find_assertions': " + e.getMessage());
                 e.printStackTrace();
                 return "Error executing tool: " + e.getMessage();
             }

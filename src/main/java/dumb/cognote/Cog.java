@@ -512,6 +512,70 @@ public class Cog {
         events.emit(new LlmUpdateEvent(taskId, status, content));
     }
 
+    /**
+     * Executes a query synchronously by emitting a QueryRequestEvent and waiting for the corresponding QueryResultEvent.
+     * This method is intended for use by components that need a direct query result, such as LLM tools.
+     * It blocks the calling thread until the result is received or a timeout occurs.
+     *
+     * @param query The query to execute.
+     * @return The Answer containing the query result.
+     * @throws RuntimeException if interrupted or if waiting for the result fails.
+     */
+    public Answer executeQuerySync(Query query) {
+        // Use a CompletableFuture to signal when the result is received
+        CompletableFuture<Answer> resultFuture = new CompletableFuture<>();
+
+        // Register a temporary listener for QueryResultEvent with this specific query ID
+        Consumer<CogEvent> listener = event -> {
+            if (event instanceof QueryResultEvent resultEvent && resultEvent.result().query().equals(query.id())) {
+                resultFuture.complete(resultEvent.result());
+            }
+        };
+
+        // Add the listener. Need a way to remove it later.
+        // The Events class doesn't currently support removing specific listeners easily.
+        // A simple approach for this temporary listener is to rely on the CompletableFuture
+        // completing and the listener being short-lived. A more robust system would
+        // involve listener registration handles. For this prototype, we'll add directly
+        // and rely on the future completion.
+        // NOTE: This relies on the event executor processing the QueryResultEvent
+        // and completing the future *before* the calling thread times out or is interrupted.
+        // Since the event executor is separate, this should generally work, but could
+        // be a point of failure under heavy load or complex event processing.
+        // events.on(QueryResultEvent.class, listener); // This doesn't work directly as 'on' is not public and doesn't return handle
+
+        // Workaround: Manually add to the listeners map. This is fragile and bypasses
+        // the intended event system encapsulation. A proper fix requires modifying Events.
+        // For this prototype, we'll use this direct access.
+        @SuppressWarnings("unchecked")
+        CopyOnWriteArrayList<Consumer<CogEvent>> queryResultListeners = (CopyOnWriteArrayList<Consumer<CogEvent>>) events.listeners.computeIfAbsent(QueryResultEvent.class, k -> new CopyOnWriteArrayList<>());
+        queryResultListeners.add(listener);
+
+
+        try {
+            // Emit the query request event
+            events.emit(new QueryRequestEvent(query));
+
+            // Wait for the result future to complete
+            // Use a reasonable timeout to prevent indefinite blocking
+            return resultFuture.get(60, TimeUnit.SECONDS); // Wait up to 60 seconds
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Query execution interrupted", e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException("Error during query execution", e.getCause());
+        } catch (TimeoutException e) {
+            throw new RuntimeException("Query execution timed out after 60 seconds", e);
+        } finally {
+            // Attempt to remove the listener. This is tricky without a removal handle.
+            // In a real system, Events.on would return a handle to allow removal.
+            // For this prototype, we'll remove directly from the list.
+            queryResultListeners.remove(listener);
+        }
+    }
+
+
     enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
 
     enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}

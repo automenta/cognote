@@ -347,7 +347,18 @@ class UI extends JFrame {
             var model = entry.getKey();
             var index = entry.getValue();
             var oldVm = model.getElementAt(index);
-            var newVm = oldVm.withLlmUpdate(status, content);
+
+            // Append new content/status updates to the existing content string
+            // This shows the progression including tool calls/results
+            var newContent = oldVm.content();
+            if (content != null && !content.isBlank()) {
+                 // Avoid appending the same content repeatedly if status updates without new text
+                 if (!newContent.endsWith(content)) {
+                     newContent += "\n" + content;
+                 }
+            }
+
+            var newVm = oldVm.withLlmUpdate(status, newContent);
             model.setElementAt(newVm, index);
             if (currentNote != null && currentNote.id.equals(oldVm.noteId()))
                 attachmentPanel.refreshAttachmentDisplay();
@@ -575,159 +586,6 @@ class UI extends JFrame {
         }
     }
 
-    static class AttachmentListCellRenderer extends JPanel implements ListCellRenderer<AttachmentViewModel> {
-        private final JLabel iconLabel = new JLabel();
-        private final JLabel contentLabel = new JLabel();
-        private final JLabel detailLabel = new JLabel();
-        private final Border activeBorder = new CompoundBorder(new LineBorder(Color.LIGHT_GRAY, 1), new EmptyBorder(3, 5, 3, 5));
-        private final Border inactiveBorder = new CompoundBorder(new LineBorder(new Color(240, 240, 240), 1), new EmptyBorder(3, 5, 3, 5));
-        private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
-
-        AttachmentListCellRenderer() {
-            setLayout(new BorderLayout(5, 0));
-            setOpaque(true);
-            var textPanel = new JPanel(new BorderLayout());
-            textPanel.setOpaque(false);
-            textPanel.add(contentLabel, BorderLayout.CENTER);
-            textPanel.add(detailLabel, BorderLayout.SOUTH);
-            add(iconLabel, BorderLayout.WEST);
-            add(textPanel, BorderLayout.CENTER);
-            contentLabel.setFont(MONOSPACED_FONT);
-            detailLabel.setFont(UI_SMALL_FONT);
-            iconLabel.setFont(UI_DEFAULT_FONT.deriveFont(Font.BOLD));
-            iconLabel.setBorder(new EmptyBorder(0, 4, 0, 4));
-            iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        }
-
-        @Override
-        public Component getListCellRendererComponent(JList<? extends AttachmentViewModel> list, AttachmentViewModel value, int index, boolean isSelected, boolean cellHasFocus) {
-            contentLabel.setText(value.content());
-            contentLabel.setFont(MONOSPACED_FONT);
-            String iconText;
-            Color iconColor, bgColor = Color.WHITE, fgColor = Color.BLACK;
-            switch (value.attachmentType) {
-                case FACT -> {
-                    iconText = "F";
-                    iconColor = new Color(0, 128, 0);
-                    bgColor = new Color(235, 255, 235);
-                }
-                case DERIVED -> {
-                    iconText = "D";
-                    iconColor = Color.BLUE;
-                    bgColor = new Color(230, 240, 255);
-                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
-                }
-                case UNIVERSAL -> {
-                    iconText = "∀";
-                    iconColor = new Color(0, 0, 128);
-                    bgColor = new Color(235, 235, 255);
-                }
-                case SKOLEMIZED -> {
-                    iconText = "∃";
-                    iconColor = new Color(139, 69, 19);
-                    bgColor = new Color(255, 255, 230);
-                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
-                }
-                case SUMMARY -> {
-                    iconText = "Σ";
-                    iconColor = Color.DARK_GRAY;
-                    bgColor = new Color(240, 240, 240);
-                }
-                case CONCEPT -> {
-                    iconText = "C";
-                    iconColor = Color.DARK_GRAY;
-                    bgColor = new Color(240, 240, 240);
-                }
-                case QUESTION -> {
-                    iconText = "?";
-                    iconColor = Color.MAGENTA;
-                    bgColor = new Color(255, 240, 255);
-                }
-                case LLM_ERROR -> {
-                    iconText = "!";
-                    iconColor = Color.RED;
-                    bgColor = new Color(255, 230, 230);
-                }
-                case LLM_INFO -> {
-                    iconText = "i";
-                    iconColor = Color.GRAY;
-                }
-                case QUERY_SENT -> {
-                    iconText = "->";
-                    iconColor = new Color(0, 150, 150);
-                }
-                case QUERY_RESULT -> {
-                    iconText = "<-";
-                    iconColor = new Color(0, 150, 150);
-                }
-                default -> {
-                    iconText = "*";
-                    iconColor = Color.BLACK;
-                }
-            }
-            var kbDisp = ofNullable(value.kbId()).map(id -> switch (id) {
-                case Cog.GLOBAL_KB_NOTE_ID -> " [KB:G]";
-                case "unknown" -> "";
-                default -> " [KB:" + id.replace(Cog.ID_PREFIX_NOTE, "") + "]";
-            }).orElse("");
-            var assocNoteDisp = ofNullable(value.associatedNoteId()).filter(id -> !id.equals(value.kbId())).map(id -> " (N:" + id.replace(Cog.ID_PREFIX_NOTE, "") + ")").orElse("");
-            var timeStr = timeFormatter.format(Instant.ofEpochMilli(value.timestamp()));
-            var details = switch (value.attachmentType) {
-                case FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION ->
-                        String.format("P:%.3f|D:%d|%s%s%s", value.priority(), value.depth(), timeStr, assocNoteDisp, kbDisp);
-                case LLM_INFO, LLM_ERROR -> String.format("%s|%s%s", value.llmStatus(), timeStr, kbDisp);
-                case QUERY_SENT, QUERY_RESULT -> String.format("%s|%s%s", value.attachmentType, timeStr, kbDisp);
-                default -> String.format("%s%s", timeStr, kbDisp);
-            };
-            detailLabel.setText(details);
-            iconLabel.setText(iconText);
-            if (value.status != AttachmentStatus.ACTIVE && value.isKifBased()) {
-                fgColor = Color.LIGHT_GRAY;
-                contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
-                detailLabel.setText(value.status + "|" + details);
-                bgColor = new Color(248, 248, 248);
-                setBorder(inactiveBorder);
-                iconColor = Color.LIGHT_GRAY;
-            } else {
-                setBorder(activeBorder);
-            }
-            if (value.attachmentType == AttachmentType.LLM_INFO || value.attachmentType == AttachmentType.LLM_ERROR) {
-                switch (value.llmStatus) {
-                    case SENDING, PROCESSING -> {
-                        bgColor = new Color(255, 255, 200);
-                        iconColor = Color.ORANGE;
-                    }
-                    case ERROR -> {
-                        bgColor = new Color(255, 220, 220);
-                        iconColor = Color.RED;
-                    }
-                    case CANCELLED -> {
-                        fgColor = Color.GRAY;
-                        contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
-                        bgColor = new Color(230, 230, 230);
-                        iconColor = Color.GRAY;
-                    }
-                    default -> {
-                    }
-                }
-            }
-            if (isSelected) {
-                setBackground(list.getSelectionBackground());
-                contentLabel.setForeground(list.getSelectionForeground());
-                detailLabel.setForeground(list.getSelectionForeground());
-                iconLabel.setForeground(list.getSelectionForeground());
-            } else {
-                setBackground(bgColor);
-                contentLabel.setForeground(fgColor);
-                detailLabel.setForeground((value.status == AttachmentStatus.ACTIVE || !value.isKifBased()) ? Color.GRAY : Color.LIGHT_GRAY);
-                iconLabel.setForeground(iconColor);
-            }
-            var justList = (value.justifications() == null || value.justifications().isEmpty()) ? "None" : String.join(", ", value.justifications());
-            setToolTipText(String.format("<html>ID: %s<br>KB: %s<br>Assoc Note: %s<br>Status: %s<br>LLM Status: %s<br>Type: %s<br>Pri: %.4f<br>Depth: %d<br>Time: %s<br>Just: %s</html>", value.id, value.kbId() != null ? value.kbId() : "N/A", value.associatedNoteId() != null ? value.associatedNoteId() : "N/A", value.status, value.llmStatus, value.attachmentType, value.priority(), value.depth(), Instant.ofEpochMilli(value.timestamp()).toString(), justList));
-            return this;
-        }
-    }
-
     static class SettingsDialog extends JDialog {
         private final JTextField llmUrlField, llmModelField;
         private final JSpinner kbCapacitySpinner, depthLimitSpinner;
@@ -937,139 +795,138 @@ class UI extends JFrame {
         private void analyzeNoteAction() {
             performNoteActionAsync("Analyzing", (taskId, note) -> {
                 clearNoteAttachmentList(note.id);
-                // This call needs to be updated to handle ChatResponse
+                // Call the updated llmAsync which returns CompletableFuture<ChatResponse>
                 return cog.lm.text2kifAsync(taskId, note.text, note.id);
-            }, (kif, note) -> {
-            }, UI::handleLlmFailure);
+            }, (chatResponse, note) -> {
+                // Success handler now receives ChatResponse
+                // Extract the final content from the response
+                var finalContent = chatResponse.content();
+                if (finalContent != null && !finalContent.isBlank()) {
+                    // Parse the KIF and emit as external input
+                    try {
+                        Logic.KifParser.parseKif(finalContent).forEach(term -> {
+                            if (term instanceof Logic.KifList list) {
+                                // Emit as external input, targeting the note's KB
+                                cog.events.emit(new Cog.ExternalInputEvent(list, "llm:" + note.id, note.id));
+                            } else {
+                                System.err.println("LLM KIF output contained non-list term: " + term.toKif());
+                            }
+                        });
+                    } catch (Logic.KifParser.ParseException e) {
+                        System.err.println("LLM KIF output parse error for note " + note.id + ": " + e.getMessage());
+                        // Optionally add an error attachment
+                        var errorVm = UI.AttachmentViewModel.forLlm(
+                                Cog.generateId(Cog.ID_PREFIX_LLM_ITEM + "kif_parse_error"),
+                                note.id, "KIF Parse Error: " + e.getMessage() + "\nOutput:\n" + finalContent,
+                                UI.AttachmentType.LLM_ERROR, System.currentTimeMillis(), note.id, UI.LlmStatus.ERROR
+                        );
+                        cog.events.emit(new Cog.LlmInfoEvent(errorVm));
+                    }
+                } else {
+                     System.out.println("LLM KIF generation for note " + note.id + " returned empty content.");
+                }
+            }, UI::handleLlmFailure); // Failure handler remains the same
         }
 
         private void enhanceNoteAction() {
-            // This call needs to be updated to handle ChatResponse
-            performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (resp, n) -> {
+            performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (chatResponse, n) -> {
+                // Success handler receives ChatResponse
+                var enhancedText = chatResponse.content();
+                if (enhancedText != null && !enhancedText.isBlank()) {
+                    // Update the note text in the UI and save
+                    n.text = enhancedText;
+                    editorPanel.noteEditor.setText(enhancedText);
+                    cog.saveNotesToFile();
+                    System.out.println("Note " + n.id + " enhanced successfully.");
+                } else {
+                     System.out.println("LLM enhancement for note " + n.id + " returned empty content.");
+                }
             }, UI::handleLlmFailure);
         }
 
         private void summarizeNoteAction() {
-            // This call needs to be updated to handle ChatResponse
-            performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (resp, n) -> {
+            performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (chatResponse, n) -> {
+                // Success handler receives ChatResponse
+                var summary = chatResponse.content();
+                if (summary != null && !summary.isBlank()) {
+                    // Add summary as a KIF assertion to the note's KB
+                    var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_SUMMARY, n.id, summary.replace("\"", "\\\""));
+                    try {
+                        var terms = Logic.KifParser.parseKif(kif);
+                         if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
+                             // Emit as external input, targeting the note's KB
+                             cog.events.emit(new Cog.ExternalInputEvent(list, "llm-summary:" + n.id, n.id));
+                         } else {
+                             System.err.println("Generated summary KIF was not a single list: " + kif);
+                         }
+                    } catch (Logic.KifParser.ParseException e) {
+                         System.err.println("Error parsing generated summary KIF: " + e.getMessage() + " | KIF: " + kif);
+                    }
+                } else {
+                     System.out.println("LLM summarization for note " + n.id + " returned empty content.");
+                }
             }, UI::handleLlmFailure);
         }
 
         private void keyConceptsAction() {
-            // This call needs to be updated to handle ChatResponse
-            performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (resp, n) -> {
+            performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (chatResponse, n) -> {
+                // Success handler receives ChatResponse
+                var conceptsText = chatResponse.content();
+                if (conceptsText != null && !conceptsText.isBlank()) {
+                    // Add each concept as a KIF assertion to the note's KB
+                    conceptsText.lines()
+                        .map(String::trim)
+                        .filter(Predicate.not(String::isEmpty))
+                        .forEach(concept -> {
+                            var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_CONCEPT, n.id, concept.replace("\"", "\\\""));
+                            try {
+                                var terms = Logic.KifParser.parseKif(kif);
+                                if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
+                                    // Emit as external input, targeting the note's KB
+                                    cog.events.emit(new Cog.ExternalInputEvent(list, "llm-concept:" + n.id, n.id));
+                                } else {
+                                    System.err.println("Generated concept KIF was not a single list: " + kif);
+                                }
+                            } catch (Logic.KifParser.ParseException e) {
+                                System.err.println("Error parsing generated concept KIF: " + e.getMessage() + " | KIF: " + kif);
+                            }
+                        });
+                } else {
+                     System.out.println("LLM concept identification for note " + n.id + " returned empty content.");
+                }
             }, UI::handleLlmFailure);
         }
 
         private void generateQuestionsAction() {
-            // This call needs to be updated to handle ChatResponse
-            performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (resp, n) -> {
+            performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (chatResponse, n) -> {
+                // Success handler receives ChatResponse
+                var questionsText = chatResponse.content();
+                if (questionsText != null && !questionsText.isBlank()) {
+                    // Add each question as a KIF assertion to the note's KB
+                    questionsText.lines()
+                        .map(String::trim)
+                        .filter(Predicate.not(String::isEmpty))
+                        .filter(q -> q.startsWith("- ")) // Filter for expected format
+                        .map(q -> q.substring(2).trim()) // Remove "- " prefix
+                        .filter(Predicate.not(String::isEmpty))
+                        .forEach(question -> {
+                            var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_QUESTION, n.id, question.replace("\"", "\\\""));
+                             try {
+                                var terms = Logic.KifParser.parseKif(kif);
+                                if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
+                                    // Emit as external input, targeting the note's KB
+                                    cog.events.emit(new Cog.ExternalInputEvent(list, "llm-question:" + n.id, n.id));
+                                } else {
+                                    System.err.println("Generated question KIF was not a single list: " + kif);
+                                }
+                            } catch (Logic.KifParser.ParseException e) {
+                                System.err.println("Error parsing generated question KIF: " + e.getMessage() + " | KIF: " + kif);
+                            }
+                        });
+                } else {
+                     System.out.println("LLM question generation for note " + n.id + " returned empty content.");
+                }
             }, UI::handleLlmFailure);
-        }
-
-        private void removeNoteAction() {
-            performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
-        }
-    }
-
-    class EditorPanel extends JPanel {
-        public final JTextArea noteEditor = new JTextArea();
-        final JTextField noteTitleField = new JTextField();
-        private boolean isUpdatingTitleField = false;
-
-        EditorPanel() {
-            setLayout(new BorderLayout());
-            noteEditor.setLineWrap(true);
-            noteEditor.setWrapStyleWord(true);
-            var titlePanel = new JPanel(new BorderLayout());
-            titlePanel.add(new JLabel("Title: "), BorderLayout.WEST);
-            titlePanel.add(noteTitleField, BorderLayout.CENTER);
-            titlePanel.setBorder(new EmptyBorder(5, 5, 5, 5));
-            add(titlePanel, BorderLayout.NORTH);
-            add(new JScrollPane(noteEditor), BorderLayout.CENTER);
-            setupActionListeners();
-        }
-
-        private void setupActionListeners() {
-            noteEditor.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id))
-                    currentNote.text = noteEditor.getText();
-            });
-            noteEditor.addFocusListener(new FocusAdapter() {
-                @Override
-                public void focusLost(FocusEvent e) {
-                    saveCurrentNote();
-                }
-            });
-            noteTitleField.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (!isUpdatingTitleField && currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id) && !Cog.CONFIG_NOTE_ID.equals(currentNote.id)) {
-                    currentNote.title = noteTitleField.getText();
-                    noteTitleUpdated(currentNote); // Notify outer UI
-                }
-            });
-        }
-
-        void updateForSelection(Cog.Note note, boolean isGlobal, boolean isConfig) {
-            var noteSelected = (note != null);
-            var isEditableNoteContent = noteSelected && !isGlobal;
-            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig;
-            isUpdatingTitleField = true;
-            noteTitleField.setText(noteSelected ? note.title : "");
-            noteTitleField.setEditable(isEditableNoteTitle);
-            noteTitleField.setEnabled(noteSelected && !isGlobal);
-            isUpdatingTitleField = false;
-            noteEditor.setText(noteSelected ? note.text : "");
-            noteEditor.setEditable(isEditableNoteContent);
-            noteEditor.setEnabled(isEditableNoteContent);
-            noteEditor.getHighlighter().removeAllHighlights();
-            noteEditor.setCaretPosition(0);
-        }
-
-        void setControlsEnabled(boolean enabled, boolean noteSelected, boolean isGlobal, boolean isConfig) {
-            noteTitleField.setEnabled(enabled && noteSelected && !isGlobal);
-            noteTitleField.setEditable(enabled && noteSelected && !isGlobal && !isConfig);
-            noteEditor.setEnabled(enabled && noteSelected && !isGlobal);
-            noteEditor.setEditable(enabled && noteSelected && !isGlobal);
-        }
-
-        void clearEditor() {
-            noteTitleField.setText("");
-            noteEditor.setText("");
-        }
-
-        void highlightAffectedNoteText(Logic.Assertion assertion, AttachmentStatus status) {
-            if (cog == null || currentNote == null || Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id) || Cog.CONFIG_NOTE_ID.equals(currentNote.id))
-                return;
-            var displayNoteId = assertion.sourceNoteId();
-            if (displayNoteId == null && assertion.derivationDepth() > 0)
-                displayNoteId = cog.context.findCommonSourceNodeId(assertion.justificationIds());
-            if (displayNoteId == null && !Cog.GLOBAL_KB_NOTE_ID.equals(assertion.kb())) displayNoteId = assertion.kb();
-            if (currentNote.id.equals(displayNoteId)) {
-                var searchTerm = extractHighlightTerm(assertion.kif());
-                if (searchTerm == null || searchTerm.isBlank()) return;
-                var highlighter = noteEditor.getHighlighter();
-                Highlighter.HighlightPainter painter = switch (status) {
-                    case ACTIVE -> new DefaultHighlighter.DefaultHighlightPainter(new Color(200, 255, 200));
-                    case RETRACTED, INACTIVE ->
-                            new DefaultHighlighter.DefaultHighlightPainter(new Color(255, 200, 200));
-                    case EVICTED -> new DefaultHighlighter.DefaultHighlightPainter(Color.LIGHT_GRAY);
-                };
-                try {
-                    var text = noteEditor.getText();
-                    var pos = text.toLowerCase().indexOf(searchTerm.toLowerCase());
-                    while (pos >= 0) {
-                        highlighter.addHighlight(pos, pos + searchTerm.length(), painter);
-                        pos = text.toLowerCase().indexOf(searchTerm.toLowerCase(), pos + 1);
-                    }
-                } catch (BadLocationException e) { /* Ignore */ }
-            }
-        }
-
-        private String extractHighlightTerm(Logic.KifList kif) {
-            return kif.terms().stream().filter(Logic.KifAtom.class::isInstance).map(Logic.KifAtom.class::cast).map(Logic.KifAtom::value)
-                    .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
-                    .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT))
-                    .findFirst().orElse(null);
         }
     }
 
