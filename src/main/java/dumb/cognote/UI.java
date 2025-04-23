@@ -937,27 +937,32 @@ class UI extends JFrame {
         private void analyzeNoteAction() {
             performNoteActionAsync("Analyzing", (taskId, note) -> {
                 clearNoteAttachmentList(note.id);
+                // This call needs to be updated to handle ChatResponse
                 return cog.lm.text2kifAsync(taskId, note.text, note.id);
             }, (kif, note) -> {
             }, UI::handleLlmFailure);
         }
 
         private void enhanceNoteAction() {
+            // This call needs to be updated to handle ChatResponse
             performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (resp, n) -> {
             }, UI::handleLlmFailure);
         }
 
         private void summarizeNoteAction() {
+            // This call needs to be updated to handle ChatResponse
             performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (resp, n) -> {
             }, UI::handleLlmFailure);
         }
 
         private void keyConceptsAction() {
+            // This call needs to be updated to handle ChatResponse
             performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (resp, n) -> {
             }, UI::handleLlmFailure);
         }
 
         private void generateQuestionsAction() {
+            // This call needs to be updated to handle ChatResponse
             performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (resp, n) -> {
             }, UI::handleLlmFailure);
         }
