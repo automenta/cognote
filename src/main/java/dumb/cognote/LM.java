@@ -1,31 +1,24 @@
 package dumb.cognote;
 
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatResponse;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.tool.ToolExecutionRequest;
+import dev.langchain4j.model.tool.ToolParameter;
+import dev.langchain4j.model.tool.ToolSpecification;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.io.IOException;
+import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiConsumer;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
-
-import dumb.cognote.Tool;
-import dev.langchain4j.model.tool.ToolExecutionRequest;
-import dev.langchain4j.model.tool.ToolSpecification;
-import dev.langchain4j.model.chat.ChatResponse;
-import java.lang.reflect.Method;
-import java.util.List;
-import java.util.stream.Stream;
-import dev.langchain4j.model.tool.ToolParameter;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
 
 
 public class LM {
