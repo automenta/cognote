@@ -17,7 +17,9 @@ import static dumb.cognote.Cog.ID_PREFIX_PLUGIN;
 import static dumb.cognote.Logic.*;
 import static java.util.Optional.ofNullable;
 
-/** uses Logic to implement higher-level Reasoning functions */
+/**
+ * uses Logic to implement higher-level Reasoning functions
+ */
 public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
@@ -56,11 +58,11 @@ public class Reason {
             return new Cog.Configuration(cognition.cog);
         }
 
-        Logic.Truths getTMS() {
+        TruthMaintenance.Truths getTMS() {
             return cognition.truth();
         }
 
-        Logic.Operators operators() {
+        Op.Operators operators() {
             return cognition.operators();
         }
     }
@@ -190,7 +192,7 @@ public class Reason {
             System.out.println("Reasoner plugin shutdown complete.");
         }
 
-        private Logic.Truths getTMS() {
+        private TruthMaintenance.Truths getTMS() {
             return reasonerContext.getTMS();
         }
     }
@@ -218,7 +220,7 @@ public class Reason {
             return context.getKb(noteId);
         }
 
-        protected Logic.Truths getTMS() {
+        protected TruthMaintenance.Truths getTMS() {
             return context.getTMS();
         }
 
@@ -481,6 +483,14 @@ public class Reason {
     }
 
     static class UniversalInstantiationReasonerPlugin extends BaseReasonerPlugin {
+        // Finds bindings if any sub-expression of 'expr' matches 'target'
+        private static Stream<Map<KifVar, KifTerm>> findSubExpressionMatches(KifTerm expr, KifTerm target) {
+            return Stream.concat(
+                    ofNullable(Unifier.match(expr, target, Map.of())).stream(), // Match whole expression
+                    (expr instanceof KifList l) ? l.terms().stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty() // Match sub-expressions recursively
+            );
+        }
+
         @Override
         public void initialize(ReasonerContext ctx) {
             super.initialize(ctx);
@@ -547,17 +557,21 @@ public class Reason {
                         }
                     });
         }
-
-        // Finds bindings if any sub-expression of 'expr' matches 'target'
-        private static Stream<Map<KifVar, KifTerm>> findSubExpressionMatches(KifTerm expr, KifTerm target) {
-            return Stream.concat(
-                    ofNullable(Unifier.match(expr, target, Map.of())).stream(), // Match whole expression
-                    (expr instanceof KifList l) ? l.terms().stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty() // Match sub-expressions recursively
-            );
-        }
     }
 
     static class BackwardChainingReasonerPlugin extends BaseReasonerPlugin {
+        private static Rule renameRuleVariables(Rule rule, int depth) {
+            var suffix = "_d" + depth + "_" + Cog.idCounter.incrementAndGet();
+            Map<KifVar, KifTerm> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> KifVar.of(v.name() + suffix)));
+            var renamedForm = (KifList) Unifier.subst(rule.form(), renameMap);
+            try {
+                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri());
+            } catch (IllegalArgumentException e) {
+                System.err.println("Error renaming rule variables: " + e.getMessage());
+                return rule;
+            } // Fallback
+        }
+
         @Override
         public Set<Cog.Feature> getSupportedFeatures() {
             return Set.of(Cog.Feature.BACKWARD_CHAINING, Cog.Feature.OPERATOR_SUPPORT);
@@ -619,7 +633,7 @@ public class Reason {
             return resultStream.distinct(); // Remove duplicate solutions
         }
 
-        private Optional<Map<KifVar, KifTerm>> executeOperator(Operator op, KifList goalList, Map<KifVar, KifTerm> bindings, KifTerm currentGoal) {
+        private Optional<Map<KifVar, KifTerm>> executeOperator(Op.Operator op, KifList goalList, Map<KifVar, KifTerm> bindings, KifTerm currentGoal) {
             try {
                 // Operators run asynchronously but we need the result here
                 return op.exe(goalList, context).handle((opResult, ex) -> {
@@ -645,18 +659,6 @@ public class Reason {
             // Prove first, then recursively prove rest with updated bindings
             return prove(first, kbId, bindings, depth, proofStack)
                     .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
-        }
-
-        private static Rule renameRuleVariables(Rule rule, int depth) {
-            var suffix = "_d" + depth + "_" + Cog.idCounter.incrementAndGet();
-            Map<KifVar, KifTerm> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> KifVar.of(v.name() + suffix)));
-            var renamedForm = (KifList) Unifier.subst(rule.form(), renameMap);
-            try {
-                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri());
-            } catch (IllegalArgumentException e) {
-                System.err.println("Error renaming rule variables: " + e.getMessage());
-                return rule;
-            } // Fallback
         }
     }
 }

@@ -111,7 +111,7 @@ public class LM {
                 try {
                     Logic.KifParser.parseKif(cleanedKif).forEach(term -> cog.events.emit(new Cog.ExternalInputEvent(term, "llm-kif:" + noteId, noteId)));
                     cog.updateLlmItemStatus(id, UI.LlmStatus.DONE, "KIF Generation Complete. Assertions added to KB.");
-                } catch (Logic.ParseException parseEx) {
+                } catch (Logic.KifParser.ParseException parseEx) {
                     System.err.printf("LLM Error (KIF %s): Failed to parse generated KIF: %s%n", noteId, parseEx.getMessage());
                     cog.updateLlmItemStatus(id, UI.LlmStatus.ERROR, "KIF Parse Error: " + parseEx.getMessage());
                 }
@@ -144,8 +144,8 @@ public class LM {
             note.text = result.trim();
             SwingUtilities.invokeLater(() -> {
                 if (note.equals(cog.ui.currentNote)) {
-                    cog.ui.noteEditor.setText(note.text);
-                    cog.ui.noteEditor.setCaretPosition(0);
+                    cog.ui.editorPanel.noteEditor.setText(note.text);
+                    cog.ui.editorPanel.noteEditor.setCaretPosition(0);
                 }
             });
             cog.saveNotesToFile();

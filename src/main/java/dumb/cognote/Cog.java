@@ -31,7 +31,9 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
-/** Cognition Reasoning engine */
+/**
+ * Cognition Reasoning engine
+ */
 public class Cog {
 
     // --- ID Prefixes ---
@@ -94,8 +96,8 @@ public class Cog {
         lm.reconfigure();
 
 
-        var tms = new BasicTMS(events);
-        var operatorRegistry = new Operators();
+        var tms = new TruthMaintenance.BasicTMS(events);
+        var operatorRegistry = new Op.Operators();
 
         this.context = new Cognition(globalKbCapacity, events, tms, operatorRegistry, this);
         this.reasonerManager = new Reason.ReasonerManager(events, context);
@@ -170,6 +172,58 @@ public class Cog {
         }
     }
 
+    static Note createDefaultConfigNote() {
+        var configJson = new JSONObject()
+                .put("llmApiUrl", LM.DEFAULT_LLM_URL)
+                .put("llmModel", LM.DEFAULT_LLM_MODEL)
+                .put("globalKbCapacity", DEFAULT_KB_CAPACITY)
+                .put("reasoningDepthLimit", DEFAULT_REASONING_DEPTH)
+                .put("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2));
+    }
+
+    private static List<Note> loadNotesFromFile() {
+        Path filePath = Paths.get(NOTES_FILE);
+        if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
+        try {
+            var jsonText = Files.readString(filePath);
+            var jsonArray = new JSONArray(new JSONTokener(jsonText));
+            List<Note> notes = IntStream.range(0, jsonArray.length())
+                    .mapToObj(jsonArray::getJSONObject)
+                    .map(obj -> new Note(obj.getString("id"), obj.getString("title"), obj.getString("text")))
+                    .collect(Collectors.toCollection(ArrayList::new));
+
+            if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+                notes.add(createDefaultConfigNote());
+            }
+            System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
+            return notes;
+        } catch (IOException | org.json.JSONException e) {
+            System.err.println("Error loading notes from " + NOTES_FILE + ": " + e.getMessage() + ". Returning default config note.");
+            return new ArrayList<>(List.of(createDefaultConfigNote()));
+        }
+    }
+
+    private static synchronized void saveNotesToFile(List<Note> notes) {
+        var filePath = Paths.get(NOTES_FILE);
+        var jsonArray = new JSONArray();
+        List<Note> notesToSave = new ArrayList<>(notes);
+        if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+            notesToSave.add(createDefaultConfigNote()); // Ensure config note is always saved
+        }
+
+        notesToSave.forEach(note -> jsonArray.put(new JSONObject()
+                .put("id", note.id)
+                .put("title", note.title)
+                .put("text", note.text)));
+        try {
+            Files.writeString(filePath, jsonArray.toString(2));
+            // System.out.println("Saved " + notesToSave.size() + " notes to " + NOTES_FILE); // Reduce log noise
+        } catch (IOException e) {
+            System.err.println("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
+        }
+    }
+
     private void setupDefaultPlugins() {
         plugins.loadPlugin(new InputProcessingPlugin());
         plugins.loadPlugin(new RetractionPlugin());
@@ -205,14 +259,14 @@ public class Cog {
             }
             return Optional.empty();
         };
-        or.add(new BasicOperator(KifAtom.of("+"), args -> numeric.apply(args, Double::sum)));
-        or.add(new BasicOperator(KifAtom.of("-"), args -> numeric.apply(args, (a, b) -> a - b)));
-        or.add(new BasicOperator(KifAtom.of("*"), args -> numeric.apply(args, (a, b) -> a * b)));
-        or.add(new BasicOperator(KifAtom.of("/"), args -> numeric.apply(args, (a, b) -> b == 0 ? Double.NaN : a / b)));
-        or.add(new BasicOperator(KifAtom.of("<"), args -> comparison.apply(args, (a, b) -> a < b)));
-        or.add(new BasicOperator(KifAtom.of(">"), args -> comparison.apply(args, (a, b) -> a > b)));
-        or.add(new BasicOperator(KifAtom.of("<="), args -> comparison.apply(args, (a, b) -> a <= b)));
-        or.add(new BasicOperator(KifAtom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
+        or.add(new Op.BasicOperator(KifAtom.of("+"), args -> numeric.apply(args, Double::sum)));
+        or.add(new Op.BasicOperator(KifAtom.of("-"), args -> numeric.apply(args, (a, b) -> a - b)));
+        or.add(new Op.BasicOperator(KifAtom.of("*"), args -> numeric.apply(args, (a, b) -> a * b)));
+        or.add(new Op.BasicOperator(KifAtom.of("/"), args -> numeric.apply(args, (a, b) -> b == 0 ? Double.NaN : a / b)));
+        or.add(new Op.BasicOperator(KifAtom.of("<"), args -> comparison.apply(args, (a, b) -> a < b)));
+        or.add(new Op.BasicOperator(KifAtom.of(">"), args -> comparison.apply(args, (a, b) -> a > b)));
+        or.add(new Op.BasicOperator(KifAtom.of("<="), args -> comparison.apply(args, (a, b) -> a <= b)));
+        or.add(new Op.BasicOperator(KifAtom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
     }
 
     public void startSystem() {
@@ -313,7 +367,7 @@ public class Cog {
             if (ui.findNoteById(CONFIG_NOTE_ID).isEmpty()) {
                 ui.addNoteToList(createDefaultConfigNote());
             }
-            ui.noteList.setSelectedIndex(0);
+            ui.noteListPanel.noteList.setSelectedIndex(0);
         });
 
         systemStatus = "Cleared";
@@ -372,7 +426,7 @@ public class Cog {
         if (ui != null && ui.isDisplayable()) {
             var kbCount = context.kbCount();
             var kbCapacityTotal = context.kbTotalCapacity();
-            var notesCount = ui.noteListModel.size();
+            var notesCount = ui.noteListPanel.noteListModel.size();
             var tasksCount = lm.activeLlmTasks.size();
             var statusText = String.format("KB: %d/%d | Rules: %d | Notes: %d | Tasks: %d | Status: %s",
                     kbCount, kbCapacityTotal, context.ruleCount(), notesCount, tasksCount, systemStatus);
@@ -381,7 +435,7 @@ public class Cog {
     }
 
     private void updateStatusLabel(String statusText) {
-        SwingUtilities.invokeLater(() -> ui.statusLabel.setText(statusText));
+        SwingUtilities.invokeLater(() -> ui.mainControlPanel.statusLabel.setText(statusText));
     }
 
     void waitIfPaused() {
@@ -431,16 +485,6 @@ public class Cog {
         }
     }
 
-    static Note createDefaultConfigNote() {
-        var configJson = new JSONObject()
-                .put("llmApiUrl", LM.DEFAULT_LLM_URL)
-                .put("llmModel", LM.DEFAULT_LLM_MODEL)
-                .put("globalKbCapacity", DEFAULT_KB_CAPACITY)
-                .put("reasoningDepthLimit", DEFAULT_REASONING_DEPTH)
-                .put("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2));
-    }
-
     public boolean updateConfig(String newConfigJsonText) {
         try {
             var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText)); // Validate first
@@ -460,50 +504,8 @@ public class Cog {
         }
     }
 
-    private static List<Note> loadNotesFromFile() {
-        Path filePath = Paths.get(NOTES_FILE);
-        if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
-        try {
-            var jsonText = Files.readString(filePath);
-            var jsonArray = new JSONArray(new JSONTokener(jsonText));
-            List<Note> notes = IntStream.range(0, jsonArray.length())
-                    .mapToObj(jsonArray::getJSONObject)
-                    .map(obj -> new Note(obj.getString("id"), obj.getString("title"), obj.getString("text")))
-                    .collect(Collectors.toCollection(ArrayList::new));
-
-            if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-                notes.add(createDefaultConfigNote());
-            }
-            System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
-            return notes;
-        } catch (IOException | org.json.JSONException e) {
-            System.err.println("Error loading notes from " + NOTES_FILE + ": " + e.getMessage() + ". Returning default config note.");
-            return new ArrayList<>(List.of(createDefaultConfigNote()));
-        }
-    }
-
     public void saveNotesToFile() {
         saveNotesToFile(ui.getAllNotes());
-    }
-
-    private static synchronized void saveNotesToFile(List<Note> notes) {
-        var filePath = Paths.get(NOTES_FILE);
-        var jsonArray = new JSONArray();
-        List<Note> notesToSave = new ArrayList<>(notes);
-        if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            notesToSave.add(createDefaultConfigNote()); // Ensure config note is always saved
-        }
-
-        notesToSave.forEach(note -> jsonArray.put(new JSONObject()
-                .put("id", note.id)
-                .put("title", note.title)
-                .put("text", note.text)));
-        try {
-            Files.writeString(filePath, jsonArray.toString(2));
-            // System.out.println("Saved " + notesToSave.size() + " notes to " + NOTES_FILE); // Reduce log noise
-        } catch (IOException e) {
-            System.err.println("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
-        }
     }
 
     void updateLlmItemStatus(String taskId, UI.LlmStatus status, String content) {
@@ -653,6 +655,27 @@ public class Cog {
             this.exe = requireNonNull(exe);
         }
 
+        private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
+            try {
+                listener.accept(event);
+            } catch (Exception e) {
+                logExeError(e, type, event.getClass().getSimpleName());
+            }
+        }
+
+        private static void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
+            try {
+                listener.accept(event, bindings);
+            } catch (Exception e) {
+                logExeError(e, type, event.getClass().getSimpleName() + " (Pattern Match)");
+            }
+        }
+
+        private static void logExeError(Exception e, String type, String eventName) {
+            System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
+            e.printStackTrace();
+        }
+
         public <T extends CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
             listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
         }
@@ -682,27 +705,6 @@ public class Cog {
                     ofNullable(Unifier.match(pattern, eventTerm, Map.of()))
                             .ifPresent(bindings -> listeners.forEach(listener -> exeSafe(listener, event, bindings, "Pattern Listener")))
             );
-        }
-
-        private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
-            try {
-                listener.accept(event);
-            } catch (Exception e) {
-                logExeError(e, type, event.getClass().getSimpleName());
-            }
-        }
-
-        private static void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
-            try {
-                listener.accept(event, bindings);
-            } catch (Exception e) {
-                logExeError(e, type, event.getClass().getSimpleName() + " (Pattern Match)");
-            }
-        }
-
-        private static void logExeError(Exception e, String type, String eventName) {
-            System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
-            e.printStackTrace();
         }
 
         public void shutdown() {
@@ -1014,7 +1016,7 @@ public class Cog {
                             System.out.println("Retract rule from " + s + ": " + (removed ? "Success" : "No match found") + " for: " + rf.toKif());
                         } else
                             System.err.println("Retract rule from " + s + ": Input is not a single valid rule KIF list: " + event.target());
-                    } catch (ParseException e) {
+                    } catch (KifParser.ParseException e) {
                         System.err.println("Retract rule from " + s + ": Parse error: " + e.getMessage());
                     }
                 }
@@ -1092,7 +1094,7 @@ public class Cog {
                         var queryId = generateId(ID_PREFIX_QUERY);
                         var query = new Query(queryId, QueryType.ASK_BINDINGS, queryPattern, null, Map.of()); // Default to ASK_BINDINGS, global KB
                         events.emit(new QueryRequestEvent(query));
-                    } catch (ParseException e) {
+                    } catch (KifParser.ParseException e) {
                         conn.send("error Parse error: " + e.getMessage());
                     }
                 }

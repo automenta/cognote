@@ -20,19 +20,20 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
   - End-to-end encryption protects private data. 
   - Crypto-signing ensures `Note` integrity and provenance.
 
-### Code
+## Code Guidelines
 - Complete (fully functional)
-    - Ensure all functionality remains present, in some way.
-  - Professional-grade, not explanatory/educational
-  - Correct (bug-free and logically sound)
-  - Compact (minimal codebase size)
-      - Using space-saving syntax constructs, like ternary/switch/etc..., to minimize lines and tokens
-      - Using the latest language version's syntax options to best express code
-  - Consolidated (avoids unnecessary separation)
-  - Deduplicated (no redundant logic)
-      - Introduce helpful abstractions functions, parameters, and classes to share common code
-      - Apply "don't repeat yourself" principles
-  - Modular (logically organized, supporting abstraction)
-  - Remove all comments, relying only on self-documenting code
-      - Clear naming and structure
-  - Use the latest version of the language, APIs, and dependencies
+  - Ensure all functionality remains present, in some way.
+- Professional-grade, not explanatory/educational
+- Correct (bug-free and logically sound)
+- Compact (minimal codebase size)
+    - Using space-saving syntax constructs, like ternary/switch/etc..., to minimize lines and tokens
+    - Using the latest language version's syntax options to best express code
+- Consolidated (avoids unnecessary separation)
+- Deduplicated (no redundant logic)
+    - Introduce helpful abstractions functions, parameters, and classes to share common code
+    - Apply "don't repeat yourself" principles
+- Modular (logically organized, supporting abstraction)
+- Remove all comments, relying only on self-documenting code
+    - Clear naming and structure
+- Use the latest version of the language, APIs, and dependencies
+- Assume any referenced dependencies exist, so do not create stubs/mocks

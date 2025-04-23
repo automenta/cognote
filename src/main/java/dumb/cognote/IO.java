@@ -9,7 +9,9 @@ import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
 
-/** miscellanous functions that don't belong in the Core */
+/**
+ * miscellanous functions that don't belong in the Core
+ */
 public class IO {
     static class StatusUpdaterPlugin extends Cog.BasePlugin {
         private final Consumer<Cog.SystemStatusEvent> uiUpdater;

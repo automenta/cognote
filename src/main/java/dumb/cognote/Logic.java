@@ -22,7 +22,9 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
-/** Probabilistic Prolog Engine */
+/**
+ * Probabilistic Prolog Engine
+ */
 public class Logic {
     public static final String KIF_OP_IMPLIES = "=>";
     public static final String KIF_OP_EQUIV = "<=>";
@@ -58,34 +60,6 @@ public class Logic {
 
     enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
 
-    enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
-
-    interface Truths {
-        SupportTicket addAssertion(Assertion assertion, Set<String> justificationIds, String source);
-
-        void retractAssertion(String assertionId, String source);
-
-        Set<String> getActiveSupport(String assertionId);
-
-        boolean isActive(String assertionId);
-
-        Optional<Assertion> getAssertion(String assertionId);
-
-        Collection<Assertion> getAllActiveAssertions();
-
-        void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy);
-
-        Set<Contradiction> findContradictions();
-    }
-
-    interface Operator {
-        String id();
-
-        KifAtom pred();
-
-        CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context);
-    }
-
     sealed interface KifTerm permits KifAtom, KifVar, KifList {
         static Set<KifVar> collectSpecVars(KifTerm varsTerm) {
             return switch (varsTerm) {
@@ -118,12 +92,6 @@ public class Logic {
     }
 
     record Explanation(String details) {
-    }
-
-    record SupportTicket(String ticketId, String assertionId) {
-    }
-
-    record Contradiction(Set<String> conflictingAssertionIds) {
     }
 
     static class Skolemizer {
@@ -337,6 +305,18 @@ public class Logic {
                 throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKif());
         }
 
+        private static void collectPredicatesRecursive(KifTerm term, Set<KifAtom> predicates) {
+            switch (term) {
+                case KifList list when !list.terms().isEmpty() && list.get(0) instanceof KifAtom pred -> {
+                    predicates.add(pred);
+                    list.terms().stream().skip(1).forEach(sub -> collectPredicatesRecursive(sub, predicates));
+                }
+                case KifList list -> list.terms().forEach(sub -> collectPredicatesRecursive(sub, predicates));
+                default -> {
+                }
+            }
+        }
+
         @Override
         public int compareTo(Assertion other) {
             var cmp = Boolean.compare(other.isActive, this.isActive);
@@ -363,18 +343,6 @@ public class Logic {
             Set<KifAtom> p = new HashSet<>();
             collectPredicatesRecursive(getEffectiveTerm(), p);
             return Collections.unmodifiableSet(p);
-        }
-
-        private static void collectPredicatesRecursive(KifTerm term, Set<KifAtom> predicates) {
-            switch (term) {
-                case KifList list when !list.terms().isEmpty() && list.get(0) instanceof KifAtom pred -> {
-                    predicates.add(pred);
-                    list.terms().stream().skip(1).forEach(sub -> collectPredicatesRecursive(sub, predicates));
-                }
-                case KifList list -> list.terms().forEach(sub -> collectPredicatesRecursive(sub, predicates));
-                default -> {
-                }
-            }
         }
 
         Assertion withStatus(boolean newActiveStatus) {
@@ -495,157 +463,341 @@ public class Logic {
         }
     }
 
-    static class PathNode {
-        static final Class<KifVar> VAR_MARKER = KifVar.class;
-        static final Object LIST_MARKER = new Object();
-        final ConcurrentMap<Object, PathNode> children = new ConcurrentHashMap<>();
-        final Set<String> assertionIdsHere = ConcurrentHashMap.newKeySet();
+    static class TruthMaintenance {
+
+        enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
+
+        interface Truths {
+            SupportTicket addAssertion(Assertion assertion, Set<String> justificationIds, String source);
+
+            void retractAssertion(String assertionId, String source);
+
+            Set<String> getActiveSupport(String assertionId);
+
+            boolean isActive(String assertionId);
+
+            Optional<Assertion> getAssertion(String assertionId);
+
+            Collection<Assertion> getAllActiveAssertions();
+
+            void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy);
+
+            Set<Contradiction> findContradictions();
+        }
+
+        record SupportTicket(String ticketId, String assertionId) {
+        }
+
+        record Contradiction(Set<String> conflictingAssertionIds) {
+        }
+
+        static class BasicTMS implements Truths {
+            private final Events events;
+            private final ConcurrentMap<String, Assertion> assertions = new ConcurrentHashMap<>();
+            private final ConcurrentMap<String, Set<String>> justifications = new ConcurrentHashMap<>();
+            private final ConcurrentMap<String, Set<String>> dependents = new ConcurrentHashMap<>();
+            private final ReadWriteLock lock = new ReentrantReadWriteLock();
+
+            BasicTMS(Events e) {
+                this.events = e;
+            }
+
+            @Override
+            public SupportTicket addAssertion(Assertion assertion, Set<String> justificationIds, String source) {
+                lock.writeLock().lock();
+                try {
+                    if (assertions.containsKey(assertion.id)) return null;
+                    var assertionToAdd = assertion.withStatus(true);
+                    var supportingAssertions = justificationIds.stream().map(assertions::get).filter(Objects::nonNull).toList();
+                    if (!justificationIds.isEmpty() && supportingAssertions.size() != justificationIds.size()) {
+                        System.err.printf("TMS Warning: Justification missing for %s. Supporters: %s, Found: %s%n", assertion.id, justificationIds, supportingAssertions.stream().map(Assertion::id).toList());
+                        return null;
+                    }
+                    if (!justificationIds.isEmpty() && supportingAssertions.stream().noneMatch(Assertion::isActive))
+                        assertionToAdd = assertionToAdd.withStatus(false);
+
+                    assertions.put(assertionToAdd.id, assertionToAdd);
+                    justifications.put(assertionToAdd.id, Set.copyOf(justificationIds));
+                    var finalAssertionToAdd = assertionToAdd;
+                    justificationIds.forEach(supporterId -> dependents.computeIfAbsent(supporterId, k -> ConcurrentHashMap.newKeySet()).add(finalAssertionToAdd.id));
+
+                    if (!assertionToAdd.isActive())
+                        events.emit(new AssertionStatusChangedEvent(assertionToAdd.id, false, assertionToAdd.kb));
+                    else checkForContradictions(assertionToAdd);
+                    return new SupportTicket(generateId(ID_PREFIX_TICKET), assertionToAdd.id);
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            }
+
+            @Override
+            public void retractAssertion(String assertionId, String source) {
+                lock.writeLock().lock();
+                try {
+                    retractInternal(assertionId, source, new HashSet<>());
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            }
+
+            private void retractInternal(String assertionId, String source, Set<String> visited) {
+                if (!visited.add(assertionId)) return;
+                var assertion = assertions.remove(assertionId);
+                if (assertion == null) return;
+                justifications.remove(assertionId);
+                assertion.justificationIds().forEach(supporterId -> ofNullable(dependents.get(supporterId)).ifPresent(deps -> deps.remove(assertionId)));
+                var depsToProcess = new HashSet<>(dependents.remove(assertionId));
+                if (assertion.isActive()) events.emit(new AssertionRetractedEvent(assertion, assertion.kb, source));
+                else events.emit(new AssertionStatusChangedEvent(assertion.id, false, assertion.kb));
+                depsToProcess.forEach(depId -> updateStatus(depId, visited));
+            }
+
+            private void updateStatus(String assertionId, Set<String> visited) {
+                if (!visited.add(assertionId)) return;
+                var assertion = assertions.get(assertionId);
+                if (assertion == null) return;
+                var just = justifications.getOrDefault(assertionId, Set.of());
+                var supportActive = just.stream().map(assertions::get).filter(Objects::nonNull).allMatch(Assertion::isActive);
+                var newActiveStatus = !just.isEmpty() && supportActive;
+                if (newActiveStatus != assertion.isActive()) {
+                    var updatedAssertion = assertion.withStatus(newActiveStatus);
+                    assertions.put(assertionId, updatedAssertion);
+                    events.emit(new AssertionStatusChangedEvent(assertionId, newActiveStatus, assertion.kb));
+                    if (newActiveStatus) checkForContradictions(updatedAssertion);
+                    dependents.getOrDefault(assertionId, Set.of()).forEach(depId -> updateStatus(depId, visited));
+                }
+            }
+
+            @Override
+            public Set<String> getActiveSupport(String assertionId) {
+                lock.readLock().lock();
+                try {
+                    return justifications.getOrDefault(assertionId, Set.of()).stream().filter(this::isActive).collect(Collectors.toSet());
+                } finally {
+                    lock.readLock().unlock();
+                }
+            }
+
+            @Override
+            public boolean isActive(String assertionId) {
+                lock.readLock().lock();
+                try {
+                    return ofNullable(assertions.get(assertionId)).map(Assertion::isActive).orElse(false);
+                } finally {
+                    lock.readLock().unlock();
+                }
+            }
+
+            @Override
+            public Optional<Assertion> getAssertion(String assertionId) {
+                lock.readLock().lock();
+                try {
+                    return ofNullable(assertions.get(assertionId));
+                } finally {
+                    lock.readLock().unlock();
+                }
+            }
+
+            @Override
+            public Collection<Assertion> getAllActiveAssertions() {
+                lock.readLock().lock();
+                try {
+                    return assertions.values().stream().filter(Assertion::isActive).toList();
+                } finally {
+                    lock.readLock().unlock();
+                }
+            }
+
+            private void checkForContradictions(Assertion newlyActive) {
+                if (!newlyActive.isActive()) return;
+                var oppositeForm = newlyActive.negated ? newlyActive.getEffectiveTerm() : new KifList(KifAtom.of(KIF_OP_NOT), newlyActive.kif);
+                if (!(oppositeForm instanceof KifList)) return;
+                findMatchingAssertion((KifList) oppositeForm, newlyActive.kb, !newlyActive.negated)
+                        .ifPresent(match -> {
+                            System.err.printf("TMS Contradiction Detected in KB %s: %s and %s%n", newlyActive.kb, newlyActive.id, match.id);
+                            events.emit(new ContradictionDetectedEvent(Set.of(newlyActive.id, match.id), newlyActive.kb));
+                        });
+            }
+
+            private Optional<Assertion> findMatchingAssertion(KifList formToMatch, String kbId, boolean matchIsNegated) {
+                lock.readLock().lock();
+                try {
+                    return assertions.values().stream()
+                            .filter(Assertion::isActive)
+                            .filter(a -> a.negated == matchIsNegated && a.kb.equals(kbId) && a.kif.equals(formToMatch))
+                            .findFirst();
+                } finally {
+                    lock.readLock().unlock();
+                }
+            }
+
+            @Override
+            public void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy) {
+                System.err.println("Contradiction resolution not implemented. Strategy: " + strategy + ", Conflicting: " + contradiction.conflictingAssertionIds());
+            }
+
+            @Override
+            public Set<Contradiction> findContradictions() {
+                return Set.of();
+            }
+        }
     }
 
-    static class PathIndex {
-        private final PathNode root = new PathNode();
-        private final Truths tms;
+    static class Path {
 
-        PathIndex(Truths tms) {
-            this.tms = tms;
+        static class PathNode {
+            static final Class<KifVar> VAR_MARKER = KifVar.class;
+            static final Object LIST_MARKER = new Object();
+            final ConcurrentMap<Object, PathNode> children = new ConcurrentHashMap<>();
+            final Set<String> assertionIdsHere = ConcurrentHashMap.newKeySet();
         }
 
-        void add(Assertion assertion) {
-            if (tms.isActive(assertion.id)) addPathsRecursive(assertion.kif, assertion.id, root);
-        }
+        static class PathIndex {
+            private final PathNode root = new PathNode();
+            private final TruthMaintenance.Truths tms;
 
-        void remove(Assertion assertion) {
-            removePathsRecursive(assertion.kif, assertion.id, root);
-        }
+            PathIndex(TruthMaintenance.Truths tms) {
+                this.tms = tms;
+            }
 
-        void clear() {
-            root.children.clear();
-            root.assertionIdsHere.clear();
-        }
-
-        Stream<Assertion> findUnifiableAssertions(KifTerm queryTerm) {
-            return findCandidates(queryTerm, PathIndex::findUnifiableRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
-        }
-
-        Stream<Assertion> findInstancesOf(KifTerm queryPattern) {
-            var neg = (queryPattern instanceof KifList ql && ql.op().filter(KIF_OP_NOT::equals).isPresent());
-            return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated == neg).filter(a -> Unifier.match(queryPattern, a.kif, Map.of()) != null);
-        }
-
-        Stream<Assertion> findGeneralizationsOf(KifTerm queryTerm) {
-            return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
-        }
-
-        private Set<String> findCandidates(KifTerm query, TriConsumer<KifTerm, PathNode, Set<String>> searchFunc) {
-            Set<String> candidates = ConcurrentHashMap.newKeySet();
-            searchFunc.accept(query, root, candidates);
-            return Set.copyOf(candidates);
-        }
-
-        private static void addPathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
-            if (currentNode == null) return;
-            currentNode.assertionIdsHere.add(assertionId);
-            var key = getIndexKey(term);
-            var termNode = currentNode.children.computeIfAbsent(key, _ -> new PathNode());
-            termNode.assertionIdsHere.add(assertionId);
-            if (term instanceof KifList list)
-                list.terms().forEach(subTerm -> addPathsRecursive(subTerm, assertionId, termNode));
-        }
-
-        private static boolean removePathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
-            if (currentNode == null) return false;
-            currentNode.assertionIdsHere.remove(assertionId);
-            var key = getIndexKey(term);
-            var termNode = currentNode.children.get(key);
-            if (termNode != null) {
-                termNode.assertionIdsHere.remove(assertionId);
-                var canPruneChild = true;
+            private static void addPathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
+                if (currentNode == null) return;
+                currentNode.assertionIdsHere.add(assertionId);
+                var key = getIndexKey(term);
+                var termNode = currentNode.children.computeIfAbsent(key, _ -> new PathNode());
+                termNode.assertionIdsHere.add(assertionId);
                 if (term instanceof KifList list)
-                    canPruneChild = list.terms().stream().allMatch(subTerm -> removePathsRecursive(subTerm, assertionId, termNode));
-                if (canPruneChild && termNode.assertionIdsHere.isEmpty() && termNode.children.isEmpty())
-                    currentNode.children.remove(key, termNode);
+                    list.terms().forEach(subTerm -> addPathsRecursive(subTerm, assertionId, termNode));
             }
-            return currentNode.assertionIdsHere.isEmpty() && currentNode.children.isEmpty();
-        }
 
-        private static Object getIndexKey(KifTerm term) {
-            return switch (term) {
-                case KifAtom a -> a.value();
-                case KifVar _ -> PathNode.VAR_MARKER;
-                case KifList l -> l.op().map(op -> (Object) op).orElse(PathNode.LIST_MARKER);
-            };
-        }
-
-        private static void collectAllAssertionIds(PathNode node, Set<String> ids) {
-            if (node == null) return;
-            ids.addAll(node.assertionIdsHere);
-            node.children.values().forEach(child -> collectAllAssertionIds(child, ids));
-        }
-
-        private static void findUnifiableRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
-            if (indexNode == null) return;
-            ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
-            if (queryTerm instanceof KifList)
-                ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> collectAllAssertionIds(listNode, candidates));
-            var specificNode = indexNode.children.get(getIndexKey(queryTerm));
-            if (specificNode != null) {
-                candidates.addAll(specificNode.assertionIdsHere);
-                if (queryTerm instanceof KifList) collectAllAssertionIds(specificNode, candidates);
+            private static boolean removePathsRecursive(KifTerm term, String assertionId, PathNode currentNode) {
+                if (currentNode == null) return false;
+                currentNode.assertionIdsHere.remove(assertionId);
+                var key = getIndexKey(term);
+                var termNode = currentNode.children.get(key);
+                if (termNode != null) {
+                    termNode.assertionIdsHere.remove(assertionId);
+                    var canPruneChild = true;
+                    if (term instanceof KifList list)
+                        canPruneChild = list.terms().stream().allMatch(subTerm -> removePathsRecursive(subTerm, assertionId, termNode));
+                    if (canPruneChild && termNode.assertionIdsHere.isEmpty() && termNode.children.isEmpty())
+                        currentNode.children.remove(key, termNode);
+                }
+                return currentNode.assertionIdsHere.isEmpty() && currentNode.children.isEmpty();
             }
-            if (queryTerm instanceof KifVar)
-                indexNode.children.values().forEach(childNode -> collectAllAssertionIds(childNode, candidates));
-        }
 
-        private static void findInstancesRecursive(KifTerm queryPattern, PathNode indexNode, Set<String> candidates) {
-            if (indexNode == null) return;
-            if (queryPattern instanceof KifVar) {
-                collectAllAssertionIds(indexNode, candidates);
-                return;
+            private static Object getIndexKey(KifTerm term) {
+                return switch (term) {
+                    case KifAtom a -> a.value();
+                    case KifVar _ -> PathNode.VAR_MARKER;
+                    case KifList l -> l.op().map(op -> (Object) op).orElse(PathNode.LIST_MARKER);
+                };
             }
-            var specificNode = indexNode.children.get(getIndexKey(queryPattern));
-            if (specificNode != null) {
-                candidates.addAll(specificNode.assertionIdsHere);
-                if (queryPattern instanceof KifList listPattern && !listPattern.terms().isEmpty()) {
-                    collectAllAssertionIds(specificNode, candidates);
+
+            private static void collectAllAssertionIds(PathNode node, Set<String> ids) {
+                if (node == null) return;
+                ids.addAll(node.assertionIdsHere);
+                node.children.values().forEach(child -> collectAllAssertionIds(child, ids));
+            }
+
+            private static void findUnifiableRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
+                if (queryTerm instanceof KifList)
+                    ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> collectAllAssertionIds(listNode, candidates));
+                var specificNode = indexNode.children.get(getIndexKey(queryTerm));
+                if (specificNode != null) {
+                    candidates.addAll(specificNode.assertionIdsHere);
+                    if (queryTerm instanceof KifList) collectAllAssertionIds(specificNode, candidates);
+                }
+                if (queryTerm instanceof KifVar)
+                    indexNode.children.values().forEach(childNode -> collectAllAssertionIds(childNode, candidates));
+            }
+
+            private static void findInstancesRecursive(KifTerm queryPattern, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                if (queryPattern instanceof KifVar) {
+                    collectAllAssertionIds(indexNode, candidates);
+                    return;
+                }
+                var specificNode = indexNode.children.get(getIndexKey(queryPattern));
+                if (specificNode != null) {
+                    candidates.addAll(specificNode.assertionIdsHere);
+                    if (queryPattern instanceof KifList listPattern && !listPattern.terms().isEmpty()) {
+                        collectAllAssertionIds(specificNode, candidates);
+                    }
                 }
             }
-        }
 
-        private static void findGeneralizationsRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
-            if (indexNode == null) return;
-            ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
-            if (queryTerm instanceof KifList)
-                ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> candidates.addAll(listNode.assertionIdsHere));
-            ofNullable(indexNode.children.get(getIndexKey(queryTerm))).ifPresent(nextNode -> {
-                candidates.addAll(nextNode.assertionIdsHere);
-                if (queryTerm instanceof KifList queryList && !queryList.terms().isEmpty()) {
-                    queryList.terms().forEach(subTerm -> findGeneralizationsRecursive(subTerm, nextNode, candidates));
-                }
-            });
-        }
+            private static void findGeneralizationsRecursive(KifTerm queryTerm, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
+                if (queryTerm instanceof KifList)
+                    ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> candidates.addAll(listNode.assertionIdsHere));
+                ofNullable(indexNode.children.get(getIndexKey(queryTerm))).ifPresent(nextNode -> {
+                    candidates.addAll(nextNode.assertionIdsHere);
+                    if (queryTerm instanceof KifList queryList && !queryList.terms().isEmpty()) {
+                        queryList.terms().forEach(subTerm -> findGeneralizationsRecursive(subTerm, nextNode, candidates));
+                    }
+                });
+            }
 
-        @FunctionalInterface
-        private interface TriConsumer<T, U, V> {
-            void accept(T t, U u, V v);
+            void add(Assertion assertion) {
+                if (tms.isActive(assertion.id)) addPathsRecursive(assertion.kif, assertion.id, root);
+            }
+
+            void remove(Assertion assertion) {
+                removePathsRecursive(assertion.kif, assertion.id, root);
+            }
+
+            void clear() {
+                root.children.clear();
+                root.assertionIdsHere.clear();
+            }
+
+            Stream<Assertion> findUnifiableAssertions(KifTerm queryTerm) {
+                return findCandidates(queryTerm, PathIndex::findUnifiableRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
+            }
+
+            Stream<Assertion> findInstancesOf(KifTerm queryPattern) {
+                var neg = (queryPattern instanceof KifList ql && ql.op().filter(KIF_OP_NOT::equals).isPresent());
+                return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated == neg).filter(a -> Unifier.match(queryPattern, a.kif, Map.of()) != null);
+            }
+
+            Stream<Assertion> findGeneralizationsOf(KifTerm queryTerm) {
+                return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::getAssertion).flatMap(Optional::stream).filter(Assertion::isActive);
+            }
+
+            private Set<String> findCandidates(KifTerm query, TriConsumer<KifTerm, PathNode, Set<String>> searchFunc) {
+                Set<String> candidates = ConcurrentHashMap.newKeySet();
+                searchFunc.accept(query, root, candidates);
+                return Set.copyOf(candidates);
+            }
+
+            @FunctionalInterface
+            private interface TriConsumer<T, U, V> {
+                void accept(T t, U u, V v);
+            }
         }
     }
 
+    /** knowledgebase (KB) */
     static class Knowledge {
         final String id;
         final int capacity;
         final Events events;
-        final Truths truth;
-        final PathIndex paths;
+        final TruthMaintenance.Truths truth;
+        final Path.PathIndex paths;
         final ConcurrentMap<KifAtom, Set<String>> universalIndex = new ConcurrentHashMap<>();
         final PriorityBlockingQueue<String> groundEvictionQueue;
         private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
-        Knowledge(String kbId, int capacity, Events events, Truths truth) {
+        Knowledge(String kbId, int capacity, Events events, TruthMaintenance.Truths truth) {
             this.id = requireNonNull(kbId);
             this.capacity = capacity;
             this.events = requireNonNull(events);
             this.truth = requireNonNull(truth);
-            this.paths = new PathIndex(truth);
+            this.paths = new Path.PathIndex(truth);
             this.groundEvictionQueue = new PriorityBlockingQueue<>(1024,
                     Comparator.<String, Double>comparing(id -> truth.getAssertion(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
                             .thenComparing(id -> truth.getAssertion(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
@@ -743,7 +895,7 @@ public class Logic {
 
         private boolean isSubsumedInternal(KifTerm term, boolean isNegated) {
             return paths.findGeneralizationsOf(term)
-                    .filter(a -> a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED)
+                    .filter(Logic::groundOrSkolemized)
                     .anyMatch(candidate -> candidate.negated == isNegated && Unifier.match(candidate.getEffectiveTerm(), term, Map.of()) != null);
         }
 
@@ -754,12 +906,12 @@ public class Logic {
         private void enforceKbCapacityInternal(String source) {
             while (getAssertionCount() >= capacity && !groundEvictionQueue.isEmpty()) {
                 ofNullable(groundEvictionQueue.poll())
-                        .flatMap(truth::getAssertion)
-                        .filter(a -> a.kb.equals(id) && (a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED))
-                        .ifPresent(toEvict -> {
-                            truth.retractAssertion(toEvict.id, source + "-evict");
-                            events.emit(new AssertionEvictedEvent(toEvict, id));
-                        });
+                    .flatMap(truth::getAssertion)
+                    .filter(a -> groundOrSkolemized(a) && a.kb.equals(id))
+                    .ifPresent(toEvict -> {
+                        truth.retractAssertion(toEvict.id, source + "-evict");
+                        events.emit(new AssertionEvictedEvent(toEvict, id));
+                    });
             }
         }
 
@@ -782,10 +934,10 @@ public class Logic {
                         groundEvictionQueue.remove(a.id);
                     }
                     case UNIVERSAL ->
-                            a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfPresent(pred, (_, ids) -> {
-                                ids.remove(a.id);
-                                return ids.isEmpty() ? null : ids;
-                            }));
+                        a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfPresent(pred, (_, ids) -> {
+                            ids.remove(a.id);
+                            return ids.isEmpty() ? null : ids;
+                        }));
                 }
             } finally {
                 lock.writeLock().unlock();
@@ -808,21 +960,54 @@ public class Logic {
         }
     }
 
+    private static boolean groundOrSkolemized(Assertion a) {
+        return a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED;
+    }
+
     static class Cognition {
         final Cog cog;
         final Events events;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
-        private final Truths tms;
-        private final Operators operators;
+        private final TruthMaintenance.Truths tms;
+        private final Op.Operators operators;
 
-        Cognition(int globalKbCapacity, Events events, Truths tms, Operators operators, Cog cog) {
+        Cognition(int globalKbCapacity, Events events, TruthMaintenance.Truths tms, Op.Operators operators, Cog cog) {
             this.cog = cog;
             this.events = events;
             this.tms = tms;
             this.operators = operators;
             this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, events, tms);
+        }
+
+        public static KifList performSkolemization(KifList body, Collection<KifVar> existentialVars, Map<KifVar, KifTerm> contextBindings) {
+            return Skolemizer.skolemize(new KifList(KifAtom.of(KIF_OP_EXISTS), new KifList(new ArrayList<>(existentialVars)), body), contextBindings);
+        }
+
+        public static KifList simplifyLogicalTerm(KifList term) {
+            final var MAX_DEPTH = 5;
+            var current = term;
+            for (var depth = 0; depth < MAX_DEPTH; depth++) {
+                var next = simplifyLogicalTermOnce(current);
+                if (next.equals(current)) return current;
+                current = next;
+            }
+            if (!term.equals(current))
+                System.err.println("Warning: Simplification depth limit reached for: " + term.toKif());
+            return current;
+        }
+
+        private static KifList simplifyLogicalTermOnce(KifList term) {
+            if (term.op().filter(KIF_OP_NOT::equals).isPresent() && term.size() == 2 && term.get(1) instanceof KifList nl && nl.op().filter(KIF_OP_NOT::equals).isPresent() && nl.size() == 2 && nl.get(1) instanceof KifList inner)
+                return simplifyLogicalTermOnce(inner);
+            var changed = new boolean[]{false};
+            var newTerms = term.terms().stream().map(subTerm -> {
+                var simplifiedSub = (subTerm instanceof KifList sl) ? simplifyLogicalTermOnce(sl) : subTerm;
+                if (!simplifiedSub.equals(subTerm)) changed[0] = true;
+                return simplifiedSub;
+            }).toList();
+            return changed[0] ? new KifList(newTerms) : term;
         }
 
         public Knowledge kb(@Nullable String noteId) {
@@ -857,11 +1042,11 @@ public class Logic {
             return globalKb.capacity + noteKbs.size() * globalKb.capacity;
         }
 
-        public Truths truth() {
+        public TruthMaintenance.Truths truth() {
             return tms;
         }
 
-        public Operators operators() {
+        public Op.Operators operators() {
             return operators;
         }
 
@@ -930,189 +1115,9 @@ public class Logic {
             return supportIds.stream().map(this::findAssertionByIdAcrossKbs).flatMap(Optional::stream).mapToInt(Assertion::derivationDepth).max().orElse(-1);
         }
 
-        public static KifList performSkolemization(KifList body, Collection<KifVar> existentialVars, Map<KifVar, KifTerm> contextBindings) {
-            return Skolemizer.skolemize(new KifList(KifAtom.of(KIF_OP_EXISTS), new KifList(new ArrayList<>(existentialVars)), body), contextBindings);
-        }
-
-        public static KifList simplifyLogicalTerm(KifList term) {
-            final var MAX_DEPTH = 5;
-            var current = term;
-            for (var depth = 0; depth < MAX_DEPTH; depth++) {
-                var next = simplifyLogicalTermOnce(current);
-                if (next.equals(current)) return current;
-                current = next;
-            }
-            if (!term.equals(current))
-                System.err.println("Warning: Simplification depth limit reached for: " + term.toKif());
-            return current;
-        }
-
-        private static KifList simplifyLogicalTermOnce(KifList term) {
-            if (term.op().filter(KIF_OP_NOT::equals).isPresent() && term.size() == 2 && term.get(1) instanceof KifList nl && nl.op().filter(KIF_OP_NOT::equals).isPresent() && nl.size() == 2 && nl.get(1) instanceof KifList inner)
-                return simplifyLogicalTermOnce(inner);
-            var changed = new boolean[]{false};
-            var newTerms = term.terms().stream().map(subTerm -> {
-                var simplifiedSub = (subTerm instanceof KifList sl) ? simplifyLogicalTermOnce(sl) : subTerm;
-                if (!simplifiedSub.equals(subTerm)) changed[0] = true;
-                return simplifiedSub;
-            }).toList();
-            return changed[0] ? new KifList(newTerms) : term;
-        }
-
         @Nullable
         public Assertion tryCommit(PotentialAssertion pa, String source) {
             return kb(pa.sourceNoteId()).commit(pa, source);
-        }
-    }
-
-    static class BasicTMS implements Truths {
-        private final Events events;
-        private final ConcurrentMap<String, Assertion> assertions = new ConcurrentHashMap<>();
-        private final ConcurrentMap<String, Set<String>> justifications = new ConcurrentHashMap<>();
-        private final ConcurrentMap<String, Set<String>> dependents = new ConcurrentHashMap<>();
-        private final ReadWriteLock lock = new ReentrantReadWriteLock();
-
-        BasicTMS(Events e) {
-            this.events = e;
-        }
-
-        @Override
-        public SupportTicket addAssertion(Assertion assertion, Set<String> justificationIds, String source) {
-            lock.writeLock().lock();
-            try {
-                if (assertions.containsKey(assertion.id)) return null;
-                var assertionToAdd = assertion.withStatus(true);
-                var supportingAssertions = justificationIds.stream().map(assertions::get).filter(Objects::nonNull).toList();
-                if (!justificationIds.isEmpty() && supportingAssertions.size() != justificationIds.size()) {
-                    System.err.printf("TMS Warning: Justification missing for %s. Supporters: %s, Found: %s%n", assertion.id, justificationIds, supportingAssertions.stream().map(Assertion::id).toList());
-                    return null;
-                }
-                if (!justificationIds.isEmpty() && supportingAssertions.stream().noneMatch(Assertion::isActive))
-                    assertionToAdd = assertionToAdd.withStatus(false);
-
-                assertions.put(assertionToAdd.id, assertionToAdd);
-                justifications.put(assertionToAdd.id, Set.copyOf(justificationIds));
-                var finalAssertionToAdd = assertionToAdd;
-                justificationIds.forEach(supporterId -> dependents.computeIfAbsent(supporterId, k -> ConcurrentHashMap.newKeySet()).add(finalAssertionToAdd.id));
-
-                if (!assertionToAdd.isActive())
-                    events.emit(new AssertionStatusChangedEvent(assertionToAdd.id, false, assertionToAdd.kb));
-                else checkForContradictions(assertionToAdd);
-                return new SupportTicket(generateId(ID_PREFIX_TICKET), assertionToAdd.id);
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        @Override
-        public void retractAssertion(String assertionId, String source) {
-            lock.writeLock().lock();
-            try {
-                retractInternal(assertionId, source, new HashSet<>());
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        private void retractInternal(String assertionId, String source, Set<String> visited) {
-            if (!visited.add(assertionId)) return;
-            var assertion = assertions.remove(assertionId);
-            if (assertion == null) return;
-            justifications.remove(assertionId);
-            assertion.justificationIds().forEach(supporterId -> ofNullable(dependents.get(supporterId)).ifPresent(deps -> deps.remove(assertionId)));
-            var depsToProcess = new HashSet<>(dependents.remove(assertionId));
-            if (assertion.isActive()) events.emit(new AssertionRetractedEvent(assertion, assertion.kb, source));
-            else events.emit(new AssertionStatusChangedEvent(assertion.id, false, assertion.kb));
-            depsToProcess.forEach(depId -> updateStatus(depId, visited));
-        }
-
-        private void updateStatus(String assertionId, Set<String> visited) {
-            if (!visited.add(assertionId)) return;
-            var assertion = assertions.get(assertionId);
-            if (assertion == null) return;
-            var just = justifications.getOrDefault(assertionId, Set.of());
-            var supportActive = just.stream().map(assertions::get).filter(Objects::nonNull).allMatch(Assertion::isActive);
-            var newActiveStatus = !just.isEmpty() && supportActive;
-            if (newActiveStatus != assertion.isActive()) {
-                var updatedAssertion = assertion.withStatus(newActiveStatus);
-                assertions.put(assertionId, updatedAssertion);
-                events.emit(new AssertionStatusChangedEvent(assertionId, newActiveStatus, assertion.kb));
-                if (newActiveStatus) checkForContradictions(updatedAssertion);
-                dependents.getOrDefault(assertionId, Set.of()).forEach(depId -> updateStatus(depId, visited));
-            }
-        }
-
-        @Override
-        public Set<String> getActiveSupport(String assertionId) {
-            lock.readLock().lock();
-            try {
-                return justifications.getOrDefault(assertionId, Set.of()).stream().filter(this::isActive).collect(Collectors.toSet());
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
-
-        @Override
-        public boolean isActive(String assertionId) {
-            lock.readLock().lock();
-            try {
-                return ofNullable(assertions.get(assertionId)).map(Assertion::isActive).orElse(false);
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
-
-        @Override
-        public Optional<Assertion> getAssertion(String assertionId) {
-            lock.readLock().lock();
-            try {
-                return ofNullable(assertions.get(assertionId));
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
-
-        @Override
-        public Collection<Assertion> getAllActiveAssertions() {
-            lock.readLock().lock();
-            try {
-                return assertions.values().stream().filter(Assertion::isActive).toList();
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
-
-        private void checkForContradictions(Assertion newlyActive) {
-            if (!newlyActive.isActive()) return;
-            var oppositeForm = newlyActive.negated ? newlyActive.getEffectiveTerm() : new KifList(KifAtom.of(KIF_OP_NOT), newlyActive.kif);
-            if (!(oppositeForm instanceof KifList)) return;
-            findMatchingAssertion((KifList) oppositeForm, newlyActive.kb, !newlyActive.negated)
-                    .ifPresent(match -> {
-                        System.err.printf("TMS Contradiction Detected in KB %s: %s and %s%n", newlyActive.kb, newlyActive.id, match.id);
-                        events.emit(new ContradictionDetectedEvent(Set.of(newlyActive.id, match.id), newlyActive.kb));
-                    });
-        }
-
-        private Optional<Assertion> findMatchingAssertion(KifList formToMatch, String kbId, boolean matchIsNegated) {
-            lock.readLock().lock();
-            try {
-                return assertions.values().stream()
-                        .filter(Assertion::isActive)
-                        .filter(a -> a.negated == matchIsNegated && a.kb.equals(kbId) && a.kif.equals(formToMatch))
-                        .findFirst();
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
-
-        @Override
-        public void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy) {
-            System.err.println("Contradiction resolution not implemented. Strategy: " + strategy + ", Conflicting: " + contradiction.conflictingAssertionIds());
-        }
-
-        @Override
-        public Set<Contradiction> findContradictions() {
-            return Set.of();
         }
     }
 
@@ -1242,45 +1247,6 @@ public class Logic {
         }
     }
 
-    static class Operators {
-        private final ConcurrentMap<KifAtom, Operator> ops = new ConcurrentHashMap<>();
-
-        void add(Operator operator) {
-            ops.put(operator.pred(), operator);
-            System.out.println("Registered operator: " + operator.pred().toKif());
-        }
-
-        Optional<Operator> get(KifAtom predicate) {
-            return ofNullable(ops.get(predicate));
-        }
-    }
-
-    static class BasicOperator implements Operator {
-        private final String id = generateId(ID_PREFIX_OPERATOR);
-        private final KifAtom pred;
-        private final Function<KifList, Optional<KifTerm>> function;
-
-        BasicOperator(KifAtom pred, Function<KifList, Optional<KifTerm>> function) {
-            this.pred = pred;
-            this.function = function;
-        }
-
-        @Override
-        public String id() {
-            return id;
-        }
-
-        @Override
-        public KifAtom pred() {
-            return pred;
-        }
-
-        @Override
-        public CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context) {
-            return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
-        }
-    }
-
     static class KifParser {
         private final Reader reader;
         private int currentChar = -2;
@@ -1298,6 +1264,10 @@ public class Logic {
             } catch (IOException e) {
                 throw new ParseException("Internal Read error: " + e.getMessage());
             }
+        }
+
+        private static boolean isValidAtomChar(int c) {
+            return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
         }
 
         private List<KifTerm> parseTopLevel() throws IOException, ParseException {
@@ -1350,10 +1320,6 @@ public class Logic {
             if (!isValidAtomChar(peek())) throw createParseException("Invalid character at start of atom");
             while (isValidAtomChar(peek())) sb.append((char) consumeChar());
             return KifAtom.of(sb.toString());
-        }
-
-        private static boolean isValidAtomChar(int c) {
-            return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
         }
 
         private KifAtom parseQuotedString() throws IOException, ParseException {
@@ -1413,11 +1379,64 @@ public class Logic {
         private ParseException createParseException(String message) {
             return new ParseException(message + " at line " + line + " col " + col);
         }
+
+        static class ParseException extends Exception {
+            ParseException(String message) {
+                super(message);
+            }
+        }
     }
 
-    static class ParseException extends Exception {
-        ParseException(String message) {
-            super(message);
+    public static class Op {
+
+        interface Operator {
+            String id();
+
+            KifAtom pred();
+
+            CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context);
+        }
+
+        /**
+         * Operator registry
+         */
+        static class Operators {
+            private final ConcurrentMap<KifAtom, Operator> ops = new ConcurrentHashMap<>();
+
+            void add(Operator operator) {
+                ops.put(operator.pred(), operator);
+                System.out.println("Registered operator: " + operator.pred().toKif());
+            }
+
+            Optional<Operator> get(KifAtom predicate) {
+                return ofNullable(ops.get(predicate));
+            }
+        }
+
+        static class BasicOperator implements Operator {
+            private final String id = generateId(ID_PREFIX_OPERATOR);
+            private final KifAtom pred;
+            private final Function<KifList, Optional<KifTerm>> function;
+
+            BasicOperator(KifAtom pred, Function<KifList, Optional<KifTerm>> function) {
+                this.pred = pred;
+                this.function = function;
+            }
+
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public KifAtom pred() {
+                return pred;
+            }
+
+            @Override
+            public CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context) {
+                return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
+            }
         }
     }
 }
