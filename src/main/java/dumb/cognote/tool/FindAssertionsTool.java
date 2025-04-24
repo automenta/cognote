@@ -9,6 +9,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.ID_PREFIX_QUERY;
@@ -39,7 +40,24 @@ public class FindAssertionsTool implements Tool {
     public String findAssertionsToolMethod(@P(value = "The KIF pattern to query the knowledge base with.") String kifPattern, @P(value = "Optional ID of the knowledge base (note ID) to query. Defaults to global KB if not provided or empty.") @Nullable String targetKbId) {
         try {
             // Call the internal execute logic and block for the result.
-            return (String) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
+            // The execute method now returns Answer, so format it here.
+            Cog.Answer answer = (Cog.Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
+
+            if (answer.status() == Cog.QueryStatus.SUCCESS) {
+                if (answer.bindings().isEmpty()) {
+                    return "Query successful, but no matching assertions found.";
+                } else {
+                    return "Query successful. Found " + answer.bindings().size() + " bindings:\n" +
+                            answer.bindings().stream()
+                                    .map(b -> b.entrySet().stream()
+                                            .map(e -> e.getKey().name() + " = " + e.getValue().toKif())
+                                            .collect(Collectors.joining(", ")))
+                                    .collect(Collectors.joining("\n"));
+                }
+            } else {
+                return "Query failed with status " + answer.status() + ". " + (answer.explanation() != null ? "Details: " + answer.explanation().details() : "");
+            }
+
         } catch (Exception e) {
             System.err.println("Error in blocking tool method 'findAssertionsToolMethod': " + e.getMessage());
             e.printStackTrace();
@@ -48,7 +66,7 @@ public class FindAssertionsTool implements Tool {
     }
 
     // The BaseTool execute method signature for internal calls.
-    // It parses parameters from the map and returns a CompletableFuture.
+    // It parses parameters from the map and returns a CompletableFuture<Answer>.
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
         var kifPattern = (String) parameters.get("kif_pattern");
@@ -56,45 +74,31 @@ public class FindAssertionsTool implements Tool {
 
         return CompletableFuture.supplyAsync(() -> {
             if (cog == null) {
-                return "Error: System not available.";
+                throw new IllegalStateException("System not available.");
             }
             if (kifPattern == null || kifPattern.isBlank()) {
-                return "Error: Missing required parameter 'kif_pattern'.";
+                throw new IllegalArgumentException("Missing required parameter 'kif_pattern'.");
             }
             try {
                 var terms = Logic.KifParser.parseKif(kifPattern);
                 if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst patternList)) {
-                    return "Error: Invalid KIF pattern format. Must be a single KIF list.";
+                    throw new IllegalArgumentException("Invalid KIF pattern format. Must be a single KIF list.");
                 }
 
                 var finalTargetKbId = requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID);
 
                 var queryId = Cog.id(ID_PREFIX_QUERY + "tool_");
+                // This tool specifically uses ASK_BINDINGS
                 var query = new Cog.Query(queryId, Cog.QueryType.ASK_BINDINGS, patternList, finalTargetKbId, Map.of());
-                var answer = cog.querySync(query); // Call the sync method in Cog
-
-                if (answer.status() == Cog.QueryStatus.SUCCESS) {
-                    if (answer.bindings().isEmpty()) {
-                        return "Query successful, but no matching assertions found.";
-                    } else {
-                        return "Query successful. Found " + answer.bindings().size() + " bindings:\n" +
-                                answer.bindings().stream()
-                                        .map(b -> b.entrySet().stream()
-                                                .map(e -> e.getKey().name() + " = " + e.getValue().toKif())
-                                                .collect(Collectors.joining(", ")))
-                                        .collect(Collectors.joining("\n"));
-                    }
-                } else {
-                    return "Query failed with status " + answer.status() + ". " + (answer.explanation() != null ? "Details: " + answer.explanation().details() : "");
-                }
+                return cog.querySync(query); // Call the sync method in Cog and return the Answer object
 
             } catch (Logic.KifParser.ParseException e) {
                 System.err.println("Error parsing KIF pattern in tool 'find_assertions' (internal): " + e.getMessage());
-                return "Error parsing KIF pattern: " + e.getMessage();
+                throw new CompletionException(new IllegalArgumentException("Error parsing KIF pattern: " + e.getMessage()));
             } catch (Exception e) {
                 System.err.println("Error executing tool 'find_assertions' (internal): " + e.getMessage());
                 e.printStackTrace();
-                return "Error executing tool: " + e.getMessage();
+                throw new CompletionException(new RuntimeException("Error executing tool: " + e.getMessage(), e));
             }
         }, cog.events.exe);
     }

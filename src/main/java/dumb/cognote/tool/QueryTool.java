@@ -10,6 +10,7 @@ import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.ID_PREFIX_QUERY;
@@ -34,6 +35,25 @@ public class QueryTool implements Tool {
         return "Executes a KIF query against the knowledge base. Input is a JSON object with 'kif_pattern' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns the query result as a formatted string.";
     }
 
+    // This method is called by LangChain4j's AiServices.
+    // It needs to block or return a simple type.
+    // It calls the internal execute logic and blocks for the result.
+    @dev.langchain4j.agent.tool.Tool(name = "run_query", value = "Executes a KIF query against the knowledge base. Input is a JSON object with 'kif_pattern' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns the query result as a formatted string.")
+    public String runQueryToolMethod(@P(value = "The KIF pattern to query the knowledge base with.") String kifPattern, @P(value = "Optional ID of the knowledge base (note ID) to query. Defaults to global KB if not provided or empty.") @Nullable String targetKbId) {
+        try {
+            // Call the internal execute logic and block for the result.
+            // The execute method now returns Answer, so format it here.
+            Answer answer = (Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
+            return formatQueryResult(answer);
+        } catch (Exception e) {
+            System.err.println("Error in blocking tool method 'runQueryToolMethod': " + e.getMessage());
+            e.printStackTrace();
+            return "Error executing tool: " + e.getMessage();
+        }
+    }
+
+    // The BaseTool execute method signature for internal calls.
+    // It parses parameters from the map and returns a CompletableFuture<Answer>.
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
         var kifPattern = (String) parameters.get("kif_pattern");
@@ -42,44 +62,37 @@ public class QueryTool implements Tool {
 
         return CompletableFuture.supplyAsync(() -> {
             if (cog == null) {
-                return "Error: System not available.";
+                throw new IllegalStateException("System not available.");
             }
             if (kifPattern == null || kifPattern.isBlank()) {
-                return "Error: Missing required parameter 'kif_pattern'.";
+                throw new IllegalArgumentException("Missing required parameter 'kif_pattern'.");
             }
 
             QueryType queryType;
             try {
                 queryType = valueOf(queryTypeStr.toUpperCase());
             } catch (IllegalArgumentException e) {
-                return "Error: Invalid query type '" + queryTypeStr + "'. Must be ASK_BINDINGS, ASK_TRUE_FALSE, or ACHIEVE_GOAL.";
+                throw new IllegalArgumentException("Invalid query type '" + queryTypeStr + "'. Must be ASK_BINDINGS, ASK_TRUE_FALSE, or ACHIEVE_GOAL.");
             }
 
             try {
-                return query(kifPattern, queryType, targetKbId);
+                // Execute the query synchronously via Cog and return the Answer object
+                return cog.querySync(
+                        new Cog.Query(
+                                Cog.id(ID_PREFIX_QUERY + "tool_"),
+                                queryType,
+                                (Term.Lst) Logic.KifParser.parseKif(kifPattern).getFirst(), // Assuming parseKif returns a single list for a query pattern
+                                requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID),
+                                Map.of()));
             } catch (ParseException e) {
                 System.err.println("Error parsing KIF pattern in tool 'run_query': " + e.getMessage());
-                return "Error parsing KIF pattern: " + e.getMessage();
+                throw new CompletionException(new IllegalArgumentException("Error parsing KIF pattern: " + e.getMessage()));
             } catch (Exception e) {
                 System.err.println("Error executing tool 'run_query': " + e.getMessage());
                 e.printStackTrace();
-                return "Error executing tool: " + e.getMessage();
+                throw new CompletionException(new RuntimeException("Error executing tool: " + e.getMessage(), e));
             }
         }, cog.events.exe);
-    }
-
-    private String query(String kifPattern, QueryType queryType, String targetKbId) throws ParseException {
-        var terms = Logic.KifParser.parseKif(kifPattern);
-        if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst patternList))
-            return "Error: Invalid KIF pattern format. Must be a single KIF list.";
-
-        // Execute the query synchronously via Cog
-        return formatQueryResult(cog.querySync(
-                new Cog.Query(
-                        Cog.id(ID_PREFIX_QUERY + "tool_"),
-                        queryType, patternList,
-                        requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID),
-                        Map.of())));
     }
 
     private String formatQueryResult(Answer answer) {

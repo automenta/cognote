@@ -22,7 +22,7 @@ public class RetractTool implements Tool {
 
     @Override
     public String description() {
-        return "Retracts an assertion or rule from the knowledge base. Input is a JSON object with 'target' (string, the ID or KIF form) and 'type' (string, 'BY_ID' or 'BY_RULE_FORM'). Optional 'target_note_id' (string) for BY_ID type.";
+        return "Retracts an assertion or rule from the knowledge base. Input is a JSON object with 'target' (string, the ID or KIF form) and 'type' (string, 'BY_ID', 'BY_RULE_FORM', or 'BY_KIF'). Optional 'target_note_id' (string) for BY_ID type.";
     }
 
     @Override
@@ -43,11 +43,11 @@ public class RetractTool implements Tool {
             try {
                 type = Logic.RetractionType.valueOf(typeStr.toUpperCase());
             } catch (IllegalArgumentException e) {
-                return "Error: Invalid retraction type '" + typeStr + "'. Must be BY_ID or BY_RULE_FORM.";
+                return "Error: Invalid retraction type '" + typeStr + "'. Must be BY_ID, BY_RULE_FORM, or BY_KIF.";
             }
 
             // Note: BY_NOTE retraction is handled by the UI directly when removing a note.
-            // This tool focuses on ID or Rule form retraction.
+            // This tool focuses on ID, Rule form, or KIF form retraction.
             if (type == Logic.RetractionType.BY_NOTE) {
                 return "Error: Retraction type BY_NOTE is not supported by this tool. Use the UI to remove notes.";
             }
