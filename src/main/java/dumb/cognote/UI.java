@@ -1126,7 +1126,7 @@ public class UI extends JFrame {
                 if (currentNoteModel != null) {
                     // Add items from the current note's model, avoiding duplicates
                     Collections.list(currentNoteModel.elements()).stream()
-                            .filter(vm -> !allRelevantItems.stream().anyMatch(existing -> existing.id.equals(vm.id))) // Avoid duplicates
+                            .filter(vm -> allRelevantItems.stream().noneMatch(existing -> existing.id.equals(vm.id))) // Avoid duplicates
                             .forEach(allRelevantItems::add);
                 }
             }

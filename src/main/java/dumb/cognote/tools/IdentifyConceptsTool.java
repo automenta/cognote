@@ -34,7 +34,7 @@ public class IdentifyConceptsTool implements BaseTool {
     }
 
     @Override
-    public CompletableFuture execute(Map<String, Object> parameters) {
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
         var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {

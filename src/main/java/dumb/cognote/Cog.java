@@ -233,11 +233,11 @@ public class Cog {
         tools.register(new AddKifAssertionTool(this));
         tools.register(new GetNoteTextTool(this));
         tools.register(new FindAssertionsTool(this));
-        tools.register(new RetractAssertionTool(this));
+        tools.register(new RetractTool(this));
         tools.register(new RunQueryTool(this));
         tools.register(new LogMessageTool());
 
-        tools.register(new SummarizeNoteTool(this));
+        tools.register(new SummarizeTool(this));
         tools.register(new IdentifyConceptsTool(this));
         tools.register(new GenerateQuestionsTool(this));
         tools.register(new TextToKifTool(this));

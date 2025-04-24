@@ -6,11 +6,11 @@ import dumb.cognote.Logic;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class RetractAssertionTool implements BaseTool {
+public class RetractTool implements BaseTool {
 
     private final Cog cog;
 
-    public RetractAssertionTool(Cog cog) {
+    public RetractTool(Cog cog) {
         this.cog = cog;
     }
 

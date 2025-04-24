@@ -1,58 +1,3 @@
-# Enhance TMS: Implement the resolveContradiction method in BasicTMS (or its refactored equivalent). Define and implement
-
-ResolutionStrategy options (e.g., retract weakest, user intervention).
-
-# Improve KIF Handling: Make KifParser more robust. Improve error reporting. Consider supporting more KIF constructs if needed for
-
-future features.
-
-# Primitives
-
-    • Applicability: Formalizing a set of "Cognote Primitives" (e.g., add_assertion, retract_assertion, run_query, call_llm_kif, call_llm_summary,
-      log_message) that can be invoked by a meta-level processing mechanism would provide a structured way to
-      define complex reasoning or task execution flows declaratively.
-
-# Refine LLM Integration:
-
-    • Improve prompt engineering for better KIF generation and other tasks.                                                                       
-    • Handle potential LLM failures and edge cases more gracefully.    
-
-# LM Tool Calling
-
-    • FlowMind: Has a Tools registry and a BaseTool abstraction. Rules trigger actions represented as Struct terms, which are dispatched to named
-      Tool instances (ActionExecutor). This provides a clean way to encapsulate side effects and external interactions (LLM, file system, user,
-      etc.) and make them callable from the rule system.
-    • Cognote: Has Operators for evaluating KIF functions, but external interactions like LLM calls are handled ad-hoc within the LM class and
-      triggered by specific events or UI actions.
-    • Applicability: Implementing a Tool system in Cognote would be a significant enhancement. LLM interactions, file system operations, user
-      prompts, and internal system commands could all be refactored into Tools. The ReasonerPlugins or a new Engine component could then execute
-      these tools based on logical conclusions or task requirements. This would modularize the system and make it easier to add new capabilities.
-    • Applicability: CogNote could adopt a more generalized Tool system. Logic.Operators could be refactored to implement a Tool interface. LLM
-      functions (text2kif, summarize, etc.) could also be wrapped as Tools. New capabilities (like interacting with external systems, file I/O, or
-      even triggering UI actions) could be added as Tool implementations. This unified system would make it easier to extend the system's
-      capabilities and use them as steps within the Note logic workflows (as described in point 2).
-
-    • Current: The LLM cannot directly interact with the application's data or functions.
-    • Opportunity: Define Java methods as @Tools (e.g., findAssertions(String kifPattern),
-      getNoteText(String noteId)). Use a tool-calling capable model (like newer Ollama models or OpenAI
-      functions). The LLM could then decide to call these tools based on the user's prompt (e.g.,
-      "Summarize the main points about 'Project X' from my notes" could trigger a tool call to retrieve
-      notes about "Project X").
-    • Benefit: Allows the LLM to act as an agent interacting with the knowledge base, enabling more
-      complex queries and actions.
-    • Implementation: Requires a tool-calling model, defining @Tool methods, and using a
-      ToolCallingChatModel.
-
-# LM Usage Patterns (Task Decomposition, General Generation):
-
-    • Coglog: Uses the LLM via ThoughtGenerator to break down high-level goals into concrete sub-tasks (STRATEGY thoughts) and via call_llm for
-      general text generation based on a prompt.
-    • CogNote: The LM class provides specific LLM functions (text-to-KIF, summarize, etc.) primarily triggered by the UI.
-    • Applicability: CogNote could adopt Coglog's pattern of using the LLM for task decomposition. A plugin could take a high-level goal assertion
-      and use the LLM (via the LM class) to generate a list of sub-goal or strategy assertions, adding them to the KB for other reasoners/plugins
-      to process. The call_llm primitive pattern could also be generalized in CogNote as a primitive action or operator.
-
-----
 
 # Semantic Matching
 
@@ -72,8 +17,6 @@ relevant information.
 • Task 5.3: Implement Continuous Matching: Develop a background process that continuously evaluates new incoming
 assertions/notes from the       
 network against the local node's persistent queries, using the combined KIF/semantic matching from Phase
-
-3.
 
 • Task 5.4: Implement Notification System: When a match is found, generate a notification event. Design how these
 notifications are presented to

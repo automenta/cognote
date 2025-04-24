@@ -28,7 +28,7 @@ public class TaskDecomposePlugin extends Cog.BasePlugin {
         // This is the targetNoteId from the input event
 
 
-        if (!(term instanceof Logic.KifList goalList) || goalList.size() < 2 || !goalList.op().filter("goal"::equals).isPresent()) {
+        if (!(term instanceof Logic.KifList goalList) || goalList.size() < 2 || goalList.op().filter("goal"::equals).isEmpty()) {
             return; // Should not happen due to pattern matching, but defensive check
         }
 
@@ -62,5 +62,4 @@ public class TaskDecomposePlugin extends Cog.BasePlugin {
         }, () -> System.err.println("TaskDecompositionPlugin: DecomposeGoalTool not found in registry."));
     }
 
-    // Remove triggerLlmDecomposition method entirely
 }

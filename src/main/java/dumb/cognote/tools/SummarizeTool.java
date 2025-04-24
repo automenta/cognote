@@ -14,11 +14,11 @@ import java.util.concurrent.CompletionException;
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
 import static dumb.cognote.Logic.PRED_NOTE_SUMMARY;
 
-public class SummarizeNoteTool implements BaseTool {
+public class SummarizeTool implements BaseTool {
 
     private final Cog cog;
 
-    public SummarizeNoteTool(Cog cog) {
+    public SummarizeTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -33,7 +33,7 @@ public class SummarizeNoteTool implements BaseTool {
     }
 
     @Override
-    public CompletableFuture execute(Map<String, Object> parameters) {
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
         var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {

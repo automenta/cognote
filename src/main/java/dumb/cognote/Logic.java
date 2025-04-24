@@ -1214,7 +1214,7 @@ public class Logic {
         }
 
         private static KifTerm substRecursive(KifTerm term, Map<KifVar, KifTerm> bindings, int depth, boolean fully) {
-            if (bindings.isEmpty() || depth > MAX_SUBST_DEPTH || (term instanceof KifList l && !l.containsVar()) || (term instanceof KifAtom))
+            if (bindings.isEmpty() || depth > MAX_SUBST_DEPTH || (term instanceof KifList l && !l.containsVar()))
                 return term;
             return switch (term) {
                 case KifAtom atom -> atom;
