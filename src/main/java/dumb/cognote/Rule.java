@@ -10,9 +10,9 @@ import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
-record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double pri,
-            List<Term> antecedents, @Nullable String sourceNoteId) {
-    Rule {
+public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double pri,
+                   List<Term> antecedents, @Nullable String sourceNoteId) {
+    public Rule {
         requireNonNull(id);
         requireNonNull(form);
         requireNonNull(antecedent);
@@ -20,7 +20,7 @@ record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double p
         antecedents = List.copyOf(requireNonNull(antecedents));
     }
 
-    static Rule parseRule(String id, Term.Lst ruleForm, double pri, @Nullable String sourceNoteId) throws IllegalArgumentException {
+    public static Rule parseRule(String id, Term.Lst ruleForm, double pri, @Nullable String sourceNoteId) throws IllegalArgumentException {
         if (!(ruleForm.op().filter(op -> op.equals(Logic.KIF_OP_IMPLIES) || op.equals(Logic.KIF_OP_EQUIV)).isPresent() && ruleForm.size() == 3))
             throw new IllegalArgumentException("Rule form must be (=> ant con) or (<=> ant con): " + ruleForm.toKif());
 

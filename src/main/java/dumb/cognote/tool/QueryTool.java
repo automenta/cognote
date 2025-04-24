@@ -1,5 +1,6 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.P;
 import dumb.cognote.Cog;
 import dumb.cognote.Cog.Answer;
 import dumb.cognote.Cog.QueryType;
@@ -7,6 +8,7 @@ import dumb.cognote.Logic;
 import dumb.cognote.Logic.KifParser.ParseException;
 import dumb.cognote.Term;
 import dumb.cognote.Tool;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;

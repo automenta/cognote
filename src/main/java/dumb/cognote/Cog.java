@@ -40,7 +40,7 @@ public class Cog {
 
 
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
-    static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
+    public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
     static final String NOTES_FILE = "cognote_notes.json";

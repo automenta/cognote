@@ -88,7 +88,7 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         private volatile Set<Var> variablesCache;
         private volatile Boolean containsVariableCache, containsSkolemCache;
 
-        Lst(List<Term> terms) {
+        public Lst(List<Term> terms) {
             this.terms = List.copyOf(terms);
         }
 
