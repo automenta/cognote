@@ -92,10 +92,10 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         context.addActiveNote(testKbId);
 
         // Use CompletableFuture to chain setup, action, expected, and teardown
-        CompletableFuture<TestResult> c = executeActions(test, testKbId, "Setup")
-                .thenCompose(setupResult -> executeAction(test, testKbId, "Action"))
+        CompletableFuture<TestResult> c = executeActions(test, testKbId, "Setup", test.setup)
+                .thenCompose(setupResult -> executeAction(test, testKbId, "Action", test.action))
                 .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
-                .thenCompose(expectedResult -> executeActions(test, testKbId, "Teardown")
+                .thenCompose(expectedResult -> executeActions(test, testKbId, "Teardown", test.teardown)
                 .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting"))) // Result determined by expectations
                 .whenComplete((result, ex) -> {
                     // Cleanup the temporary KB regardless of success or failure
@@ -106,11 +106,10 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         return c;
     }
 
-    private CompletableFuture<Void> executeActions(TestDefinition test, String testKbId, String phase) {
-        var actions = test.setup;
+    private CompletableFuture<Void> executeActions(TestDefinition test, String testKbId, String phase, List<TestAction> actions) {
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         for (var action : actions) {
-            future = future.thenCompose(v -> executeAction(test, testKbId, phase).thenAccept(result -> {
+            future = future.thenCompose(v -> executeAction(test, testKbId, phase, action).thenAccept(result -> {
                 // Log action result if needed, but don't use it to determine test success/failure here
                 // Success/failure of setup/teardown actions is handled by exceptions
             }));
@@ -118,12 +117,11 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         return future;
     }
 
-    private CompletableFuture<Object> executeAction(TestDefinition test, String testKbId, String phase) {
-        TestAction action = test.action;
+    private CompletableFuture<Object> executeAction(TestDefinition test, String testKbId, String phase, TestAction action) {
         System.out.println("  " + phase + ": Executing " + action.type + "...");
 
         // Apply timeout to the action future
-        return executeAction(test, testKbId, phase, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        return executeSingleAction(test, testKbId, phase, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                     if (cause instanceof TimeoutException) {
@@ -133,7 +131,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 });
     }
 
-    private CompletableFuture<Object> executeAction(TestDefinition test, String testKbId, String phase, TestAction action) {
+    private CompletableFuture<Object> executeSingleAction(TestDefinition test, String testKbId, String phase, TestAction action) {
 
         try {
 
@@ -257,13 +255,13 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 if (!currentOverallResult) {
                     return CompletableFuture.completedFuture(false); // If any previous expectation failed, the whole test fails
                 }
-                return checkExpectation(expected, testKbId, actionResult);
+                return checkSingleExpectation(expected, testKbId, actionResult);
             });
         }
         return future;
     }
 
-    private CompletableFuture<Boolean> checkExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
+    private CompletableFuture<Boolean> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
         System.out.println("    Checking expectation: " + expected.type + "...");
         var ctx = cog().context;
         return CompletableFuture.supplyAsync(() -> {
@@ -362,44 +360,41 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     List<TestAction> teardown = new ArrayList<>();
 
                     // Parse the rest of the list for setup, action, expected, teardown sections
+                    // Iterate through terms *after* the test name (index 2 onwards)
                     for (var i = 2; i < list.size(); i++) {
-                        var sectionTerm = list.get(i);
+                        var sectionTerm = list.get(i); // This should be the section list, e.g., (action (query ...))
                         if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
                             System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid section format: " + sectionTerm.toKif());
                             action = null; // Mark test as invalid
                             break;
                         }
-                        var sectionOpOpt = sectionList.op();
+                        var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
                         if (sectionOpOpt.isEmpty()) {
                             System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to section without operator: " + sectionList.toKif());
                             action = null; // Mark test as invalid
                             break;
                         }
                         var sectionOp = sectionOpOpt.get();
+                        var sectionContents = sectionList.terms.stream().skip(1).toList(); // These are the terms *inside* the section list
+
 
                         switch (sectionOp) {
                             case "setup" -> {
-                                if (sectionList.size() > 1) {
-                                    setup.addAll(parseActions(sectionList.terms.stream().skip(1).toList()));
-                                }
+                                setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
                             }
                             case "action" -> {
-                                if (sectionList.size() == 2) {
-                                    action = parseAction(sectionList.get(1));
+                                if (sectionContents.size() == 1) {
+                                    action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
                                 } else {
-                                    System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid action section size: " + sectionList.toKif());
+                                    System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid action section size (expected 1): " + sectionList.toKif());
                                     action = null; // Mark test as invalid
                                 }
                             }
                             case "expected" -> {
-                                if (sectionList.size() > 1) {
-                                    expected.addAll(parseExpectations(sectionList.terms.stream().skip(1).toList()));
-                                }
+                                expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
                             }
                             case "teardown" -> {
-                                if (sectionList.size() > 1) {
-                                    teardown.addAll(parseActions(sectionList.terms.stream().skip(1).toList()));
-                                }
+                                teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
                             }
                             default -> {
                                 System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to unknown section type: " + sectionList.toKif());
