@@ -78,7 +78,6 @@ public class UI extends JFrame {
         var existingIndex = findViewModelIndexById(sourceModel, newItem.id);
         if (existingIndex != -1) {
             var existingItem = sourceModel.getElementAt(existingIndex);
-            // Only update if relevant fields changed
             if (newItem.status != existingItem.status || !newItem.content().equals(existingItem.content()) ||
                     newItem.priority() != existingItem.priority() || !Objects.equals(newItem.associatedNoteId(), existingItem.associatedNoteId()) ||
                     !Objects.equals(newItem.kbId(), existingItem.kbId()) || newItem.llmStatus != existingItem.llmStatus ||
@@ -203,9 +202,9 @@ public class UI extends JFrame {
 
     private void saveCurrentNote() {
         ofNullable(currentNote).filter(n -> !Cog.GLOBAL_KB_NOTE_ID.equals(n.id)).ifPresent(n -> {
-            n.text = editorPanel.noteEditor.getText(); // Get text from editor panel
+            n.text = editorPanel.noteEditor.getText();
             if (!Cog.CONFIG_NOTE_ID.equals(n.id)) {
-                n.title = editorPanel.noteTitleField.getText(); // Get title from editor panel
+                n.title = editorPanel.noteTitleField.getText();
             } else if (cog != null && !cog.updateConfig(n.text)) {
                 JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration note. Changes not applied.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
             }
@@ -225,8 +224,8 @@ public class UI extends JFrame {
             setTitle("Cognote - " + currentNote.title + (isGlobalSelected || isConfigSelected ? "" : " [" + currentNote.id + "]"));
             SwingUtilities.invokeLater(() -> {
                 if (!isGlobalSelected && !isConfigSelected) editorPanel.noteEditor.requestFocusInWindow();
-                else if (!isGlobalSelected) editorPanel.noteEditor.requestFocusInWindow(); // Config note editor focus
-                else attachmentPanel.filterField.requestFocusInWindow(); // Global KB filter focus
+                else if (!isGlobalSelected) editorPanel.noteEditor.requestFocusInWindow();
+                else attachmentPanel.filterField.requestFocusInWindow();
             });
         } else {
             setTitle("Cognote - Event Driven");
@@ -243,7 +242,7 @@ public class UI extends JFrame {
         mainControlPanel.setControlsEnabled(enabled);
         editorPanel.setControlsEnabled(enabled, noteSelected, isGlobalSelected, isConfigSelected);
         attachmentPanel.setControlsEnabled(enabled, noteSelected, systemReady);
-        noteListPanel.setControlsEnabled(enabled/*, noteSelected, isGlobalSelected, isConfigSelected, systemReady*/);
+        noteListPanel.setControlsEnabled(enabled);
     }
 
     private void performNoteAction(String actionName, String confirmTitle, String confirmMsgFormat, int confirmMsgType, Consumer<Cog.Note> action) {
@@ -263,10 +262,6 @@ public class UI extends JFrame {
                     }
                 });
     }
-
-    // Removed performNoteActionAsync - replaced by executeNoteTool
-
-    // Removed addLlmUiPlaceholder - moved into LLM Action Tools
 
     private void handleActionError(String actionName, Throwable ex) {
         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
@@ -313,11 +308,8 @@ public class UI extends JFrame {
             var index = entry.getValue();
             var oldVm = model.getElementAt(index);
 
-            // Append new content/status updates to the existing content string
-            // This shows the progression including tool calls/results
             var newContent = oldVm.content();
             if (content != null && !content.isBlank()) {
-                // Avoid appending the same content repeatedly if status updates without new text
                 if (!newContent.endsWith(content)) {
                     newContent += "\n" + content;
                 }
@@ -359,7 +351,6 @@ public class UI extends JFrame {
         }
     }
 
-    // --- Delegated Methods to Panels ---
     public void addNoteToList(Cog.Note note) {
         noteListPanel.addNoteToList(note);
     }
@@ -371,7 +362,6 @@ public class UI extends JFrame {
     public Optional<Cog.Note> findNoteById(String noteId) {
         return noteListPanel.findNoteById(noteId);
     }
-    // --- End Delegated Methods ---
 
     public java.util.List<Cog.Note> getAllNotes() {
         return noteListPanel.getAllNotes();
@@ -379,7 +369,7 @@ public class UI extends JFrame {
 
     public void loadNotes(java.util.List<Cog.Note> notes) {
         noteListPanel.loadNotes(notes);
-        updateUIForSelection(); // Ensure UI state is consistent after loading
+        updateUIForSelection();
         updateStatus("Notes loaded");
     }
 
@@ -422,16 +412,11 @@ public class UI extends JFrame {
         if (cog != null) cog.systemStatus = statusText;
     }
 
-    // --- Inner Classes ---
-
-    // --- Static Helper Classes/Records/Enums ---
     enum AttachmentStatus {ACTIVE, RETRACTED, EVICTED, INACTIVE}
 
     public enum LlmStatus {IDLE, SENDING, PROCESSING, DONE, ERROR, CANCELLED}
 
     public enum AttachmentType {FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION, LLM_INFO, LLM_ERROR, QUERY_SENT, QUERY_RESULT, OTHER}
-
-    // Removed NoteAsyncAction interface
 
     @FunctionalInterface
     interface SimpleDocumentListener extends DocumentListener {
@@ -813,13 +798,12 @@ public class UI extends JFrame {
                     updateUIForSelection();
                 }
             });
-            // Update action listeners to call tools via the registry
-            analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", currentNote)); // Use tool name
-            enhanceItem.addActionListener(e -> executeNoteTool("enhance_note", currentNote)); // Use tool name
-            summarizeItem.addActionListener(e -> executeNoteTool("summarize_note", currentNote)); // Use tool name
-            keyConceptsItem.addActionListener(e -> executeNoteTool("identify_concepts", currentNote)); // Use tool name
-            generateQuestionsItem.addActionListener(e -> executeNoteTool("generate_questions", currentNote)); // Use tool name
-            removeItem.addActionListener(e -> removeNoteAction()); // This uses RetractionRequestEvent, keep for now or refactor to tool
+            analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", currentNote));
+            enhanceItem.addActionListener(e -> executeNoteTool("enhance_note", currentNote));
+            summarizeItem.addActionListener(e -> executeNoteTool("summarize_note", currentNote));
+            keyConceptsItem.addActionListener(e -> executeNoteTool("identify_concepts", currentNote));
+            generateQuestionsItem.addActionListener(e -> executeNoteTool("generate_questions", currentNote));
+            removeItem.addActionListener(e -> removeNoteAction());
             noteList.addMouseListener(createContextMenuMouseListener(noteList, noteContextMenu, this::updateNoteContextMenuState));
         }
 
@@ -831,17 +815,11 @@ public class UI extends JFrame {
                     .forEach(i -> i.setEnabled(isEditableNote && systemReady));
         }
 
-        void setControlsEnabled(boolean enabled/*, boolean noteSelected, boolean isGlobal, boolean isConfig, boolean systemReady*/) {
+        void setControlsEnabled(boolean enabled) {
             noteList.setEnabled(enabled);
         }
 
-        void addNoteToList(Cog.Note note) {
-            addNoteToListInternal(note);
-        }
-
         private void removeNoteAction() {
-            // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
-            // For now, keep as is to minimize changes outside the tool system core.
             performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
         }
 
@@ -865,14 +843,14 @@ public class UI extends JFrame {
                 if (!noteListModel.isEmpty()) {
                     var newIndex = Math.max(0, Math.min(selectedIdxBeforeRemove, noteListModel.getSize() - 1));
                     if (noteList.getSelectedIndex() != newIndex) {
-                        noteList.setSelectedIndex(newIndex); // Listener will trigger updateUIForSelection
+                        noteList.setSelectedIndex(newIndex);
                     } else if (stateChanged) {
-                        currentNote = noteList.getSelectedValue(); // Re-sync currentNote
-                        updateUIForSelection(); // Manually trigger update if index didn't change but note did
+                        currentNote = noteList.getSelectedValue();
+                        updateUIForSelection();
                     }
                 } else {
                     currentNote = null;
-                    updateUIForSelection(); // Update for empty list
+                    updateUIForSelection();
                 }
             });
         }
@@ -910,11 +888,10 @@ public class UI extends JFrame {
                 var firstSelectable = IntStream.range(0, noteListModel.getSize())
                         .filter(i -> !noteListModel.getElementAt(i).id.equals(Cog.GLOBAL_KB_NOTE_ID) && !noteListModel.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID))
                         .findFirst().orElse(findNoteIndexById(Cog.GLOBAL_KB_NOTE_ID).orElse(0));
-                noteList.setSelectedIndex(firstSelectable); // Listener might trigger updateUIForSelection
+                noteList.setSelectedIndex(firstSelectable);
             }
         }
 
-        // New helper method to execute a tool on the current note
         private void executeNoteTool(String toolName, Cog.Note note) {
             if (cog == null || note == null || Cog.GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id)) {
                 System.err.println("Cannot execute tool '" + toolName + "': System not ready or invalid note selected.");
@@ -925,30 +902,24 @@ public class UI extends JFrame {
                 updateStatus(tool.description() + " for '" + note.title + "'...");
                 setControlsEnabled(false);
 
-                // Parameters for note-based tools typically include the note ID
                 Map<String, Object> params = Map.of("note_id", note.id);
 
                 tool.execute(params).whenCompleteAsync((result, ex) -> {
                     setControlsEnabled(true);
-                    updateStatus("Running"); // Or update based on result/ex
+                    updateStatus("Running");
 
                     if (ex != null) {
                         handleActionError(tool.name(), ex);
                     } else {
                         System.out.println("Tool '" + tool.name() + "' completed for note '" + note.id + "'. Result: " + result);
-                        // Optional: Show result in UI if the tool returns a message
                         if (result instanceof String msg && !msg.isBlank()) {
-                            // JOptionPane.showMessageDialog(UI.this, msg, tool.name() + " Result", JOptionPane.INFORMATION_MESSAGE);
-                            // Or log to status bar briefly
                             updateStatus(tool.name() + " Result: " + msg);
                         }
                     }
-                }, SwingUtilities::invokeLater); // Handle completion on EDT
+                }, SwingUtilities::invokeLater);
 
             }, () -> System.err.println("Tool '" + toolName + "' not found in registry."));
         }
-
-        // Removed analyzeNoteAction, enhanceNoteAction, summarizeNoteAction, keyConceptsAction, generateQuestionsAction
     }
 
     private class EditorPanel extends JPanel {
@@ -983,7 +954,7 @@ public class UI extends JFrame {
             noteTitleField.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
                 if (!isUpdatingTitleField && currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id) && !Cog.CONFIG_NOTE_ID.equals(currentNote.id)) {
                     currentNote.title = noteTitleField.getText();
-                    noteTitleUpdated(currentNote); // Notify outer UI
+                    noteTitleUpdated(currentNote);
                 }
             });
         }
@@ -1088,16 +1059,15 @@ public class UI extends JFrame {
 
         private void setupActionListeners() {
             filterField.getDocument().addDocumentListener((SimpleDocumentListener) e -> refreshAttachmentDisplay());
-            // Update action listeners to call tools via the registry
             queryButton.addActionListener(e -> askQueryAction());
             queryInputField.addActionListener(e -> askQueryAction());
             retractItem.addActionListener(e -> retractSelectedAttachmentAction());
-            showSupportItem.addActionListener(e -> showSupportAction()); // This doesn't use a tool, keeps internal logic
-            queryItem.addActionListener(e -> querySelectedAttachmentAction()); // This just copies text, keeps internal logic
-            cancelLlmItem.addActionListener(e -> cancelSelectedLlmTaskAction()); // This interacts directly with LM tasks, keeps internal logic
-            insertSummaryItem.addActionListener(e -> insertSummaryAction()); // This interacts with editor, keeps internal logic
-            answerQuestionItem.addActionListener(e -> answerQuestionAction()); // This interacts with editor/dialog, keeps internal logic
-            findRelatedConceptsItem.addActionListener(e -> findRelatedConceptsAction()); // NYI placeholder, keeps internal logic
+            showSupportItem.addActionListener(e -> showSupportAction());
+            queryItem.addActionListener(e -> querySelectedAttachmentAction());
+            cancelLlmItem.addActionListener(e -> cancelSelectedLlmTaskAction());
+            insertSummaryItem.addActionListener(e -> insertSummaryAction());
+            answerQuestionItem.addActionListener(e -> answerQuestionAction());
+            findRelatedConceptsItem.addActionListener(e -> findRelatedConceptsAction());
             MouseListener itemMouseListener = createContextMenuMouseListener(attachmentList, itemContextMenu, this::updateItemContextMenuState);
             MouseListener itemDblClickListener = new MouseAdapter() {
                 @Override
@@ -1180,23 +1150,16 @@ public class UI extends JFrame {
             getSelectedAttachmentViewModel().filter(AttachmentViewModel::isKifBased).filter(vm -> vm.status == AttachmentStatus.ACTIVE).map(AttachmentViewModel::id).ifPresent(id -> {
                 if (cog == null) return;
                 cog.toolRegistry().get("retract_assertion").ifPresentOrElse(tool -> {
-                    // Parameters for retract_assertion tool
                     Map<String, Object> params = new HashMap<>();
                     params.put("target", id);
                     params.put("type", "BY_ID");
-                    // Optional: Pass target_note_id if retraction is context-specific
                     if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
                         params.put("target_note_id", currentNote.id);
                     }
 
                     tool.execute(params).whenCompleteAsync((result, ex) -> {
-                        if (ex != null) {
-                            System.err.println("Error executing retract_assertion tool: " + ex.getMessage());
-                            // Optionally update status bar or show dialog
-                        } else {
-                            System.out.println("Retract tool result: " + result);
-                            // Status update will happen via AssertionRetractedEvent
-                        }
+                        System.out.println("WS Retract tool result: " + result);
+                        if (ex != null) System.err.println("WS Retract tool error: " + ex.getMessage());
                     }, SwingUtilities::invokeLater);
 
                 }, () -> System.err.println("Tool 'retract_assertion' not found."));
@@ -1252,16 +1215,13 @@ public class UI extends JFrame {
             if (queryText.isBlank()) return;
 
             cog.toolRegistry().get("run_query").ifPresentOrElse(tool -> {
-                // Parameters for run_query tool
                 Map<String, Object> params = new HashMap<>();
                 params.put("kif_pattern", queryText);
-                // Optional: Pass target_kb_id if query is context-specific
                 if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
                     params.put("target_kb_id", currentNote.id);
                 }
-                // Default query_type is ASK_BINDINGS, no need to add if that's the intent
 
-                queryInputField.setText(""); // Clear input field immediately
+                queryInputField.setText("");
 
                 tool.execute(params).whenCompleteAsync((result, ex) -> {
                     if (ex != null) {
@@ -1269,10 +1229,9 @@ public class UI extends JFrame {
                         JOptionPane.showMessageDialog(UI.this, "Query Error: " + ex.getMessage(), "Tool Execution Error", JOptionPane.ERROR_MESSAGE);
                     } else {
                         System.out.println("Query tool result:\n" + result);
-                        // Display the result in a dialog or status bar
                         JOptionPane.showMessageDialog(UI.this, result, "Query Result", JOptionPane.INFORMATION_MESSAGE);
                     }
-                }, SwingUtilities::invokeLater); // Handle completion on EDT
+                }, SwingUtilities::invokeLater);
 
             }, () -> {
                 System.err.println("Tool 'run_query' not found.");
@@ -1298,9 +1257,9 @@ public class UI extends JFrame {
         }
 
         private void setupActionListeners() {
-            addButton.addActionListener(e -> addNoteAction()); // Doesn't use a tool, keeps internal logic
-            pauseResumeButton.addActionListener(e -> togglePauseAction()); // Doesn't use a tool, keeps internal logic
-            clearAllButton.addActionListener(e -> clearAllAction()); // Doesn't use a tool, keeps internal logic
+            addButton.addActionListener(e -> addNoteAction());
+            pauseResumeButton.addActionListener(e -> togglePauseAction());
+            clearAllButton.addActionListener(e -> clearAllAction());
         }
 
         void updatePauseResumeButton() {
@@ -1352,13 +1311,13 @@ public class UI extends JFrame {
             var qm = new JMenu("Query");
             var hm = new JMenu("Help");
 
-            settingsItem.addActionListener(e -> showSettingsDialog()); // Doesn't use a tool, keeps internal logic
+            settingsItem.addActionListener(e -> showSettingsDialog());
             fm.add(settingsItem);
 
-            viewRulesItem.addActionListener(e -> viewRulesAction()); // Doesn't use a tool, keeps internal logic
+            viewRulesItem.addActionListener(e -> viewRulesAction());
             vm.add(viewRulesItem);
 
-            askQueryItem.addActionListener(e -> attachmentPanel.queryInputField.requestFocusInWindow()); // Doesn't use a tool, keeps internal logic
+            askQueryItem.addActionListener(e -> attachmentPanel.queryInputField.requestFocusInWindow());
             qm.add(askQueryItem);
 
             Stream.of(fm, em, vm, qm, hm).forEach(menuBar::add);
@@ -1392,8 +1351,6 @@ public class UI extends JFrame {
             removeButton.addActionListener(ae -> {
                 var selectedRule = ruleJList.getSelectedValue();
                 if (selectedRule != null && JOptionPane.showConfirmDialog(UI.this, "Remove rule: " + selectedRule.id() + "?", "Confirm Rule Removal", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                    // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
-                    // For now, keep as is.
                     cog.events.emit(new Cog.RetractionRequestEvent(selectedRule.form().toKif(), Logic.RetractionType.BY_RULE_FORM, "UI-RuleView", null));
                     ruleListModel.removeElement(selectedRule);
                 }

@@ -22,9 +22,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
-/**
- * Probabilistic Prolog Engine
- */
 public class Logic {
     public static final String KIF_OP_IMPLIES = "=>";
     public static final String KIF_OP_EQUIV = "<=>";
@@ -40,7 +37,6 @@ public class Logic {
     private static final String ID_PREFIX_FACT = "fact_";
     private static final String ID_PREFIX_SKOLEM_FUNC = "skf_";
     private static final String ID_PREFIX_SKOLEM_CONST = "skc_";
-    private static final String ID_PREFIX_TEMP_ITEM = "temp_";
     private static final String ID_PREFIX_TICKET = "tms_";
 
     private static final Set<String> REFLEXIVE_PREDICATES = Set.of("instance", "subclass", "subrelation", "equivalent", "same", "equal", "domain", "range");
@@ -126,7 +122,6 @@ public class Logic {
     }
 
     public record KifAtom(String value) implements KifTerm {
-        // Relaxed pattern slightly to allow more common symbols, but still restrictive
         private static final Pattern SAFE_ATOM_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\-+*/.<>=:!#%&']+$");
         private static final Map<String, KifAtom> internCache = new ConcurrentHashMap<>(1024);
 
@@ -140,7 +135,6 @@ public class Logic {
 
         @Override
         public String toKif() {
-            // Check if quoting is necessary based on the relaxed pattern and common KIF delimiters
             var needsQuotes = value.isEmpty() || !SAFE_ATOM_PATTERN.matcher(value).matches() || value.chars().anyMatch(c -> Character.isWhitespace(c) || "()\";?".indexOf(c) != -1);
             return needsQuotes ? '"' + value.replace("\\", "\\\\").replace("\"", "\\\"") + '"' : value;
         }
@@ -639,16 +633,13 @@ public class Logic {
 
             @Override
             public void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy) {
-                lock.writeLock().lock(); // Acquire lock to safely access assertions map
+                lock.writeLock().lock();
                 try {
                     var conflictingIds = contradiction.conflictingAssertionIds();
                     System.err.printf("TMS Contradiction Resolution (Strategy: %s) for IDs: %s%n", strategy, conflictingIds);
 
                     switch (strategy) {
-                        case LOG_ONLY -> {
-                            // Already logged when detected, just return
-                            System.err.println("Strategy LOG_ONLY: No assertions retracted.");
-                        }
+                        case LOG_ONLY -> System.err.println("Strategy LOG_ONLY: No assertions retracted.");
                         case RETRACT_WEAKEST -> {
                             var activeConflicts = conflictingIds.stream()
                                     .map(assertions::get)
@@ -661,48 +652,23 @@ public class Logic {
                                 return;
                             }
 
-                            // Find the minimum priority among active conflicts
-                            var minPri = activeConflicts.stream()
-                                    .mapToDouble(Assertion::pri)
-                                    .min()
-                                    .orElseThrow(); // Should not happen if activeConflicts is not empty
-
-                            // Find assertions with the minimum priority
-                            var weakestAssertions = activeConflicts.stream()
-                                    .filter(a -> Double.compare(a.pri(), minPri) == 0)
-                                    .toList();
+                            var minPri = activeConflicts.stream().mapToDouble(Assertion::pri).min().orElseThrow();
+                            var weakestAssertions = activeConflicts.stream().filter(a -> Double.compare(a.pri(), minPri) == 0).toList();
 
                             Set<String> idsToRetract = new HashSet<>();
-
                             if (weakestAssertions.size() > 1) {
-                                // If there's a tie in priority, retract the oldest ones
-                                var maxTimestamp = weakestAssertions.stream()
-                                        .mapToLong(Assertion::timestamp)
-                                        .max()
-                                        .orElseThrow(); // Should not happen
-
-                                weakestAssertions.stream()
-                                        .filter(a -> a.timestamp() == maxTimestamp)
-                                        .map(Assertion::id)
-                                        .forEach(idsToRetract::add);
+                                var maxTimestamp = weakestAssertions.stream().mapToLong(Assertion::timestamp).max().orElseThrow();
+                                weakestAssertions.stream().filter(a -> a.timestamp() == maxTimestamp).map(Assertion::id).forEach(idsToRetract::add);
                                 System.err.printf("Strategy RETRACT_WEAKEST: Tie in priority (%.3f), retracting %d oldest assertions.%n", minPri, idsToRetract.size());
-
                             } else {
-                                // Only one weakest assertion, retract it
                                 idsToRetract.add(weakestAssertions.getFirst().id());
                                 System.err.printf("Strategy RETRACT_WEAKEST: Retracting weakest assertion with priority %.3f.%n", minPri);
                             }
-
-                            // Retract the identified assertions.
-                            // Note: retractInternal modifies the maps while holding the lock.
-                            // We collect IDs first, then retract.
-                            // Retracting might deactivate others, potentially resolving the contradiction
-                            // or causing new ones. The TMS handles dependency updates.
                             idsToRetract.forEach(id -> retractInternal(id, "ContradictionResolution", new HashSet<>()));
                         }
                     }
                 } finally {
-                    lock.writeLock().unlock(); // Release lock
+                    lock.writeLock().unlock();
                 }
             }
 
@@ -851,9 +817,6 @@ public class Logic {
         }
     }
 
-    /**
-     * knowledgebase (KB)
-     */
     static class Knowledge {
         final String id;
         final int capacity;
@@ -1301,27 +1264,23 @@ public class Logic {
         }
 
         private static Optional<KifTerm> rewriteSubterms(KifList targetList, KifTerm lhs, KifTerm rhs, int depth) {
-            var changed = false;
-            List<KifTerm> newSubs = new ArrayList<>(targetList.size());
-            for (var sub : targetList.terms()) {
-                var rewritten = rewriteRecursive(sub, lhs, rhs, depth);
-                if (rewritten.isPresent()) {
-                    changed = true;
-                    newSubs.add(rewritten.get());
-                } else {
-                    newSubs.add(sub);
-                }
-            }
-            return changed ? Optional.of(new KifList(newSubs)) : Optional.empty();
+            var changed = new boolean[]{false};
+            var newSubs = targetList.terms().stream().map(sub ->
+                    rewriteRecursive(sub, lhs, rhs, depth + 1).map(rewritten -> {
+                        changed[0] = true;
+                        return rewritten;
+                    }).orElse(sub)
+            ).toList();
+            return changed[0] ? Optional.of(new KifList(newSubs)) : Optional.empty();
         }
     }
 
     public static class KifParser {
         private final Reader reader;
-        private int currentChar = -2; // -2: initial, -1: EOF, >=0: char value
+        private int currentChar = -2;
         private int line = 1;
         private int col = 0;
-        private int charPos = 0; // Absolute character position
+        private int charPos = 0;
 
         private KifParser(Reader reader) {
             this.reader = reader;
@@ -1332,14 +1291,11 @@ public class Logic {
             try (var sr = new StringReader(input.trim())) {
                 return new KifParser(sr).parseTopLevel();
             } catch (IOException e) {
-                // This should ideally not happen with StringReader, but handle it
                 throw new ParseException("Internal Read error: " + e.getMessage());
             }
         }
 
-        // Determines if a character is valid within an unquoted atom
         private static boolean isValidAtomChar(int c) {
-            // Matches the pattern used in KifAtom, plus checks for EOF and delimiters
             return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
         }
 
@@ -1372,7 +1328,7 @@ public class Logic {
         }
 
         private KifList parseList() throws IOException, ParseException {
-            consumeChar('('); // This already throws a good error if not '('
+            consumeChar('(');
             List<KifTerm> terms = new ArrayList<>();
             while (true) {
                 consumeWhitespaceAndComments();
@@ -1383,18 +1339,16 @@ public class Logic {
                 }
                 if (next == -1) throw createParseException("Unmatched parenthesis", "EOF");
 
-                // Check if the next character is a valid start of a term
-                // Valid starts are '(', '"', '?', or a character valid for an unquoted atom
                 if (next != '(' && next != '"' && next != '?' && !isValidAtomChar(next)) {
                     throw createParseException("Invalid character inside list", "'" + (char) next + "'");
                 }
 
-                terms.add(parseTerm()); // parseTerm handles its own errors
+                terms.add(parseTerm());
             }
         }
 
         private KifVar parseVariable() throws IOException, ParseException {
-            consumeChar('?'); // This already throws if not '?'
+            consumeChar('?');
             var sb = new StringBuilder("?");
             var next = peek();
             if (!isValidAtomChar(next)) {
@@ -1404,7 +1358,6 @@ public class Logic {
                 sb.append((char) consumeChar());
             }
             if (sb.length() < 2) {
-                // This case should ideally be caught by the check after '?', but defensive
                 throw createParseException("Empty variable name after '?'", null);
             }
             return KifVar.of(sb.toString());
@@ -1413,7 +1366,6 @@ public class Logic {
         private KifAtom parseAtom() throws IOException, ParseException {
             var sb = new StringBuilder();
             var next = peek();
-            // This check is somewhat redundant if called from parseTerm, but safe
             if (!isValidAtomChar(next)) {
                 throw createParseException("Invalid character at start of atom", "'" + (char) next + "'");
             }
@@ -1424,7 +1376,7 @@ public class Logic {
         }
 
         private KifAtom parseQuotedString() throws IOException, ParseException {
-            consumeChar('"'); // Throws if not '"'
+            consumeChar('"');
             var sb = new StringBuilder();
             while (true) {
                 var c = consumeChar();
@@ -1437,8 +1389,8 @@ public class Logic {
                         case 'n' -> '\n';
                         case 't' -> '\t';
                         case 'r' -> '\r';
-                        case '"' -> '"'; // Escape for double quote
-                        case '\\' -> '\\'; // Escape for backslash
+                        case '"' -> '"';
+                        case '\\' -> '\\';
                         default ->
                                 throw createParseException("Invalid escape sequence in string literal", "'\\" + (char) next + "'");
                     });
@@ -1456,7 +1408,7 @@ public class Logic {
         private int consumeChar() throws IOException {
             var c = peek();
             if (c != -1) {
-                currentChar = -2; // Mark for next read
+                currentChar = -2;
                 charPos++;
                 if (c == '\n') {
                     line++;
@@ -1482,18 +1434,16 @@ public class Logic {
                 if (Character.isWhitespace(c)) {
                     consumeChar();
                 } else if (c == ';') {
-                    // Consume characters until newline or EOF
                     do {
                         consumeChar();
                     } while (peek() != '\n' && peek() != '\r' && peek() != -1);
                 } else {
-                    break; // Not whitespace or comment start
+                    break;
                 }
             }
         }
 
         private ParseException createParseException(String message) {
-            // Default message without specific token info
             return new ParseException(message + " at line " + line + " col " + col);
         }
 
@@ -1519,9 +1469,6 @@ public class Logic {
             CompletableFuture<KifTerm> exe(KifList arguments, Reason.ReasonerContext context);
         }
 
-        /**
-         * Operator registry
-         */
         static class Operators {
             private final ConcurrentMap<KifAtom, Operator> ops = new ConcurrentHashMap<>();
 

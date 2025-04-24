@@ -17,9 +17,6 @@ import static dumb.cognote.Cog.ID_PREFIX_PLUGIN;
 import static dumb.cognote.Logic.*;
 import static java.util.Optional.ofNullable;
 
-/**
- * uses Logic to implement higher-level Reasoning functions
- */
 public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
@@ -41,10 +38,9 @@ public class Reason {
 
         @Override
         default void start(Cog.Events events, Cognition ctx) {
-        } // Not used directly for ReasonerPlugins
+        }
     }
 
-    // --- Reasoner Related Records & Classes ---
     public record ReasonerContext(Logic.Cognition cognition, Cog.Events events) {
         Logic.Knowledge getKb(@Nullable String noteId) {
             return cognition.kb(noteId);
@@ -97,7 +93,7 @@ public class Reason {
                 } catch (Exception e) {
                     System.err.println("Failed to initialize reasoner plugin " + plugin.id() + ": " + e.getMessage());
                     e.printStackTrace();
-                    plugins.remove(plugin); // Remove failed plugin
+                    plugins.remove(plugin);
                 }
             });
 
@@ -124,14 +120,11 @@ public class Reason {
         }
 
         private void dispatchRuleEvent(Cog.CogEvent event) {
-            if (event instanceof Cog.RuleAddedEvent) {
-                var rae = (Cog.RuleAddedEvent) event;
+            if (event instanceof Cog.RuleAddedEvent rae) {
                 plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rae.rule())));
-            } else if (event instanceof Cog.RuleRemovedEvent) {
-                var rre = (Cog.RuleRemovedEvent) event;
+            } else if (event instanceof Cog.RuleRemovedEvent rre) {
                 plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rre.rule())));
             }
-            // No default needed as there are no other RuleEvent types currently
         }
 
         private void handleQueryRequest(Cog.QueryRequestEvent event) {
@@ -146,23 +139,23 @@ public class Reason {
                 return;
             }
 
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .thenApplyAsync(v -> {
                         List<Map<KifVar, KifTerm>> allBindings = new ArrayList<>();
                         var overallStatus = Cog.QueryStatus.FAILURE;
                         Explanation combinedExplanation = null;
                         for (var future : futures) {
                             try {
-                                var result = future.join(); // Already completed
+                                var result = future.join();
                                 var e = result.explanation();
                                 var s = result.status();
                                 if (s == Cog.QueryStatus.SUCCESS) {
                                     overallStatus = Cog.QueryStatus.SUCCESS;
                                     allBindings.addAll(result.bindings());
                                     if (e != null)
-                                        combinedExplanation = e; // Take first explanation for now
+                                        combinedExplanation = e;
                                 } else if (s != Cog.QueryStatus.FAILURE && overallStatus == Cog.QueryStatus.FAILURE) {
-                                    overallStatus = s; // Upgrade status from failure
+                                    overallStatus = s;
                                     if (e != null) combinedExplanation = e;
                                 }
                             } catch (CompletionException | CancellationException e) {
@@ -174,7 +167,7 @@ public class Reason {
                             }
                         }
                         return new Cog.Answer(query.id(), overallStatus, allBindings, combinedExplanation);
-                    }, reasonerContext.events.exe) // Use event executor for final aggregation
+                    }, reasonerContext.events.exe)
                     .thenAccept(result -> events.emit(new Cog.QueryResultEvent(result)));
         }
 
@@ -285,32 +278,26 @@ public class Reason {
             var nextRemaining = remaining.subList(1, remaining.size());
             var neg = (clause instanceof Logic.KifList l && l.op().filter(KIF_OP_NOT::equals).isPresent());
             var pattern = neg ? ((Logic.KifList) clause).get(1) : clause;
-            if (!(pattern instanceof Logic.KifList)) return Stream.empty(); // Cannot match non-lists
+            if (!(pattern instanceof Logic.KifList)) return Stream.empty();
 
             var currentKb = getKb(currentKbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
             return Stream.concat(currentKb.findUnifiableAssertions(pattern),
                             (!currentKb.id.equals(Cog.GLOBAL_KB_NOTE_ID)) ? globalKb.findUnifiableAssertions(pattern) : Stream.empty())
                     .distinct()
-                    .filter(Logic.Assertion::isActive) // Only match active assertions
-                    .filter(c -> c.negated() == neg) // Match negation status
+                    .filter(Logic.Assertion::isActive)
+                    .filter(c -> c.negated() == neg)
                     .flatMap(c -> ofNullable(Logic.Unifier.unify(pattern, c.getEffectiveTerm(), bindings))
                             .map(newB -> findMatchesRecursive(rule, nextRemaining, newB,
-                                    Stream.concat(support.stream(), Stream.of(c.id())).collect(Collectors.toSet()), c.kb())) // Use KB ID of the matched fact
+                                    Stream.concat(support.stream(), Stream.of(c.id())).collect(Collectors.toSet()), c.kb()))
                             .orElse(Stream.empty()));
         }
 
         private void processDerivedAssertion(Logic.Rule rule, MatchResult result) {
             var consequent = Logic.Unifier.subst(rule.consequent(), result.bindings());
-            if (consequent == null) return; // Substitution failed (shouldn't happen if antecedents matched)
+            if (consequent == null) return;
 
-            KifTerm simplified;
-            if ((consequent instanceof KifList kl)) {
-                getCogNoteContext();
-                simplified = Cognition.simplifyLogicalTerm(kl);
-            } else {
-                simplified = consequent;
-            }
+            KifTerm simplified = (consequent instanceof KifList kl) ? Cognition.simplifyLogicalTerm(kl) : consequent;
             var targetNoteId = getCogNoteContext().findCommonSourceNodeId(result.supportIds());
 
             switch (simplified) {
@@ -324,20 +311,14 @@ public class Reason {
                 case KifTerm term when !(term instanceof KifVar) ->
                         System.err.println("Warning: Rule " + rule.id() + " derived non-list/non-var consequent: " + term.toKif());
                 default -> {
-                } // Ignore derived variables or empty results
+                }
             }
         }
 
         private void processDerivedConjunction(Rule rule, KifList conj, MatchResult result, @Nullable String targetNoteId) {
             conj.terms().stream().skip(1).forEach(term -> {
-                KifTerm simp;
-                if ((term instanceof KifList kl)) {
-                    getCogNoteContext();
-                    simp = Cognition.simplifyLogicalTerm(kl);
-                } else {
-                    simp = term;
-                }
-                if (simp instanceof KifList c) // Recurse for each conjunct
+                KifTerm simp = (term instanceof KifList kl) ? Cognition.simplifyLogicalTerm(kl) : term;
+                if (simp instanceof KifList c)
                     processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents()), result);
                 else if (!(simp instanceof KifVar))
                     System.err.println("Warning: Rule " + rule.id() + " derived (and ...) with non-list/non-var conjunct: " + term.toKif());
@@ -351,17 +332,17 @@ public class Reason {
             if (vars.isEmpty()) {
                 processDerivedStandard(rule, body, result, targetNoteId);
                 return;
-            } // Treat as standard if no vars
+            }
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
             if (depth > getMaxDerivationDepth()) return;
 
-            if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) { // Derived rule
+            if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
                 try {
                     var pri = getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri());
                     var derivedRule = Rule.parseRule(Cog.generateId(Cog.ID_PREFIX_RULE + "derived_"), body, pri);
                     getCogNoteContext().addRule(derivedRule);
-                    if (KIF_OP_EQUIV.equals(body.op().orElse(null))) { // Add reverse for equivalence
+                    if (KIF_OP_EQUIV.equals(body.op().orElse(null))) {
                         var revList = new KifList(new KifAtom(KIF_OP_IMPLIES), body.get(2), body.get(1));
                         var revRule = Rule.parseRule(Cog.generateId(Cog.ID_PREFIX_RULE + "derived_"), revList, pri);
                         getCogNoteContext().addRule(revRule);
@@ -369,7 +350,7 @@ public class Reason {
                 } catch (IllegalArgumentException e) {
                     System.err.println("Invalid derived rule format ignored: " + body.toKif() + " from rule " + rule.id() + " | Error: " + e.getMessage());
                 }
-            } else { // Derived universal assertion
+            } else {
                 tryCommit(new PotentialAssertion(forall, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), false, false, false, targetNoteId, AssertionType.UNIVERSAL, List.copyOf(vars), depth), rule.id());
             }
         }
@@ -383,7 +364,7 @@ public class Reason {
             if (vars.isEmpty()) {
                 processDerivedStandard(rule, body, result, targetNoteId);
                 return;
-            } // Treat as standard if no vars
+            }
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
             if (depth > getMaxDerivationDepth()) return;
@@ -392,15 +373,16 @@ public class Reason {
             var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
             var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
             var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();
-            var pa = new PotentialAssertion(skolemBody, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), isEq, isNeg, isOriented, targetNoteId, AssertionType.SKOLEMIZED, List.of(), depth);
+            var type = skolemBody.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
+            var pa = new PotentialAssertion(skolemBody, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
             tryCommit(pa, rule.id());
         }
 
         private void processDerivedStandard(Rule rule, KifList derived, MatchResult result, @Nullable String targetNoteId) {
-            if (derived.containsVar() || isTrivial(derived)) return; // Ignore non-ground or trivial results
+            if (derived.containsVar() || isTrivial(derived)) return;
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
-            if (depth > getMaxDerivationDepth() || derived.weight() > MAX_DERIVED_TERM_WEIGHT) return; // Check limits
+            if (depth > getMaxDerivationDepth() || derived.weight() > MAX_DERIVED_TERM_WEIGHT) return;
 
             var isNeg = derived.op().filter(KIF_OP_NOT::equals).isPresent();
             if (isNeg && derived.size() != 2) {
@@ -441,20 +423,18 @@ public class Reason {
             var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
             var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream()).filter(Assertion::isActive).distinct().toList();
 
-            // If new assertion is a rewrite rule (= L R) where L > R
             if (newA.isEquality() && newA.isOrientedEquality() && !newA.negated() && newA.kif().size() == 3) {
                 var lhs = newA.kif().get(1);
                 allActiveAssertions.stream()
-                        .filter(t -> !t.id().equals(newA.id())) // Don't rewrite self
-                        .filter(t -> Unifier.match(lhs, t.getEffectiveTerm(), Map.of()) != null) // Check if LHS matches target term
+                        .filter(t -> !t.id().equals(newA.id()))
+                        .filter(t -> Unifier.match(lhs, t.getEffectiveTerm(), Map.of()) != null)
                         .forEach(t -> applyRewrite(newA, t));
             }
 
-            // If new assertion can be rewritten by existing rules
             allActiveAssertions.stream()
-                    .filter(r -> r.isEquality() && r.isOrientedEquality() && !r.negated() && r.kif().size() == 3) // Find existing rewrite rules
-                    .filter(r -> !r.id().equals(newA.id())) // Don't use self as rule
-                    .filter(r -> Unifier.match(r.kif().get(1), newA.getEffectiveTerm(), Map.of()) != null) // Check if rule LHS matches new term
+                    .filter(r -> r.isEquality() && r.isOrientedEquality() && !r.negated() && r.kif().size() == 3)
+                    .filter(r -> !r.id().equals(newA.id()))
+                    .filter(r -> Unifier.match(r.kif().get(1), newA.getEffectiveTerm(), Map.of()) != null)
                     .forEach(r -> applyRewrite(r, newA));
         }
 
@@ -463,14 +443,14 @@ public class Reason {
             var rhs = ruleA.kif().get(2);
 
             Unifier.rewrite(targetA.kif(), lhs, rhs)
-                    .filter(rw -> rw instanceof KifList && !rw.equals(targetA.kif())) // Ensure rewrite happened and result is a list
+                    .filter(rw -> rw instanceof KifList && !rw.equals(targetA.kif()))
                     .map(KifList.class::cast)
-                    .filter(Predicate.not(Logic::isTrivial)) // Avoid trivial rewrites
+                    .filter(Predicate.not(Logic::isTrivial))
                     .ifPresent(rwList -> {
                         var support = Stream.concat(targetA.justificationIds().stream(), Stream.of(targetA.id(), ruleA.id())).collect(Collectors.toSet());
                         var depth = Math.max(targetA.derivationDepth(), ruleA.derivationDepth()) + 1;
                         if (depth > getMaxDerivationDepth() || rwList.weight() > MAX_DERIVED_TERM_WEIGHT)
-                            return; // Check limits
+                            return;
 
                         var isNeg = rwList.op().filter(KIF_OP_NOT::equals).isPresent();
                         var isEq = !isNeg && rwList.op().filter(KIF_OP_EQUAL::equals).isPresent();
@@ -484,11 +464,10 @@ public class Reason {
     }
 
     static class UniversalInstantiationReasonerPlugin extends BaseReasonerPlugin {
-        // Finds bindings if any sub-expression of 'expr' matches 'target'
         private static Stream<Map<KifVar, KifTerm>> findSubExpressionMatches(KifTerm expr, KifTerm target) {
             return Stream.concat(
-                    ofNullable(Unifier.match(expr, target, Map.of())).stream(), // Match whole expression
-                    (expr instanceof KifList l) ? l.terms().stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty() // Match sub-expressions recursively
+                    ofNullable(Unifier.match(expr, target, Map.of())).stream(),
+                    (expr instanceof KifList l) ? l.terms().stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty()
             );
         }
 
@@ -513,20 +492,17 @@ public class Reason {
             var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
             var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream()).filter(Assertion::isActive).distinct().toList();
 
-            // Case 1: New assertion is ground/skolemized, try matching against existing universals
             if ((newA.type() == AssertionType.GROUND || newA.type() == AssertionType.SKOLEMIZED) && newA.kif().get(0) instanceof KifAtom pred) {
                 allActiveAssertions.stream()
                         .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getMaxDerivationDepth())
-                        .filter(u -> u.getReferencedPredicates().contains(pred)) // Quick check
+                        .filter(u -> u.getReferencedPredicates().contains(pred))
                         .forEach(u -> tryInstantiate(u, newA));
-            }
-            // Case 2: New assertion is universal, try matching against existing ground/skolemized facts
-            else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getMaxDerivationDepth()) {
+            } else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getMaxDerivationDepth()) {
                 ofNullable(newA.getEffectiveTerm()).filter(KifList.class::isInstance).map(KifList.class::cast)
-                        .flatMap(KifList::op).map(KifAtom::of) // Get predicate if possible
+                        .flatMap(KifList::op).map(KifAtom::of)
                         .ifPresent(pred -> allActiveAssertions.stream()
                                 .filter(g -> g.type() == AssertionType.GROUND || g.type() == AssertionType.SKOLEMIZED)
-                                .filter(g -> g.getReferencedPredicates().contains(pred)) // Quick check
+                                .filter(g -> g.getReferencedPredicates().contains(pred))
                                 .forEach(g -> tryInstantiate(newA, g)));
             }
         }
@@ -535,10 +511,10 @@ public class Reason {
             var formula = uniA.getEffectiveTerm();
             var vars = uniA.quantifiedVars();
             if (vars.isEmpty() || !(formula instanceof KifList))
-                return; // Cannot instantiate non-lists or non-universals
+                return;
 
             findSubExpressionMatches(formula, groundA.kif())
-                    .filter(bindings -> bindings.keySet().containsAll(vars)) // Ensure all universal vars are bound
+                    .filter(bindings -> bindings.keySet().containsAll(vars))
                     .forEach(bindings -> {
                         var instFormula = Unifier.subst(formula, bindings);
                         if (instFormula instanceof KifList instList && !instFormula.containsVar() && !isTrivial(instList)) {
@@ -570,7 +546,7 @@ public class Reason {
             } catch (IllegalArgumentException e) {
                 System.err.println("Error renaming rule variables: " + e.getMessage());
                 return rule;
-            } // Fallback
+            }
         }
 
         @Override
@@ -596,24 +572,22 @@ public class Reason {
                     e.printStackTrace();
                     return Cog.Answer.error(query.id(), e.getMessage());
                 }
-            }, context.events().exe); // Run on event executor
+            }, context.events().exe);
         }
 
         private Stream<Map<KifVar, KifTerm>> prove(KifTerm goal, @Nullable String kbId, Map<KifVar, KifTerm> bindings, int depth, Set<KifTerm> proofStack) {
             if (depth <= 0) return Stream.empty();
             var currentGoal = Unifier.substFully(goal, bindings);
-            if (!proofStack.add(currentGoal)) return Stream.empty(); // Cycle detection
+            if (!proofStack.add(currentGoal)) return Stream.empty();
 
             Stream<Map<KifVar, KifTerm>> resultStream = Stream.empty();
 
-            // Try operators first
             if (currentGoal instanceof KifList goalList && !goalList.terms().isEmpty() && goalList.get(0) instanceof KifAtom opAtom) {
                 resultStream = context.operators().get(opAtom)
                         .flatMap(op -> executeOperator(op, goalList, bindings, currentGoal))
                         .stream();
             }
 
-            // Try matching facts in current and global KB
             var kbStream = Stream.concat(getKb(kbId).findUnifiableAssertions(currentGoal),
                             (kbId != null && !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) ? context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal) : Stream.empty())
                     .distinct()
@@ -621,22 +595,20 @@ public class Reason {
                     .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
             resultStream = Stream.concat(resultStream, kbStream);
 
-            // Try applying rules
             var ruleStream = context.rules().stream().flatMap(rule -> {
-                var renamedRule = renameRuleVariables(rule, depth); // Avoid variable capture
+                var renamedRule = renameRuleVariables(rule, depth);
                 return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
                         .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack)))
                         .orElse(Stream.empty());
             });
             resultStream = Stream.concat(resultStream, ruleStream);
 
-            proofStack.remove(currentGoal); // Backtrack
-            return resultStream.distinct(); // Remove duplicate solutions
+            proofStack.remove(currentGoal);
+            return resultStream.distinct();
         }
 
         private Optional<Map<KifVar, KifTerm>> executeOperator(Op.Operator op, KifList goalList, Map<KifVar, KifTerm> bindings, KifTerm currentGoal) {
             try {
-                // Operators run asynchronously but we need the result here
                 return op.exe(goalList, context).handle((opResult, ex) -> {
                     if (ex != null) {
                         System.err.println("Operator execution failed for " + op.pred().toKif() + ": " + ex.getMessage());
@@ -644,9 +616,9 @@ public class Reason {
                     }
                     if (opResult == null) return Optional.<Map<KifVar, KifTerm>>empty();
                     if (opResult.equals(KifAtom.of("true")))
-                        return Optional.of(bindings); // Operator succeeded as boolean test
-                    return ofNullable(Unifier.unify(currentGoal, opResult, bindings)); // Try to unify result with goal
-                }).join(); // Block for result (running within supplyAsync)
+                        return Optional.of(bindings);
+                    return ofNullable(Unifier.unify(currentGoal, opResult, bindings));
+                }).join();
             } catch (Exception e) {
                 System.err.println("Operator execution exception for " + op.pred().toKif() + ": " + e.getMessage());
                 return Optional.empty();
@@ -654,10 +626,9 @@ public class Reason {
         }
 
         private Stream<Map<KifVar, KifTerm>> proveAntecedents(List<KifTerm> antecedents, @Nullable String kbId, Map<KifVar, KifTerm> bindings, int depth, Set<KifTerm> proofStack) {
-            if (antecedents.isEmpty()) return Stream.of(bindings); // Base case: all antecedents proven
+            if (antecedents.isEmpty()) return Stream.of(bindings);
             var first = antecedents.getFirst();
             var rest = antecedents.subList(1, antecedents.size());
-            // Prove first, then recursively prove rest with updated bindings
             return prove(first, kbId, bindings, depth, proofStack)
                     .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
         }

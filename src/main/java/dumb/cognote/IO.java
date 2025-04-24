@@ -9,10 +9,6 @@ import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
 
-
-/**
- * miscellanous functions that don't belong in the Core
- */
 public class IO {
     static class StatusUpdaterPlugin extends Cog.BasePlugin {
         private final Consumer<Cog.SystemStatusEvent> uiUpdater;
@@ -24,23 +20,22 @@ public class IO {
         @Override
         public void start(Cog.Events ev, Logic.Cognition ctx) {
             super.start(ev, ctx);
-            // Listen to events that change system state counts
             ev.on(Cog.AssertionAddedEvent.class, e -> updateStatus());
             ev.on(Cog.AssertionRetractedEvent.class, e -> updateStatus());
             ev.on(Cog.AssertionEvictedEvent.class, e -> updateStatus());
             ev.on(Cog.AssertionStatusChangedEvent.class, e -> updateStatus());
             ev.on(Cog.RuleAddedEvent.class, e -> updateStatus());
             ev.on(Cog.RuleRemovedEvent.class, e -> updateStatus());
-            ev.on(Cog.AddedEvent.class, e -> updateStatus()); // Note added
-            ev.on(Cog.RemovedEvent.class, e -> updateStatus()); // Note removed
-            ev.on(Cog.LlmInfoEvent.class, e -> updateStatus()); // LLM task started
+            ev.on(Cog.AddedEvent.class, e -> updateStatus());
+            ev.on(Cog.RemovedEvent.class, e -> updateStatus());
+            ev.on(Cog.LlmInfoEvent.class, e -> updateStatus());
             ev.on(Cog.LlmUpdateEvent.class, e -> {
                 var s = e.status();
                 if (s == UI.LlmStatus.DONE || s == UI.LlmStatus.ERROR || s == UI.LlmStatus.CANCELLED)
                     updateStatus();
-            }); // LLM task finished
-            ev.on(Cog.SystemStatusEvent.class, uiUpdater); // Directly pass through status updates
-            updateStatus(); // Initial status
+            });
+            ev.on(Cog.SystemStatusEvent.class, uiUpdater);
+            updateStatus();
         }
 
         private void updateStatus() {
@@ -58,7 +53,6 @@ public class IO {
         @Override
         public void start(Cog.Events ev, Logic.Cognition ctx) {
             super.start(ev, ctx);
-            // Keep existing listeners for broadcasting internal events
             ev.on(Cog.AssertionAddedEvent.class, e -> broadcastMessage("assert-added", e.assertion(), e.kbId()));
             ev.on(Cog.AssertionRetractedEvent.class, e -> broadcastMessage("retract", e.assertion(), e.kbId()));
             ev.on(Cog.AssertionEvictedEvent.class, e -> broadcastMessage("evict", e.assertion(), e.kbId()));
@@ -74,7 +68,6 @@ public class IO {
                 var pri = (event.sourceId().startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : Cog.INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + list.weight());
                 var type = list.containsSkolemTerm() ? Logic.AssertionType.SKOLEMIZED : Logic.AssertionType.GROUND;
                 var kbId = requireNonNullElse(event.targetNoteId(), Cog.GLOBAL_KB_NOTE_ID);
-                // Create a temporary Assertion object just for broadcasting
                 broadcastMessage("assert-input", new Logic.Assertion(tempId, list, pri, System.currentTimeMillis(), event.targetNoteId(), Set.of(), type, false, false, false, List.of(), 0, true, kbId), kbId);
             }
         }
@@ -85,7 +78,7 @@ public class IO {
                 case "assert-added", "assert-input" ->
                         String.format("%s %.4f %s [%s] {type:%s, depth:%d, kb:%s}", type, assertion.pri(), kif, assertion.id(), assertion.type(), assertion.derivationDepth(), kbId);
                 case "retract", "evict" -> String.format("%s %s", type, assertion.id());
-                default -> String.format("%s %.4f %s [%s]", type, assertion.pri(), kif, assertion.id()); // Fallback
+                default -> String.format("%s %.4f %s [%s]", type, assertion.pri(), kif, assertion.id());
             };
             safeBroadcast(msg);
         }
@@ -108,7 +101,6 @@ public class IO {
             try {
                 if (!server.websocket.getConnections().isEmpty()) server.websocket.broadcast(message);
             } catch (Exception e) {
-                // Reduce log noise for common closure exceptions
                 if (!(e instanceof ConcurrentModificationException || ofNullable(e.getMessage()).map(m -> m.contains("closed") || m.contains("reset") || m.contains("Broken pipe")).orElse(false)))
                     System.err.println("Error during WebSocket broadcast: " + e.getMessage());
             }
@@ -140,14 +132,14 @@ public class IO {
         private void handleUiUpdate(String type, Object payload) {
             if (swingUI == null || !swingUI.isDisplayable()) return;
 
-            UI.AttachmentViewModel vm;
-            String displayNoteId;
+            UI.AttachmentViewModel vm = null;
+            String displayNoteId = null;
 
             switch (payload) {
                 case Logic.Assertion assertion -> {
                     var sourceNoteId = assertion.sourceNoteId();
                     var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0) ? context.findCommonSourceNodeId(assertion.justificationIds()) : null;
-                    displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb()); // Default to KB ID if no source/derived note
+                    displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb());
                     vm = UI.AttachmentViewModel.fromAssertion(assertion, type, displayNoteId);
                 }
                 case UI.AttachmentViewModel llmVm -> {
@@ -155,21 +147,20 @@ public class IO {
                     displayNoteId = vm.noteId();
                 }
                 case Cog.Answer result -> {
-                    displayNoteId = Cog.GLOBAL_KB_NOTE_ID; // Query results shown globally for now
+                    displayNoteId = Cog.GLOBAL_KB_NOTE_ID;
                     var content = String.format("Query Result (%s): %s -> %d bindings", result.status(), result.query(), result.bindings().size());
                     vm = UI.AttachmentViewModel.forQuery(result.query() + "_res", displayNoteId, content, UI.AttachmentType.QUERY_RESULT, System.currentTimeMillis(), Cog.GLOBAL_KB_NOTE_ID);
                 }
                 case Cog.Query query -> {
-                    displayNoteId = requireNonNullElse(query.targetKbId(), Cog.GLOBAL_KB_NOTE_ID); // Show query in target KB or global
+                    displayNoteId = requireNonNullElse(query.targetKbId(), Cog.GLOBAL_KB_NOTE_ID);
                     var content = "Query Sent: " + query.pattern().toKif();
                     vm = UI.AttachmentViewModel.forQuery(query.id() + "_sent", displayNoteId, content, UI.AttachmentType.QUERY_SENT, System.currentTimeMillis(), displayNoteId);
                 }
                 default -> {
-                    return;
-                } // Unknown payload type
+                }
             }
 
-            if (displayNoteId != null)
+            if (vm != null && displayNoteId != null)
                 handleSystemUpdate(vm, displayNoteId);
         }
 

@@ -12,23 +12,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 
-
 public class LM {
     public static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
-    static final String DEFAULT_LLM_URL = "http://localhost:11434"; // Base URL for Ollama
+    static final String DEFAULT_LLM_URL = "http://localhost:11434";
     static final String DEFAULT_LLM_MODEL = "hf.co/mradermacher/phi-4-GGUF:Q4_K_S";
     public final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
-    // Removed final Tools tools; // No longer needed
 
-    private final Cog cog; // Keep reference to Cog
-    volatile String llmApiUrl; // Now base URL
+    private final Cog cog;
+    volatile String llmApiUrl;
     volatile String llmModel;
     private volatile ChatLanguageModel chatModel;
-    private volatile LlmService llmService; // The AI Service interface instance
+    private volatile LlmService llmService;
 
-    public LM(Cog cog) { // Constructor takes Cog
+    public LM(Cog cog) {
         this.cog = cog;
-        // Initial configuration will happen via loadNotesAndConfig -> updateConfig -> reconfigure
     }
 
     void reconfigure() {
@@ -59,18 +56,11 @@ public class LM {
                 return;
             }
 
-            // Get LLM-callable tools from the registry
-            // AiServices.builder().tools() can accept a list of objects containing @Tool methods
-            // or a list of ToolSpecification.
-            // Let's pass the list of BaseTool instances that have @Tool methods.
-            // AiServices will reflect on these instances.
             var llmCallableTools = cog.toolRegistry().getLlmCallableTools().stream().toList();
-
 
             this.llmService = AiServices.builder(LlmService.class)
                     .chatLanguageModel(this.chatModel)
-                    .tools(llmCallableTools.toArray()) // Pass the instances of LLM-callable tools
-                    //.chatMemory() // Optional: Add memory for multi-turn conversations managed by AiServices
+                    .tools(llmCallableTools.toArray())
                     .build();
             System.out.println("LM AiService configured with " + llmCallableTools.size() + " LLM-callable tools.");
 
@@ -82,7 +72,6 @@ public class LM {
         }
     }
 
-    // Simplified llmAsync: Delegates to AiService.chat()
     public CompletableFuture<dev.langchain4j.data.message.AiMessage> llmAsync(String taskId, List<dev.langchain4j.data.message.ChatMessage> history, String interactionType, String noteId) {
         if (llmService == null) {
             var errorMsg = interactionType + " Error: LLM Service not configured.";
@@ -124,9 +113,6 @@ public class LM {
         }, cog.events.exe);
     }
 
-    // Remove all specific LLM action methods (enhanceNoteWithLlmAsync, summarizeNoteWithLlmAsync, etc.)
-
-    // Define the AI Service Interface
     interface LlmService {
         dev.langchain4j.data.message.AiMessage chat(List<dev.langchain4j.data.message.ChatMessage> messages);
     }

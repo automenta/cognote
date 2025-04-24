@@ -32,34 +32,25 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
-/**
- * Cognition Reasoning engine
- */
 public class Cog {
 
-    // --- ID Prefixes ---
     public static final String ID_PREFIX_NOTE = "note-";
     public static final String ID_PREFIX_LLM_ITEM = "llm_";
     public static final String ID_PREFIX_QUERY = "query_";
     public static final String ID_PREFIX_LLM_RESULT = "llmres_";
-    // --- Special Note IDs & Titles ---
     public static final String GLOBAL_KB_NOTE_ID = "kb://global";
     public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge";
     public static final String CONFIG_NOTE_ID = "note-config";
-    // --- End ID Prefixes ---
     public static final String CONFIG_NOTE_TITLE = "System Configuration";
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90;
     static final int KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
-    // --- End Special Note IDs & Titles ---
     static final AtomicLong idCounter = new AtomicLong(System.currentTimeMillis());
     static final String ID_PREFIX_RULE = "rule_";
     static final String ID_PREFIX_INPUT_ITEM = "input_";
-    // --- System Parameters ---
-    static final int HTTP_TIMEOUT_SECONDS = 90; // Still relevant for LLM calls via LangChain4j config
+    static final int HTTP_TIMEOUT_SECONDS = 90;
     static final double INPUT_ASSERTION_BASE_PRIORITY = 10.0;
     static final String ID_PREFIX_PLUGIN = "plugin_";
-    // --- Configuration Defaults ---
     private static final String NOTES_FILE = "cognote_notes.json";
     private static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     private static final int DEFAULT_REASONING_DEPTH = 4;
@@ -69,12 +60,10 @@ public class Cog {
     private static final int WS_CONNECTION_LOST_TIMEOUT_MS = 100;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    // --- End System Parameters ---
     private static final int MAX_WS_PARSE_PREVIEW = 100;
     public final Events events;
     public final Cognition context;
-    public final LM lm; // Initialize after toolRegistry
-    // final HttpClient http; // Removed
+    public final LM lm;
     public final UI ui;
     final AtomicBoolean running = new AtomicBoolean(true);
     final AtomicBoolean paused = new AtomicBoolean(false);
@@ -83,7 +72,7 @@ public class Cog {
     private final Reason.ReasonerManager reasonerManager;
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Object pauseLock = new Object();
-    private final Tools tools; // Add ToolRegistry field
+    private final Tools tools;
 
     volatile String systemStatus = "Initializing";
     volatile boolean broadcastInputAssertions;
@@ -94,14 +83,10 @@ public class Cog {
         this.ui = requireNonNull(ui, "SwingUI cannot be null");
         this.events = new Events(mainExecutor);
 
+        this.tools = new Tools();
 
-        // Initialize ToolRegistry
-        this.tools = new Tools(); // Initialize ToolRegistry
+        this.lm = new LM(this);
 
-        // Initialize LM *after* ToolRegistry is available
-        this.lm = new LM(this); // LM constructor now takes Cog
-
-        // Load notes and config first to set initial LM properties
         loadNotesAndConfig();
 
         var tms = new TruthMaintenance.BasicTMS(events);
@@ -138,7 +123,7 @@ public class Cog {
             UI ui = null;
             try {
                 ui = new UI(null);
-                var server = new Cog(port, ui); // Cog constructor now loads config and reconfigures LM
+                var server = new Cog(port, ui);
                 ui.setSystemReference(server);
                 Runtime.getRuntime().addShutdownHook(new Thread(server::stopSystem));
                 server.startSystem();
@@ -217,7 +202,7 @@ public class Cog {
         var jsonArray = new JSONArray();
         List<Note> notesToSave = new ArrayList<>(notes);
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            notesToSave.add(createDefaultConfigNote()); // Ensure config note is always saved
+            notesToSave.add(createDefaultConfigNote());
         }
 
         notesToSave.forEach(note -> jsonArray.put(new JSONObject()
@@ -226,7 +211,6 @@ public class Cog {
                 .put("text", note.text)));
         try {
             Files.writeString(filePath, jsonArray.toString(2));
-            // System.out.println("Saved " + notesToSave.size() + " notes to " + NOTES_FILE); // Reduce log noise
         } catch (IOException e) {
             System.err.println("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
         }
@@ -246,15 +230,13 @@ public class Cog {
         reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
 
-        // Register Tools
         tools.register(new AddKifAssertionTool(this));
         tools.register(new GetNoteTextTool(this));
         tools.register(new FindAssertionsTool(this));
         tools.register(new RetractAssertionTool(this));
         tools.register(new RunQueryTool(this));
-        tools.register(new LogMessageTool()); // LogMessageTool doesn't need Cog directly
+        tools.register(new LogMessageTool());
 
-        // Register LLM Action Tools
         tools.register(new SummarizeNoteTool(this));
         tools.register(new IdentifyConceptsTool(this));
         tools.register(new GenerateQuestionsTool(this));
@@ -306,7 +288,7 @@ public class Cog {
 
         SwingUtilities.invokeLater(() -> {
             ui.addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Assertions in the global knowledge base."));
-            ui.loadNotes(loadNotesFromFile()); // This will reload notes, including config, and trigger updateConfig again
+            ui.loadNotes(loadNotesFromFile());
         });
 
         setupDefaultPlugins();
@@ -410,7 +392,7 @@ public class Cog {
             throw new IOException("File not found or not readable: " + filename);
 
         var kifBuffer = new StringBuilder();
-        long[] counts = {0, 0, 0}; // lines, blocks, events
+        long[] counts = {0, 0, 0};
         try (var reader = Files.newBufferedReader(path)) {
             String line;
             var parenDepth = 0;
@@ -439,7 +421,7 @@ public class Cog {
                     }
                 } else if (parenDepth < 0) {
                     System.err.printf("Mismatched parentheses near line %d: '%s'%n", counts[0], line);
-                    parenDepth = 0; // Reset parsing state
+                    parenDepth = 0;
                     kifBuffer.setLength(0);
                 }
             }
@@ -488,8 +470,8 @@ public class Cog {
             System.out.println("Configuration note not found, using defaults and creating one.");
             var configNote = createDefaultConfigNote();
             notes.add(configNote);
-            parseConfig(configNote.text); // Parse defaults first
-            saveNotesToFile(notes); // Save the newly created config note
+            parseConfig(configNote.text);
+            saveNotesToFile(notes);
         }
     }
 
@@ -509,16 +491,16 @@ public class Cog {
             this.reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
             this.broadcastInputAssertions = DEFAULT_BROADCAST_INPUT;
         }
-        lm.reconfigure(); // Reconfigure the LLM instance
+        lm.reconfigure();
     }
 
     public boolean updateConfig(String newConfigJsonText) {
         try {
-            var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText)); // Validate first
-            parseConfig(newConfigJsonText); // Apply changes to volatile fields
+            var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText));
+            parseConfig(newConfigJsonText);
             ui.findNoteById(CONFIG_NOTE_ID).ifPresent(note -> {
-                note.text = newConfigJson.toString(2); // Update note text
-                saveNotesToFile(); // Persist changes
+                note.text = newConfigJson.toString(2);
+                saveNotesToFile();
             });
             System.out.println("Configuration updated and saved.");
             System.out.printf("New Config: KBSize=%d, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d, BroadcastInput=%b%n",
@@ -538,53 +520,24 @@ public class Cog {
         events.emit(new LlmUpdateEvent(taskId, status, content));
     }
 
-    /**
-     * Executes a query synchronously by emitting a QueryRequestEvent and waiting for the corresponding QueryResultEvent.
-     * This method is intended for use by components that need a direct query result, such as LLM tools.
-     * It blocks the calling thread until the result is received or a timeout occurs.
-     *
-     * @param query The query to execute.
-     * @return The Answer containing the query result.
-     * @throws RuntimeException if interrupted or if waiting for the result fails.
-     */
     public Answer executeQuerySync(Query query) {
-        // Use a CompletableFuture to signal when the result is received
         var resultFuture = new CompletableFuture<Answer>();
 
-        // Register a temporary listener for QueryResultEvent with this specific query ID
         Consumer<CogEvent> listener = event -> {
             if (event instanceof QueryResultEvent(var result) && result.query().equals(query.id())) {
                 resultFuture.complete(result);
             }
         };
 
-        // Add the listener. Need a way to remove it later.
-        // The Events class doesn't currently support removing specific listeners easily.
-        // A simple approach for this temporary listener is to rely on the CompletableFuture
-        // completing and the listener being short-lived. A more robust system would
-        // involve listener registration handles. For this prototype, we'll add directly
-        // and rely on the future completion.
-        // NOTE: This relies on the event executor processing the QueryResultEvent
-        // and completing the future *before* the calling thread times out or is interrupted.
-        // Since the event executor is separate, this should generally work, but could
-        // be a point of failure under heavy load or complex event processing.
-        // events.on(QueryResultEvent.class, listener); // This doesn't work directly as 'on' is not public and doesn't return handle
-
-        // Workaround: Manually add to the listeners map. This is fragile and bypasses
-        // the intended event system encapsulation. A proper fix requires modifying Events.
-        // For this prototype, we'll use this direct access.
         @SuppressWarnings("unchecked")
         var queryResultListeners = events.listeners.computeIfAbsent(QueryResultEvent.class, k -> new CopyOnWriteArrayList<>());
         queryResultListeners.add(listener);
 
 
         try {
-            // Emit the query request event
             events.emit(new QueryRequestEvent(query));
 
-            // Wait for the result future to complete
-            // Use a reasonable timeout to prevent indefinite blocking
-            return resultFuture.get(60, TimeUnit.SECONDS); // Wait up to 60 seconds
+            return resultFuture.get(60, TimeUnit.SECONDS);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -594,14 +547,11 @@ public class Cog {
         } catch (TimeoutException e) {
             throw new RuntimeException("Query execution timed out after 60 seconds", e);
         } finally {
-            // Attempt to remove the listener. This is tricky without a removal handle.
-            // In a real system, Events.on would return a handle to allow removal.
-            // For this prototype, we'll remove directly from the list.
             queryResultListeners.remove(listener);
         }
     }
 
-    public Tools toolRegistry() { // Add getter for ToolRegistry
+    public Tools toolRegistry() {
         return tools;
     }
 
@@ -740,147 +690,6 @@ public class Cog {
     record QueryResultEvent(Answer result) implements CogEvent {
     }
 
-    public static class Events {
-        public final ExecutorService exe;
-        private final ConcurrentMap<Class<? extends CogEvent>, CopyOnWriteArrayList<Consumer<CogEvent>>> listeners = new ConcurrentHashMap<>();
-        private final ConcurrentMap<KifTerm, CopyOnWriteArrayList<BiConsumer<CogEvent, Map<KifVar, KifTerm>>>> patternListeners = new ConcurrentHashMap<>();
-
-        Events(ExecutorService exe) {
-            this.exe = requireNonNull(exe);
-        }
-
-        private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
-            try {
-                listener.accept(event);
-            } catch (Exception e) {
-                logExeError(e, type, event.getClass().getSimpleName());
-            }
-        }
-
-        private static void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
-            try {
-                listener.accept(event, bindings);
-            } catch (Exception e) {
-                logExeError(e, type, event.getClass().getSimpleName() + " (Pattern Match)");
-            }
-        }
-
-        private static void logExeError(Exception e, String type, String eventName) {
-            System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
-            e.printStackTrace();
-        }
-
-        public <T extends CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
-            listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
-        }
-
-        public void on(KifTerm pattern, BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener) {
-            patternListeners.computeIfAbsent(pattern, k -> new CopyOnWriteArrayList<>()).add(listener);
-        }
-
-        public void emit(CogEvent event) {
-            if (exe.isShutdown()) {
-                System.err.println("Warning: Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
-                return;
-            }
-            exe.submit(() -> {
-                listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "Direct Listener"));
-                switch (event) {
-                    case AssertionAddedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), event);
-                    case TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), event);
-                    case ExternalInputEvent eiEvent ->
-                            handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
-                    default -> {
-                    }
-                }
-            });
-        }
-
-        private void handlePatternMatching(KifTerm eventTerm, CogEvent event) {
-            patternListeners.forEach((pattern, listeners) ->
-                    ofNullable(Unifier.match(pattern, eventTerm, Map.of()))
-                            .ifPresent(bindings -> listeners.forEach(listener -> exeSafe(listener, event, bindings, "Pattern Listener")))
-            );
-        }
-
-        public void shutdown() {
-            listeners.clear();
-            patternListeners.clear();
-        }
-    }
-
-    static class Plugins {
-        private final Events events;
-        private final Cognition context;
-        private final List<Plugin> plugins = new CopyOnWriteArrayList<>();
-        private final AtomicBoolean initialized = new AtomicBoolean(false);
-
-        Plugins(Events events, Cognition context) {
-            this.events = events;
-            this.context = context;
-        }
-
-        public void loadPlugin(Plugin plugin) {
-            if (initialized.get()) {
-                System.err.println("Cannot load plugin " + plugin.id() + " after initialization.");
-                return;
-            }
-            plugins.add(plugin);
-            System.out.println("Plugin loaded: " + plugin.id());
-        }
-
-        public void initializeAll() {
-            if (!initialized.compareAndSet(false, true)) return;
-            System.out.println("Initializing " + plugins.size() + " general plugins...");
-            plugins.forEach(plugin -> {
-                try {
-                    plugin.start(events, context);
-                    System.out.println("Initialized plugin: " + plugin.id());
-                } catch (Exception e) {
-                    System.err.println("Failed to initialize plugin " + plugin.id() + ": " + e.getMessage());
-                    e.printStackTrace();
-                    plugins.remove(plugin); // Remove failed plugin
-                }
-            });
-            System.out.println("General plugin initialization complete.");
-        }
-
-        public void shutdownAll() {
-            System.out.println("Shutting down " + plugins.size() + " general plugins...");
-            plugins.forEach(plugin -> {
-                try {
-                    plugin.stop();
-                    System.out.println("Shutdown plugin: " + plugin.id());
-                } catch (Exception e) {
-                    System.err.println("Error shutting down plugin " + plugin.id() + ": " + e.getMessage());
-                    e.printStackTrace();
-                }
-            });
-            plugins.clear();
-            System.out.println("General plugin shutdown complete.");
-        }
-    }
-
-    public record Query(String id, QueryType type, KifTerm pattern, @Nullable String targetKbId,
-                        Map<String, Object> parameters) {
-    }
-
-    public record Answer(String query, QueryStatus status, List<Map<KifVar, KifTerm>> bindings,
-                         @Nullable Explanation explanation) {
-        static Answer success(String queryId, List<Map<KifVar, KifTerm>> bindings) {
-            return new Answer(queryId, QueryStatus.SUCCESS, bindings, null);
-        }
-
-        static Answer failure(String queryId) {
-            return new Answer(queryId, QueryStatus.FAILURE, List.of(), null);
-        }
-
-        static Answer error(String queryId, String message) {
-            return new Answer(queryId, QueryStatus.ERROR, List.of(), new Explanation(message));
-        }
-    }
-    // --- End Reasoner Related ---
-
     public record Configuration(Cog cog) {
         String llmApiUrl() {
             return cog.lm.llmApiUrl;
@@ -939,7 +748,6 @@ public class Cog {
         }
     }
 
-    // --- Base Plugin Classes ---
     public abstract static class BasePlugin implements Plugin {
         protected final String id = generateId(ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("Plugin", "").toLowerCase() + "_");
         protected Events events;
@@ -969,9 +777,6 @@ public class Cog {
         }
     }
 
-    // --- End Base Plugin Classes ---
-
-    // --- Concrete Plugins ---
     static class InputProcessingPlugin extends BasePlugin {
         @Override
         public void start(Events e, Cognition ctx) {
@@ -1003,7 +808,7 @@ public class Cog {
             try {
                 var rule = Rule.parseRule(generateId(ID_PREFIX_RULE), list, DEFAULT_RULE_PRIORITY);
                 context.addRule(rule);
-                if (KIF_OP_EQUIV.equals(list.op().orElse(null))) { // Handle equivalence by adding reverse implication
+                if (KIF_OP_EQUIV.equals(list.op().orElse(null))) {
                     var revList = new KifList(new KifAtom(KIF_OP_IMPLIES), list.get(2), list.get(1));
                     var revRule = Rule.parseRule(generateId(ID_PREFIX_RULE), revList, DEFAULT_RULE_PRIORITY);
                     context.addRule(revRule);
@@ -1061,7 +866,7 @@ public class Cog {
             }
 
             if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
-                handleRuleInput(body, sourceId); // Treat quantified implications/equivalences as rules
+                handleRuleInput(body, sourceId);
             } else {
                 System.out.println("Storing 'forall' as universal fact from " + sourceId + ": " + forallExpr.toKif());
                 var pri = (sourceId.startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + forallExpr.weight());
@@ -1097,11 +902,11 @@ public class Cog {
                         var ids = kb.getAllAssertionIds();
                         if (!ids.isEmpty()) {
                             System.out.printf("Initiating retraction of %d assertions for note %s from %s.%n", ids.size(), noteId, s);
-                            new HashSet<>(ids).forEach(id -> context.truth().retractAssertion(id, s)); // Copy to avoid CME
+                            new HashSet<>(ids).forEach(id -> context.truth().retractAssertion(id, s));
                         } else
                             System.out.printf("Retraction by Note ID %s from %s: No associated assertions found in its KB.%n", noteId, s);
                         context.removeNoteKb(noteId, s);
-                        publish(new RemovedEvent(new Note(noteId, "Removed", ""))); // Notify UI
+                        publish(new RemovedEvent(new Note(noteId, "Removed", "")));
                     } else
                         System.out.printf("Retraction by Note ID %s from %s failed: Note KB not found.%n", noteId, s);
                 }
@@ -1131,8 +936,6 @@ public class Cog {
         }
     }
 
-    // --- End Concrete Plugins ---
-
     class MyWebSocketServer extends WebSocketServer {
         MyWebSocketServer(InetSocketAddress address) {
             super(address);
@@ -1159,7 +962,7 @@ public class Cog {
             var addr = ofNullable(conn).map(WebSocket::getRemoteSocketAddress).map(Object::toString).orElse("server");
             var msg = ofNullable(ex.getMessage()).orElse("");
             if (ex instanceof IOException && (msg.contains("Socket closed") || msg.contains("Connection reset") || msg.contains("Broken pipe")))
-                System.err.println("WS Network Info from " + addr + ": " + msg); // Less alarming log level
+                System.err.println("WS Network Info from " + addr + ": " + msg);
             else {
                 System.err.println("WS Error from " + addr + ": " + msg);
                 ex.printStackTrace();
@@ -1175,10 +978,9 @@ public class Cog {
             var command = parts[0].toLowerCase();
             var argument = (parts.length > 1) ? parts[1] : "";
 
-            // Get tools from the registry via the Cog instance
             var retractToolOpt = tools.get("retract_assertion");
             var queryToolOpt = tools.get("run_query");
-            var addKifToolOpt = tools.get("add_kif_assertion"); // Also allow adding KIF via tool
+            var addKifToolOpt = tools.get("add_kif_assertion");
 
             switch (command) {
                 case "retract" -> {
@@ -1187,11 +989,7 @@ public class Cog {
                             Map<String, Object> params = new HashMap<>();
                             params.put("target", argument);
                             params.put("type", "BY_ID");
-                            // Optional: Add target_note_id if the WS client provides context?
-                            // For now, assume global or infer from argument format if needed.
-                            // params.put("target_note_id", ...);
                             tool.execute(params).whenComplete((result, ex) -> {
-                                // Log result or send back to client if appropriate
                                 System.out.println("WS Retract tool result: " + result);
                                 if (ex != null) System.err.println("WS Retract tool error: " + ex.getMessage());
                                 conn.send("result: " + (ex != null ? "Error: " + ex.getMessage() : result.toString()));
@@ -1204,8 +1002,6 @@ public class Cog {
                         queryToolOpt.ifPresentOrElse(tool -> {
                             Map<String, Object> params = new HashMap<>();
                             params.put("kif_pattern", argument);
-                            // Optional: Add target_kb_id if the WS client provides context?
-                            // params.put("target_kb_id", ...);
                             tool.execute(params).whenComplete((result, ex) -> {
                                 System.out.println("WS Query tool result:\n" + result);
                                 if (ex != null) System.err.println("WS Query tool error: " + ex.getMessage());
@@ -1214,13 +1010,11 @@ public class Cog {
                         }, () -> conn.send("error: Query tool not available."));
                     } else conn.send("error: Missing KIF pattern for query.");
                 }
-                case "add" -> { // New command to explicitly add KIF via tool
+                case "add" -> {
                     if (!argument.isEmpty()) {
                         addKifToolOpt.ifPresentOrElse(tool -> {
                             Map<String, Object> params = new HashMap<>();
                             params.put("kif_assertion", argument);
-                            // Optional: Add target_kb_id if the WS client provides context?
-                            // params.put("target_kb_id", ...);
                             tool.execute(params).whenComplete((result, ex) -> {
                                 System.out.println("WS Add tool result: " + result);
                                 if (ex != null) System.err.println("WS Add tool error: " + ex.getMessage());
@@ -1229,10 +1023,9 @@ public class Cog {
                         }, () -> conn.send("error: Add KIF tool not available."));
                     } else conn.send("error: Missing KIF assertion for add.");
                 }
-                default -> { // Assume it's a KIF assertion/rule to be added via the standard input event mechanism
+                default -> {
                     try {
-                        // Keep the existing mechanism for raw KIF input for backward compatibility
-                        KifParser.parseKif(trimmed).forEach(term -> events.emit(new ExternalInputEvent(term, sourceId, null))); // Default to global KB
+                        KifParser.parseKif(trimmed).forEach(term -> events.emit(new ExternalInputEvent(term, sourceId, null)));
                     } catch (ClassCastException e) {
                         System.err.printf("WS Message Parse Error from %s: %s | Original: %s...%n", sourceId, e.getMessage(), trimmed.substring(0, Math.min(trimmed.length(), MAX_WS_PARSE_PREVIEW)));
                         conn.send("error Parse error: " + e.getMessage());
