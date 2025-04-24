@@ -28,7 +28,7 @@ public class DecomposeGoalTool implements BaseTool {
 
     @Override
     public String description() {
-        return "Decomposes a high-level goal into smaller, actionable steps or sub-goals using the LLM. Input is a JSON object with 'goal_description' (string) and optional 'target_note_id' (string, defaults to global KB). The LLM should use the 'add_kif_assertion' tool to add the generated steps.";
+        return "Decomposes a high-level goal into smaller, actionable steps or sub-goals using the LLM. Input is a JSON object with 'goal_description' (string) and optional 'target_note_id' (string, defaults to global KB). The LLM should use the 'assert_kif' tool to add the generated steps.";
     }
 
     @Override
@@ -58,7 +58,7 @@ public class DecomposeGoalTool implements BaseTool {
         var promptText = """
                 You are a task decomposition agent. Your goal is to break down a high-level goal into smaller, actionable steps or sub-goals.
                 Express each step as a concise KIF assertion representing the step itself (e.g., a goal, action, or query).
-                For each step you identify, use the `add_kif_assertion` tool with the note ID "%s".
+                For each step you identify, use the `assert_kif` tool with the note ID "%s".
                 Do NOT output the KIF assertions directly in your response. Only use the tool.
                 
                 Examples of KIF assertions for steps:

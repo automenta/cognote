@@ -24,7 +24,7 @@ public class SummarizeTool implements BaseTool {
 
     @Override
     public String name() {
-        return "summarize_note";
+        return "summarize";
     }
 
     @Override

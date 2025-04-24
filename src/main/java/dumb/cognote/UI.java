@@ -800,7 +800,7 @@ public class UI extends JFrame {
             });
             analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", currentNote));
             enhanceItem.addActionListener(e -> executeNoteTool("enhance_note", currentNote));
-            summarizeItem.addActionListener(e -> executeNoteTool("summarize_note", currentNote));
+            summarizeItem.addActionListener(e -> executeNoteTool("summarize", currentNote));
             keyConceptsItem.addActionListener(e -> executeNoteTool("identify_concepts", currentNote));
             generateQuestionsItem.addActionListener(e -> executeNoteTool("generate_questions", currentNote));
             removeItem.addActionListener(e -> removeNoteAction());

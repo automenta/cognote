@@ -230,7 +230,7 @@ public class Cog {
         reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
 
-        tools.register(new AddKifAssertionTool(this));
+        tools.register(new AssertKIFTool(this));
         tools.register(new GetNoteTextTool(this));
         tools.register(new FindAssertionsTool(this));
         tools.register(new RetractTool(this));
@@ -1120,7 +1120,7 @@ public class Cog {
 
             var retractToolOpt = tools.get("retract_assertion");
             var queryToolOpt = tools.get("run_query");
-            var addKifToolOpt = tools.get("add_kif_assertion");
+            var addKifToolOpt = tools.get("assert_kif");
 
             switch (command) {
                 case "retract" -> {

@@ -27,7 +27,7 @@ public class TextToKifTool implements BaseTool {
 
     @Override
     public String description() {
-        return "Converts the text content of a note into KIF assertions using the LLM. Input is a JSON object with 'note_id' (string). The LLM should use the 'add_kif_assertion' tool to add the generated KIF.";
+        return "Converts the text content of a note into KIF assertions using the LLM. Input is a JSON object with 'note_id' (string). The LLM should use the 'assert_kif' tool to add the generated KIF.";
     }
 
     @Override
@@ -68,7 +68,7 @@ public class TextToKifTool implements BaseTool {
                             "%s"
                             ```
                             
-                            For each assertion you generate, use the `add_kif_assertion` tool with the note ID "%s".
+                            For each assertion you generate, use the `assert_kif` tool with the note ID "%s".
                             Do NOT output the KIF assertions directly in your response. Only use the tool.
                             Generate the KIF Assertions by adding them using the tool:""".formatted(note.text, note.id); // Pass note.id as target_kb_id hint
 
