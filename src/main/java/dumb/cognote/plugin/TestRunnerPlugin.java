@@ -344,8 +344,16 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
             for (var term : Logic.KifParser.parseKif(text)) {
                 if (term instanceof Term.Lst list && list.size() >= 2 && list.op().filter("test"::equals).isPresent()) {
                     var nameTerm = list.get(1);
-                    if (!(nameTerm instanceof Term.Atom(String name))) {
-                        System.err.println("TestRunnerPlugin: Skipping test with invalid name format: " + list.toKif());
+                    String name;
+                    // Check if the name term is an Atom and extract its value
+                    if (nameTerm instanceof Term.Atom atom) {
+                        name = atom.value();
+                        if (name == null || name.isBlank()) {
+                            System.err.println("TestRunnerPlugin: Skipping test with invalid name format (empty or blank Atom): " + list.toKif());
+                            continue;
+                        }
+                    } else {
+                        System.err.println("TestRunnerPlugin: Skipping test with invalid name format (not an Atom): " + list.toKif());
                         continue;
                     }
 
@@ -408,9 +416,10 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
                 } else {
                     // Ignore non-(test ...) top-level terms
-                    if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
-                        System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
-                    }
+                    // This check is redundant with the outer if, but kept for clarity if needed later
+                    // if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
+                         System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+                    // }
                 }
             }
 
