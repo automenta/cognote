@@ -230,7 +230,8 @@ public class Cog {
         plugins.loadPlugin(new IO.StatusUpdaterPlugin(statusEvent -> updateStatusLabel(statusEvent.statusMessage())));
         plugins.loadPlugin(new IO.WebSocketBroadcasterPlugin(this));
         plugins.loadPlugin(new IO.UiUpdatePlugin(ui));
-        plugins.loadPlugin(new TaskDecompositionPlugin()); // Add the new plugin
+        plugins.loadPlugin(new TaskDecompositionPlugin()); // Add the task decomposition plugin
+        plugins.loadPlugin(new TmsEventHandlerPlugin()); // Add the TMS event handler plugin
 
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
