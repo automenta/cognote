@@ -4,14 +4,17 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -25,6 +28,94 @@ public class CogNote extends Cog {
         // Notes are loaded in the constructor
         load();
     }
+
+    public static void main(String[] args) {
+        String rulesFile = null;
+        boolean runTests = false;
+
+        for (var i = 0; i < args.length; i++) {
+            try {
+                switch (args[i]) {
+                    case "-r", "--rules" -> rulesFile = args[++i];
+                    case "--run-tests" -> runTests = true;
+                    default -> System.err.println("Warning: Unknown option: " + args[i] + ". Config via UI/JSON.");
+                }
+            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
+                System.err.printf("Error parsing argument for %s: %s%n", (i > 0 ? args[i - 1] : args[i]), e.getMessage());
+                printUsageAndExit();
+            }
+        }
+
+        try {
+            var c = new CogNote(); // CogNote loads notes and config in constructor
+            c.start(); // Initialize Cog components, but keep paused
+
+            if (rulesFile != null) {
+                // Load rules after Cog is initialized but before UI is fully ready/unpaused
+                // Rules are processed via events, which are handled by the executor
+                // The executor is running even when paused, but reasoning might be limited
+                // This is acceptable for loading static rules.
+                c.loadRules(rulesFile);
+            }
+
+            if (runTests) {
+                System.out.println("Running tests from command line...");
+                c.setPaused(false); // Unpause the system to allow plugins/reasoners to run
+                CompletableFuture<Void> testsCompleteFuture = new CompletableFuture<>();
+
+                // Listen for the "Tests Complete" status update
+                c.events.on(SystemStatusEvent.class, statusEvent -> {
+                    if ("Tests Complete".equals(statusEvent.statusMessage())) {
+                        testsCompleteFuture.complete(null);
+                    } else if ("Tests Failed".equals(statusEvent.statusMessage())) {
+                         testsCompleteFuture.completeExceptionally(new RuntimeException("Tests failed."));
+                    }
+                });
+
+                // Emit the event to trigger the TestRunnerPlugin
+                c.events.emit(new RunTestsEvent());
+
+                try {
+                    // Wait for the tests to complete (or timeout)
+                    testsCompleteFuture.get(120, TimeUnit.SECONDS); // Adjust timeout as needed
+
+                    // Print results from the Test Results note
+                    c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
+                        System.out.println("\n" + note.text);
+                    });
+
+                    System.out.println("Command-line test run finished.");
+                    System.exit(0); // Exit successfully after tests
+                } catch (Exception e) {
+                    System.err.println("Error during command-line test execution: " + e.getMessage());
+                    e.printStackTrace();
+                    System.exit(1); // Exit with error code
+                } finally {
+                    c.stop(); // Ensure system is stopped
+                }
+
+            } else {
+                // Start the GUI if not running tests
+                SwingUtilities.invokeLater(() -> {
+                    var ui = new UI(c);
+                    ui.setVisible(true);
+                    // UI is now responsible for calling c.setPaused(false) when the user starts the system
+                });
+            }
+
+        } catch (Exception e) {
+            System.err.println("Initialization/Startup failed: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private static void printUsageAndExit() {
+        System.err.printf("Usage: java %s [-r rules_file.kif] [--run-tests]%n", CogNote.class.getName());
+        System.err.println("Note: Most configuration is now managed via the UI and persisted in " + NOTES_FILE);
+        System.exit(1);
+    }
+
 
     static List<Note> loadNotesFromFile() {
         var filePath = Paths.get(NOTES_FILE);
@@ -56,12 +147,15 @@ public class CogNote extends Cog {
         }
 
         // Ensure system notes exist (config, global KB, test defs, test results)
+        // Global KB note is not saved, but needed internally
+        // Config, Test Definitions, and Test Results notes *are* saved.
+        // Ensure they are in the list if they weren't loaded.
         if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
             notes.add(createDefaultConfigNote());
         }
-        // Global KB note is not saved, but needed internally
+         // Global KB note is internal, not persisted in this file, but needed in the map
         if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
-            notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+             notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
         }
         if (notes.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
             notes.add(createDefaultTestDefinitionsNote());
@@ -77,17 +171,20 @@ public class CogNote extends Cog {
     private static synchronized void saveNotesToFile(List<Note> notes) {
         var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
-        // Filter out system notes that are not persisted
+        // Filter out system notes that are not persisted (only GLOBAL_KB_NOTE_ID for now)
         List<Note> notesToSave = notes.stream()
-                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID) && !note.id.equals(TEST_RESULTS_NOTE_ID))
+                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
                 .collect(Collectors.toCollection(ArrayList::new));
 
-        // Ensure config and test definitions notes are included if they weren't in the filtered list (shouldn't happen if loaded correctly)
+        // Ensure config, test defs, and test results notes are included if they weren't in the filtered list (shouldn't happen if loaded correctly)
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
             notesToSave.add(createDefaultConfigNote());
         }
         if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
             notesToSave.add(createDefaultTestDefinitionsNote());
+        }
+         if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
+            notesToSave.add(createDefaultTestResultsNote());
         }
 
 
@@ -115,13 +212,17 @@ public class CogNote extends Cog {
     public void addNote(Note note) {
         if (notes.putIfAbsent(note.id, note) == null) {
             events.emit(new AddedEvent(note));
-            save();
+            // Don't save temporary test KBs
+            if (!note.id.startsWith(TEST_KB_PREFIX)) {
+                 save();
+            }
         }
     }
 
     public void removeNote(String noteId) {
-        // Prevent removal of system notes
-        if (noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID)) {
+        // Prevent removal of system notes (except temporary test KBs)
+        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID))
+             && !noteId.startsWith(TEST_KB_PREFIX)) { // Allow removing temporary test KBs even if they match system ID pattern
             System.err.println("Attempted to remove system note: " + noteId + ". Operation ignored.");
             return;
         }
@@ -132,7 +233,10 @@ public class CogNote extends Cog {
             // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
             events.emit(new RemovedEvent(note)); // Emit RemovedEvent with the Note object
             context.removeActiveNote(noteId); // Ensure it's removed from active set
-            save();
+            // Don't save temporary test KBs
+            if (!note.id.startsWith(TEST_KB_PREFIX)) {
+                save();
+            }
         });
     }
 
@@ -148,7 +252,10 @@ public class CogNote extends Cog {
                 }
 
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus)); // Emit event
-                save(); // Save status change
+                // Don't save temporary test KBs status
+                 if (!note.id.startsWith(TEST_KB_PREFIX)) {
+                    save();
+                 }
             }
         });
     }
@@ -202,7 +309,7 @@ public class CogNote extends Cog {
         setPaused(true);
         // Retract assertions from all notes except config, global, and test notes
         context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID))
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID) && !noteId.startsWith(TEST_KB_PREFIX)) // Also exclude temporary test KBs
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
@@ -229,6 +336,7 @@ public class CogNote extends Cog {
         // Re-emit Added events for the system notes so UI can add them back if needed
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(TEST_RESULTS_NOTE_ID)));
 
@@ -325,4 +433,8 @@ public class CogNote extends Cog {
         saveNotesToFile(getAllNotes());
     }
 
+    // Provide access to the CogNote context for plugins/reasoners that extend BaseReasonerPlugin
+    Logic.Cognition cogNoteContext() {
+        return context;
+    }
 }
