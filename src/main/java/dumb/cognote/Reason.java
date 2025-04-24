@@ -319,7 +319,7 @@ public class Reason {
             var consequent = Logic.Unifier.subst(rule.consequent(), result.bindings());
             if (consequent == null) return;
 
-            Term simplified = (consequent instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : consequent;
+            var simplified = (consequent instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : consequent;
             var targetNoteId = getCogNoteContext().commonSourceNodeId(result.supportIds());
 
             // Only derive assertions if the common source note is active or if the rule is global
@@ -343,7 +343,7 @@ public class Reason {
 
         private void processDerivedConjunction(Rule rule, Term.Lst conj, MatchResult result, @Nullable String targetNoteId) {
             conj.terms.stream().skip(1).forEach(term -> {
-                Term simp = (term instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : term;
+                var simp = (term instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : term;
                 if (simp instanceof Term.Lst c)
                     processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents(), rule.sourceNoteId()), result); // Pass sourceNoteId
                 else if (!(simp instanceof Term.Var))
@@ -692,8 +692,7 @@ public class Reason {
             Stream<Map<Term.Var, Term>> resultStream = Stream.empty();
 
             // Handle Logical Connectives (and, or, not)
-            if (currentGoal instanceof Term.Lst) {
-                Term.Lst goalList = (Term.Lst) currentGoal;
+            if (currentGoal instanceof Term.Lst goalList) {
                 var opOpt = goalList.op();
                 if (opOpt.isPresent()) {
                     var op = opOpt.get();
@@ -806,9 +805,8 @@ public class Reason {
                 if (opResult == null) return Optional.empty();
 
                 // If the operator returns a boolean atom ("true" or "false")
-                if (opResult instanceof Term.Atom) {
-                    Term.Atom atomResult = (Term.Atom) opResult;
-                    String value = atomResult.value();
+                if (opResult instanceof Term.Atom atomResult) {
+                    var value = atomResult.value();
                     if ("true".equals(value)) {
                         return Optional.of(bindings); // Operator evaluated to true, goal is proven with current bindings
                     } else if ("false".equals(value)) {

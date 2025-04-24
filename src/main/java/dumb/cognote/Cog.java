@@ -226,7 +226,7 @@ public class Cog {
         }
     }
 
-    void status(String status) {
+    public void status(String status) {
         events.emit(new SystemStatusEvent(this.status = status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
@@ -245,31 +245,6 @@ public class Cog {
         // Clear the logic context (KBs, rules, active notes)
         context.clear();
 
-        // Clear internal note map, but keep system notes
-        var configNote = notes.get(CONFIG_NOTE_ID);
-        var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
-        var testDefsNote = notes.get(TEST_DEFINITIONS_NOTE_ID);
-        var testResultsNote = notes.get(TEST_RESULTS_NOTE_ID);
-
-        notes.clear();
-        notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
-        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
-        notes.put(TEST_DEFINITIONS_NOTE_ID, testDefsNote != null ? testDefsNote.withStatus(Note.Status.IDLE) : createDefaultTestDefinitionsNote());
-        notes.put(TEST_RESULTS_NOTE_ID, testResultsNote != null ? testResultsNote.withStatus(Note.Status.IDLE) : createDefaultTestResultsNote());
-
-
-        // Ensure system notes are marked as active in context (Global KB is always active)
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-        // Config and Test notes are not typically active for reasoning, so don't add them
-
-        // Re-emit Added events for the system notes so UI can add them back if needed
-        events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
-        events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
-        events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
-        events.emit(new AddedEvent(notes.get(TEST_RESULTS_NOTE_ID)));
-
-
-        save(); // Save the cleared state (only system notes remain)
 
         status("Cleared");
         setPaused(false); // Unpause after clearing
@@ -346,7 +321,7 @@ public class Cog {
         Consumer<CogEvent> listener = event -> {
             // Use a standard type pattern variable for broader compatibility
             if (event instanceof Answer.AnswerEvent) {
-                Answer result = ((Answer.AnswerEvent) event).result();
+                var result = ((Answer.AnswerEvent) event).result();
                 if (result.query().equals(query.id())) {
                     resultFuture.complete(result);
                 }
@@ -377,6 +352,10 @@ public class Cog {
     public Optional<Note> note(String id) {
         // This method is implemented in CogNote
         return Optional.empty();
+    }
+
+    public void save() {
+
     }
 
     public enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}

@@ -1,18 +1,8 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Cog;
-import dumb.cognote.Events;
-import dumb.cognote.Plugin;
-import dumb.cognote.Term;
+import dumb.cognote.*;
 
-import java.util.ArrayList;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-
-import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
-import static java.util.Objects.requireNonNullElse;
 
 /**
  * Plugin that listens for (goal ...) assertions and uses the LLM to decompose them into sub-tasks.
@@ -28,13 +18,12 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof Cog.ExternalInputEvent)) {
-             return; // Should not happen with correct registration, but defensive
+        if (!(event instanceof Cog.ExternalInputEvent eiEvent)) {
+            return; // Should not happen with correct registration, but defensive
         }
-        Cog.ExternalInputEvent eiEvent = (Cog.ExternalInputEvent) event;
-        Term term = eiEvent.term();
-        String sourceId = eiEvent.sourceId();
-        String noteId = eiEvent.noteId();
+        var term = eiEvent.term();
+        var sourceId = eiEvent.sourceId();
+        var noteId = eiEvent.noteId();
         // This is the targetNoteId from the input event
 
 

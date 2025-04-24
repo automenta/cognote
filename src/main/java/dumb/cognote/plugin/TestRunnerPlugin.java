@@ -1,9 +1,6 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Cog;
-import dumb.cognote.Events;
-import dumb.cognote.Logic;
-import dumb.cognote.Term;
+import dumb.cognote.*;
 
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -36,7 +33,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         }
 
         var testDefinitionsText = testDefinitionsNote.get().text;
-        List<TestDefinition> tests = parseTestDefinitions(testDefinitionsText);
+        var tests = parseTestDefinitions(testDefinitionsText);
 
         if (tests.isEmpty()) {
             updateTestResults("No tests found in Test Definitions note.");
@@ -74,16 +71,13 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         if (text == null || text.isBlank()) return definitions;
 
         try (var reader = new StringReader(text)) {
-            var parser = new Logic.KifParser(reader);
-            List<Term> terms = parser.parseKif(text);
-
-            for (var term : terms) {
+            for (var term : Logic.KifParser.parseKif(text)) {
                 if (term instanceof Term.Lst list && list.size() >= 4 && list.op().filter("test"::equals).isPresent()) {
                     var nameTerm = list.get(1);
                     var queryTerm = list.get(2);
                     var expectedTerm = list.get(3);
 
-                    if (!(nameTerm instanceof Term.Atom nameAtom)) {
+                    if (!(nameTerm instanceof Term.Atom(String value))) {
                         System.err.println("TestRunnerPlugin: Skipping test with invalid name format: " + list.toKif());
                         continue;
                     }
@@ -92,7 +86,6 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         continue;
                     }
 
-                    var testName = nameAtom.value();
                     var queryPattern = patternList;
 
                     Cog.QueryType queryType;
@@ -108,7 +101,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                                     if (bindingListTerm instanceof Term.Lst bindingList && bindingList.size() == 2 && bindingList.get(0) instanceof Term.Var var && bindingList.get(1) instanceof Term value) {
                                         expectedBindings.add(Map.of(var, value));
                                     } else {
-                                        System.err.println("TestRunnerPlugin: Skipping test '" + testName + "' due to invalid expectedBindings format: " + expectedList.toKif());
+                                        System.err.println("TestRunnerPlugin: Skipping test '" + value + "' due to invalid expectedBindings format: " + expectedList.toKif());
                                         expectedBindings = null; // Mark as invalid
                                         break;
                                     }
@@ -121,28 +114,28 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             }
 
                         } else {
-                            System.err.println("TestRunnerPlugin: Skipping test '" + testName + "' with unknown expected format: " + expectedList.toKif());
+                            System.err.println("TestRunnerPlugin: Skipping test '" + value + "' with unknown expected format: " + expectedList.toKif());
                             continue;
                         }
-                    } else if (expectedTerm instanceof Term.Atom expectedAtom) {
-                        if (expectedAtom.value().equals("true") || expectedAtom.value().equals("false")) {
+                    } else if (expectedTerm instanceof Term.Atom(String value) expectedAtom) {
+                        if (value.equals("true") || value.equals("false")) {
                             queryType = Cog.QueryType.ASK_TRUE_FALSE;
-                            expectedValue = Boolean.parseBoolean(expectedAtom.value());
+                            expectedValue = Boolean.parseBoolean(value);
                         } else {
-                            System.err.println("TestRunnerPlugin: Skipping test '" + testName + "' with unknown expected format: " + expectedAtom.toKif());
+                            System.err.println("TestRunnerPlugin: Skipping test '" + value + "' with unknown expected format: " + expectedAtom.toKif());
                             continue;
                         }
                     } else {
-                        System.err.println("TestRunnerPlugin: Skipping test '" + testName + "' with invalid expected format: " + expectedTerm.toKif());
+                        System.err.println("TestRunnerPlugin: Skipping test '" + value + "' with invalid expected format: " + expectedTerm.toKif());
                         continue;
                     }
 
-                    definitions.add(new TestDefinition(testName, queryType, queryPattern, expectedValue));
+                    definitions.add(new TestDefinition(value, queryType, queryPattern, expectedValue));
 
                 } else {
                     // Ignore non-(test ...) top-level terms
                     if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
-                         System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+                        System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
                     }
                 }
             }
@@ -154,8 +147,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     }
 
     private TestResult runTest(TestDefinition test, Cog.Answer answer) {
-        boolean passed = false;
-        String details = "";
+        var passed = false;
+        var details = "";
 
         if (answer.status() == Cog.QueryStatus.ERROR) {
             passed = false;
@@ -167,14 +160,14 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
             switch (test.queryType) {
                 case ASK_TRUE_FALSE -> {
                     boolean expected = (Boolean) test.expectedValue;
-                    boolean actual = (answer.status() == Cog.QueryStatus.SUCCESS);
+                    var actual = (answer.status() == Cog.QueryStatus.SUCCESS);
                     passed = (expected == actual);
                     details = String.format("Expected: %b, Actual: %b", expected, actual);
                 }
                 case ASK_BINDINGS -> {
                     @SuppressWarnings("unchecked")
-                    List<Map<Term.Var, Term>> expected = (List<Map<Term.Var, Term>>) test.expectedValue;
-                    List<Map<Term.Var, Term>> actual = answer.bindings();
+                    var expected = (List<Map<Term.Var, Term>>) test.expectedValue;
+                    var actual = answer.bindings();
 
                     // Simple comparison: check if the lists of bindings are equal (order matters for now)
                     passed = Objects.equals(expected, actual);
@@ -188,13 +181,13 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     // We don't have a specific expected value format for ACHIEVE_GOAL yet,
                     // so we just check if the status matches the expectation (e.g., expectedResult true/false)
                     if (test.expectedValue instanceof Boolean expected) {
-                         boolean actual = (answer.status() == Cog.QueryStatus.SUCCESS);
-                         passed = (expected == actual);
-                         details = String.format("Expected Goal Achieved: %b, Actual Goal Achieved: %b", expected, actual);
+                        var actual = (answer.status() == Cog.QueryStatus.SUCCESS);
+                        passed = (expected == actual);
+                        details = String.format("Expected Goal Achieved: %b, Actual Goal Achieved: %b", expected, actual);
                     } else {
-                         // Default success check for ACHIEVE_GOAL if no specific expectation
-                         passed = (answer.status() == Cog.QueryStatus.SUCCESS);
-                         details = "Goal Achievement Status: " + answer.status();
+                        // Default success check for ACHIEVE_GOAL if no specific expectation
+                        passed = (answer.status() == Cog.QueryStatus.SUCCESS);
+                        details = "Goal Achievement Status: " + answer.status();
                     }
                 }
             }
@@ -215,8 +208,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     private String formatTestResults(List<TestResult> results) {
         var sb = new StringBuilder();
         sb.append("--- Test Results (").append(java.time.LocalDateTime.now()).append(") ---\n\n");
-        int passedCount = 0;
-        int failedCount = 0;
+        var passedCount = 0;
+        var failedCount = 0;
 
         for (var result : results) {
             sb.append(result.passed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
@@ -224,7 +217,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 sb.append("  Details: ").append(result.details.replace("\n", "\n    ")).append("\n");
                 failedCount++;
             } else {
-                 passedCount++;
+                passedCount++;
             }
             sb.append("\n");
         }

@@ -714,7 +714,7 @@ public class Logic {
         private int col = 0;
         private int charPos = 0;
 
-        private KifParser(Reader reader) {
+        public KifParser(Reader reader) {
             this.reader = reader;
         }
 
