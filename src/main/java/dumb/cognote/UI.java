@@ -137,10 +137,13 @@ public class UI extends JFrame {
     private static String extractContentFromKif(String kifString) {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
-            if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list && list.size() >= 4 && list.get(3) instanceof Term.Atom(
-                    var value
-            )) {
-                return value;
+            if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst) {
+                Term.Lst list = (Term.Lst) terms.getFirst();
+                if (list.size() >= 4 && list.get(3) instanceof Term.Atom) {
+                    Term.Atom atom = (Term.Atom) list.get(3);
+                    var value = atom.value();
+                    return value;
+                }
             }
         } catch (KifParser.ParseException e) {
             System.err.println("Failed to parse KIF for content extraction: " + kifString);
@@ -427,7 +430,7 @@ public class UI extends JFrame {
                     }
                 }
             }
-        });
+            });
     }
 
 
