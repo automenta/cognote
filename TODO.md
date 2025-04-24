@@ -1,29 +1,4 @@
-> /ask Revise and show the plan to complete the changes.                                                                                          
-
-Warning: it's best to only add files that need changes to the chat.
-https://aider.chat/docs/troubleshooting/edit-errors.html
-                    
-Okay, I understand. We will proceed with the plan, focusing on building the Prolog-inspired backward chaining engine internally within the        
-existing Java codebase, rather than integrating an external Prolog system.                                                                        
-
-Based on our previous discussion and the code changes already committed (ab99ea8, b0da39c), here is the revised comprehensive plan to complete the
-changes, incorporating the internal backward chaining engine, Note lifecycle management, and System Notes:                                        
-
-Overall Vision:                                                                                                                                   
-
-The system will be centered around Notes, which serve as scoped knowledge bases and execution contexts. An internally developed Prolog-inspired   
-backward chaining engine will be implemented to handle complex queries and goal achievement. The UI is now decoupled and interacts with the core  
-CogNote backend via events and a defined API. Notes will have explicit states (IDLE, ACTIVE, PAUSED, COMPLETED), controlling their processing     
-activity. Special "System Notes" will manage configuration, testing, and test results.                                                            
-
-Current Status:                                                                                                                                   
-
- • Phase 1: Foundation & Decoupling (CogNote and UI) is largely complete. CogNote now manages the internal notes map and persistence, and the UI  
-   interacts via CogNote methods and listens to Cog.CogEvents.                                                                                    
-
-Revised Plan:                                                                                                                                     
-
-Phase 2: Note Lifecycle and Quiescent Startup                                                                                                     
+Note Lifecycle and Quiescent Startup                                                                                                     
 
  1 Note State:                                                                                                                                    
     • Add a Status enum (IDLE, ACTIVE, PAUSED, COMPLETED) to the Note class. Default to IDLE.                                                     
@@ -34,7 +9,7 @@ Phase 2: Note Lifecycle and Quiescent Startup
     • The UI (or a new SystemManager class within CogNote) will be responsible for calling cog.setPaused(false) when the user explicitly "starts" 
       the system.                                                                                                                                 
  3 "Starting" a Note:                                                                                                                             
-    • Add a UI action (e.g., button, context menu) to "Start" an IDLE Note.                                                                       
+    • Add a UI action (e.g., button, context menu) to "Start" IDLE Notes, and "Pause" ACTIVE Notes.                                                                       
     • This UI action calls a method on CogNote (e.g., startNote(String noteId)).                                                                  
     • CogNote.startNote(noteId):                                                                                                                  
        • Find the Note in the internal map.                                                                                                       
@@ -49,7 +24,7 @@ Phase 2: Note Lifecycle and Quiescent Startup
     • Reasoners/plugins should check the status of the Note associated with an assertion/rule/query and potentially skip or deprioritize          
       processing if the Note is not ACTIVE.                                                                                                       
 
-Phase 3: Internal Prolog-Inspired Backward Chaining                                                                                               
+Internal Prolog-Inspired Backward Chaining                                                                                               
 
  1 Core prove Function:                                                                                                                           
     • Create a private recursive method in Reason.BackwardChainingReasonerPlugin (or a new helper class) like Stream<Map<Term.Var, Term>>         
@@ -145,21 +120,6 @@ Phase 5: System Notes and Advanced Features
       A successful proof might involve identifying actions (represented as KIF terms like (action ...)) that need to be executed. The reasoner    
       would need a mechanism to report these required actions back (perhaps via a special binding or a new event type). (This is a more advanced  
       step and could be deferred).                                                                                                                
-
-Phase 6: Refinement and README Alignment                                                                                                          
-
- 1 Code Cleanup:                                                                                                                                  
-    • Review all code against the README guidelines (Compact, Correct, Consolidated, Deduplicated, Modular, No Comments, Latest Language/APIs).   
-    • Refactor repetitive code.                                                                                                                   
-    • Ensure consistent error handling and logging.                                                                                               
-    • Verify thread safety and concurrency logic, especially with the new internal BC and Note states.                                            
- 2 Documentation: Update the README to reflect the new architecture, Note states, quiescent startup, System Notes, and the internal               
-   Prolog-inspired reasoning engine.                                                                                                              
- 3 Testing: Although automated tests are not a code guideline yet, consider adding basic unit tests for the core Unifier and the new internal     
-   backward chaining logic as these are complex and critical components.                                                                          
-
-This revised plan maintains the overall structure while adapting Phase 3 to the requirement of an internal BC engine and detailing the steps      
-involved in implementing it. It also integrates the Note lifecycle and System Notes as requested.                                                 
 
 ----
 

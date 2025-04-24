@@ -10,7 +10,9 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
+import javax.swing.text.DefaultHighlighter.DefaultHighlightPainter;
 import javax.swing.text.Highlighter;
+import javax.swing.text.Highlighter.HighlightPainter;
 import java.awt.*;
 import java.awt.event.*;
 import java.time.Instant;
@@ -1168,7 +1170,7 @@ public class UI extends JFrame {
                 return;
             // Determine which note this assertion is primarily associated with for UI display
             var displayNoteId = assertion.sourceNoteId();
-            if (displayNoteId == null && assertion.derivationDepth() > 0 && cog != null)
+            if (displayNoteId == null && assertion.derivationDepth() > 0)
                 displayNoteId = cog.context.findCommonSourceNodeId(assertion.justificationIds());
             // If still no specific note and it's not in the global KB, use its KB ID (which might be a note ID)
             if (displayNoteId == null && !GLOBAL_KB_NOTE_ID.equals(assertion.kb())) displayNoteId = assertion.kb();
@@ -1178,12 +1180,10 @@ public class UI extends JFrame {
                 var searchTerm = extractHighlightTerm(assertion.kif());
                 if (searchTerm == null || searchTerm.isBlank()) return;
                 var highlighter = edit.getHighlighter();
-                Highlighter.HighlightPainter painter = switch (status) {
-                    case ACTIVE ->
-                            new DefaultHighlighter.DefaultHighlightPainter(new Color(200, 255, 200)); // Light Green
-                    case RETRACTED, INACTIVE ->
-                            new DefaultHighlighter.DefaultHighlightPainter(new Color(255, 200, 200)); // Light Red
-                    case EVICTED -> new DefaultHighlighter.DefaultHighlightPainter(Color.LIGHT_GRAY); // Light Gray
+                var painter = switch (status) {
+                    case ACTIVE -> new DefaultHighlightPainter(new Color(200, 255, 200)); // Light Green
+                    case RETRACTED, INACTIVE -> new DefaultHighlightPainter(new Color(255, 200, 200)); // Light Red
+                    case EVICTED -> new DefaultHighlightPainter(Color.LIGHT_GRAY); // Light Gray
                 };
                 try {
                     var text = edit.getText();
@@ -1304,7 +1304,7 @@ public class UI extends JFrame {
             // Get items associated with the currently selected note (sourced from it or committed to its KB)
             var currentNoteModel = noteAttachmentModels.get(note.id);
             if (currentNoteModel != null) {
-                Collections.list(currentNoteModel.elements()).forEach(allRelevantItems::add);
+                allRelevantItems.addAll(Collections.list(currentNoteModel.elements()));
             }
 
             // If the selected note is NOT the global KB, also include items from the Global KB model

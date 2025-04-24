@@ -81,9 +81,7 @@ public class LM {
             return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
         }
 
-        var conversationHistory = new ArrayList<ChatMessage>();
-
-//        var systemMessage = dev.langchain4j.data.message.SystemMessage.from("""
+        //        var systemMessage = dev.langchain4j.data.message.SystemMessage.from("""
 //                You are an intelligent cognitive agent interacting with a semantic knowledge system.
 //                Your primary goal is to assist the user by processing information, answering questions, or performing tasks using the available tools and your knowledge.
 //                Available tools have been provided to you. If a tool call is required to fulfill the request, use the tool(s). Otherwise, provide a direct text response.
@@ -92,7 +90,7 @@ public class LM {
 //                """);
 //        conversationHistory.add(systemMessage);
 
-        conversationHistory.addAll(history);
+        var conversationHistory = new ArrayList<ChatMessage>(history);
 
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
