@@ -56,6 +56,10 @@ public class Logic {
         return false;
     }
 
+    private static boolean groundOrSkolemized(Assertion a) {
+        return a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED;
+    }
+
     enum AssertionType {GROUND, UNIVERSAL, SKOLEMIZED}
 
     enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
@@ -845,7 +849,9 @@ public class Logic {
         }
     }
 
-    /** knowledgebase (KB) */
+    /**
+     * knowledgebase (KB)
+     */
     static class Knowledge {
         final String id;
         final int capacity;
@@ -970,12 +976,12 @@ public class Logic {
         private void enforceKbCapacityInternal(String source) {
             while (getAssertionCount() >= capacity && !groundEvictionQueue.isEmpty()) {
                 ofNullable(groundEvictionQueue.poll())
-                    .flatMap(truth::getAssertion)
-                    .filter(a -> groundOrSkolemized(a) && a.kb.equals(id))
-                    .ifPresent(toEvict -> {
-                        truth.retractAssertion(toEvict.id, source + "-evict");
-                        events.emit(new AssertionEvictedEvent(toEvict, id));
-                    });
+                        .flatMap(truth::getAssertion)
+                        .filter(a -> groundOrSkolemized(a) && a.kb.equals(id))
+                        .ifPresent(toEvict -> {
+                            truth.retractAssertion(toEvict.id, source + "-evict");
+                            events.emit(new AssertionEvictedEvent(toEvict, id));
+                        });
             }
         }
 
@@ -998,10 +1004,10 @@ public class Logic {
                         groundEvictionQueue.remove(a.id);
                     }
                     case UNIVERSAL ->
-                        a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfPresent(pred, (_, ids) -> {
-                            ids.remove(a.id);
-                            return ids.isEmpty() ? null : ids;
-                        }));
+                            a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfPresent(pred, (_, ids) -> {
+                                ids.remove(a.id);
+                                return ids.isEmpty() ? null : ids;
+                            }));
                 }
             } finally {
                 lock.writeLock().unlock();
@@ -1022,10 +1028,6 @@ public class Logic {
                 lock.writeLock().unlock();
             }
         }
-    }
-
-    private static boolean groundOrSkolemized(Assertion a) {
-        return a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED;
     }
 
     static class Cognition {
@@ -1247,7 +1249,8 @@ public class Logic {
         }
 
         private static KifTerm substRecursive(KifTerm term, Map<KifVar, KifTerm> bindings, int depth, boolean fully) {
-            if (bindings.isEmpty() || depth > MAX_SUBST_DEPTH || (term instanceof KifList l && !l.containsVar()) || (term instanceof KifAtom)) return term;
+            if (bindings.isEmpty() || depth > MAX_SUBST_DEPTH || (term instanceof KifList l && !l.containsVar()) || (term instanceof KifAtom))
+                return term;
             return switch (term) {
                 case KifAtom atom -> atom;
                 case KifVar var -> {

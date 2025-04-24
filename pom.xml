@@ -13,7 +13,7 @@
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Define LangChain4j version -->
-        <langchain4j.version>0.36.2</langchain4j.version>
+        <langchain4j.version>1.0.0-beta3</langchain4j.version>
     </properties>
 
     <dependencies>
@@ -25,18 +25,18 @@
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
-            <version>20220320</version>
+            <version>20240205</version>
         </dependency>
         <dependency>
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
-            <version>26.0.1</version>
+            <version>26.0.2</version>
         </dependency>
 
         <!-- LangChain4j Dependencies -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-core</artifactId>
+            <artifactId>langchain4j</artifactId>
             <version>${langchain4j.version}</version>
         </dependency>
         <dependency>

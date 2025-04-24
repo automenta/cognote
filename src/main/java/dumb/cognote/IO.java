@@ -43,7 +43,7 @@ public class IO {
         }
 
         private void updateStatus() {
-            publish(new Cog.SystemStatusEvent(getCog().systemStatus, context.kbCount(), context.kbTotalCapacity(), getCog().lm.activeLlmTasks.size(), context.ruleCount()));
+            publish(new Cog.SystemStatusEvent(cog().systemStatus, context.kbCount(), context.kbTotalCapacity(), cog().lm.activeLlmTasks.size(), context.ruleCount()));
         }
     }
 

@@ -1,6 +1,5 @@
 package dumb.cognote;
 
-import dev.langchain4j.model.chat.ChatResponse;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -529,8 +528,8 @@ public class Cog {
 
         // Register a temporary listener for QueryResultEvent with this specific query ID
         Consumer<CogEvent> listener = event -> {
-            if (event instanceof QueryResultEvent resultEvent && resultEvent.result().query().equals(query.id())) {
-                resultFuture.complete(resultEvent.result());
+            if (event instanceof QueryResultEvent(Answer result) && result.query().equals(query.id())) {
+                resultFuture.complete(result);
             }
         };
 
@@ -550,7 +549,7 @@ public class Cog {
         // the intended event system encapsulation. A proper fix requires modifying Events.
         // For this prototype, we'll use this direct access.
         @SuppressWarnings("unchecked")
-        CopyOnWriteArrayList<Consumer<CogEvent>> queryResultListeners = (CopyOnWriteArrayList<Consumer<CogEvent>>) events.listeners.computeIfAbsent(QueryResultEvent.class, k -> new CopyOnWriteArrayList<>());
+        CopyOnWriteArrayList<Consumer<CogEvent>> queryResultListeners = events.listeners.computeIfAbsent(QueryResultEvent.class, k -> new CopyOnWriteArrayList<>());
         queryResultListeners.add(listener);
 
 
@@ -760,7 +759,8 @@ public class Cog {
                 switch (event) {
                     case AssertionAddedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), event);
                     case TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), event);
-                    case ExternalInputEvent eiEvent -> handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
+                    case ExternalInputEvent eiEvent ->
+                            handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
                     default -> {
                     }
                 }
@@ -935,7 +935,7 @@ public class Cog {
             return context.kb(noteId);
         }
 
-        protected Cog getCog() {
+        protected Cog cog() {
             return context.cog;
         }
     }

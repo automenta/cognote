@@ -1,17 +1,6 @@
- # Refactor Logic                                                                                                                      
-    • Break Logic into smaller, dedicated classes (e.g., KifParser, Unifier, TruthMaintenanceSystem, RuleEngine, KnowledgeBaseManager,            
-      OperatorsRegistry).    
-
-# Refactor UI
-    • Break down the large UI class into smaller, more manageable components (e.g., NoteListPanel, NoteEditorPanel, AttachmentPanel,              
-      StatusBarPanel, SettingsDialog).                                                                                                            
-    • Use event listeners and potentially a dedicated UI state management pattern to decouple components from the main UI frame and the Cog       
-      instance.        
-
-                                                                                                 
-
 # Enhance TMS: Implement the resolveContradiction method in BasicTMS (or its refactored equivalent). Define and implement              
    ResolutionStrategy options (e.g., retract weakest, user intervention).                                                                         
+
 # Improve KIF Handling: Make KifParser more robust. Improve error reporting. Consider supporting more KIF constructs if needed for     
    future features.                                                                                                                               
 
@@ -57,6 +46,8 @@
     • Applicability: CogNote could adopt Coglog's pattern of using the LLM for task decomposition. A plugin could take a high-level goal assertion
       and use the LLM (via the LM class) to generate a list of sub-goal or strategy assertions, adding them to the KB for other reasoners/plugins
       to process. The call_llm primitive pattern could also be generalized in CogNote as a primitive action or operator.
+
+----
 
 # Semantic Matching
  • Task 3.1: Integrate Embedding Model: Choose and integrate a text embedding model (potentially via LangChain4j or a separate library).          
@@ -117,18 +108,6 @@
       (expected-kif-result))) that the system can load and evaluate would provide a powerful, declarative way to test the reasoning engine's behavior directly. This is often closer to the system's intended use case than pure Java tests.
     • Changes Required: Implement KIF predicates for testing equality of evaluation results (similar to assertEqual in hyp9). Create a mechanism to load and run a specific set of KIF test assertions, evaluate them, and report results.
 
-# Term Interning
-    For performance (CPU and Memory).
-
-# Generalized Term Representation and Unification:
-    • FlowMind: Uses a flexible Term structure (Atom, Variable, Struct, List) and a robust unify function that works across these types. Struct is
-      used extensively to represent actions (Struct("ToolName", [Atom("operation"), ...args])) and structured data.
-    • Cognote: Uses a KIF-subset representation (KifAtom, KifVar, KifList) and Unifier tailored for KIF syntax. While powerful for logic, it's
-      less natural for representing arbitrary data structures or tool calls.
-    • Applicability: Adopting a more generalized Term structure like FlowMind's could make representing data and actions within Cognote more
-      flexible. Instead of relying solely on KIF lists, Structs could represent tool calls, UI commands, or complex data payloads. The Unifier
-      would need to be adapted to handle this new structure, but the core unification logic is similar. This would align well with the Tool system
-      below.
 
 # Embeddings and RAG (Retrieval Augmented Generation):
     • Current: Finding related notes or answering questions relies on the existing reasoning engine,
@@ -160,6 +139,19 @@
       clients (like the provided REPL client or a potential web UI). Using JSON messages with command/response/event types and broadcasting state
       deltas would make building interactive clients much easier.
 
+
+# Term Interning
+    For performance (CPU and Memory).
+
+# Generalized Term Representation and Unification:
+    • FlowMind: Uses a flexible Term structure (Atom, Variable, Struct, List) and a robust unify function that works across these types. Struct is
+      used extensively to represent actions (Struct("ToolName", [Atom("operation"), ...args])) and structured data.
+    • Cognote: Uses a KIF-subset representation (KifAtom, KifVar, KifList) and Unifier tailored for KIF syntax. While powerful for logic, it's
+      less natural for representing arbitrary data structures or tool calls.
+    • Applicability: Adopting a more generalized Term structure like FlowMind's could make representing data and actions within Cognote more
+      flexible. Instead of relying solely on KIF lists, Structs could represent tool calls, UI commands, or complex data payloads. The Unifier
+      would need to be adapted to handle this new structure, but the core unification logic is similar. This would align well with the Tool system
+      below.
 
 # LM Enhancements
 ## LM Structured Output (High Priority for KIF):
@@ -213,6 +205,11 @@
       similar to Coglog's Thought status could allow CogNote to manage complex, multi-step processes (like achieving a goal, performing a
       multi-step analysis) more explicitly than just relying on chains of derived assertions. A dedicated "Task Executor" plugin could manage
       these lifecycle states.
+
+
+# Refactor UI
+    • Use event listeners and potentially a dedicated UI state management pattern to decouple components from the main UI frame and the Cog       
+      instance.        
 
 # Comprehensive Testing
   Write unit tests for individual components, integration tests for interactions between components, and system
