@@ -288,7 +288,7 @@ public class Cog {
         var resultFuture = new CompletableFuture<Answer>();
 
         Consumer<CogEvent> listener = event -> {
-            if (event instanceof Answer.AnswerEvent(var result) && result.query().equals(query.id()))
+            if (event instanceof Cog.Answer.AnswerEvent(var result) && result.query().equals(query.id()))
                 resultFuture.complete(result);
         };
 
