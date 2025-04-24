@@ -90,7 +90,7 @@ public class LM {
 //                """);
 //        conversationHistory.add(systemMessage);
 
-        var conversationHistory = new ArrayList<ChatMessage>(history);
+        var conversationHistory = new ArrayList<>(history);
 
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();

@@ -194,7 +194,7 @@ public class Reason {
             return context.cognition();
         }
 
-        protected int getMaxDerivationDepth() {
+        protected int getDerivationDepthMax() {
             return context.getConfig().reasoningDepthLimit();
         }
 
@@ -243,18 +243,19 @@ public class Reason {
                     // Only consider rules from active contexts (active notes or global KB)
                     .filter(rule -> isActiveContext(rule.sourceNoteId()))
                     .forEach(rule -> rule.antecedents().forEach(clause -> {
-                var neg = (clause instanceof Term.Lst l && l.op().filter(KIF_OP_NOT::equals).isPresent());
-                if (neg == newAssertion.negated()) {
-                    var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
-                    ofNullable(Logic.Unifier.unify(pattern, newAssertion.getEffectiveTerm(), Map.of()))
-                            .ifPresent(bindings -> findMatchesRecursive(rule, rule.antecedents(), bindings, Set.of(newAssertion.id()), sourceKbId)
-                                    .forEach(match -> processDerivedAssertion(rule, match)));
-                }
-            }));
+                        var neg = (clause instanceof Term.Lst l && l.op().filter(KIF_OP_NOT::equals).isPresent());
+                        if (neg == newAssertion.negated()) {
+                            var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
+                            ofNullable(Logic.Unifier.unify(pattern, newAssertion.getEffectiveTerm(), Map.of()))
+                                    .ifPresent(bindings -> findMatchesRecursive(rule, rule.antecedents(), bindings, Set.of(newAssertion.id()), sourceKbId)
+                                            .forEach(match -> processDerivedAssertion(rule, match)));
+                        }
+                    }));
         }
 
         private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Term.Var, Term> bindings, Set<String> support, String currentKbId) {
-            if (getCogNoteContext().calculateDerivedDepth(support) + 1 > getMaxDerivationDepth()) return Stream.empty(); // Prevent infinite recursion in matching
+            if (getCogNoteContext().calculateDerivedDepth(support) + 1 > getDerivationDepthMax())
+                return Stream.empty(); // Prevent infinite recursion in matching
             if (remaining.isEmpty()) return Stream.of(new MatchResult(bindings, support));
 
             var clause = Logic.Unifier.substFully(remaining.getFirst(), bindings);
@@ -267,24 +268,22 @@ public class Reason {
             var currentKb = getKb(currentKbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
 
-            Stream<Assertion> assertionStream = Stream.empty();
 
             // 1. Search current KB
-            assertionStream = Stream.concat(assertionStream, currentKb.findUnifiableAssertions(pattern));
+            final Stream<Assertion>[] assertionStream = new Stream[]{currentKb.findUnifiableAssertions(pattern)};
 
             // 2. Search other active note KBs (excluding current and global)
             context.getActiveNoteIds().stream()
                     .filter(id -> !id.equals(currentKbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
                     .map(this::getKb)
-                    .forEach(kb -> assertionStream = Stream.concat(assertionStream, kb.findUnifiableAssertions(pattern)));
+                    .forEach(kb -> assertionStream[0] = Stream.concat(assertionStream[0], kb.findUnifiableAssertions(pattern)));
 
             // 3. Search global KB (if not already the current KB)
             if (!currentKbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
-                assertionStream = Stream.concat(assertionStream, globalKb.findUnifiableAssertions(pattern));
+                assertionStream[0] = Stream.concat(assertionStream[0], globalKb.findUnifiableAssertions(pattern));
             }
 
-
-            return assertionStream
+            return assertionStream[0]
                     .distinct()
                     .filter(Assertion::isActive)
                     // Only use assertions from active contexts (active notes or global KB)
@@ -301,7 +300,7 @@ public class Reason {
             if (consequent == null) return;
 
             Term simplified = (consequent instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : consequent;
-            var targetNoteId = getCogNoteContext().findCommonSourceNodeId(result.supportIds());
+            var targetNoteId = getCogNoteContext().commonSourceNodeId(result.supportIds());
 
             // Only derive assertions if the common source note is active or if the rule is global
             if (!isActiveContext(targetNoteId) && !isActiveContext(rule.sourceNoteId())) return;
@@ -342,7 +341,7 @@ public class Reason {
             }
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
-            if (depth > getMaxDerivationDepth()) return;
+            if (depth > getDerivationDepthMax()) return;
 
             if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
                 try {
@@ -375,7 +374,7 @@ public class Reason {
             }
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
-            if (depth > getMaxDerivationDepth()) return;
+            if (depth > getDerivationDepthMax()) return;
 
             var skolemBody = Cognition.performSkolemization(body, vars, result.bindings());
             var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
@@ -390,7 +389,7 @@ public class Reason {
             if (derived.containsVar() || isTrivial(derived)) return;
 
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
-            if (depth > getMaxDerivationDepth() || derived.weight() > MAX_DERIVED_TERM_WEIGHT) return;
+            if (depth > getDerivationDepthMax() || derived.weight() > MAX_DERIVED_TERM_WEIGHT) return;
 
             var isNeg = derived.op().filter(KIF_OP_NOT::equals).isPresent();
             if (isNeg && derived.size() != 2) {
@@ -469,32 +468,44 @@ public class Reason {
                     .forEach(r -> applyRewrite(r, newA)); // Apply existing rules to the new fact
         }
 
-        private void applyRewrite(Assertion ruleA, Assertion targetA) {
+        private void applyRewrite(Assertion rule, Assertion target) {
             // Ensure both the rule and the target assertion are from active contexts
-            if (!isActiveContext(ruleA.sourceNoteId()) || (!isActiveContext(targetA.kb()) && !isActiveContext(targetA.sourceNoteId()))) {
-                 return;
+            if (!isActiveContext(rule.sourceNoteId()) || (!isActiveContext(target.kb()) && !isActiveContext(target.sourceNoteId()))) {
+                return;
             }
 
-            var lhs = ruleA.kif().get(1);
-            var rhs = ruleA.kif().get(2);
+            var rk = rule.kif();
+            var lhs = rk.get(1);
+            var rhs = rk.get(2);
 
-            Unifier.rewrite(targetA.kif(), lhs, rhs)
-                    .filter(rw -> rw instanceof Term.Lst && !rw.equals(targetA.kif()))
+            var ruleID = rule.id();
+            var support = Stream.concat(target.justificationIds().stream(), Stream.of(target.id(), ruleID)).collect(Collectors.toSet());
+            var depth = Math.max(target.derivationDepth(), rule.derivationDepth()) + 1;
+            var derivationDepthMax = getDerivationDepthMax();
+            if (depth > derivationDepthMax)
+                return;
+
+            var ctx = getCogNoteContext();
+            var targetNoteId = ctx.commonSourceNodeId(support);
+            var pri = ctx.calculateDerivedPri(support, (rule.pri() + target.pri()) / 2.0);
+
+            Unifier.rewrite(target.kif(), lhs, rhs)
+                    .filter(rw -> rw instanceof Term.Lst && !rw.equals(target.kif()))
                     .map(Term.Lst.class::cast)
                     .filter(Predicate.not(Logic::isTrivial))
-                    .ifPresent(rwList -> {
-                        var support = Stream.concat(targetA.justificationIds().stream(), Stream.of(targetA.id(), ruleA.id())).collect(Collectors.toSet());
-                        var depth = Math.max(targetA.derivationDepth(), ruleA.derivationDepth()) + 1;
-                        if (depth > getMaxDerivationDepth() || rwList.weight() > MAX_DERIVED_TERM_WEIGHT)
+                    .ifPresent(l -> {
+                        if (l.weight() > MAX_DERIVED_TERM_WEIGHT)
                             return;
 
-                        var isNeg = rwList.op().filter(KIF_OP_NOT::equals).isPresent();
-                        var isEq = !isNeg && rwList.op().filter(KIF_OP_EQUAL::equals).isPresent();
-                        var isOriented = isEq && rwList.size() == 3 && rwList.get(1).weight() > rwList.get(2).weight();
-                        var type = rwList.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-                        var targetNoteId = getCogNoteContext().findCommonSourceNodeId(support);
-                        var pa = new Assertion.PotentialAssertion(rwList, getCogNoteContext().calculateDerivedPri(support, (ruleA.pri() + targetA.pri()) / 2.0), support, ruleA.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
-                        tryCommit(pa, rule.id());
+                        var o = l.op();
+                        var isNeg = o.filter(KIF_OP_NOT::equals).isPresent();
+                        var isEq = !isNeg && o.filter(KIF_OP_EQUAL::equals).isPresent();
+                        var isOriented = isEq && l.size() == 3 && l.get(1).weight() > l.get(2).weight();
+                        var type = l.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
+
+                        tryCommit(new Assertion.PotentialAssertion(l, pri, support, ruleID,
+                                        isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth),
+                                ruleID);
                     });
         }
     }
@@ -538,16 +549,16 @@ public class Reason {
             // Case 1: New assertion is ground/skolemized, try instantiating universals with it
             if ((newA.type() == AssertionType.GROUND || newA.type() == AssertionType.SKOLEMIZED) && newA.kif().get(0) instanceof Term.Atom pred) {
                 allActiveAssertions.stream()
-                        .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getMaxDerivationDepth())
+                        .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getDerivationDepthMax())
                         // Only consider universal rules from active contexts
                         .filter(u -> isActiveContext(u.sourceNoteId()))
                         .filter(u -> u.getReferencedPredicates().contains(pred))
                         .forEach(u -> tryInstantiate(u, newA));
             }
             // Case 2: New assertion is universal, try instantiating it with existing ground/skolemized facts
-            else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getMaxDerivationDepth()) {
-                 // Only process if the new universal is from an active context
-                 if (!isActiveContext(newA.sourceNoteId())) return;
+            else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getDerivationDepthMax()) {
+                // Only process if the new universal is from an active context
+                if (!isActiveContext(newA.sourceNoteId())) return;
 
                 ofNullable(newA.getEffectiveTerm()).filter(Term.Lst.class::isInstance).map(Term.Lst.class::cast)
                         .flatMap(Term.Lst::op).map(Term.Atom::of)
@@ -563,7 +574,7 @@ public class Reason {
         private void tryInstantiate(Assertion uniA, Assertion groundA) {
             // Ensure both the universal and the ground assertion are from active contexts
             if (!isActiveContext(uniA.sourceNoteId()) || (!isActiveContext(groundA.kb()) && !isActiveContext(groundA.sourceNoteId()))) {
-                 return;
+                return;
             }
 
             var formula = uniA.getEffectiveTerm();
@@ -580,12 +591,12 @@ public class Reason {
                             var pri = getCogNoteContext().calculateDerivedPri(support, (groundA.pri() + uniA.pri()) / 2.0);
                             var depth = Math.max(groundA.derivationDepth(), uniA.derivationDepth()) + 1;
 
-                            if (depth <= getMaxDerivationDepth() && instList.weight() <= MAX_DERIVED_TERM_WEIGHT) {
+                            if (depth <= getDerivationDepthMax() && instList.weight() <= MAX_DERIVED_TERM_WEIGHT) {
                                 var isNeg = instList.op().filter(KIF_OP_NOT::equals).isPresent();
                                 var isEq = !isNeg && instList.op().filter(KIF_OP_EQUAL::equals).isPresent();
                                 var isOriented = isEq && instList.size() == 3 && instList.get(1).weight() > instList.get(2).weight();
                                 var type = instList.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-                                var targetNoteId = getCogNoteContext().findCommonSourceNodeId(support);
+                                var targetNoteId = getCogNoteContext().commonSourceNodeId(support);
                                 var pa = new Assertion.PotentialAssertion(instList, pri, support, uniA.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
                                 tryCommit(pa, uniA.id());
                             }
@@ -621,8 +632,8 @@ public class Reason {
         public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
             // Only execute query if the target KB is active or global
             if (!isActiveContext(query.targetKbId())) {
-                 System.out.println("Query skipped: Target KB '" + query.targetKbId() + "' is not active.");
-                 return CompletableFuture.completedFuture(Cog.Answer.failure(query.id()));
+                System.out.println("Query skipped: Target KB '" + query.targetKbId() + "' is not active.");
+                return CompletableFuture.completedFuture(Cog.Answer.failure(query.id()));
             }
 
             return CompletableFuture.supplyAsync(() -> {
@@ -715,26 +726,23 @@ public class Reason {
             // Check if resultStream has any elements without consuming it fully
             var hasOperatorResult = resultStream.findAny().isPresent();
             if (!hasOperatorResult) {
-                 resultStream = Stream.empty(); // Reset stream if it was consumed by findAny()
-
-                // 2. Try matching active facts, prioritizing KBs
-                Stream<Assertion> factStream = Stream.empty();
+                resultStream = Stream.empty(); // Reset stream if it was consumed by findAny()
 
                 // 2a. Search target KB first
-                factStream = Stream.concat(factStream, getKb(kbId).findUnifiableAssertions(currentGoal));
+                Stream<Assertion>[] factStream = new Stream[]{getKb(kbId).findUnifiableAssertions(currentGoal)};
 
                 // 2b. Search other active note KBs (excluding target and global)
                 context.getActiveNoteIds().stream()
                         .filter(id -> !id.equals(kbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
                         .map(this::getKb)
-                        .forEach(kb -> factStream = Stream.concat(factStream, kb.findUnifiableAssertions(currentGoal)));
+                        .forEach(kb -> factStream[0] = Stream.concat(factStream[0], kb.findUnifiableAssertions(currentGoal)));
 
                 // 2c. Search global KB (if not already the target KB)
                 if (kbId == null || !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
-                    factStream = Stream.concat(factStream, context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
+                    factStream[0] = Stream.concat(factStream[0], context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
                 }
 
-                var factBindingsStream = factStream
+                var factBindingsStream = factStream[0]
                         .distinct()
                         .filter(Assertion::isActive)
                         // Only use assertions from active contexts
@@ -749,11 +757,11 @@ public class Reason {
                         // Only consider rules from active contexts
                         .filter(rule -> isActiveContext(rule.sourceNoteId()))
                         .flatMap(rule -> {
-                    var renamedRule = renameRuleVariables(rule, depth); // Rename variables for this rule application
-                    return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
-                            .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack))) // Pass a copy of proofStack
-                            .orElse(Stream.empty());
-                });
+                            var renamedRule = renameRuleVariables(rule, depth); // Rename variables for this rule application
+                            return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
+                                    .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack))) // Pass a copy of proofStack
+                                    .orElse(Stream.empty());
+                        });
                 resultStream = Stream.concat(resultStream, ruleStream);
             }
 
@@ -770,10 +778,10 @@ public class Reason {
                 if (opResult == null) return Optional.empty();
 
                 // If the operator returns a boolean atom ("true" or "false")
-                if (opResult instanceof Term.Atom atom) {
-                    if ("true".equals(atom.value())) {
+                if (opResult instanceof Term.Atom(String value)) {
+                    if ("true".equals(value)) {
                         return Optional.of(bindings); // Operator evaluated to true, goal is proven with current bindings
-                    } else if ("false".equals(atom.value())) {
+                    } else if ("false".equals(value)) {
                         return Optional.empty(); // Operator evaluated to false, goal is not proven
                     }
                 }

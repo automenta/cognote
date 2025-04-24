@@ -199,7 +199,7 @@ public class Cog {
         }
     }
 
-    private void status(String status) {
+    void status(String status) {
         events.emit(new SystemStatusEvent(this.status = status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
@@ -292,8 +292,8 @@ public class Cog {
 
         Consumer<CogEvent> listener = event -> {
             // Use a standard type pattern variable for broader compatibility
-            if (event instanceof Cog.Answer.AnswerEvent answerEvent && answerEvent.result().query().equals(query.id())) {
-                resultFuture.complete(answerEvent.result());
+            if (event instanceof Answer.AnswerEvent(Answer result) && result.query().equals(query.id())) {
+                resultFuture.complete(result);
             }
         };
 

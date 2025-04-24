@@ -23,10 +23,6 @@ public class Note {
         return new Note(this.id, this.title, this.text, newStatus);
     }
 
-    public enum Status {
-        IDLE, ACTIVE, PAUSED, COMPLETED
-    }
-
     @Override
     public String toString() {
         return title;
@@ -40,5 +36,9 @@ public class Note {
     @Override
     public int hashCode() {
         return id.hashCode();
+    }
+
+    public enum Status {
+        IDLE, ACTIVE, PAUSED, COMPLETED
     }
 }

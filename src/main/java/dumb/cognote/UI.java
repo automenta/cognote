@@ -9,10 +9,7 @@ import javax.swing.border.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
-import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.DefaultHighlighter.DefaultHighlightPainter;
-import javax.swing.text.Highlighter;
-import javax.swing.text.Highlighter.HighlightPainter;
 import java.awt.*;
 import java.awt.event.*;
 import java.time.Instant;
@@ -146,14 +143,14 @@ public class UI extends JFrame {
             if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                 // Attempt to extract a string literal from common positions
                 // This is a heuristic and might need refinement
-                if (list.size() >= 2 && list.get(1) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 2 && list.get(1) instanceof Term.Atom(String value)) {
+                    return value;
                 }
-                if (list.size() >= 3 && list.get(2) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 3 && list.get(2) instanceof Term.Atom(String value)) {
+                    return value;
                 }
-                if (list.size() >= 4 && list.get(3) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 4 && list.get(3) instanceof Term.Atom(String value)) {
+                    return value;
                 }
             }
         } catch (KifParser.ParseException e) {
@@ -244,7 +241,7 @@ public class UI extends JFrame {
                 // Find the most specific note ID to display this assertion under
                 // Prefer sourceNoteId if present, otherwise try to find a common source from justifications
                 // Fallback to the KB ID if no specific note source is found
-                var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0 && cog != null) ? cog.context.findCommonSourceNodeId(assertion.justificationIds()) : null;
+                var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0 && cog != null) ? cog.context.commonSourceNodeId(assertion.justificationIds()) : null;
                 displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb());
                 vm = AttachmentViewModel.fromAssertion(assertion, type, displayNoteId);
             }
@@ -478,7 +475,7 @@ public class UI extends JFrame {
                 if (!newContent.endsWith(content) && !content.equals(status.toString()) && !(oldVm.llmStatus != status && newContent.endsWith(oldVm.llmStatus.toString()))) {
                     newContent += (newContent.isBlank() ? "" : "\n") + content;
                 } else if (newContent.isBlank() && !content.isBlank()) {
-                     newContent = content; // If content was blank, just set it
+                    newContent = content; // If content was blank, just set it
                 }
             }
 
@@ -604,7 +601,7 @@ public class UI extends JFrame {
             var currentId = queue.poll();
             if (currentId == null || !visited.add(currentId)) continue;
             cog.context.findAssertionByIdAcrossKbs(currentId).ifPresent(a -> {
-                var displayNoteId = a.sourceNoteId() != null ? a.sourceNoteId() : cog.context.findCommonSourceNodeId(a.justificationIds());
+                var displayNoteId = a.sourceNoteId() != null ? a.sourceNoteId() : cog.context.commonSourceNodeId(a.justificationIds());
                 model.addElement(AttachmentViewModel.fromAssertion(a, "support", displayNoteId));
                 a.justificationIds().forEach(queue::offer);
             });
@@ -680,6 +677,233 @@ public class UI extends JFrame {
                 l.setFont(f);
             }
             return l;
+        }
+    }
+
+    public record AttachmentViewModel(String id, @Nullable String noteId, String content, AttachmentType attachmentType,
+                                      AttachmentStatus status, double priority, int depth, long timestamp,
+                                      @Nullable String associatedNoteId, @Nullable String kbId,
+                                      @Nullable Set<String> justifications,
+                                      Cog.TaskStatus llmStatus) implements Comparable<AttachmentViewModel> {
+        public static AttachmentViewModel fromAssertion(Assertion a, String callbackType, @Nullable String associatedNoteId) {
+            return new AttachmentViewModel(a.id(), a.sourceNoteId(), a.toKifString(), determineTypeFromAssertion(a), determineStatusFromCallback(callbackType, a.isActive()), a.pri(), a.derivationDepth(), a.timestamp(), requireNonNullElse(associatedNoteId, a.sourceNoteId()), a.kb(), a.justificationIds(), Cog.TaskStatus.IDLE);
+        }
+
+        public static AttachmentViewModel forLlm(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId, Cog.TaskStatus taskStatus) {
+            return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, taskStatus);
+        }
+
+        public static AttachmentViewModel forQuery(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId) {
+            return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, Cog.TaskStatus.IDLE);
+        }
+
+        private static AttachmentType determineTypeFromAssertion(Assertion a) {
+            return a.kif().op().map(op -> switch (op) {
+                case PRED_NOTE_SUMMARY -> AttachmentType.SUMMARY;
+                case PRED_NOTE_CONCEPT -> AttachmentType.CONCEPT;
+                case PRED_NOTE_QUESTION -> AttachmentType.QUESTION;
+                default -> detTypeFromAssertionType(a);
+            }).orElse(detTypeFromAssertionType(a));
+        }
+
+        private static AttachmentType detTypeFromAssertionType(Assertion a) {
+            return switch (a.type()) {
+                case GROUND -> (a.derivationDepth() == 0) ? AttachmentType.FACT : AttachmentType.DERIVED;
+                case SKOLEMIZED -> AttachmentType.SKOLEMIZED;
+                case UNIVERSAL -> AttachmentType.UNIVERSAL;
+            };
+        }
+
+        private static AttachmentStatus determineStatusFromCallback(String callbackType, boolean isActive) {
+            return switch (callbackType) {
+                case "retract" -> AttachmentStatus.RETRACTED;
+                case "evict" -> AttachmentStatus.EVICTED;
+                case "status-inactive" -> AttachmentStatus.INACTIVE;
+                default -> isActive ? AttachmentStatus.ACTIVE : AttachmentStatus.INACTIVE;
+            };
+        }
+
+        public AttachmentViewModel withStatus(AttachmentStatus newStatus) {
+            return new AttachmentViewModel(id, noteId, content, attachmentType, newStatus, priority, depth, timestamp, associatedNoteId, kbId, justifications, llmStatus);
+        }
+
+        public AttachmentViewModel withLlmUpdate(Cog.TaskStatus newLlmStatus, String newContent) {
+            return new AttachmentViewModel(id, noteId, newContent, attachmentType, status, priority, depth, timestamp, associatedNoteId, kbId, justifications, newLlmStatus);
+        }
+
+        public boolean isKifBased() {
+            return switch (attachmentType) {
+                case FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION -> true;
+                default -> false;
+            };
+        }
+
+        @Override
+        public int compareTo(AttachmentViewModel other) {
+            var cmp = Integer.compare(status.ordinal(), other.status.ordinal());
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(attachmentType.ordinal(), other.attachmentType.ordinal());
+            if (cmp != 0) return cmp;
+            if (isKifBased()) {
+                cmp = Double.compare(other.priority, this.priority);
+                if (cmp != 0) return cmp;
+                cmp = Integer.compare(this.depth, other.depth);
+                if (cmp != 0) return cmp;
+            }
+            return Long.compare(other.timestamp, this.timestamp);
+        }
+    }
+
+    static class AttachmentListCellRenderer extends JPanel implements ListCellRenderer<AttachmentViewModel> {
+        private final JLabel iconLabel = new JLabel();
+        private final JLabel contentLabel = new JLabel();
+        private final JLabel detailLabel = new JLabel();
+        private final Border activeBorder = new CompoundBorder(new LineBorder(Color.LIGHT_GRAY, 1), new EmptyBorder(3, 5, 3, 5));
+        private final Border inactiveBorder = new CompoundBorder(new LineBorder(new Color(240, 240, 240), 1), new EmptyBorder(3, 5, 3, 5));
+        private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
+
+        AttachmentListCellRenderer() {
+            setLayout(new BorderLayout(5, 0));
+            setOpaque(true);
+            var textPanel = new JPanel(new BorderLayout());
+            textPanel.setOpaque(false);
+            textPanel.add(contentLabel, BorderLayout.CENTER);
+            textPanel.add(detailLabel, BorderLayout.SOUTH);
+            add(iconLabel, BorderLayout.WEST);
+            add(textPanel, BorderLayout.CENTER);
+            contentLabel.setFont(MONOSPACED_FONT);
+            detailLabel.setFont(UI_SMALL_FONT);
+            iconLabel.setFont(UI_DEFAULT_FONT.deriveFont(Font.BOLD));
+            iconLabel.setBorder(new EmptyBorder(0, 4, 0, 4));
+            iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        }
+
+        @Override
+        public Component getListCellRendererComponent(JList<? extends AttachmentViewModel> list, AttachmentViewModel value, int index, boolean isSelected, boolean cellHasFocus) {
+            contentLabel.setText(value.content());
+            contentLabel.setFont(MONOSPACED_FONT);
+            String iconText;
+            Color iconColor, bgColor = Color.WHITE, fgColor = Color.BLACK;
+            switch (value.attachmentType) {
+                case FACT -> {
+                    iconText = "F";
+                    iconColor = new Color(0, 128, 0);
+                    bgColor = new Color(235, 255, 235);
+                }
+                case DERIVED -> {
+                    iconText = "D";
+                    iconColor = Color.BLUE;
+                    bgColor = new Color(230, 240, 255);
+                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
+                }
+                case UNIVERSAL -> {
+                    iconText = "∀";
+                    iconColor = new Color(0, 0, 128);
+                    bgColor = new Color(235, 235, 255);
+                }
+                case SKOLEMIZED -> {
+                    iconText = "∃";
+                    iconColor = new Color(139, 69, 19);
+                    bgColor = new Color(255, 255, 230);
+                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
+                }
+                case SUMMARY -> {
+                    iconText = "Σ";
+                    iconColor = Color.DARK_GRAY;
+                    bgColor = new Color(240, 240, 240);
+                }
+                case CONCEPT -> {
+                    iconText = "C";
+                    iconColor = Color.DARK_GRAY;
+                    bgColor = new Color(240, 240, 240);
+                }
+                case QUESTION -> {
+                    iconText = "?";
+                    iconColor = Color.MAGENTA;
+                    bgColor = new Color(255, 240, 255);
+                }
+                case LLM_ERROR -> {
+                    iconText = "!";
+                    iconColor = Color.RED;
+                    bgColor = new Color(255, 230, 230);
+                }
+                case LLM_INFO -> {
+                    iconText = "i";
+                    iconColor = Color.GRAY;
+                }
+                case QUERY_SENT -> {
+                    iconText = "->";
+                    iconColor = new Color(0, 150, 150);
+                }
+                case QUERY_RESULT -> {
+                    iconText = "<-";
+                    iconColor = new Color(0, 150, 150);
+                }
+                default -> {
+                    iconText = "*";
+                    iconColor = Color.BLACK;
+                }
+            }
+            var kbDisp = ofNullable(value.kbId()).map(id -> switch (id) {
+                case GLOBAL_KB_NOTE_ID -> " [KB:G]";
+                case "unknown" -> "";
+                default -> " [KB:" + id.replace(Cog.ID_PREFIX_NOTE, "") + "]";
+            }).orElse("");
+            var assocNoteDisp = ofNullable(value.associatedNoteId()).filter(id -> !id.equals(value.kbId())).map(id -> " (N:" + id.replace(Cog.ID_PREFIX_NOTE, "") + ")").orElse("");
+            var timeStr = timeFormatter.format(Instant.ofEpochMilli(value.timestamp()));
+            var details = switch (value.attachmentType) {
+                case FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION ->
+                        String.format("P:%.3f|D:%d|%s%s%s", value.priority(), value.depth(), timeStr, assocNoteDisp, kbDisp);
+                case LLM_INFO, LLM_ERROR -> String.format("%s|%s%s", value.llmStatus(), timeStr, kbDisp);
+                case QUERY_SENT, QUERY_RESULT -> String.format("%s|%s%s", value.attachmentType, timeStr, kbDisp);
+                default -> String.format("%s%s", timeStr, kbDisp);
+            };
+            detailLabel.setText(details);
+            iconLabel.setText(iconText);
+            if (value.status != AttachmentStatus.ACTIVE && value.isKifBased()) {
+                fgColor = Color.LIGHT_GRAY;
+                contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
+                detailLabel.setText(value.status + "|" + details);
+                bgColor = new Color(248, 248, 248);
+                setBorder(inactiveBorder);
+                iconColor = Color.LIGHT_GRAY;
+            } else {
+                setBorder(activeBorder);
+            }
+            if (value.attachmentType == AttachmentType.LLM_INFO || value.attachmentType == AttachmentType.LLM_ERROR) {
+                switch (value.llmStatus) {
+                    case SENDING, PROCESSING -> {
+                        bgColor = new Color(255, 255, 200);
+                        iconColor = Color.ORANGE;
+                    }
+                    case ERROR -> {
+                        bgColor = new Color(255, 220, 220);
+                        iconColor = Color.RED;
+                    }
+                    case CANCELLED -> {
+                        fgColor = Color.GRAY;
+                        contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
+                        bgColor = new Color(230, 230, 230);
+                        iconColor = Color.GRAY;
+                    }
+                    default -> {
+                    }
+                }
+            }
+            if (isSelected) {
+                setBackground(list.getSelectionBackground());
+                contentLabel.setForeground(list.getSelectionForeground());
+                detailLabel.setForeground(list.getSelectionForeground());
+                iconLabel.setForeground(list.getSelectionForeground());
+            } else {
+                setBackground(bgColor);
+                contentLabel.setForeground(fgColor);
+                detailLabel.setForeground((value.status == AttachmentStatus.ACTIVE || !value.isKifBased()) ? Color.GRAY : Color.LIGHT_GRAY);
+                iconLabel.setForeground(iconColor);
+            }
+            var justList = (value.justifications() == null || value.justifications().isEmpty()) ? "None" : String.join(", ", value.justifications());
+            setToolTipText(String.format("<html>ID: %s<br>KB: %s<br>Assoc Note: %s<br>Status: %s<br>LLM Status: %s<br>Type: %s<br>Pri: %.4f<br>Depth: %d<br>Time: %s<br>Just: %s</html>", value.id, value.kbId() != null ? value.kbId() : "N/A", value.associatedNoteId() != null ? value.associatedNoteId() : "N/A", value.status, value.llmStatus, value.attachmentType, value.priority(), value.depth(), Instant.ofEpochMilli(value.timestamp()).toString(), justList));
+            return this;
         }
     }
 
@@ -788,9 +1012,7 @@ public class UI extends JFrame {
             noteContextMenu.add(pauseNoteItem);
             noteContextMenu.add(completeNoteItem);
             noteContextMenu.addSeparator();
-            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem).forEach(item -> {
-                noteContextMenu.add(item);
-            });
+            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem).forEach(noteContextMenu::add);
             noteContextMenu.addSeparator();
             noteContextMenu.add(removeItem);
 
@@ -907,8 +1129,8 @@ public class UI extends JFrame {
             }
             // Check if the note is active before running LLM tools
             if (!cog.context.isActiveNote(note.id)) {
-                 JOptionPane.showMessageDialog(UI.this, "Note must be Active to run LLM tools.", "Note Status", JOptionPane.WARNING_MESSAGE);
-                 return;
+                JOptionPane.showMessageDialog(UI.this, "Note must be Active to run LLM tools.", "Note Status", JOptionPane.WARNING_MESSAGE);
+                return;
             }
 
 
@@ -1018,7 +1240,7 @@ public class UI extends JFrame {
             // Determine which note this assertion is primarily associated with for UI display
             var displayNoteId = assertion.sourceNoteId();
             if (displayNoteId == null && assertion.derivationDepth() > 0)
-                displayNoteId = cog.context.findCommonSourceNodeId(assertion.justificationIds());
+                displayNoteId = cog.context.commonSourceNodeId(assertion.justificationIds());
             // If still no specific note and it's not in the global KB, use its KB ID (which might be a note ID)
             if (displayNoteId == null && !GLOBAL_KB_NOTE_ID.equals(assertion.kb())) displayNoteId = assertion.kb();
 
@@ -1350,9 +1572,9 @@ public class UI extends JFrame {
             } else if (cog.isPaused()) {
                 // Check if it's the initial paused state or user-paused
                 if ("Paused (Ready to Start)".equals(cog.status)) {
-                     pauseResumeButton.setText("Start");
+                    pauseResumeButton.setText("Start");
                 } else {
-                     pauseResumeButton.setText("Resume");
+                    pauseResumeButton.setText("Resume");
                 }
                 pauseResumeButton.setEnabled(true);
             } else {

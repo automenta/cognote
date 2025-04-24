@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static java.util.Optional.ofNullable;
+
 public class CogNote extends Cog {
 
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
@@ -31,7 +33,7 @@ public class CogNote extends Cog {
             var jsonText = Files.readString(filePath);
             var jsonArray = new JSONArray(new JSONTokener(jsonText));
             List<Note> notes = IntStream.range(0, jsonArray.length())
-                    .map(jsonArray::getJSONObject)
+                    .mapToObj(jsonArray::getJSONObject)
                     .map(obj -> {
                         var id = obj.getString("id");
                         var title = obj.getString("title");
@@ -47,9 +49,9 @@ public class CogNote extends Cog {
                 notes.add(createDefaultConfigNote());
             }
             // Ensure global KB note exists (it's not saved, but needed internally)
-             if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
-                 notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
-             }
+            if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
+                notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+            }
 
 
             System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
@@ -65,12 +67,12 @@ public class CogNote extends Cog {
         var jsonArray = new JSONArray();
         // Filter out the Global KB note as it's not persisted
         List<Note> notesToSave = notes.stream()
-                                      .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
-                                      .collect(Collectors.toCollection(ArrayList::new));
+                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
+                .collect(Collectors.toCollection(ArrayList::new));
 
         // Ensure config note is included if it wasn't in the filtered list (shouldn't happen if loaded correctly)
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-             notesToSave.add(createDefaultConfigNote());
+            notesToSave.add(createDefaultConfigNote());
         }
 
 
@@ -88,7 +90,7 @@ public class CogNote extends Cog {
 
     @Override
     public Optional<Note> note(String id) {
-        return Optional.ofNullable(notes.get(id));
+        return ofNullable(notes.get(id));
     }
 
     public List<Note> getAllNotes() {
@@ -103,7 +105,7 @@ public class CogNote extends Cog {
     }
 
     public void removeNote(String noteId) {
-        Optional.ofNullable(notes.remove(noteId)).ifPresent(note -> {
+        ofNullable(notes.remove(noteId)).ifPresent(note -> {
             // Trigger retraction of associated assertions via event
             events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
             // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
@@ -180,7 +182,7 @@ public class CogNote extends Cog {
         // Retract assertions from all notes except config and global
         context.getAllNoteIds().stream()
                 .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
-                .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
+                .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
         // Clear the logic context (KBs, rules, active notes)
