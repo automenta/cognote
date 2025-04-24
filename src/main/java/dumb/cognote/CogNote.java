@@ -11,19 +11,20 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class CogNote extends Cog {
 
-    @Deprecated
-    public UI ui;
+    private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
         load();
     }
 
-    static List<Note> loadNotes() {
+    static List<Note> loadNotesFromFile() {
         var filePath = Paths.get(NOTES_FILE);
         if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
         try {
@@ -45,7 +46,7 @@ public class CogNote extends Cog {
         }
     }
 
-    private static synchronized void save(List<Note> notes) {
+    private static synchronized void saveNotesToFile(List<Note> notes) {
         var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
         List<Note> notesToSave = new ArrayList<>(notes);
@@ -66,34 +67,51 @@ public class CogNote extends Cog {
 
     @Override
     public Optional<Note> note(String id) {
-        return ui.findNoteById(id);
+        return Optional.ofNullable(notes.get(id));
+    }
+
+    public List<Note> getAllNotes() {
+        return new ArrayList<>(notes.values());
+    }
+
+    public void addNote(Note note) {
+        if (notes.putIfAbsent(note.id, note) == null) {
+            events.emit(new AddedEvent(note));
+            save();
+        }
+    }
+
+    public void removeNote(String noteId) {
+        Optional.ofNullable(notes.remove(noteId)).ifPresent(note -> {
+            // Trigger retraction of associated assertions via event
+            events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
+            // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
+            save();
+        });
     }
 
     @Override
     public synchronized void clear() {
         super.clear();
-
-        SwingUtilities.invokeLater(() -> {
-            ui.clearAllUILists();
-            ui.addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions"));
-            if (ui.findNoteById(CONFIG_NOTE_ID).isEmpty()) {
-                ui.addNoteToList(createDefaultConfigNote());
-            }
-            ui.noteListPanel.noteList.setSelectedIndex(0);
-        });
+        notes.clear(); // Clear internal map after triggering retractions
+        // Add default notes back
+        var globalKbNote = new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions");
+        var configNote = createDefaultConfigNote();
+        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote);
+        notes.put(CONFIG_NOTE_ID, configNote);
+        events.emit(new AddedEvent(globalKbNote));
+        events.emit(new AddedEvent(configNote));
+        save();
     }
 
     public boolean updateConfig(String newConfigJsonText) {
         try {
             var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText));
             parseConfig(newConfigJsonText);
-            ui.findNoteById(CONFIG_NOTE_ID).ifPresent(note -> {
+            note(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = newConfigJson.toString(2);
                 save();
             });
-//                System.out.println("Configuration updated and saved.");
-//                System.out.printf("New Config: KBSize=%d, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d, BroadcastInput=%b%n",
-//                        globalKbCapacity, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit, broadcastInputAssertions);
             return true;
         } catch (org.json.JSONException e) {
             System.err.println("Failed to parse new configuration JSON: " + e.getMessage());
@@ -102,17 +120,23 @@ public class CogNote extends Cog {
     }
 
     private void load() {
-        var notes = loadNotes();
+        var loadedNotes = loadNotesFromFile();
+        loadedNotes.forEach(note -> notes.put(note.id, note));
 
-        var configNoteOpt = notes.stream().filter(n -> n.id.equals(CONFIG_NOTE_ID)).findFirst();
+        var configNoteOpt = note(CONFIG_NOTE_ID);
         if (configNoteOpt.isPresent()) {
             parseConfig(configNoteOpt.get().text);
         } else {
             System.out.println("Configuration note not found, using defaults and creating one.");
             var configNote = createDefaultConfigNote();
-            notes.add(configNote);
+            notes.put(CONFIG_NOTE_ID, configNote);
             parseConfig(configNote.text);
-            save(notes);
+            save();
+        }
+
+        // Ensure Global KB note exists internally, even if not loaded from file
+        if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
+            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions"));
         }
     }
 
@@ -138,12 +162,11 @@ public class CogNote extends Cog {
     @Override
     public void stop() {
         save();
-
         super.stop();
     }
 
     public void save() {
-        save(ui.getAllNotes());
+        saveNotesToFile(getAllNotes());
     }
 
 }

@@ -92,7 +92,8 @@ public class UI extends JFrame {
                 var ui = new UI(c);
                 ui.setVisible(true);
 
-                ui.loadNotes(c.loadNotes());
+                // UI now loads notes from CogNote after setCog
+                // ui.loadNotes(c.loadNotes());
 
                 c.start();
             });
@@ -109,19 +110,6 @@ public class UI extends JFrame {
         System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
         System.err.println("Note: Most configuration is now managed via the UI and persisted in " + NOTES_FILE);
         System.exit(1);
-    }
-
-    /**
-     * TODO this needs to be called from somewhere
-     */
-    private static void handleLlmFailure(Throwable ex, Note contextNote) {
-        var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-        if (!(cause instanceof CancellationException)) {
-            var action = (cause instanceof KifParser.ParseException) ? "KIF Parse Error" : "LLM Interaction Failed";
-            System.err.println("LLM Failure for note " + contextNote.id + ": " + action + ": " + cause.getMessage());
-        } else {
-            System.out.println("LLM task cancelled for note " + contextNote.id);
-        }
     }
 
     private static void updateOrAddModelItem(DefaultListModel<AttachmentViewModel> sourceModel, AttachmentViewModel newItem) {
@@ -203,7 +191,9 @@ public class UI extends JFrame {
 
     private void setCog(CogNote c) {
         this.cog = c;
-        cog.ui = this;
+
+        // Load notes from CogNote into the UI list model
+        loadNotes(cog.getAllNotes());
 
         updateUIForSelection();
 
@@ -217,7 +207,7 @@ public class UI extends JFrame {
         ev.on(LlmInfoEvent.class, e -> handleUiUpdate("llm-info", e.llmItem()));
         ev.on(Cog.TaskUpdateEvent.class, this::updateLlmItem);
         ev.on(Cog.AddedEvent.class, e -> invokeLater(() -> addNoteToList(e.note())));
-        ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.note().id)));
+        ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.noteId()))); // RemovedEvent now carries noteId
         ev.on(Cog.Answer.AnswerEvent.class, e -> handleUiUpdate("query-result", e.result()));
         ev.on(Cog.Query.QueryEvent.class, e -> handleUiUpdate("query-sent", e.query()));
 
@@ -235,7 +225,10 @@ public class UI extends JFrame {
         switch (payload) {
             case Assertion assertion -> {
                 var sourceNoteId = assertion.sourceNoteId();
-                var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0) ? cog.context.findCommonSourceNodeId(assertion.justificationIds()) : null;
+                // Find the most specific note ID to display this assertion under
+                // Prefer sourceNoteId if present, otherwise try to find a common source from justifications
+                // Fallback to the KB ID if no specific note source is found
+                var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0 && cog != null) ? cog.context.findCommonSourceNodeId(assertion.justificationIds()) : null;
                 displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb());
                 vm = AttachmentViewModel.fromAssertion(assertion, type, displayNoteId);
             }
@@ -244,11 +237,14 @@ public class UI extends JFrame {
                 displayNoteId = vm.noteId();
             }
             case Cog.Answer result -> {
-                displayNoteId = GLOBAL_KB_NOTE_ID;
+                // Query results are typically global or associated with the query's target KB
+                displayNoteId = result.query().startsWith(ID_PREFIX_QUERY) && cog != null ?
+                        cog.context.findAssertionByIdAcrossKbs(result.query()).map(Assertion::kb).orElse(GLOBAL_KB_NOTE_ID) : GLOBAL_KB_NOTE_ID; // Attempt to find KB from query ID if it's an assertion-based query
                 var content = String.format("Query Result (%s): %s -> %d bindings", result.status(), result.query(), result.bindings().size());
-                vm = AttachmentViewModel.forQuery(result.query() + "_res", displayNoteId, content, AttachmentType.QUERY_RESULT, System.currentTimeMillis(), GLOBAL_KB_NOTE_ID);
+                vm = AttachmentViewModel.forQuery(result.query() + "_res", displayNoteId, content, AttachmentType.QUERY_RESULT, System.currentTimeMillis(), displayNoteId);
             }
             case Cog.Query query -> {
+                // Query sent is associated with its target KB
                 displayNoteId = requireNonNullElse(query.targetKbId(), GLOBAL_KB_NOTE_ID);
                 var content = "Query Sent: " + query.pattern().toKif();
                 vm = AttachmentViewModel.forQuery(query.id() + "_sent", displayNoteId, content, AttachmentType.QUERY_SENT, System.currentTimeMillis(), displayNoteId);
@@ -262,6 +258,7 @@ public class UI extends JFrame {
     }
 
     private void handleStatusChange(Cog.AssertionStateEvent event) {
+        if (cog == null) return;
         cog.context.findAssertionByIdAcrossKbs(event.assertionId())
                 .ifPresent(a -> handleUiUpdate(event.isActive() ? "status-active" : "status-inactive", a));
     }
@@ -305,7 +302,7 @@ public class UI extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                saveCurrentNote();
+                saveCurrentNote(); // Save current note text before stopping
                 ofNullable(cog).ifPresent(Cog::stop);
                 dispose();
                 System.exit(0);
@@ -318,8 +315,13 @@ public class UI extends JFrame {
             n.text = editorPanel.edit.getText();
             if (!Cog.CONFIG_NOTE_ID.equals(n.id)) {
                 n.title = editorPanel.title.getText();
-            } else if (cog != null && !cog.updateConfig(n.text)) {
-                JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration note. Changes not applied.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
+                if (cog != null) cog.save(); // Save all notes if a regular note is edited
+            } else if (cog != null) {
+                if (!cog.updateConfig(n.text)) {
+                    JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration note. Changes not applied.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
+                } else {
+                    // Config update already calls save internally on success
+                }
             }
         });
     }
@@ -337,13 +339,13 @@ public class UI extends JFrame {
             setTitle("Cognote - " + note.title + (isGlobalSelected || isConfigSelected ? "" : " [" + note.id + "]"));
             SwingUtilities.invokeLater(() -> {
                 if (!isGlobalSelected && !isConfigSelected) editorPanel.edit.requestFocusInWindow();
-                else if (!isGlobalSelected) editorPanel.edit.requestFocusInWindow();
-                else attachmentPanel.filterField.requestFocusInWindow();
+                else if (!isGlobalSelected) editorPanel.edit.requestFocusInWindow(); // Allow editing global KB description? Maybe not.
+                else attachmentPanel.filterField.requestFocusInWindow(); // Focus filter for global KB
             });
         } else {
             setTitle("Cognote - Event Driven");
         }
-        setControlsEnabled(true);
+        setControlsEnabled(true); // Re-enable controls after selection change
     }
 
     private void setControlsEnabled(boolean enabled) {
@@ -366,12 +368,11 @@ public class UI extends JFrame {
                     setControlsEnabled(false);
                     try {
                         action.accept(note);
-                        updateStatus(String.format("Finished %s '%s'.", actionName, note.title));
+                        // Status update and re-enabling controls will happen via events (e.g., TaskUpdateEvent)
                     } catch (Exception ex) {
                         updateStatus(String.format("Error %s '%s'.", actionName, note.title));
                         handleActionError(actionName, ex);
-                    } finally {
-                        setControlsEnabled(true);
+                        setControlsEnabled(true); // Re-enable on immediate error
                     }
                 });
     }
@@ -393,8 +394,10 @@ public class UI extends JFrame {
             var status = vm.status;
             if (status == AttachmentStatus.RETRACTED || status == AttachmentStatus.EVICTED || status == AttachmentStatus.INACTIVE)
                 updateAttachmentStatusInOtherNoteModels(vm.id, status, targetNoteIdForList);
-            ofNullable(cog).flatMap(s -> s.context.findAssertionByIdAcrossKbs(vm.id))
+            if (cog != null) {
+                 cog.context.findAssertionByIdAcrossKbs(vm.id)
                     .ifPresent(assertion -> editorPanel.highlightAffectedNoteText(assertion, status));
+            }
         }
 
         if (note != null && note.id.equals(targetNoteIdForList))
@@ -404,16 +407,29 @@ public class UI extends JFrame {
 
     private void updateAttachmentStatusInOtherNoteModels(String attachmentId, AttachmentStatus newStatus, @Nullable String primaryNoteId) {
         noteAttachmentModels.forEach((noteId, model) -> {
-            if (!noteId.equals(primaryNoteId)) {
+            if (!Objects.equals(noteId, primaryNoteId)) { // Only update in *other* models
                 var idx = findViewModelIndexById(model, attachmentId);
-                if (idx != -1 && model.getElementAt(idx).status != newStatus) {
-                    model.setElementAt(model.getElementAt(idx).withStatus(newStatus), idx);
-                    if (note != null && note.id.equals(noteId))
-                        attachmentPanel.refreshAttachmentDisplay();
+                if (idx != -1) { // Found in another note's attachments
+                    var existingItem = model.getElementAt(idx);
+                    if (existingItem.status != newStatus) {
+                         // Create a new ViewModel with updated status
+                        var updatedItem = new AttachmentViewModel(
+                            existingItem.id(), existingItem.noteId(), existingItem.content(),
+                            existingItem.attachmentType(), newStatus, existingItem.priority(),
+                            existingItem.depth(), existingItem.timestamp(), existingItem.associatedNoteId(),
+                            existingItem.kbId(), existingItem.justifications(), existingItem.llmStatus()
+                        );
+                        model.setElementAt(updatedItem, idx);
+                        if (note != null && note.id.equals(noteId)) {
+                            // If that other note is currently selected, refresh its display
+                            attachmentPanel.refreshAttachmentDisplay();
+                        }
+                    }
                 }
             }
         });
     }
+
 
     public void updateLlmItem(String taskId, Cog.TaskStatus status, String content) {
         findViewModelInAnyModel(taskId).ifPresent(entry -> {
@@ -422,11 +438,14 @@ public class UI extends JFrame {
             var oldVm = model.getElementAt(index);
 
             var newContent = oldVm.content();
+            // Append content only if it's new and not just status updates
             if (content != null && !content.isBlank()) {
-                if (!newContent.endsWith(content)) {
-                    newContent += "\n" + content;
+                 // Simple check to avoid appending the same status message repeatedly
+                if (!newContent.endsWith(content) && !(oldVm.llmStatus != status && newContent.endsWith(oldVm.llmStatus.toString()))) {
+                     newContent += (newContent.isBlank() ? "" : "\n") + content;
                 }
             }
+
 
             var newVm = oldVm.withLlmUpdate(status, newContent);
             model.setElementAt(newVm, index);
@@ -465,14 +484,21 @@ public class UI extends JFrame {
     }
 
     public void addNoteToList(Note note) {
-        noteListPanel.add(note);
+        // Only add if not already present in the UI list model
+        if (noteListPanel.findNoteById(note.id).isEmpty()) {
+            noteListPanel.add(note);
+            // Ensure attachment model exists for this note
+            noteAttachmentModels.computeIfAbsent(note.id, id -> new DefaultListModel<>());
+        }
     }
 
     public void removeNoteFromList(String noteId) {
         noteListPanel.remove(noteId);
+        noteAttachmentModels.remove(noteId); // Remove the attachment model for the removed note
+        // The note selection listener in NoteListPanel handles selecting a new note or clearing the editor
     }
 
-    @Deprecated
+    @Deprecated // UI should not directly find notes, rely on events or CogNote API
     public Optional<Note> findNoteById(String noteId) {
         return noteListPanel.findNoteById(noteId);
     }
@@ -481,12 +507,38 @@ public class UI extends JFrame {
         return noteListPanel.getAllNotes();
     }
 
-    @Deprecated
+    // This method is now called by setCog to populate the UI list from CogNote's internal list
     public void loadNotes(java.util.List<Note> notes) {
         SwingUtilities.invokeLater(() -> {
-            addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Assertions in the global knowledge base."));
-            noteListPanel.load(notes);
-            updateUIForSelection();
+            noteListPanel.clearNotes(); // Clear existing UI list
+            notes.forEach(this::addNoteToList); // Add notes from CogNote's list
+            // Ensure default notes are in the UI list if they weren't loaded
+            if (noteListPanel.findNoteById(GLOBAL_KB_NOTE_ID).isEmpty())
+                 addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions."));
+            if (noteListPanel.findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
+                 addNoteToList(cog != null ? CogNote.createDefaultConfigNote() : new Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
+
+
+            if (!noteListPanel.notes.isEmpty()) {
+                // Select the first non-system note, or global KB if none
+                var firstSelectable = IntStream.range(0, noteListPanel.notes.getSize())
+                        .filter(i -> {
+                            var id = noteListPanel.notes.getElementAt(i).id;
+                            return !id.equals(Cog.CONFIG_NOTE_ID); // Config note not selectable initially
+                        })
+                        .findFirst().orElse(noteListPanel.findNoteIndexById(GLOBAL_KB_NOTE_ID).orElse(0)); // Fallback to Global KB
+
+                if (firstSelectable >= 0 && firstSelectable < noteListPanel.notes.getSize()) {
+                     noteListPanel.noteList.setSelectedIndex(firstSelectable);
+                } else {
+                    noteListPanel.noteList.clearSelection();
+                    note = null;
+                }
+            } else {
+                 noteListPanel.noteList.clearSelection();
+                 note = null;
+            }
+            updateUIForSelection(); // Update UI based on the new selection (or lack thereof)
             updateStatus("Notes loaded");
         });
     }
@@ -494,6 +546,7 @@ public class UI extends JFrame {
     void noteTitleUpdated(Note note) {
         setTitle("Cognote - " + note.title + " [" + note.id + "]");
         noteListPanel.updateNoteDisplay(note);
+        if (cog != null) cog.save(); // Save notes when title changes
     }
 
     private void displaySupportChain(Assertion startingAssertion) {
@@ -527,7 +580,7 @@ public class UI extends JFrame {
 
     void updateStatus(String statusText) {
         mainControlPanel.statusLabel.setText("Status: " + statusText);
-        if (cog != null) cog.status = statusText;
+        if (cog != null) cog.status = statusText; // Update Cog's internal status too
     }
 
     enum AttachmentStatus {ACTIVE, RETRACTED, EVICTED, INACTIVE}
@@ -910,9 +963,9 @@ public class UI extends JFrame {
         private void setupActionListeners() {
             noteList.addListSelectionListener(e -> {
                 if (!e.getValueIsAdjusting()) {
-                    saveCurrentNote();
-                    note = noteList.getSelectedValue();
-                    updateUIForSelection();
+                    saveCurrentNote(); // Save the previously selected note
+                    note = noteList.getSelectedValue(); // Update the current note
+                    updateUIForSelection(); // Update UI based on the new selection
                 }
             });
             analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", note));
@@ -928,46 +981,45 @@ public class UI extends JFrame {
             var noteSelected = note != null;
             var isEditableNote = noteSelected && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id);
             var systemReady = cog != null && cog.running.get() && !cog.paused.get();
-            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem, removeItem)
+            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem)
                     .forEach(i -> i.setEnabled(isEditableNote && systemReady));
+            removeItem.setEnabled(isEditableNote); // Allow removing non-system notes even if system is paused
         }
 
         void setControlsEnabled(boolean enabled) {
             noteList.setEnabled(enabled);
+            // Context menu items are handled by updateNoteContextMenuState
         }
 
         private void removeNoteAction() {
-            performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
+            performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.removeNote(note.id))); // Call CogNote method
         }
 
         void add(Note note) {
+            // Add to the UI list model
             if (findNoteById(note.id).isEmpty()) {
                 notes.addElement(note);
-                noteAttachmentModels.computeIfAbsent(note.id, id -> new DefaultListModel<>());
             }
         }
 
         void remove(String noteId) {
-            noteAttachmentModels.remove(noteId);
+            // Remove from the UI list model
             findNoteIndexById(noteId).ifPresent(indexToRemove -> {
                 var selectedIdxBeforeRemove = noteList.getSelectedIndex();
                 notes.removeElementAt(indexToRemove);
-                var stateChanged = false;
+
+                // If the removed note was selected, select a new one or clear selection
                 if (note != null && note.id.equals(noteId)) {
-                    note = null;
-                    stateChanged = true;
-                }
-                if (!notes.isEmpty()) {
-                    var newIndex = Math.max(0, Math.min(selectedIdxBeforeRemove, notes.getSize() - 1));
-                    if (noteList.getSelectedIndex() != newIndex) {
-                        noteList.setSelectedIndex(newIndex);
-                    } else if (stateChanged) {
-                        note = noteList.getSelectedValue();
-                        updateUIForSelection();
+                    note = null; // Clear the reference to the removed note
+                    if (!notes.isEmpty()) {
+                        var newIndex = Math.max(0, Math.min(selectedIdxBeforeRemove, notes.getSize() - 1));
+                        noteList.setSelectedIndex(newIndex); // This will trigger updateUIForSelection
+                    } else {
+                        noteList.clearSelection(); // This will trigger updateUIForSelection
                     }
                 } else {
-                    note = null;
-                    updateUIForSelection();
+                     // If a different note was selected, just update the UI for the current selection state
+                     updateUIForSelection();
                 }
             });
         }
@@ -982,7 +1034,7 @@ public class UI extends JFrame {
             notes.clear();
         }
 
-        @Deprecated
+        @Deprecated // UI should not directly find notes, rely on events or CogNote API
         Optional<Note> findNoteById(String noteId) {
             return Collections.list(notes.elements()).stream().filter(n -> n.id.equals(noteId)).findFirst();
         }
@@ -995,19 +1047,11 @@ public class UI extends JFrame {
             return Collections.list(notes.elements());
         }
 
+        // This method is now called by setCog to populate the UI list from CogNote's internal list
         void load(List<Note> notes) {
             this.notes.clear();
             notes.forEach(this::add);
-            if (findNoteById(GLOBAL_KB_NOTE_ID).isEmpty())
-                add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions."));
-            if (findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
-                add(cog != null ? Cog.createDefaultConfigNote() : new Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
-            if (!this.notes.isEmpty()) {
-                var firstSelectable = IntStream.range(0, this.notes.getSize())
-                        .filter(i -> !this.notes.getElementAt(i).id.equals(GLOBAL_KB_NOTE_ID) && !this.notes.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID))
-                        .findFirst().orElse(findNoteIndexById(GLOBAL_KB_NOTE_ID).orElse(0));
-                noteList.setSelectedIndex(firstSelectable);
-            }
+            // Selection and UI update handled by loadNotes in UI class
         }
 
         private void executeNoteTool(String toolName, Note note) {
@@ -1018,23 +1062,24 @@ public class UI extends JFrame {
 
             cog.tools.get(toolName).ifPresentOrElse(tool -> {
                 updateStatus(tool.description() + " for '" + note.title + "'...");
-                setControlsEnabled(false);
+                setControlsEnabled(false); // Disable controls while tool is running
 
                 Map<String, Object> params = Map.of("note_id", note.id);
 
                 tool.execute(params).whenCompleteAsync((result, ex) -> {
-                    setControlsEnabled(true);
-                    updateStatus("Running");
+                    setControlsEnabled(true); // Re-enable controls
+                    updateStatus("Running"); // Reset status or show tool result
 
                     if (ex != null) {
                         handleActionError(tool.name(), ex);
                     } else {
                         System.out.println("Tool '" + tool.name() + "' completed for note '" + note.id + "'. Result: " + result);
                         if (result instanceof String msg && !msg.isBlank()) {
-                            updateStatus(tool.name() + " Result: " + msg);
+                            // Optionally display tool result message in status bar or a dialog
+                            // updateStatus(tool.name() + " Result: " + msg);
                         }
                     }
-                }, SwingUtilities::invokeLater);
+                }, SwingUtilities::invokeLater); // Ensure UI updates happen on EDT
 
             }, () -> System.err.println("Tool '" + toolName + "' not found in registry."));
         }
@@ -1062,37 +1107,40 @@ public class UI extends JFrame {
 
         private void setupActionListeners() {
             edit.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id))
+                // Text changes are saved when focus is lost or window closes
+                if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id)) {
                     note.text = edit.getText();
+                    // Don't save immediately on every keystroke, save on focus lost or explicit save
+                }
             });
             edit.addFocusListener(new FocusAdapter() {
                 @Override
                 public void focusLost(FocusEvent e) {
-                    saveCurrentNote();
+                    saveCurrentNote(); // Save when editor loses focus
                 }
             });
             title.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
                 if (!isUpdatingTitleField && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)) {
                     note.title = title.getText();
-                    noteTitleUpdated(note);
+                    noteTitleUpdated(note); // Update UI list display and save
                 }
             });
         }
 
         void updateForSelection(Note note, boolean isGlobal, boolean isConfig) {
             var noteSelected = (note != null);
-            var isEditableNoteContent = noteSelected && !isGlobal;
-            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig;
-            isUpdatingTitleField = true;
+            var isEditableNoteContent = noteSelected && !isGlobal; // Global KB text is not editable
+            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig; // Global KB and Config titles not editable
+            isUpdatingTitleField = true; // Prevent document listener from firing during update
             title.setText(noteSelected ? note.title : "");
             title.setEditable(isEditableNoteTitle);
-            title.setEnabled(noteSelected && !isGlobal);
+            title.setEnabled(noteSelected && !isGlobal); // Title field enabled if any non-global note selected
             isUpdatingTitleField = false;
             edit.setText(noteSelected ? note.text : "");
             edit.setEditable(isEditableNoteContent);
-            edit.setEnabled(isEditableNoteContent);
-            edit.getHighlighter().removeAllHighlights();
-            edit.setCaretPosition(0);
+            edit.setEnabled(isEditableNoteContent); // Editor enabled if non-global note selected
+            edit.getHighlighter().removeAllHighlights(); // Clear highlights on selection change
+            edit.setCaretPosition(0); // Move caret to start
         }
 
         void setControlsEnabled(boolean enabled, boolean noteSelected, boolean isGlobal, boolean isConfig) {
@@ -1105,27 +1153,37 @@ public class UI extends JFrame {
         void clearEditor() {
             title.setText("");
             edit.setText("");
+            title.setEditable(false);
+            title.setEnabled(false);
+            edit.setEditable(false);
+            edit.setEnabled(false);
+            edit.getHighlighter().removeAllHighlights();
         }
 
         void highlightAffectedNoteText(Assertion assertion, AttachmentStatus status) {
             if (cog == null || note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id))
                 return;
+            // Determine which note this assertion is primarily associated with for UI display
             var displayNoteId = assertion.sourceNoteId();
-            if (displayNoteId == null && assertion.derivationDepth() > 0)
+            if (displayNoteId == null && assertion.derivationDepth() > 0 && cog != null)
                 displayNoteId = cog.context.findCommonSourceNodeId(assertion.justificationIds());
+            // If still no specific note and it's not in the global KB, use its KB ID (which might be a note ID)
             if (displayNoteId == null && !GLOBAL_KB_NOTE_ID.equals(assertion.kb())) displayNoteId = assertion.kb();
+
+            // Only highlight if the currently selected note is the one associated with the assertion
             if (note.id.equals(displayNoteId)) {
                 var searchTerm = extractHighlightTerm(assertion.kif());
                 if (searchTerm == null || searchTerm.isBlank()) return;
                 var highlighter = edit.getHighlighter();
                 Highlighter.HighlightPainter painter = switch (status) {
-                    case ACTIVE -> new DefaultHighlighter.DefaultHighlightPainter(new Color(200, 255, 200));
+                    case ACTIVE -> new DefaultHighlighter.DefaultHighlightPainter(new Color(200, 255, 200)); // Light Green
                     case RETRACTED, INACTIVE ->
-                            new DefaultHighlighter.DefaultHighlightPainter(new Color(255, 200, 200));
-                    case EVICTED -> new DefaultHighlighter.DefaultHighlightPainter(Color.LIGHT_GRAY);
+                            new DefaultHighlighter.DefaultHighlightPainter(new Color(255, 200, 200)); // Light Red
+                    case EVICTED -> new DefaultHighlighter.DefaultHighlightPainter(Color.LIGHT_GRAY); // Light Gray
                 };
                 try {
                     var text = edit.getText();
+                    // Find all occurrences of the search term (case-insensitive)
                     var pos = text.toLowerCase().indexOf(searchTerm.toLowerCase());
                     while (pos >= 0) {
                         highlighter.addHighlight(pos, pos + searchTerm.length(), painter);
@@ -1135,10 +1193,16 @@ public class UI extends JFrame {
             }
         }
 
+        // Extracts a suitable term from KIF for highlighting in text
         private String extractHighlightTerm(Term.Lst kif) {
-            return kif.terms.stream().filter(Term.Atom.class::isInstance).map(Term.Atom.class::cast).map(Term.Atom::value)
-                    .filter(s -> s.length() > 2 && !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
-                    .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT))
+            // Look for the first non-operator, non-ID atom with length > 2
+            return kif.terms.stream()
+                    .filter(Term.Atom.class::isInstance)
+                    .map(Term.Atom.class::cast)
+                    .map(Term.Atom::value)
+                    .filter(s -> s.length() > 2)
+                    .filter(s -> !Set.of(Logic.KIF_OP_AND, Logic.KIF_OP_OR, Logic.KIF_OP_NOT, Logic.KIF_OP_IMPLIES, Logic.KIF_OP_EQUIV, Logic.KIF_OP_EQUAL, Logic.KIF_OP_EXISTS, Logic.KIF_OP_FORALL, PRED_NOTE_SUMMARY, PRED_NOTE_CONCEPT, PRED_NOTE_QUESTION).contains(s))
+                    .filter(s -> !s.startsWith(Cog.ID_PREFIX_NOTE) && !s.startsWith(Cog.ID_PREFIX_LLM_RESULT) && !s.startsWith(Logic.ID_PREFIX_SKOLEM_CONST) && !s.startsWith(Logic.ID_PREFIX_SKOLEM_FUNC))
                     .findFirst().orElse(null);
         }
     }
@@ -1192,7 +1256,7 @@ public class UI extends JFrame {
             MouseListener itemDblClickListener = new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    if (e.getClickCount() == 2) showSupportAction();
+                    if (e.getClickCount() == 2) showSupportAction(); // Double-click shows support chain
                 }
             };
             attachmentList.addMouseListener(itemMouseListener);
@@ -1200,10 +1264,10 @@ public class UI extends JFrame {
         }
 
         void updateForSelection(Note note) {
-            filterField.setText("");
-            queryInputField.setText("");
-            refreshAttachmentDisplay();
-            updateAttachmentPanelTitle();
+            filterField.setText(""); // Clear filter on note change
+            queryInputField.setText(""); // Clear query field on note change
+            refreshAttachmentDisplay(); // Refresh list for the new note
+            updateAttachmentPanelTitle(); // Update title based on new note's attachments
         }
 
         void setControlsEnabled(boolean enabled, boolean noteSelected, boolean systemReady) {
@@ -1211,6 +1275,7 @@ public class UI extends JFrame {
             filterField.setEnabled(enabled && noteSelected);
             queryInputField.setEnabled(enabled && noteSelected && systemReady);
             queryButton.setEnabled(enabled && noteSelected && systemReady);
+            // Context menu items are handled by updateItemContextMenuState
         }
 
         void clearAttachments() {
@@ -1232,24 +1297,25 @@ public class UI extends JFrame {
             var filterText = filterField.getText().trim().toLowerCase();
             List<AttachmentViewModel> allRelevantItems = new ArrayList<>();
 
-            // Always include items from the Global KB model
-//            var globalKbModel = noteAttachmentModels.get(Cog.GLOBAL_KB_NOTE_ID);
-//            if (globalKbModel != null) {
-//                Collections.list(globalKbModel.elements()).forEach(allRelevantItems::add);
-//            }
+            // Get items associated with the currently selected note (sourced from it or committed to its KB)
+            var currentNoteModel = noteAttachmentModels.get(note.id);
+            if (currentNoteModel != null) {
+                 Collections.list(currentNoteModel.elements()).forEach(allRelevantItems::add);
+            }
 
-            // If a specific note is selected, also include items from that note's model
-            // (These include items sourced from the note or committed to its specific KB,
-            // as well as LLM-generated items like Concepts/Questions/Summaries)
+            // If the selected note is NOT the global KB, also include items from the Global KB model
             if (!GLOBAL_KB_NOTE_ID.equals(note.id)) {
-                var currentNoteModel = noteAttachmentModels.get(note.id);
-                if (currentNoteModel != null) {
-                    // Add items from the current note's model, avoiding duplicates
-                    Collections.list(currentNoteModel.elements()).stream()
+                var globalKbModel = noteAttachmentModels.get(Cog.GLOBAL_KB_NOTE_ID);
+                if (globalKbModel != null) {
+                    // Add items from the global KB model, avoiding duplicates if any somehow exist
+                    Collections.list(globalKbModel.elements()).stream()
                             .filter(vm -> allRelevantItems.stream().noneMatch(existing -> existing.id.equals(vm.id))) // Avoid duplicates
                             .forEach(allRelevantItems::add);
                 }
             }
+             // Note: Attachments associated with *other* notes are not shown here unless they are also in the global KB.
+             // This keeps the attachment list focused on the current note and global context.
+
 
             // Sort and filter the combined list
             allRelevantItems.sort(Comparator.naturalOrder());
@@ -1264,6 +1330,7 @@ public class UI extends JFrame {
 
 
         void updateAttachmentPanelTitle() {
+            // Count attachments only for the currently selected note's model (excluding global KB items shown when a note is selected)
             var count = (note != null) ? noteAttachmentModels.getOrDefault(note.id, new DefaultListModel<>()).getSize() : 0;
             ((TitledBorder) getBorder()).setTitle("Attachments" + (count > 0 ? " (" + count + ")" : ""));
             repaint();
@@ -1279,13 +1346,15 @@ public class UI extends JFrame {
             var isSummary = isActiveKif && vm.attachmentType == AttachmentType.SUMMARY;
             var isQuestion = isActiveKif && vm.attachmentType == AttachmentType.QUESTION;
             var isConcept = isActiveKif && vm.attachmentType == AttachmentType.CONCEPT;
+
+            // Enable/disable menu items based on selected attachment properties
             retractItem.setEnabled(isActiveKif);
-            showSupportItem.setEnabled(isKif);
+            showSupportItem.setEnabled(isKif && cog != null); // Need cog to show support
             queryItem.setEnabled(isKif);
-            cancelLlmItem.setEnabled(isCancelableLlm);
-            insertSummaryItem.setEnabled(isSummary);
-            answerQuestionItem.setEnabled(isQuestion);
-            findRelatedConceptsItem.setEnabled(isConcept);
+            cancelLlmItem.setEnabled(isCancelableLlm && cog != null); // Need cog to cancel LLM task
+            insertSummaryItem.setEnabled(isSummary && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only insert into editable notes
+            answerQuestionItem.setEnabled(isQuestion && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only answer in editable notes
+            findRelatedConceptsItem.setEnabled(isConcept && cog != null); // Need cog for concept search (NYI)
         }
 
         private Optional<AttachmentViewModel> getSelectedAttachmentViewModel() {
@@ -1299,13 +1368,15 @@ public class UI extends JFrame {
                     Map<String, Object> params = new HashMap<>();
                     params.put("target", id);
                     params.put("type", "BY_ID");
-                    if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id)) {
-                        params.put("target_note_id", note.id);
-                    }
+                    // Pass the KB ID the assertion belongs to, not necessarily the currently selected note's ID
+                    // The assertion's KB ID is stored in the ViewModel
+                    ofNullable(getSelectedAttachmentViewModel().get().kbId()).ifPresent(kbId -> params.put("target_kb_id", kbId));
+
 
                     tool.execute(params).whenCompleteAsync((result, ex) -> {
                         System.out.println("WS Retract tool result: " + result);
                         if (ex != null) System.err.println("WS Retract tool error: " + ex.getMessage());
+                        // UI update happens via RetractedEvent
                     }, SwingUtilities::invokeLater);
 
                 }, () -> System.err.println("Tool 'retract_assertion' not found."));
@@ -1322,17 +1393,20 @@ public class UI extends JFrame {
 
         private void cancelSelectedLlmTaskAction() {
             getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType.name().startsWith("LLM_")).ifPresent(vm -> {
+                if (cog == null) return;
                 ofNullable(cog.lm.activeLlmTasks.remove(vm.id)).ifPresent(future -> future.cancel(true));
+                // Update UI immediately
                 updateLlmItem(vm.id, Cog.TaskStatus.CANCELLED, "Task cancelled by user.");
             });
         }
 
         private void insertSummaryAction() {
             getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType == AttachmentType.SUMMARY && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm -> {
+                if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id)) return; // Should be disabled by menu state, but defensive
                 try {
                     var doc = editorPanel.edit.getDocument();
                     doc.insertString(editorPanel.edit.getCaretPosition(), extractContentFromKif(vm.content()) + "\n", null);
-                    saveCurrentNote();
+                    saveCurrentNote(); // Save the note after insertion
                 } catch (BadLocationException e) {
                     System.err.println("Error inserting summary: " + e.getMessage());
                 }
@@ -1341,13 +1415,14 @@ public class UI extends JFrame {
 
         private void answerQuestionAction() {
             getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType == AttachmentType.QUESTION && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm -> {
+                 if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id)) return; // Should be disabled by menu state, but defensive
                 var qText = extractContentFromKif(vm.content());
                 var answer = JOptionPane.showInputDialog(UI.this, "Q: " + qText + "\n\nEnter your answer:", "Answer Question", JOptionPane.PLAIN_MESSAGE);
                 if (answer != null && !answer.isBlank()) {
                     try {
                         var doc = editorPanel.edit.getDocument();
                         doc.insertString(doc.getLength(), String.format("\n\nQ: %s\nA: %s\n", qText, answer.trim()), null);
-                        saveCurrentNote();
+                        saveCurrentNote(); // Save the note after appending Q/A
                     } catch (BadLocationException e) {
                         System.err.println("Error appending Q/A: " + e.getMessage());
                     }
@@ -1363,11 +1438,14 @@ public class UI extends JFrame {
             cog.tools.get("run_query").ifPresentOrElse(tool -> {
                 Map<String, Object> params = new HashMap<>();
                 params.put("kif_pattern", queryText);
+                // If a specific note is selected, target its KB, otherwise use global
                 if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id)) {
                     params.put("target_kb_id", note.id);
+                } else {
+                    params.put("target_kb_id", GLOBAL_KB_NOTE_ID);
                 }
 
-                queryInputField.setText("");
+                queryInputField.setText(""); // Clear input field immediately
 
                 tool.execute(params).whenCompleteAsync((result, ex) -> {
                     if (ex != null) {
@@ -1375,9 +1453,11 @@ public class UI extends JFrame {
                         JOptionPane.showMessageDialog(UI.this, "Query Error: " + ex.getMessage(), "Tool Execution Error", JOptionPane.ERROR_MESSAGE);
                     } else {
                         System.out.println("Query tool result:\n" + result);
+                        // Display result in a dialog
                         JOptionPane.showMessageDialog(UI.this, result, "Query Result", JOptionPane.INFORMATION_MESSAGE);
+                        // UI update for query sent/result happens via events
                     }
-                }, SwingUtilities::invokeLater);
+                }, SwingUtilities::invokeLater); // Ensure dialog and UI updates happen on EDT
 
             }, () -> {
                 System.err.println("Tool 'run_query' not found.");
@@ -1417,16 +1497,16 @@ public class UI extends JFrame {
             addButton.setEnabled(enabled && systemExists);
             clearAllButton.setEnabled(enabled && systemExists);
             pauseResumeButton.setEnabled(enabled && systemRunning);
-            updatePauseResumeButton();
+            updatePauseResumeButton(); // Ensure button text is correct
         }
 
         private void addNoteAction() {
             ofNullable(JOptionPane.showInputDialog(UI.this, "Enter note title:", "New Note", JOptionPane.PLAIN_MESSAGE)).map(String::trim).filter(Predicate.not(String::isEmpty)).ifPresent(title -> {
                 var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, "");
-                addNoteToList(newNote);
-                noteListPanel.noteList.setSelectedValue(newNote, true);
-                if (cog != null)
-                    cog.events.emit(new Cog.AddedEvent(newNote));
+                if (cog != null) {
+                    cog.addNote(newNote); // Add note via CogNote
+                    // UI update happens via AddedEvent
+                }
             });
         }
 
@@ -1435,14 +1515,15 @@ public class UI extends JFrame {
                 r.setPaused(!r.isPaused());
                 updatePauseResumeButton();
                 updateStatus(r.isPaused() ? "Paused" : "Running");
-                setControlsEnabled(true);
+                setControlsEnabled(true); // Re-enable controls after pause/resume
             });
         }
 
         private void clearAllAction() {
             if (cog != null && JOptionPane.showConfirmDialog(UI.this, "Clear all notes (except config), assertions, and rules? This cannot be undone.", "Confirm Clear All", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                cog.clear();
+                cog.clear(); // Clear via CogNote
                 updateStatus("Clearing all...");
+                // UI clear happens via events (RemovedEvent for notes, RetractedEvent/EvictedEvent for assertions)
             }
         }
     }
@@ -1499,6 +1580,7 @@ public class UI extends JFrame {
                 var selectedRule = ruleJList.getSelectedValue();
                 if (selectedRule != null && JOptionPane.showConfirmDialog(UI.this, "Remove rule: " + selectedRule.id() + "?", "Confirm Rule Removal", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
                     cog.events.emit(new Cog.RetractionRequestEvent(selectedRule.form().toKif(), Logic.RetractionType.BY_RULE_FORM, "UI-RuleView", null));
+                    // Rule removal from context happens via RetractionPlugin, UI list update is manual here
                     ruleListModel.removeElement(selectedRule);
                 }
             });
