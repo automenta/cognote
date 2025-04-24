@@ -3,6 +3,8 @@ package dumb.cognote;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
+import dumb.cognote.tools.BaseTool; // Import BaseTool
+import dumb.cognote.tools.ToolRegistry; // Import ToolRegistry
 
 import javax.swing.*;
 import javax.swing.border.*;
@@ -266,42 +268,9 @@ class UI extends JFrame {
                 });
     }
 
-    private <T> void performNoteActionAsync(String actionName, NoteAsyncAction<T> asyncAction, BiConsumer<T, Cog.Note> successCallback, BiConsumer<Throwable, Cog.Note> failureCallback) {
-        ofNullable(currentNote).filter(_ -> cog != null).filter(n -> !Cog.GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id))
-                .ifPresent(n -> {
-                    updateStatus(actionName + " Note: " + n.title);
-                    setControlsEnabled(false);
-                    saveCurrentNote();
-                    var taskId = addLlmUiPlaceholder(n.id, actionName);
-                    try {
-                        var future = asyncAction.execute(taskId, n);
-                        cog.lm.activeLlmTasks.put(taskId, future);
-                        future.whenCompleteAsync((result, ex) -> {
-                            cog.lm.activeLlmTasks.remove(taskId);
-                            if (ex != null) failureCallback.accept(ex, n);
-                            else successCallback.accept(result, n);
-                            setControlsEnabled(true);
-                            updateStatus("Running");
-                        }, SwingUtilities::invokeLater);
-                    } catch (Exception e) {
-                        cog.lm.activeLlmTasks.remove(taskId);
-                        updateLlmItem(taskId, LlmStatus.ERROR, "Failed to start: " + e.getMessage());
-                        failureCallback.accept(e, n);
-                        setControlsEnabled(true);
-                        updateStatus("Running");
-                    }
-                });
-    }
+    // Removed performNoteActionAsync - replaced by executeNoteTool
 
-    String addLlmUiPlaceholder(String noteId, String actionName) {
-        var vm = UI.AttachmentViewModel.forLlm(
-                Cog.generateId(Cog.ID_PREFIX_LLM_ITEM + actionName.toLowerCase().replaceAll("\\s+", "")),
-                noteId, actionName + ": Starting...", UI.AttachmentType.LLM_INFO,
-                System.currentTimeMillis(), noteId, UI.LlmStatus.SENDING
-        );
-        if (cog != null) cog.events.emit(new Cog.LlmInfoEvent(vm));
-        return vm.id;
-    }
+    // Removed addLlmUiPlaceholder - moved into LLM Action Tools
 
     private void handleActionError(String actionName, Throwable ex) {
         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
@@ -466,10 +435,7 @@ class UI extends JFrame {
 
     enum AttachmentType {FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION, LLM_INFO, LLM_ERROR, QUERY_SENT, QUERY_RESULT, OTHER}
 
-    @FunctionalInterface
-    interface NoteAsyncAction<T> {
-        CompletableFuture<T> execute(String taskId, Cog.Note note);
-    }
+    // Removed NoteAsyncAction interface
 
     @FunctionalInterface
     interface SimpleDocumentListener extends DocumentListener {
@@ -851,12 +817,13 @@ class UI extends JFrame {
                     updateUIForSelection();
                 }
             });
-            analyzeItem.addActionListener(e -> analyzeNoteAction());
-            enhanceItem.addActionListener(e -> enhanceNoteAction());
-            summarizeItem.addActionListener(e -> summarizeNoteAction());
-            keyConceptsItem.addActionListener(e -> keyConceptsAction());
-            generateQuestionsItem.addActionListener(e -> generateQuestionsAction());
-            removeItem.addActionListener(e -> removeNoteAction());
+            // Update action listeners to call tools via the registry
+            analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", currentNote)); // Use tool name
+            enhanceItem.addActionListener(e -> executeNoteTool("enhance_note", currentNote)); // Use tool name
+            summarizeItem.addActionListener(e -> executeNoteTool("summarize_note", currentNote)); // Use tool name
+            keyConceptsItem.addActionListener(e -> executeNoteTool("identify_concepts", currentNote)); // Use tool name
+            generateQuestionsItem.addActionListener(e -> executeNoteTool("generate_questions", currentNote)); // Use tool name
+            removeItem.addActionListener(e -> removeNoteAction()); // This uses RetractionRequestEvent, keep for now or refactor to tool
             noteList.addMouseListener(createContextMenuMouseListener(noteList, noteContextMenu, this::updateNoteContextMenuState));
         }
 
@@ -877,6 +844,8 @@ class UI extends JFrame {
         }
 
         private void removeNoteAction() {
+             // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
+             // For now, keep as is to minimize changes outside the tool system core.
             performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
         }
 
@@ -949,145 +918,44 @@ class UI extends JFrame {
             }
         }
 
-        private void analyzeNoteAction() {
-            performNoteActionAsync("Analyzing", (taskId, note) -> {
-                clearNoteAttachmentList(note.id);
-                // Call the updated llmAsync which returns CompletableFuture<ChatResponse>
-                return cog.lm.text2kifAsync(taskId, note.text, note.id);
-            }, (chatResponse, note) -> {
-                // Success handler now receives ChatResponse
-                // Extract the final content from the response
-                var finalContent = chatResponse.text();
-                if (finalContent != null && !finalContent.isBlank()) {
-                    // Parse the KIF and emit as external input
-                    try {
-                        Logic.KifParser.parseKif(finalContent).forEach(term -> {
-                            if (term instanceof Logic.KifList list) {
-                                // Emit as external input, targeting the note's KB
-                                cog.events.emit(new Cog.ExternalInputEvent(list, "llm:" + note.id, note.id));
-                            } else {
-                                System.err.println("LLM KIF output contained non-list term: " + term.toKif());
-                            }
-                        });
-                    } catch (Logic.KifParser.ParseException e) {
-                        System.err.println("LLM KIF output parse error for note " + note.id + ": " + e.getMessage());
-                        // Optionally add an error attachment
-                        var errorVm = UI.AttachmentViewModel.forLlm(
-                                Cog.generateId(Cog.ID_PREFIX_LLM_ITEM + "kif_parse_error"),
-                                note.id, "KIF Parse Error: " + e.getMessage() + "\nOutput:\n" + finalContent,
-                                UI.AttachmentType.LLM_ERROR, System.currentTimeMillis(), note.id, UI.LlmStatus.ERROR
-                        );
-                        cog.events.emit(new Cog.LlmInfoEvent(errorVm));
-                    }
-                } else {
-                    System.out.println("LLM KIF generation for note " + note.id + " returned empty content.");
-                }
-            }, UI::handleLlmFailure); // Failure handler remains the same
-        }
+        // New helper method to execute a tool on the current note
+        private void executeNoteTool(String toolName, Cog.Note note) {
+            if (cog == null || note == null || Cog.GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id)) {
+                System.err.println("Cannot execute tool '" + toolName + "': System not ready or invalid note selected.");
+                return;
+            }
 
-        private void enhanceNoteAction() {
-            performNoteActionAsync("Enhancing", cog.lm::enhanceNoteWithLlmAsync, (chatResponse, n) -> {
-                // Success handler receives ChatResponse
-                var enhancedText = chatResponse.text();
-                if (enhancedText != null && !enhancedText.isBlank()) {
-                    // Update the note text in the UI and save
-                    n.text = enhancedText;
-                    editorPanel.noteEditor.setText(enhancedText);
-                    cog.saveNotesToFile();
-                    System.out.println("Note " + n.id + " enhanced successfully.");
-                } else {
-                    System.out.println("LLM enhancement for note " + n.id + " returned empty content.");
-                }
-            }, UI::handleLlmFailure);
-        }
+            cog.toolRegistry().get(toolName).ifPresentOrElse(tool -> {
+                updateStatus(tool.description() + " for '" + note.title + "'...");
+                setControlsEnabled(false);
 
-        private void summarizeNoteAction() {
-            performNoteActionAsync("Summarizing", cog.lm::summarizeNoteWithLlmAsync, (chatResponse, n) -> {
-                // Success handler receives ChatResponse
-                var summary = chatResponse.text();
-                if (summary != null && !summary.isBlank()) {
-                    // Add summary as a KIF assertion to the note's KB
-                    var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_SUMMARY, n.id, summary.replace("\"", "\\\""));
-                    try {
-                        var terms = Logic.KifParser.parseKif(kif);
-                        if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
-                            // Emit as external input, targeting the note's KB
-                            cog.events.emit(new Cog.ExternalInputEvent(list, "llm-summary:" + n.id, n.id));
-                        } else {
-                            System.err.println("Generated summary KIF was not a single list: " + kif);
+                // Parameters for note-based tools typically include the note ID
+                Map<String, Object> params = Map.of("note_id", note.id);
+
+                tool.execute(params).whenCompleteAsync((result, ex) -> {
+                    setControlsEnabled(true);
+                    updateStatus("Running"); // Or update based on result/ex
+
+                    if (ex != null) {
+                        handleActionError(tool.name(), ex);
+                    } else {
+                        System.out.println("Tool '" + tool.name() + "' completed for note '" + note.id + "'. Result: " + result);
+                        // Optional: Show result in UI if the tool returns a message
+                        if (result instanceof String msg && !msg.isBlank()) {
+                             // JOptionPane.showMessageDialog(UI.this, msg, tool.name() + " Result", JOptionPane.INFORMATION_MESSAGE);
+                             // Or log to status bar briefly
+                             updateStatus(tool.name() + " Result: " + msg);
                         }
-                    } catch (Logic.KifParser.ParseException e) {
-                        System.err.println("Error parsing generated summary KIF: " + e.getMessage() + " | KIF: " + kif);
                     }
-                } else {
-                    System.out.println("LLM summarization for note " + n.id + " returned empty content.");
-                }
-            }, UI::handleLlmFailure);
+                }, SwingUtilities::invokeLater); // Handle completion on EDT
+
+            }, () -> System.err.println("Tool '" + toolName + "' not found in registry."));
         }
 
-        private void keyConceptsAction() {
-            performNoteActionAsync("Identifying Concepts", cog.lm::keyConceptsWithLlmAsync, (chatResponse, n) -> {
-                // Success handler receives ChatResponse
-                var conceptsText = chatResponse.text();
-                if (conceptsText != null && !conceptsText.isBlank()) {
-                    // Add each concept as a KIF assertion to the note's KB
-                    conceptsText.lines()
-                            .map(String::trim)
-                            .filter(Predicate.not(String::isEmpty))
-                            .forEach(concept -> {
-                                var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_CONCEPT, n.id, concept.replace("\"", "\\\""));
-                                try {
-                                    var terms = Logic.KifParser.parseKif(kif);
-                                    if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
-                                        // Emit as external input, targeting the note's KB
-                                        cog.events.emit(new Cog.ExternalInputEvent(list, "llm-concept:" + n.id, n.id));
-                                    } else {
-                                        System.err.println("Generated concept KIF was not a single list: " + kif);
-                                    }
-                                } catch (Logic.KifParser.ParseException e) {
-                                    System.err.println("Error parsing generated concept KIF: " + e.getMessage() + " | KIF: " + kif);
-                                }
-                            });
-                } else {
-                    System.out.println("LLM concept identification for note " + n.id + " returned empty content.");
-                }
-            }, UI::handleLlmFailure);
-        }
-
-        private void generateQuestionsAction() {
-            performNoteActionAsync("Generating Questions", cog.lm::generateQuestionsWithLlmAsync, (chatResponse, n) -> {
-                // Success handler receives ChatResponse
-                var questionsText = chatResponse.text();
-                if (questionsText != null && !questionsText.isBlank()) {
-                    // Add each question as a KIF assertion to the note's KB
-                    questionsText.lines()
-                            .map(String::trim)
-                            .filter(Predicate.not(String::isEmpty))
-                            .filter(q -> q.startsWith("- ")) // Filter for expected format
-                            .map(q -> q.substring(2).trim()) // Remove "- " prefix
-                            .filter(Predicate.not(String::isEmpty))
-                            .forEach(question -> {
-                                var kif = String.format("(%s \"%s\" \"%s\")", Logic.PRED_NOTE_QUESTION, n.id, question.replace("\"", "\\\""));
-                                try {
-                                    var terms = Logic.KifParser.parseKif(kif);
-                                    if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
-                                        // Emit as external input, targeting the note's KB
-                                        cog.events.emit(new Cog.ExternalInputEvent(list, "llm-question:" + n.id, n.id));
-                                    } else {
-                                        System.err.println("Generated question KIF was not a single list: " + kif);
-                                    }
-                                } catch (Logic.KifParser.ParseException e) {
-                                    System.err.println("Error parsing generated question KIF: " + e.getMessage() + " | KIF: " + kif);
-                                }
-                            });
-                } else {
-                    System.out.println("LLM question generation for note " + n.id + " returned empty content.");
-                }
-            }, UI::handleLlmFailure);
-        }
+        // Removed analyzeNoteAction, enhanceNoteAction, summarizeNoteAction, keyConceptsAction, generateQuestionsAction
     }
 
-    class EditorPanel extends JPanel {
+    private class EditorPanel extends JPanel {
         public final JTextArea noteEditor = new JTextArea();
         final JTextField noteTitleField = new JTextField();
         private boolean isUpdatingTitleField = false;
@@ -1224,15 +1092,16 @@ class UI extends JFrame {
 
         private void setupActionListeners() {
             filterField.getDocument().addDocumentListener((SimpleDocumentListener) e -> refreshAttachmentDisplay());
+            // Update action listeners to call tools via the registry
             queryButton.addActionListener(e -> askQueryAction());
             queryInputField.addActionListener(e -> askQueryAction());
             retractItem.addActionListener(e -> retractSelectedAttachmentAction());
-            showSupportItem.addActionListener(e -> showSupportAction());
-            queryItem.addActionListener(e -> querySelectedAttachmentAction());
-            cancelLlmItem.addActionListener(e -> cancelSelectedLlmTaskAction());
-            insertSummaryItem.addActionListener(e -> insertSummaryAction());
-            answerQuestionItem.addActionListener(e -> answerQuestionAction());
-            findRelatedConceptsItem.addActionListener(e -> findRelatedConceptsAction());
+            showSupportItem.addActionListener(e -> showSupportAction()); // This doesn't use a tool, keeps internal logic
+            queryItem.addActionListener(e -> querySelectedAttachmentAction()); // This just copies text, keeps internal logic
+            cancelLlmItem.addActionListener(e -> cancelSelectedLlmTaskAction()); // This interacts directly with LM tasks, keeps internal logic
+            insertSummaryItem.addActionListener(e -> insertSummaryAction()); // This interacts with editor, keeps internal logic
+            answerQuestionItem.addActionListener(e -> answerQuestionAction()); // This interacts with editor/dialog, keeps internal logic
+            findRelatedConceptsItem.addActionListener(e -> findRelatedConceptsAction()); // NYI placeholder, keeps internal logic
             MouseListener itemMouseListener = createContextMenuMouseListener(attachmentList, itemContextMenu, this::updateItemContextMenuState);
             MouseListener itemDblClickListener = new MouseAdapter() {
                 @Override
@@ -1306,7 +1175,30 @@ class UI extends JFrame {
         }
 
         private void retractSelectedAttachmentAction() {
-            getSelectedAttachmentViewModel().filter(AttachmentViewModel::isKifBased).filter(vm -> vm.status == AttachmentStatus.ACTIVE).map(AttachmentViewModel::id).ifPresent(id -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(id, Logic.RetractionType.BY_ID, "UI-Retract", currentNote != null ? currentNote.id : null))));
+            getSelectedAttachmentViewModel().filter(AttachmentViewModel::isKifBased).filter(vm -> vm.status == AttachmentStatus.ACTIVE).map(AttachmentViewModel::id).ifPresent(id -> {
+                if (cog == null) return;
+                cog.toolRegistry().get("retract_assertion").ifPresentOrElse(tool -> {
+                    // Parameters for retract_assertion tool
+                    Map<String, Object> params = new HashMap<>();
+                    params.put("target", id);
+                    params.put("type", "BY_ID");
+                    // Optional: Pass target_note_id if retraction is context-specific
+                    if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
+                         params.put("target_note_id", currentNote.id);
+                    }
+
+                    tool.execute(params).whenCompleteAsync((result, ex) -> {
+                        if (ex != null) {
+                            System.err.println("Error executing retract_assertion tool: " + ex.getMessage());
+                            // Optionally update status bar or show dialog
+                        } else {
+                            System.out.println("Retract tool result: " + result);
+                            // Status update will happen via AssertionRetractedEvent
+                        }
+                    }, SwingUtilities::invokeLater);
+
+                }, () -> System.err.println("Tool 'retract_assertion' not found."));
+            });
         }
 
         private void showSupportAction() {
@@ -1352,27 +1244,38 @@ class UI extends JFrame {
             });
         }
 
-        private void findRelatedConceptsAction() {
-            getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType == AttachmentType.CONCEPT && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm -> JOptionPane.showMessageDialog(UI.this, "Find related notes for concept '" + extractContentFromKif(vm.content()) + "' NYI.", "Find Related Notes", JOptionPane.INFORMATION_MESSAGE));
-        }
-
         private void askQueryAction() {
             if (cog == null) return;
             var queryText = queryInputField.getText().trim();
             if (queryText.isBlank()) return;
-            try {
-                var terms = Logic.KifParser.parseKif(queryText);
-                if (terms.size() != 1 || !(terms.getFirst() instanceof Logic.KifList queryPattern)) {
-                    JOptionPane.showMessageDialog(UI.this, "Invalid query: Must be a single KIF list.", "Query Error", JOptionPane.ERROR_MESSAGE);
-                    return;
+
+            cog.toolRegistry().get("run_query").ifPresentOrElse(tool -> {
+                // Parameters for run_query tool
+                Map<String, Object> params = new HashMap<>();
+                params.put("kif_pattern", queryText);
+                // Optional: Pass target_kb_id if query is context-specific
+                if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
+                     params.put("target_kb_id", currentNote.id);
                 }
-                var queryId = Cog.generateId(Cog.ID_PREFIX_QUERY);
-                var targetKbId = (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) ? currentNote.id : null;
-                cog.events.emit(new Cog.QueryRequestEvent(new Cog.Query(queryId, Cog.QueryType.ASK_BINDINGS, queryPattern, targetKbId, Map.of())));
-                queryInputField.setText("");
-            } catch (KifParser.ParseException ex) {
-                JOptionPane.showMessageDialog(UI.this, "Query Parse Error: " + ex.getMessage(), "Query Error", JOptionPane.ERROR_MESSAGE);
-            }
+                // Default query_type is ASK_BINDINGS, no need to add if that's the intent
+
+                queryInputField.setText(""); // Clear input field immediately
+
+                tool.execute(params).whenCompleteAsync((result, ex) -> {
+                    if (ex != null) {
+                        System.err.println("Error executing run_query tool: " + ex.getMessage());
+                        JOptionPane.showMessageDialog(UI.this, "Query Error: " + ex.getMessage(), "Tool Execution Error", JOptionPane.ERROR_MESSAGE);
+                    } else {
+                        System.out.println("Query tool result:\n" + result);
+                        // Display the result in a dialog or status bar
+                        JOptionPane.showMessageDialog(UI.this, result, "Query Result", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }, SwingUtilities::invokeLater); // Handle completion on EDT
+
+            }, () -> {
+                System.err.println("Tool 'run_query' not found.");
+                JOptionPane.showMessageDialog(UI.this, "Query tool not available.", "Tool Error", JOptionPane.ERROR_MESSAGE);
+            });
         }
     }
 
@@ -1393,9 +1296,9 @@ class UI extends JFrame {
         }
 
         private void setupActionListeners() {
-            addButton.addActionListener(e -> addNoteAction());
-            pauseResumeButton.addActionListener(e -> togglePauseAction());
-            clearAllButton.addActionListener(e -> clearAllAction());
+            addButton.addActionListener(e -> addNoteAction()); // Doesn't use a tool, keeps internal logic
+            pauseResumeButton.addActionListener(e -> togglePauseAction()); // Doesn't use a tool, keeps internal logic
+            clearAllButton.addActionListener(e -> clearAllAction()); // Doesn't use a tool, keeps internal logic
         }
 
         void updatePauseResumeButton() {
@@ -1446,12 +1349,16 @@ class UI extends JFrame {
             var vm = new JMenu("View");
             var qm = new JMenu("Query");
             var hm = new JMenu("Help");
-            settingsItem.addActionListener(e -> showSettingsDialog());
+
+            settingsItem.addActionListener(e -> showSettingsDialog()); // Doesn't use a tool, keeps internal logic
             fm.add(settingsItem);
-            viewRulesItem.addActionListener(e -> viewRulesAction());
+
+            viewRulesItem.addActionListener(e -> viewRulesAction()); // Doesn't use a tool, keeps internal logic
             vm.add(viewRulesItem);
-            askQueryItem.addActionListener(e -> attachmentPanel.queryInputField.requestFocusInWindow());
+
+            askQueryItem.addActionListener(e -> attachmentPanel.queryInputField.requestFocusInWindow()); // Doesn't use a tool, keeps internal logic
             qm.add(askQueryItem);
+
             Stream.of(fm, em, vm, qm, hm).forEach(menuBar::add);
         }
 
@@ -1483,6 +1390,8 @@ class UI extends JFrame {
             removeButton.addActionListener(ae -> {
                 var selectedRule = ruleJList.getSelectedValue();
                 if (selectedRule != null && JOptionPane.showConfirmDialog(UI.this, "Remove rule: " + selectedRule.id() + "?", "Confirm Rule Removal", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
+                    // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
+                    // For now, keep as is.
                     cog.events.emit(new Cog.RetractionRequestEvent(selectedRule.form().toKif(), Logic.RetractionType.BY_RULE_FORM, "UI-RuleView", null));
                     ruleListModel.removeElement(selectedRule);
                 }

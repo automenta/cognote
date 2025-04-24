@@ -1,6 +1,8 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
+import dumb.cognote.tools.ToolRegistry; // Import ToolRegistry
+
 
 import java.util.*;
 import java.util.concurrent.CancellationException;
@@ -64,6 +66,10 @@ public class Reason {
 
         Op.Operators operators() {
             return cognition.operators();
+        }
+
+        public ToolRegistry toolRegistry() { // Add getter for ToolRegistry
+            return cognition.cog().toolRegistry();
         }
     }
 

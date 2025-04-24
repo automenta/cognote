@@ -7,6 +7,7 @@ import org.jetbrains.annotations.Nullable;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import dumb.cognote.tools.*; // Import all tool classes
 
 import javax.swing.*;
 import java.io.BufferedReader;
@@ -74,14 +75,16 @@ public class Cog {
     final Cognition context;
     final AtomicBoolean running = new AtomicBoolean(true);
     final AtomicBoolean paused = new AtomicBoolean(false);
-    final LM lm = new LM(this); // LM instance
-    // final HttpClient http; // Removed - LM now uses LangChain4j's internal client
+    final LM lm; // Initialize after toolRegistry
+    // final HttpClient http; // Removed
     final UI ui;
     final MyWebSocketServer websocket;
     private final Plugins plugins;
     private final Reason.ReasonerManager reasonerManager;
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Object pauseLock = new Object();
+    private final ToolRegistry toolRegistry; // Add ToolRegistry field
+
     volatile String systemStatus = "Initializing";
     volatile boolean broadcastInputAssertions;
     private volatile int globalKbCapacity;
@@ -90,11 +93,15 @@ public class Cog {
     public Cog(int port, UI ui) {
         this.ui = requireNonNull(ui, "SwingUI cannot be null");
         this.events = new Events(mainExecutor);
+
         // Load notes and config first to set initial LM properties
         loadNotesAndConfig();
-        // Now reconfigure LM based on loaded config
-        lm.reconfigure();
 
+        // Initialize ToolRegistry
+        this.toolRegistry = new ToolRegistry(); // Initialize ToolRegistry
+
+        // Initialize LM *after* ToolRegistry is available
+        this.lm = new LM(this); // LM constructor now takes Cog
 
         var tms = new TruthMaintenance.BasicTMS(events);
         var operatorRegistry = new Op.Operators();
@@ -230,13 +237,29 @@ public class Cog {
         plugins.loadPlugin(new IO.StatusUpdaterPlugin(statusEvent -> updateStatusLabel(statusEvent.statusMessage())));
         plugins.loadPlugin(new IO.WebSocketBroadcasterPlugin(this));
         plugins.loadPlugin(new IO.UiUpdatePlugin(ui));
-        plugins.loadPlugin(new TaskDecompositionPlugin()); // Add the task decomposition plugin
-        plugins.loadPlugin(new TmsEventHandlerPlugin()); // Add the TMS event handler plugin
+        plugins.loadPlugin(new TaskDecompositionPlugin());
+        plugins.loadPlugin(new TmsEventHandlerPlugin());
 
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
+
+        // Register Tools
+        toolRegistry.register(new AddKifAssertionTool(this));
+        toolRegistry.register(new GetNoteTextTool(this));
+        toolRegistry.register(new FindAssertionsTool(this));
+        toolRegistry.register(new RetractAssertionTool(this));
+        toolRegistry.register(new RunQueryTool(this));
+        toolRegistry.register(new LogMessageTool()); // LogMessageTool doesn't need Cog directly
+
+        // Register LLM Action Tools
+        toolRegistry.register(new SummarizeNoteTool(this));
+        toolRegistry.register(new IdentifyConceptsTool(this));
+        toolRegistry.register(new GenerateQuestionsTool(this));
+        toolRegistry.register(new TextToKifTool(this));
+        toolRegistry.register(new DecomposeGoalTool(this));
+
 
         var or = context.operators();
         BiFunction<KifList, DoubleBinaryOperator, Optional<KifTerm>> numeric = (args, op) -> {
@@ -575,6 +598,10 @@ public class Cog {
             // For this prototype, we'll remove directly from the list.
             queryResultListeners.remove(listener);
         }
+    }
+
+    public ToolRegistry toolRegistry() { // Add getter for ToolRegistry
+        return toolRegistry;
     }
 
 
@@ -1147,28 +1174,63 @@ public class Cog {
             var command = parts[0].toLowerCase();
             var argument = (parts.length > 1) ? parts[1] : "";
 
+            // Get tools from the registry via the Cog instance
+            var retractToolOpt = server.toolRegistry().get("retract_assertion");
+            var queryToolOpt = server.toolRegistry().get("run_query");
+            var addKifToolOpt = server.toolRegistry().get("add_kif_assertion"); // Also allow adding KIF via tool
+
             switch (command) {
                 case "retract" -> {
-                    if (!argument.isEmpty())
-                        events.emit(new RetractionRequestEvent(argument, RetractionType.BY_ID, sourceId, null));
-                    else System.err.println("WS Retract Error from " + sourceId + ": Missing assertion ID.");
+                    if (!argument.isEmpty()) {
+                        retractToolOpt.ifPresentOrElse(tool -> {
+                            Map<String, Object> params = new HashMap<>();
+                            params.put("target", argument);
+                            params.put("type", "BY_ID");
+                            // Optional: Add target_note_id if the WS client provides context?
+                            // For now, assume global or infer from argument format if needed.
+                            // params.put("target_note_id", ...);
+                            tool.execute(params).whenComplete((result, ex) -> {
+                                // Log result or send back to client if appropriate
+                                System.out.println("WS Retract tool result: " + result);
+                                if (ex != null) System.err.println("WS Retract tool error: " + ex.getMessage());
+                                conn.send("result: " + (ex != null ? "Error: " + ex.getMessage() : result.toString()));
+                            });
+                        }, () -> conn.send("error: Retract tool not available."));
+                    } else conn.send("error: Missing assertion ID for retract.");
                 }
                 case "query" -> {
-                    try {
-                        var terms = KifParser.parseKif(argument);
-                        if (terms.size() != 1 || !(terms.getFirst() instanceof KifList queryPattern)) {
-                            conn.send("error Query must be a single KIF list.");
-                            return;
-                        }
-                        var queryId = generateId(ID_PREFIX_QUERY);
-                        var query = new Query(queryId, QueryType.ASK_BINDINGS, queryPattern, null, Map.of()); // Default to ASK_BINDINGS, global KB
-                        events.emit(new QueryRequestEvent(query));
-                    } catch (KifParser.ParseException e) {
-                        conn.send("error Parse error: " + e.getMessage());
-                    }
+                    if (!argument.isEmpty()) {
+                         queryToolOpt.ifPresentOrElse(tool -> {
+                            Map<String, Object> params = new HashMap<>();
+                            params.put("kif_pattern", argument);
+                            // Optional: Add target_kb_id if the WS client provides context?
+                            // params.put("target_kb_id", ...);
+                            tool.execute(params).whenComplete((result, ex) -> {
+                                System.out.println("WS Query tool result:\n" + result);
+                                if (ex != null) System.err.println("WS Query tool error: " + ex.getMessage());
+                                conn.send("result: " + (ex != null ? "Error: " + ex.getMessage() : result.toString()));
+                            });
+                         }, () -> conn.send("error: Query tool not available."));
+                    } else conn.send("error: Missing KIF pattern for query.");
                 }
-                default -> { // Assume it's a KIF assertion/rule
+                case "add" -> { // New command to explicitly add KIF via tool
+                    if (!argument.isEmpty()) {
+                        addKifToolOpt.ifPresentOrElse(tool -> {
+                            Map<String, Object> params = new HashMap<>();
+                            params.put("kif_assertion", argument);
+                            // Optional: Add target_kb_id if the WS client provides context?
+                            // params.put("target_kb_id", ...);
+                            tool.execute(params).whenComplete((result, ex) -> {
+                                System.out.println("WS Add tool result: " + result);
+                                if (ex != null) System.err.println("WS Add tool error: " + ex.getMessage());
+                                conn.send("result: " + (ex != null ? "Error: " + ex.getMessage() : result.toString()));
+                            });
+                        }, () -> conn.send("error: Add KIF tool not available."));
+                    } else conn.send("error: Missing KIF assertion for add.");
+                }
+                default -> { // Assume it's a KIF assertion/rule to be added via the standard input event mechanism
                     try {
+                        // Keep the existing mechanism for raw KIF input for backward compatibility
                         KifParser.parseKif(trimmed).forEach(term -> events.emit(new ExternalInputEvent(term, sourceId, null))); // Default to global KB
                     } catch (ClassCastException e) {
                         System.err.printf("WS Message Parse Error from %s: %s | Original: %s...%n", sourceId, e.getMessage(), trimmed.substring(0, Math.min(trimmed.length(), MAX_WS_PARSE_PREVIEW)));

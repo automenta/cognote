@@ -4,10 +4,13 @@ import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
+import dumb.cognote.tools.BaseTool; // Import BaseTool
 
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
+import java.util.HashMap; // Import HashMap
+
 
 /**
  * miscellanous functions that don't belong in the Core
@@ -57,6 +60,7 @@ public class IO {
         @Override
         public void start(Cog.Events ev, Logic.Cognition ctx) {
             super.start(ev, ctx);
+            // Keep existing listeners for broadcasting internal events
             ev.on(Cog.AssertionAddedEvent.class, e -> broadcastMessage("assert-added", e.assertion(), e.kbId()));
             ev.on(Cog.AssertionRetractedEvent.class, e -> broadcastMessage("retract", e.assertion(), e.kbId()));
             ev.on(Cog.AssertionEvictedEvent.class, e -> broadcastMessage("evict", e.assertion(), e.kbId()));
