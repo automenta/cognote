@@ -71,7 +71,7 @@ public class LM {
             this.llmService = AiServices.builder(LlmService.class)
                     .chatLanguageModel(this.chatModel)
                     .tools(this.tools) // Provide the instance containing @Tool methods
-                    // .chatMemory() // Optional: Add memory for multi-turn conversations managed by AiServices
+                    //.chatMemory() // Optional: Add memory for multi-turn conversations managed by AiServices
                     .build();
             System.out.println("LM AiService configured.");
 
@@ -209,23 +209,24 @@ public class LM {
     public CompletableFuture<AiMessage> text2kifAsync(String taskId, String noteText, String noteId) {
         var promptText = """
                 Convert the following note into a set of concise SUMO KIF assertions (standard Lisp-like syntax, e.g., (instance MyCat Cat)).
-                For each assertion you generate, use the `add_kif_assertion` tool to add it to the knowledge base associated with the note ID "%s".
-                Do NOT output the KIF assertions directly in your response. Only use the tool.
-                Use standard SUMO predicates like 'instance', 'subclass', 'domain', 'range', 'attribute', 'partOf', etc.
-                Use '=' for equality between terms. Use unique names for new entities derived from the note (start with uppercase, use CamelCase).
-                Use '(not ...)' for negation where appropriate, e.g., (not (instance Pluto Planet)).
-                Use '(forall (?X) (=> (instance ?X Dog) (attribute ?X Canine)))' for universal statements.
-                Use '(exists (?Y) (and (instance ?Y Cat) (attribute ?Y BlackColor)))' for existential statements.
-                Avoid trivial assertions like (instance X X) or (= X X) or (not (= X X)).
+                
+                 * standard SUMO predicates like 'instance', 'subclass', 'domain', 'range', 'attribute', 'partOf', etc.
+                 * '=' for equality between terms. Use unique names for new entities derived from the note (start with uppercase, use CamelCase).
+                 * '(not ...)' for negation where appropriate, e.g., (not (instance Pluto Planet)).
+                 * '(forall (?X) (=> (instance ?X Dog) (attribute ?X Canine)))' for universal statements.
+                 * '(exists (?Y) (and (instance ?Y Cat) (attribute ?Y BlackColor)))' for existential statements.
+                 * Avoid trivial assertions like (instance X X) or (= X X) or (not (= X X)).
                 
                 Note:
+                ```
                 "%s"
+                ```
                 
-                Generate KIF Assertions and add them using the tool:""".formatted(noteId, noteText);
-        var history = new ArrayList<ChatMessage>();
-        history.add(UserMessage.from(promptText));
-        // AiServices will handle calling the 'add_kif_assertion' tool as needed.
-        var future = llmAsync(taskId, history, "KIF Generation", noteId);
+                For each assertion you generate, use the `add_kif_assertion` tool with the note ID "%s".
+                Do NOT output the KIF assertions directly in your response. Only use the tool.
+                Generate the KIF Assertions by adding them using the tool:""".formatted(noteId, noteText);
+        // AiServices calls the 'add_kif_assertion' tool as needed.
+        var future = llmAsync(taskId, List.of(UserMessage.from(promptText)), "KIF Generation", noteId);
         activeLlmTasks.put(taskId, future);
         return future;
     }

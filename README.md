@@ -5,24 +5,28 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 ## Features
 
 ### Objects
+
 - **Shared Objects:** Create, prioritize, and manage data collaboratively as `Note`s.
 - **Thought Evolution:** `Note`s describe thoughts and ideas.
 - **Privacy by Default:** All `Note`s are private unless explicitly shared.
 
 ### Search and Match
-- **Persistent Queries:** `Note`s can act as ongoing search interests. 
-- **Semantic Matching:** `Note`s capture meaning and intent. 
-- **Notifications:** The app receives matches to shared `Note`s as replies. 
+
+- **Persistent Queries:** `Note`s can act as ongoing search interests.
+- **Semantic Matching:** `Note`s capture meaning and intent.
+- **Notifications:** The app receives matches to shared `Note`s as replies.
 
 ### P2P Network
+
 - **Decentralized**
 - **Secure**
-  - End-to-end encryption protects private data. 
-  - Crypto-signing ensures `Note` integrity and provenance.
+    - End-to-end encryption protects private data.
+    - Crypto-signing ensures `Note` integrity and provenance.
 
 ## Code Guidelines
+
 - Complete (fully functional)
-  - Ensure all functionality remains present, in some way.
+    - Ensure all functionality remains present, in some way.
 - Professional-grade, not explanatory/educational
 - Correct (bug-free and logically sound)
 - Compact (minimal codebase size)
