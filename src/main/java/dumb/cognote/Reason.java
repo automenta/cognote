@@ -124,13 +124,14 @@ public class Reason {
         }
 
         private void dispatchRuleEvent(Cog.CogEvent event) {
-            switch (event) {
-                case Cog.RuleAddedEvent(var rule) -> plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
-                case Cog.RuleRemovedEvent(var rule) ->
-                        plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
-                default -> {
-                }
+            if (event instanceof Cog.RuleAddedEvent) {
+                Cog.RuleAddedEvent rae = (Cog.RuleAddedEvent) event;
+                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rae.rule())));
+            } else if (event instanceof Cog.RuleRemovedEvent) {
+                Cog.RuleRemovedEvent rre = (Cog.RuleRemovedEvent) event;
+                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rre.rule())));
             }
+            // No default needed as there are no other RuleEvent types currently
         }
 
         private void handleQueryRequest(Cog.QueryRequestEvent event) {

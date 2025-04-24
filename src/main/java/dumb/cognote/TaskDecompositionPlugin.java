@@ -23,9 +23,15 @@ public class TaskDecompositionPlugin extends Cog.BasePlugin {
     }
 
     private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Logic.KifVar, Logic.KifTerm> bindings) {
-        if (!(event instanceof Cog.ExternalInputEvent(KifTerm term, String sourceId, String noteId))) {
-            return; // Only process goals from external input for now
+        // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
+        if (!(event instanceof Cog.ExternalInputEvent)) {
+            return; // Should not happen with correct registration, but defensive
         }
+        Cog.ExternalInputEvent externalInputEvent = (Cog.ExternalInputEvent) event;
+        KifTerm term = externalInputEvent.term();
+        String sourceId = externalInputEvent.sourceId();
+        String noteId = externalInputEvent.targetNoteId(); // This is the targetNoteId from the input event
+
 
         if (!(term instanceof KifList goalList) || goalList.size() < 2 || !goalList.op().filter("goal"::equals).isPresent()) {
             return; // Should not happen due to pattern matching, but defensive check
