@@ -352,193 +352,6 @@ public class Logic {
         }
     }
 
-    static class Knowledge {
-        final String id;
-        final int capacity;
-        final Events events;
-        final Truths truth;
-        final Path.PathIndex paths;
-        final ConcurrentMap<Term.Atom, Set<String>> universalIndex = new ConcurrentHashMap<>();
-        final PriorityBlockingQueue<String> groundEvictionQueue;
-        private final ReadWriteLock lock = new ReentrantReadWriteLock();
-
-        Knowledge(String kbId, int capacity, Events events, Truths truth) {
-            this.id = requireNonNull(kbId);
-            this.capacity = capacity;
-            this.events = requireNonNull(events);
-            this.truth = requireNonNull(truth);
-            this.paths = new Path.PathIndex(truth);
-            this.groundEvictionQueue = new PriorityBlockingQueue<>(1024,
-                    Comparator.<String, Double>
-                                    comparing(id -> truth.get(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
-                            .thenComparing(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
-        }
-
-        int getAssertionCount() {
-            return (int) truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).count();
-        }
-
-        List<String> getAllAssertionIds() {
-            return truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).map(Assertion::id).toList();
-        }
-
-        Optional<Assertion> assertion(String id) {
-            return truth.get(id).filter(a -> a.kb().equals(this.id));
-        }
-
-        List<Assertion> getAllAssertions() {
-            return truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).toList();
-        }
-
-        @Nullable Assertion commit(Assertion.PotentialAssertion pa, String source) {
-            var k = pa.kif();
-            if (k instanceof Term.Lst kl && isTrivial(kl)) return null;
-            lock.writeLock().lock();
-            try {
-                var dt = pa.derivedType();
-                var finalType = dt == GROUND && k.containsSkolemTerm() ? SKOLEMIZED : dt;
-
-                var existingMatch = findExactMatchInternal(k);
-                if (existingMatch.isPresent() && truth.isActive(existingMatch.get().id())) return null;
-                if (isSubsumedInternal(k, pa.isNegated())) return null;
-
-                enforceKbCapacityInternal(source);
-                if (getAssertionCount() >= capacity) {
-                    System.err.printf("Warning: KB '%s' full (%d/%d) after eviction attempt. Cannot add: %s%n", id, getAssertionCount(), capacity, k.toKif());
-                    return null;
-                }
-
-                var newId = id(ID_PREFIX_FACT + finalType.name().toLowerCase() + "_");
-                var newAssertion = new Assertion(newId, k, pa.pri(), System.currentTimeMillis(), pa.sourceNoteId(), pa.support(), finalType, pa.isEquality(), pa.isOrientedEquality(), pa.isNegated(), pa.quantifiedVars(), pa.derivationDepth(), true, id);
-
-                var ticket = truth.add(newAssertion, pa.support(), source);
-                if (ticket == null) return null;
-
-                var addedAssertion = truth.get(newId).orElse(null);
-                if (addedAssertion == null || !addedAssertion.isActive()) return null;
-
-                switch (finalType) {
-                    case GROUND, SKOLEMIZED -> {
-                        paths.add(addedAssertion);
-                        groundEvictionQueue.offer(newId);
-                    }
-                    case UNIVERSAL ->
-                            addedAssertion.getReferencedPredicates().forEach(pred -> universalIndex.computeIfAbsent(pred, _ -> ConcurrentHashMap.newKeySet()).add(newId));
-                }
-                checkResourceThresholds();
-                events.emit(new AssertedEvent(addedAssertion, id));
-                return addedAssertion;
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        void retract(String id, String source) {
-            lock.writeLock().lock();
-            try {
-                truth.remove(id, source);
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        void clear(String source) {
-            lock.writeLock().lock();
-            try {
-                new HashSet<>(getAllAssertionIds()).forEach(id -> truth.remove(id, source));
-                paths.clear();
-                universalIndex.clear();
-                groundEvictionQueue.clear();
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        Stream<Assertion> findUnifiableAssertions(Term queryTerm) {
-            return paths.findUnifiableAssertions(queryTerm);
-        }
-
-        Stream<Assertion> findInstancesOf(Term queryPattern) {
-            return paths.findInstancesOf(queryPattern);
-        }
-
-        List<Assertion> findRelevantUniversalAssertions(Term.Atom predicate) {
-            return universalIndex.getOrDefault(predicate, Set.of()).stream().map(truth::get).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.kb().equals(id)).toList();
-        }
-
-        private boolean isSubsumedInternal(Term term, boolean isNegated) {
-            return paths.findGeneralizationsOf(term)
-                    .filter(Logic::groundOrSkolemized)
-                    .anyMatch(candidate -> candidate.negated() == isNegated && Unifier.match(candidate.getEffectiveTerm(), term, Map.of()) != null);
-        }
-
-        private Optional<Assertion> findExactMatchInternal(Term.Lst kif) {
-            return paths.findInstancesOf(kif).filter(a -> kif.equals(a.kif())).findFirst();
-        }
-
-        private void enforceKbCapacityInternal(String source) {
-            while (getAssertionCount() >= capacity && !groundEvictionQueue.isEmpty()) {
-                ofNullable(groundEvictionQueue.poll())
-                        .flatMap(truth::get)
-                        .filter(a -> groundOrSkolemized(a) && a.kb().equals(id))
-                        .ifPresent(toEvict -> {
-                            truth.remove(toEvict.id(), source + "-evict");
-                            events.emit(new AssertionEvictedEvent(toEvict, id));
-                        });
-            }
-        }
-
-        private void checkResourceThresholds() {
-            var currentSize = getAssertionCount();
-            var warnT = capacity * KB_SIZE_THRESHOLD_WARN_PERCENT / 100;
-            var haltT = capacity * KB_SIZE_THRESHOLD_HALT_PERCENT / 100;
-            if (currentSize >= haltT)
-                System.err.printf("KB CRITICAL (KB: %s): Size %d/%d (%.1f%%)%n", id, currentSize, capacity, 100.0 * currentSize / capacity);
-            else if (currentSize >= warnT)
-                System.out.printf("KB WARNING (KB: %s): Size %d/%d (%.1f%%)%n", id, currentSize, capacity, 100.0 * currentSize / capacity);
-        }
-
-        void retractExternal(Assertion a) {
-            lock.writeLock().lock();
-            try {
-                switch (a.type()) {
-                    case GROUND, SKOLEMIZED -> retractStandard(a);
-                    case UNIVERSAL -> retractUniversal(a);
-                }
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-
-        private void retractStandard(Assertion a) {
-            paths.remove(a);
-            groundEvictionQueue.remove(a.id());
-        }
-
-        private void retractUniversal(Assertion a) {
-            a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfPresent(pred, (_, ids) -> {
-                ids.remove(a.id());
-                return ids.isEmpty() ? null : ids;
-            }));
-        }
-
-        void handleExternalStatusChange(Assertion a) {
-            lock.writeLock().lock();
-            try {
-                if (a.isActive()) {
-                    switch (a.type()) {
-                        case GROUND, SKOLEMIZED -> paths.add(a);
-                        case UNIVERSAL ->
-                                a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfAbsent(pred, _ -> ConcurrentHashMap.newKeySet()).add(a.id()));
-                    }
-                } else
-                    retractExternal(a);
-            } finally {
-                lock.writeLock().unlock();
-            }
-        }
-    }
-
     public static class Cognition {
         public final Truths truth;
         public final Op.Operators operators;
@@ -547,13 +360,16 @@ public class Logic {
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
+        private final Set<String> activeNoteIds = ConcurrentHashMap.newKeySet();
+
 
         Cognition(int globalKbCapacity, Events events, Truths truth, Op.Operators operators, Cog cog) {
             this.cog = cog;
             this.events = events;
-            this.truth = truth;
-            this.operators = operators;
+            this.truth = requireNonNull(truth);
+            this.operators = requireNonNull(operators);
             this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, events, truth);
+            activeNoteIds.add(GLOBAL_KB_NOTE_ID); // Global KB is always active
         }
 
         public static Term.Lst performSkolemization(Term.Lst body, Collection<Term.Var> existentialVars, Map<Term.Var, Term> contextBindings) {
@@ -642,6 +458,8 @@ public class Logic {
             noteKbs.values().forEach(kb -> kb.clear("clearAll"));
             noteKbs.clear();
             rules.clear();
+            activeNoteIds.clear();
+            activeNoteIds.add(GLOBAL_KB_NOTE_ID); // Global KB is always active
         }
 
         public Optional<Assertion> findAssertionByIdAcrossKbs(String assertionId) {
@@ -687,6 +505,18 @@ public class Logic {
         @Nullable
         public Assertion tryCommit(Assertion.PotentialAssertion pa, String source) {
             return kb(pa.sourceNoteId()).commit(pa, source);
+        }
+
+        public boolean isActiveNote(@Nullable String noteId) {
+            return noteId != null && activeNoteIds.contains(noteId);
+        }
+
+        public void addActiveNote(String noteId) {
+            activeNoteIds.add(noteId);
+        }
+
+        public void removeActiveNote(String noteId) {
+            activeNoteIds.remove(noteId);
         }
     }
 

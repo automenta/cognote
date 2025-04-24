@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import org.jetbrains.annotations.Nullable;
+
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -9,7 +11,7 @@ import java.util.stream.Collectors;
 import static java.util.Objects.requireNonNull;
 
 record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double pri,
-            List<Term> antecedents) {
+            List<Term> antecedents, @Nullable String sourceNoteId) {
     Rule {
         requireNonNull(id);
         requireNonNull(form);
@@ -18,7 +20,7 @@ record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double p
         antecedents = List.copyOf(requireNonNull(antecedents));
     }
 
-    static Rule parseRule(String id, Term.Lst ruleForm, double pri) throws IllegalArgumentException {
+    static Rule parseRule(String id, Term.Lst ruleForm, double pri, @Nullable String sourceNoteId) throws IllegalArgumentException {
         if (!(ruleForm.op().filter(op -> op.equals(Logic.KIF_OP_IMPLIES) || op.equals(Logic.KIF_OP_EQUIV)).isPresent() && ruleForm.size() == 3))
             throw new IllegalArgumentException("Rule form must be (=> ant con) or (<=> ant con): " + ruleForm.toKif());
 
@@ -33,7 +35,7 @@ record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double p
                     throw new IllegalArgumentException("Antecedent must be a KIF list, (not list), (and ...), or true: " + antTerm.toKif());
         };
         validateUnboundVariables(ruleForm, antTerm, conTerm);
-        return new Rule(id, ruleForm, antTerm, conTerm, pri, parsedAntecedents);
+        return new Rule(id, ruleForm, antTerm, conTerm, pri, parsedAntecedents, sourceNoteId);
     }
 
     private static Term validateAntecedentClause(Term term) {

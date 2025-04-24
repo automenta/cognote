@@ -306,7 +306,8 @@ public class UI extends JFrame {
                 noteListPanel.summarizeItem, noteListPanel.conceptsItem, noteListPanel.questionsItem,
                 noteListPanel.removeItem, attachmentPanel.retractItem, attachmentPanel.showSupportItem,
                 attachmentPanel.queryItem, attachmentPanel.cancelLlmItem, attachmentPanel.insertSummaryItem,
-                attachmentPanel.answerQuestionItem, attachmentPanel.findRelatedConceptsItem
+                attachmentPanel.answerQuestionItem, attachmentPanel.findRelatedConceptsItem,
+                noteListPanel.startNoteItem, noteListPanel.pauseNoteItem, noteListPanel.completeNoteItem // Add new menu items
         ).forEach(c -> c.setFont(UI_DEFAULT_FONT));
         attachmentPanel.attachmentList.setFont(MONOSPACED_FONT);
     }
@@ -768,6 +769,9 @@ public class UI extends JFrame {
         public final JList<Note> noteList = new JList<>(notes);
         final JPopupMenu noteContextMenu = new JPopupMenu();
 
+        final JMenuItem startNoteItem = new JMenuItem("Start Note");
+        final JMenuItem pauseNoteItem = new JMenuItem("Pause Note");
+        final JMenuItem completeNoteItem = new JMenuItem("Complete Note");
         final JMenuItem analyzeItem = new JMenuItem("Analyze Note (LLM -> KIF)");
         final JMenuItem enhanceItem = new JMenuItem("Enhance Note (LLM Replace)");
         final JMenuItem summarizeItem = new JMenuItem("Summarize Note (LLM)");
@@ -780,10 +784,16 @@ public class UI extends JFrame {
             noteList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
             noteList.setCellRenderer(new NoteListCellRenderer());
 
-            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem, removeItem).forEach(item -> {
-                if (item != analyzeItem) noteContextMenu.addSeparator();
+            noteContextMenu.add(startNoteItem);
+            noteContextMenu.add(pauseNoteItem);
+            noteContextMenu.add(completeNoteItem);
+            noteContextMenu.addSeparator();
+            Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem).forEach(item -> {
                 noteContextMenu.add(item);
             });
+            noteContextMenu.addSeparator();
+            noteContextMenu.add(removeItem);
+
             setupActionListeners();
         }
 
@@ -795,6 +805,9 @@ public class UI extends JFrame {
                     updateUIForSelection(); // Update UI based on the new selection
                 }
             });
+            startNoteItem.addActionListener(e -> ofNullable(note).ifPresent(n -> cog.startNote(n.id)));
+            pauseNoteItem.addActionListener(e -> ofNullable(note).ifPresent(n -> cog.pauseNote(n.id)));
+            completeNoteItem.addActionListener(e -> ofNullable(note).ifPresent(n -> cog.completeNote(n.id)));
             analyzeItem.addActionListener(e -> executeNoteTool("text_to_kif", note));
             enhanceItem.addActionListener(e -> executeNoteTool("enhance_note", note));
             summarizeItem.addActionListener(e -> executeNoteTool("summarize", note));
@@ -809,9 +822,13 @@ public class UI extends JFrame {
             var isEditableNote = noteSelected && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id);
             var systemRunning = cog != null && cog.running.get() && !cog.isPaused(); // System is running and not paused by user
 
+            startNoteItem.setEnabled(isEditableNote && (note.status == Note.Status.IDLE || note.status == Note.Status.PAUSED));
+            pauseNoteItem.setEnabled(isEditableNote && note.status == Note.Status.ACTIVE);
+            completeNoteItem.setEnabled(isEditableNote && (note.status == Note.Status.ACTIVE || note.status == Note.Status.PAUSED));
+
             Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem)
-                    .forEach(i -> i.setEnabled(isEditableNote && systemRunning));
-            removeItem.setEnabled(isEditableNote); // Allow removing non-system notes even if system is paused
+                    .forEach(i -> i.setEnabled(isEditableNote && systemRunning && note.status == Note.Status.ACTIVE)); // LLM tools only on active notes
+            removeItem.setEnabled(isEditableNote); // Allow removing non-system notes
         }
 
         void setControlsEnabled(boolean enabled) {
@@ -888,6 +905,12 @@ public class UI extends JFrame {
                 System.err.println("Cannot execute tool '" + toolName + "': System not ready or invalid note selected.");
                 return;
             }
+            // Check if the note is active before running LLM tools
+            if (!cog.context.isActiveNote(note.id)) {
+                 JOptionPane.showMessageDialog(UI.this, "Note must be Active to run LLM tools.", "Note Status", JOptionPane.WARNING_MESSAGE);
+                 return;
+            }
+
 
             cog.tools.get(toolName).ifPresentOrElse(tool -> {
                 updateStatus(tool.description() + " for '" + note.title + "'...");

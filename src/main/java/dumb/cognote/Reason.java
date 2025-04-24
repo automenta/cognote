@@ -199,6 +199,10 @@ public class Reason {
             return getCogNoteContext().tryCommit(pa, source);
         }
 
+        protected boolean isActiveContext(@Nullable String noteId) {
+            return getCogNoteContext().isActiveNote(noteId);
+        }
+
         @Override
         public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
             return CompletableFuture.completedFuture(Cog.Answer.failure(query.id()));
@@ -225,10 +229,16 @@ public class Reason {
         private void handleAssertionAdded(Cog.AssertedEvent event) {
             var newAssertion = event.assertion();
             var sourceKbId = event.kbId();
+            // Only process assertions added to an active context (active note or global KB)
+            if (!isActiveContext(sourceKbId) && !isActiveContext(newAssertion.sourceNoteId())) return;
+
             if (!newAssertion.isActive() || (newAssertion.type() != Logic.AssertionType.GROUND && newAssertion.type() != Logic.AssertionType.SKOLEMIZED))
                 return;
 
-            context.rules().forEach(rule -> rule.antecedents().forEach(clause -> {
+            context.rules().stream()
+                    // Only consider rules from active contexts (active notes or global KB)
+                    .filter(rule -> isActiveContext(rule.sourceNoteId()))
+                    .forEach(rule -> rule.antecedents().forEach(clause -> {
                 var neg = (clause instanceof Term.Lst l && l.op().filter(KIF_OP_NOT::equals).isPresent());
                 if (neg == newAssertion.negated()) {
                     var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
@@ -240,6 +250,7 @@ public class Reason {
         }
 
         private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Term.Var, Term> bindings, Set<String> support, String currentKbId) {
+            if (depth > getMaxDerivationDepth()) return Stream.empty(); // Prevent infinite recursion in matching
             if (remaining.isEmpty()) return Stream.of(new MatchResult(bindings, support));
 
             var clause = Logic.Unifier.substFully(remaining.getFirst(), bindings);
@@ -250,10 +261,14 @@ public class Reason {
 
             var currentKb = getKb(currentKbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
+
+            // Search for matching assertions in the current KB and global KB
             return Stream.concat(currentKb.findUnifiableAssertions(pattern),
                             (!currentKb.id.equals(Cog.GLOBAL_KB_NOTE_ID)) ? globalKb.findUnifiableAssertions(pattern) : Stream.empty())
                     .distinct()
                     .filter(Assertion::isActive)
+                    // Only use assertions from active contexts (active notes or global KB)
+                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                     .filter(c -> c.negated() == neg)
                     .flatMap(c -> ofNullable(Logic.Unifier.unify(pattern, c.getEffectiveTerm(), bindings))
                             .map(newB -> findMatchesRecursive(rule, nextRemaining, newB,
@@ -267,6 +282,10 @@ public class Reason {
 
             Term simplified = (consequent instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : consequent;
             var targetNoteId = getCogNoteContext().findCommonSourceNodeId(result.supportIds());
+
+            // Only derive assertions if the common source note is active or if the rule is global
+            if (!isActiveContext(targetNoteId) && !isActiveContext(rule.sourceNoteId())) return;
+
 
             switch (simplified) {
                 case Term.Lst derived when derived.op().filter(KIF_OP_AND::equals).isPresent() ->
@@ -287,7 +306,7 @@ public class Reason {
             conj.terms.stream().skip(1).forEach(term -> {
                 Term simp = (term instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : term;
                 if (simp instanceof Term.Lst c)
-                    processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents()), result);
+                    processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents(), rule.sourceNoteId()), result); // Pass sourceNoteId
                 else if (!(simp instanceof Term.Var))
                     System.err.println("Warning: Rule " + rule.id() + " derived (and ...) with non-list/non-var conjunct: " + term.toKif());
             });
@@ -308,11 +327,12 @@ public class Reason {
             if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
                 try {
                     var pri = getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri());
-                    var derivedRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), body, pri);
+                    // Derived rules inherit the source note context if available
+                    var derivedRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), body, pri, targetNoteId);
                     getCogNoteContext().addRule(derivedRule);
                     if (KIF_OP_EQUIV.equals(body.op().orElse(null))) {
                         var revList = new Term.Lst(new Term.Atom(KIF_OP_IMPLIES), body.get(2), body.get(1));
-                        var revRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), revList, pri);
+                        var revRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), revList, pri, targetNoteId); // Pass sourceNoteId
                         getCogNoteContext().addRule(revRule);
                     }
                 } catch (IllegalArgumentException e) {
@@ -369,10 +389,16 @@ public class Reason {
     }
 
     static class RewriteRuleReasonerPlugin extends BaseReasonerPlugin {
-        @Override
-        public void initialize(ReasonerContext ctx) {
-            super.initialize(ctx);
-            ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+        private static Rule renameRuleVariables(Rule rule, int depth) {
+            var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
+            Map<Term.Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix)));
+            var renamedForm = (Term.Lst) Unifier.subst(rule.form(), renameMap);
+            try {
+                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId()); // Pass sourceNoteId
+            } catch (IllegalArgumentException e) {
+                System.err.println("Error renaming rule variables: " + e.getMessage());
+                return rule;
+            }
         }
 
         @Override
@@ -380,33 +406,55 @@ public class Reason {
             return Set.of(Cog.Feature.REWRITE_RULES);
         }
 
+        @Override
+        public void initialize(ReasonerContext ctx) {
+            super.initialize(ctx);
+            ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+        }
+
         private void handleAssertionAdded(Cog.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
+            // Only trigger rewrite if the added assertion is in an active context
+            if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
+
             if (!newA.isActive() || (newA.type() != AssertionType.GROUND && newA.type() != AssertionType.SKOLEMIZED))
                 return;
 
             var kb = getKb(kbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
             var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
-            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream()).filter(Assertion::isActive).distinct().toList();
+            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream())
+                    .filter(Assertion::isActive)
+                    // Only consider assertions from active contexts
+                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
+                    .distinct().toList();
 
+            // Case 1: New assertion is a rewrite rule (equality)
             if (newA.isEquality() && newA.isOrientedEquality() && !newA.negated() && newA.kif().size() == 3) {
                 var lhs = newA.kif().get(1);
                 allActiveAssertions.stream()
                         .filter(t -> !t.id().equals(newA.id()))
                         .filter(t -> Unifier.match(lhs, t.getEffectiveTerm(), Map.of()) != null)
-                        .forEach(t -> applyRewrite(newA, t));
+                        .forEach(t -> applyRewrite(newA, t)); // Apply the new rule to existing facts
             }
 
+            // Case 2: New assertion is a fact, apply existing rewrite rules to it
             allActiveAssertions.stream()
                     .filter(r -> r.isEquality() && r.isOrientedEquality() && !r.negated() && r.kif().size() == 3)
+                    // Only consider rules from active contexts
+                    .filter(r -> isActiveContext(r.sourceNoteId()))
                     .filter(r -> !r.id().equals(newA.id()))
                     .filter(r -> Unifier.match(r.kif().get(1), newA.getEffectiveTerm(), Map.of()) != null)
-                    .forEach(r -> applyRewrite(r, newA));
+                    .forEach(r -> applyRewrite(r, newA)); // Apply existing rules to the new fact
         }
 
         private void applyRewrite(Assertion ruleA, Assertion targetA) {
+            // Ensure both the rule and the target assertion are from active contexts
+            if (!isActiveContext(ruleA.sourceNoteId()) || (!isActiveContext(targetA.kb()) && !isActiveContext(targetA.sourceNoteId()))) {
+                 return;
+            }
+
             var lhs = ruleA.kif().get(1);
             var rhs = ruleA.kif().get(2);
 
@@ -453,29 +501,51 @@ public class Reason {
         private void handleAssertionAdded(Cog.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
+            // Only trigger instantiation if the added assertion is in an active context
+            if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
+
             if (!newA.isActive()) return;
 
             var kb = getKb(kbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
             var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
-            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream()).filter(Assertion::isActive).distinct().toList();
+            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream())
+                    .filter(Assertion::isActive)
+                    // Only consider assertions from active contexts
+                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
+                    .distinct().toList();
 
+            // Case 1: New assertion is ground/skolemized, try instantiating universals with it
             if ((newA.type() == AssertionType.GROUND || newA.type() == AssertionType.SKOLEMIZED) && newA.kif().get(0) instanceof Term.Atom pred) {
                 allActiveAssertions.stream()
                         .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getMaxDerivationDepth())
+                        // Only consider universal rules from active contexts
+                        .filter(u -> isActiveContext(u.sourceNoteId()))
                         .filter(u -> u.getReferencedPredicates().contains(pred))
                         .forEach(u -> tryInstantiate(u, newA));
-            } else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getMaxDerivationDepth()) {
+            }
+            // Case 2: New assertion is universal, try instantiating it with existing ground/skolemized facts
+            else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getMaxDerivationDepth()) {
+                 // Only process if the new universal is from an active context
+                 if (!isActiveContext(newA.sourceNoteId())) return;
+
                 ofNullable(newA.getEffectiveTerm()).filter(Term.Lst.class::isInstance).map(Term.Lst.class::cast)
                         .flatMap(Term.Lst::op).map(Term.Atom::of)
                         .ifPresent(pred -> allActiveAssertions.stream()
                                 .filter(g -> g.type() == AssertionType.GROUND || g.type() == AssertionType.SKOLEMIZED)
+                                // Only consider ground facts from active contexts
+                                .filter(g -> isActiveContext(g.kb()) || isActiveContext(g.sourceNoteId()))
                                 .filter(g -> g.getReferencedPredicates().contains(pred))
                                 .forEach(g -> tryInstantiate(newA, g)));
             }
         }
 
         private void tryInstantiate(Assertion uniA, Assertion groundA) {
+            // Ensure both the universal and the ground assertion are from active contexts
+            if (!isActiveContext(uniA.sourceNoteId()) || (!isActiveContext(groundA.kb()) && !isActiveContext(groundA.sourceNoteId()))) {
+                 return;
+            }
+
             var formula = uniA.getEffectiveTerm();
             var vars = uniA.quantifiedVars();
             if (vars.isEmpty() || !(formula instanceof Term.Lst))
@@ -510,7 +580,7 @@ public class Reason {
             Map<Term.Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix)));
             var renamedForm = (Term.Lst) Unifier.subst(rule.form(), renameMap);
             try {
-                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri());
+                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId()); // Pass sourceNoteId
             } catch (IllegalArgumentException e) {
                 System.err.println("Error renaming rule variables: " + e.getMessage());
                 return rule;
@@ -529,6 +599,12 @@ public class Reason {
 
         @Override
         public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
+            // Only execute query if the target KB is active or global
+            if (!isActiveContext(query.targetKbId())) {
+                 System.out.println("Query skipped: Target KB '" + query.targetKbId() + "' is not active.");
+                 return CompletableFuture.completedFuture(Cog.Answer.failure(query.id()));
+            }
+
             return CompletableFuture.supplyAsync(() -> {
                 var results = new ArrayList<Map<Term.Var, Term>>();
                 var maxDepth = (Integer) query.parameters().getOrDefault("maxDepth", MAX_BACKWARD_CHAIN_DEPTH);
@@ -550,20 +626,28 @@ public class Reason {
 
             Stream<Map<Term.Var, Term>> resultStream = Stream.empty();
 
+            // 1. Try operators
             if (currentGoal instanceof Term.Lst goalList && !goalList.terms.isEmpty() && goalList.get(0) instanceof Term.Atom opAtom) {
                 resultStream = context.operators().get(opAtom)
                         .flatMap(op -> executeOperator(op, goalList, bindings, currentGoal))
                         .stream();
             }
 
+            // 2. Try matching active facts in the target KB and global KB
             var kbStream = Stream.concat(getKb(kbId).findUnifiableAssertions(currentGoal),
                             (kbId != null && !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) ? context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal) : Stream.empty())
                     .distinct()
                     .filter(Assertion::isActive)
+                    // Only use assertions from active contexts
+                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                     .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
             resultStream = Stream.concat(resultStream, kbStream);
 
-            var ruleStream = context.rules().stream().flatMap(rule -> {
+            // 3. Try backward chaining on active rules
+            var ruleStream = context.rules().stream()
+                    // Only consider rules from active contexts
+                    .filter(rule -> isActiveContext(rule.sourceNoteId()))
+                    .flatMap(rule -> {
                 var renamedRule = renameRuleVariables(rule, depth);
                 return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
                         .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack)))

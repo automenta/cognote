@@ -209,10 +209,13 @@ public class Cog {
     public synchronized void clear() {
         System.out.println("Clearing all knowledge...");
         setPaused(true);
+        // Retract assertions from all notes except config and global
         context.getAllNoteIds().stream()
                 .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
+        // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
+        // Clear the logic context (KBs, rules, active notes)
         context.clear();
 
         status("Cleared");
@@ -485,7 +488,7 @@ public class Cog {
             switch (event.term()) {
                 case Term.Lst list when !list.terms.isEmpty() -> list.op().ifPresentOrElse(op -> {
                             switch (op) {
-                                case KIF_OP_IMPLIES, KIF_OP_EQUIV -> inputRule(list, src);
+                                case KIF_OP_IMPLIES, KIF_OP_EQUIV -> inputRule(list, src, id);
                                 case KIF_OP_EXISTS -> inputExists(list, src, id);
                                 case KIF_OP_FORALL -> inputForall(list, src, id);
                                 case "goal" -> { /* Handled by TaskDecompositionPlugin */ }
@@ -501,16 +504,16 @@ public class Cog {
             }
         }
 
-        private void inputRule(Term.Lst list, String sourceId) {
+        private void inputRule(Term.Lst list, String sourceId, @Nullable String noteId) {
             try {
-                var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), list, DEFAULT_RULE_PRIORITY);
+                var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), list, DEFAULT_RULE_PRIORITY, noteId);
                 context.addRule(r);
 
                 if (KIF_OP_EQUIV.equals(list.op().orElse(null))) {
                     context.addRule(
                             Rule.parseRule(Cog.id(ID_PREFIX_RULE),
                                     new Term.Lst(new Term.Atom(KIF_OP_IMPLIES), list.get(2), list.get(1)),
-                                    DEFAULT_RULE_PRIORITY));
+                                    DEFAULT_RULE_PRIORITY, noteId));
                 }
             } catch (IllegalArgumentException e) {
                 System.err.println("Invalid rule format ignored (" + sourceId + "): " + list.toKif() + " | Error: " + e.getMessage());
@@ -565,7 +568,7 @@ public class Cog {
                 publish(new ExternalInputEvent(forallExpr.get(2), sourceId + "-forallBody", targetNoteId));
             } else {
                 if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
-                    inputRule(body, sourceId);
+                    inputRule(body, sourceId, targetNoteId);
                 } else {
                     System.out.println("Storing 'forall' as universal fact from " + sourceId + ": " + forallExpr.toKif());
                     var pri = (sourceId.startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + forallExpr.weight());

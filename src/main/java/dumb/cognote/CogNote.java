@@ -108,6 +108,7 @@ public class CogNote extends Cog {
             events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
             // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
             events.emit(new RemovedEvent(note)); // Emit RemovedEvent with the Note object
+            context.removeActiveNote(noteId); // Ensure it's removed from active set
             save();
         });
     }
@@ -117,8 +118,56 @@ public class CogNote extends Cog {
             if (note.status != newStatus) {
                 var oldStatus = note.status;
                 note.status = newStatus; // Update status in the internal map
+
+                switch (newStatus) {
+                    case ACTIVE -> context.addActiveNote(noteId);
+                    case IDLE, PAUSED, COMPLETED -> context.removeActiveNote(noteId);
+                }
+
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus)); // Emit event
                 save(); // Save status change
+            }
+        });
+    }
+
+    public void startNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status == Note.Status.IDLE || note.status == Note.Status.PAUSED) {
+                System.out.println("Starting note: " + note.title + " [" + note.id + "]");
+                updateNoteStatus(noteId, Note.Status.ACTIVE);
+                // Re-emit assertions to kick off reasoning
+                context.kb(noteId).getAllAssertions().forEach(assertion ->
+                        events.emit(new ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
+                );
+                // Re-emit rules associated with this note
+                context.rules().stream()
+                        .filter(rule -> noteId.equals(rule.sourceNoteId()))
+                        .forEach(rule -> events.emit(new ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
+
+            } else {
+                System.out.println("Note " + note.title + " [" + note.id + "] is already " + note.status + ". Cannot start.");
+            }
+        });
+    }
+
+    public void pauseNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status == Note.Status.ACTIVE) {
+                System.out.println("Pausing note: " + note.title + " [" + note.id + "]");
+                updateNoteStatus(noteId, Note.Status.PAUSED);
+            } else {
+                System.out.println("Note " + note.title + " [" + note.id + "] is not ACTIVE. Cannot pause.");
+            }
+        });
+    }
+
+    public void completeNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status == Note.Status.ACTIVE || note.status == Note.Status.PAUSED) {
+                System.out.println("Completing note: " + note.title + " [" + note.id + "]");
+                updateNoteStatus(noteId, Note.Status.COMPLETED);
+            } else {
+                System.out.println("Note " + note.title + " [" + note.id + "] is already " + note.status + ". Cannot complete.");
             }
         });
     }
@@ -134,7 +183,7 @@ public class CogNote extends Cog {
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
-        // Clear the logic context (KBs, rules)
+        // Clear the logic context (KBs, rules, active notes)
         context.clear();
 
         // Clear internal note map, but keep system notes
@@ -144,6 +193,9 @@ public class CogNote extends Cog {
         notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
         notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
 
+        // Ensure system notes are marked as active in context (Global KB is always active)
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
+        // Config note is not typically active for reasoning, so don't add it
 
         // Re-emit Added events for the system notes so UI can add them back if needed
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
@@ -175,7 +227,12 @@ public class CogNote extends Cog {
 
     private void load() {
         var loadedNotes = loadNotesFromFile();
-        loadedNotes.forEach(note -> notes.put(note.id, note));
+        loadedNotes.forEach(note -> {
+            notes.put(note.id, note);
+            if (note.status == Note.Status.ACTIVE) {
+                context.addActiveNote(note.id);
+            }
+        });
 
         var configNoteOpt = note(CONFIG_NOTE_ID);
         if (configNoteOpt.isPresent()) {
@@ -192,6 +249,8 @@ public class CogNote extends Cog {
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
             notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
         }
+        // Ensure Global KB is always active in context
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
     }
 
     private void parseConfig(String jsonText) {
