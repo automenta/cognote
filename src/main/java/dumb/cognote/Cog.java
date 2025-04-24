@@ -288,8 +288,10 @@ public class Cog {
         var resultFuture = new CompletableFuture<Answer>();
 
         Consumer<CogEvent> listener = event -> {
-            if (event instanceof Cog.Answer.AnswerEvent(var result) && result.query().equals(query.id()))
-                resultFuture.complete(result);
+            // Use a standard type pattern variable for broader compatibility
+            if (event instanceof Cog.Answer.AnswerEvent answerEvent && answerEvent.result().query().equals(query.id())) {
+                resultFuture.complete(answerEvent.result());
+            }
         };
 
         @SuppressWarnings("unchecked")
