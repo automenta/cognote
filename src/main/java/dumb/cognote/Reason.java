@@ -230,6 +230,7 @@ public class Reason {
             var newAssertion = event.assertion();
             var sourceKbId = event.kbId();
             // Only process assertions added to an active context (active note or global KB)
+            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(sourceKbId) && !isActiveContext(newAssertion.sourceNoteId())) return;
 
             if (!newAssertion.isActive() || (newAssertion.type() != Logic.AssertionType.GROUND && newAssertion.type() != Logic.AssertionType.SKOLEMIZED))
@@ -416,6 +417,7 @@ public class Reason {
             var newA = event.assertion();
             var kbId = event.kbId();
             // Only trigger rewrite if the added assertion is in an active context
+            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
 
             if (!newA.isActive() || (newA.type() != AssertionType.GROUND && newA.type() != AssertionType.SKOLEMIZED))
@@ -502,6 +504,7 @@ public class Reason {
             var newA = event.assertion();
             var kbId = event.kbId();
             // Only trigger instantiation if the added assertion is in an active context
+            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
 
             if (!newA.isActive()) return;
