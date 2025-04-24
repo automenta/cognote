@@ -1,4 +1,4 @@
-package dumb.cognote.tools;
+package dumb.cognote;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -7,7 +7,7 @@ import java.util.concurrent.CompletableFuture;
  * Base interface for all tools in the system.
  * Tools can be callable by the LLM (if annotated with @Tool) or invoked internally.
  */
-public interface BaseTool {
+public interface Tool {
 
     /**
      * Gets the unique name of the tool. Used for lookup in the registry and by the LLM.

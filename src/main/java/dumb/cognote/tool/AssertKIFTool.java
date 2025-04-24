@@ -1,10 +1,7 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
-import dumb.cognote.Cog;
-import dumb.cognote.LM;
-import dumb.cognote.Logic;
+import dumb.cognote.*;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -14,7 +11,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static java.util.Objects.requireNonNullElse;
 
-public class AssertKIFTool implements BaseTool {
+public class AssertKIFTool implements Tool {
 
     private final Cog cog;
 
@@ -35,7 +32,7 @@ public class AssertKIFTool implements BaseTool {
     // This method is called by LangChain4j's AiServices.
     // It needs to block or return a simple type.
     // It calls the internal execute logic and blocks for the result.
-    @Tool(name = "assert_kif", value = "Add a KIF assertion string to a knowledge base. Input is a JSON object with 'kif_assertion' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns success or error message.")
+    @dev.langchain4j.agent.tool.Tool(name = "assert_kif", value = "Add a KIF assertion string to a knowledge base. Input is a JSON object with 'kif_assertion' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns success or error message.")
     public String addKifAssertionToolMethod(@P(value = "The KIF assertion string to add.") String kifAssertion, @P(value = "Optional ID of the knowledge base (note ID) to add the assertion to. Defaults to global KB if not provided or empty.") @Nullable String targetKbId) {
         try {
             // Call the internal execute logic and block for the result
@@ -60,7 +57,7 @@ public class AssertKIFTool implements BaseTool {
             }
             try {
                 var terms = Logic.KifParser.parseKif(kifAssertion);
-                if (terms.size() != 1 || !(terms.getFirst() instanceof Logic.KifList list)) {
+                if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst list)) {
                     return "Error: Invalid KIF format provided. Must be a single KIF list.";
                 }
 
@@ -76,7 +73,7 @@ public class AssertKIFTool implements BaseTool {
 
                 var finalTargetKbId = requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID);
 
-                var pa = new Logic.PotentialAssertion(list, pri, Set.of(), sourceId, isEq, isNeg, isOriented, finalTargetKbId, type, List.of(), 0);
+                var pa = new Assertion.PotentialAssertion(list, pri, Set.of(), sourceId, isEq, isNeg, isOriented, finalTargetKbId, type, List.of(), 0);
                 var committedAssertion = cog.context.tryCommit(pa, sourceId);
 
                 if (committedAssertion != null) {

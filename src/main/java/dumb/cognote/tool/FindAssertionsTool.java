@@ -1,9 +1,10 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
+import dumb.cognote.Term;
+import dumb.cognote.Tool;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
@@ -13,7 +14,7 @@ import java.util.stream.Collectors;
 import static dumb.cognote.Cog.ID_PREFIX_QUERY;
 import static java.util.Objects.requireNonNullElse;
 
-public class FindAssertionsTool implements BaseTool {
+public class FindAssertionsTool implements Tool {
 
     private final Cog cog;
 
@@ -34,7 +35,7 @@ public class FindAssertionsTool implements BaseTool {
     // This method is called by LangChain4j's AiServices.
     // It needs to block or return a simple type.
     // It calls the internal execute logic and blocks for the result.
-    @Tool(name = "find_assertions", value = "Query the knowledge base for assertions matching a KIF pattern. Input is a JSON object with 'kif_pattern' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns a list of bindings found or a message indicating no matches or an error.")
+    @dev.langchain4j.agent.tool.Tool(name = "find_assertions", value = "Query the knowledge base for assertions matching a KIF pattern. Input is a JSON object with 'kif_pattern' (string) and optional 'target_kb_id' (string, defaults to global KB). Returns a list of bindings found or a message indicating no matches or an error.")
     public String findAssertionsToolMethod(@P(value = "The KIF pattern to query the knowledge base with.") String kifPattern, @P(value = "Optional ID of the knowledge base (note ID) to query. Defaults to global KB if not provided or empty.") @Nullable String targetKbId) {
         try {
             // Call the internal execute logic and block for the result.
@@ -62,15 +63,15 @@ public class FindAssertionsTool implements BaseTool {
             }
             try {
                 var terms = Logic.KifParser.parseKif(kifPattern);
-                if (terms.size() != 1 || !(terms.getFirst() instanceof Logic.KifList patternList)) {
+                if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst patternList)) {
                     return "Error: Invalid KIF pattern format. Must be a single KIF list.";
                 }
 
                 var finalTargetKbId = requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID);
 
-                var queryId = Cog.generateId(ID_PREFIX_QUERY + "tool_");
+                var queryId = Cog.id(ID_PREFIX_QUERY + "tool_");
                 var query = new Cog.Query(queryId, Cog.QueryType.ASK_BINDINGS, patternList, finalTargetKbId, Map.of());
-                var answer = cog.executeQuerySync(query); // Call the sync method in Cog
+                var answer = cog.querySync(query); // Call the sync method in Cog
 
                 if (answer.status() == Cog.QueryStatus.SUCCESS) {
                     if (answer.bindings().isEmpty()) {

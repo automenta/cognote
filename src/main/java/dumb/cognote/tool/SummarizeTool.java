@@ -1,9 +1,7 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.data.message.UserMessage;
-import dumb.cognote.Cog;
-import dumb.cognote.Logic;
-import dumb.cognote.UI;
+import dumb.cognote.*;
 
 import java.util.ArrayList;
 import java.util.Map;
@@ -14,7 +12,7 @@ import java.util.concurrent.CompletionException;
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
 import static dumb.cognote.Logic.PRED_NOTE_SUMMARY;
 
-public class SummarizeTool implements BaseTool {
+public class SummarizeTool implements Tool {
 
     private final Cog cog;
 
@@ -42,18 +40,17 @@ public class SummarizeTool implements BaseTool {
 
         return cog.ui.findNoteById(noteId)
                 .map(note -> {
-                    var taskId = Cog.generateId(ID_PREFIX_LLM_ITEM + "summarize_");
+                    var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "summarize_");
                     var interactionType = "Note Summarization";
 
                     // Add a UI placeholder for the LLM task
                     // This logic is now handled by the tool itself
                     // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                    var vm = dumb.cognote.UI.AttachmentViewModel.forLlm(
+                    cog.events.emit(new Cog.LlmInfoEvent(UI.AttachmentViewModel.forLlm(
                             taskId,
-                            note.id, interactionType + ": Starting...", dumb.cognote.UI.AttachmentType.LLM_INFO,
-                            System.currentTimeMillis(), note.id, dumb.cognote.UI.LlmStatus.SENDING
-                    );
-                    cog.events.emit(new Cog.LlmInfoEvent(vm));
+                            note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
+                            System.currentTimeMillis(), note.id, Cog.TaskStatus.SENDING
+                    )));
 
 
                     var promptText = """
@@ -77,16 +74,16 @@ public class SummarizeTool implements BaseTool {
                             var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                             if (!(cause instanceof CancellationException)) {
                                 System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
+                                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
                                 return "Error summarizing note: " + cause.getMessage();
                             } else {
                                 System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
+                                cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
                                 return "Summarization cancelled.";
                             }
                         } else {
                             System.out.println(interactionType + " completed for note '" + note.id + "'.");
-                            cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
+                            cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
 
                             var summary = chatResponse.text();
                             if (summary != null && !summary.isBlank()) {
@@ -94,7 +91,7 @@ public class SummarizeTool implements BaseTool {
                                 var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_SUMMARY, note.id, summary.replace("\"", "\\\""));
                                 try {
                                     var terms = Logic.KifParser.parseKif(kif);
-                                    if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list) {
+                                    if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                                         // Emit as external input, targeting the note's KB
                                         cog.events.emit(new Cog.ExternalInputEvent(list, "llm-summary-tool:" + note.id, note.id));
                                         return "Summary generated and added as assertion.";

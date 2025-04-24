@@ -16,6 +16,7 @@ public class LM {
     public static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
     static final String DEFAULT_LLM_URL = "http://localhost:11434";
     static final String DEFAULT_LLM_MODEL = "hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q8_0";
+    static final int HTTP_TIMEOUT_SECONDS = 90;
     public final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
 
     private final Cog cog;
@@ -46,7 +47,7 @@ public class LM {
                     .baseUrl(baseUrl)
                     .modelName(llmModel)
                     .temperature(0.2)
-                    .timeout(Duration.ofSeconds(Cog.HTTP_TIMEOUT_SECONDS))
+                    .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
                     .build();
             System.out.printf("LM ChatModel reconfigured: Base URL=%s, Model=%s%s%n", baseUrl, llmModel, (chatModel == null ? " (Failed)" : ""));
 
@@ -55,7 +56,7 @@ public class LM {
                 return;
             }
 
-            var llmCallableTools = cog.toolRegistry().getLlmCallableTools().stream().toList();
+            var llmCallableTools = cog.tools.getLlmCallableTools().stream().toList();
 
             this.llmService = AiServices.builder(LlmService.class)
                     .chatLanguageModel(this.chatModel)
@@ -74,7 +75,7 @@ public class LM {
     public CompletableFuture<dev.langchain4j.data.message.AiMessage> llmAsync(String taskId, List<dev.langchain4j.data.message.ChatMessage> history, String interactionType, String noteId) {
         if (llmService == null) {
             var errorMsg = interactionType + " Error: LLM Service not configured.";
-            cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, errorMsg);
+            cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, errorMsg);
             return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
         }
 
@@ -93,12 +94,12 @@ public class LM {
 
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
-            cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Sending to LLM Service...");
+            cog.updateTaskStatus(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service...");
 
             try {
                 var finalAiMessage = llmService.chat(conversationHistory);
 
-                cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + ": Received final response.");
+                cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + ": Received final response.");
                 return finalAiMessage;
 
             } catch (Exception e) {
@@ -106,7 +107,7 @@ public class LM {
                 if (cause instanceof InterruptedException) Thread.currentThread().interrupt();
                 System.err.println("LLM Service interaction error (" + interactionType + "): " + cause.getMessage());
                 cause.printStackTrace();
-                cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " Error: " + cause.getMessage());
+                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage());
                 throw new CompletionException("LLM Service interaction error (" + interactionType + "): " + cause.getMessage(), cause);
             }
         }, cog.events.exe);

@@ -1,7 +1,8 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
+import dumb.cognote.Tool;
 import dumb.cognote.UI;
 
 import java.util.ArrayList;
@@ -12,7 +13,7 @@ import java.util.concurrent.CompletionException;
 
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
 
-public class TextToKifTool implements BaseTool {
+public class TextToKifTool implements Tool {
 
     private final Cog cog;
 
@@ -40,7 +41,7 @@ public class TextToKifTool implements BaseTool {
 
         return cog.ui.findNoteById(noteId)
                 .map(note -> {
-                    var taskId = Cog.generateId(ID_PREFIX_LLM_ITEM + "text2kif_");
+                    var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "text2kif_");
                     var interactionType = "KIF Generation";
 
                     // Add a UI placeholder for the LLM task
@@ -48,7 +49,7 @@ public class TextToKifTool implements BaseTool {
                     var vm = UI.AttachmentViewModel.forLlm(
                             taskId,
                             note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
-                            System.currentTimeMillis(), note.id, UI.LlmStatus.SENDING
+                            System.currentTimeMillis(), note.id, Cog.TaskStatus.SENDING
                     );
                     cog.events.emit(new Cog.LlmInfoEvent(vm));
 
@@ -85,16 +86,16 @@ public class TextToKifTool implements BaseTool {
                             var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                             if (!(cause instanceof CancellationException)) {
                                 System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
+                                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
                                 return "Error generating KIF: " + cause.getMessage();
                             } else {
                                 System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
+                                cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
                                 return "KIF generation cancelled.";
                             }
                         } else {
                             System.out.println(interactionType + " completed for note '" + note.id + "'. KIF assertions should have been added by tool calls.");
-                            cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
+                            cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
                             // The LLM should have used the tool. We can optionally log the final text response.
                             var text = chatResponse.text();
                             if (text != null && !text.isBlank()) {

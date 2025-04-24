@@ -1,7 +1,8 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
+import dumb.cognote.Tool;
 import dumb.cognote.UI;
 
 import java.util.ArrayList;
@@ -13,7 +14,7 @@ import java.util.concurrent.CompletionException;
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
 import static java.util.Objects.requireNonNullElse;
 
-public class DecomposeGoalTool implements BaseTool {
+public class DecomposeGoalTool implements Tool {
 
     private final Cog cog;
 
@@ -42,7 +43,7 @@ public class DecomposeGoalTool implements BaseTool {
 
         var finalTargetKbId = requireNonNullElse(targetNoteId, Cog.GLOBAL_KB_NOTE_ID);
 
-        var taskId = Cog.generateId(ID_PREFIX_LLM_ITEM + "decompose_");
+        var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "decompose_");
         var interactionType = "Task Decomposition";
 
         // Add a UI placeholder for the LLM task
@@ -50,7 +51,7 @@ public class DecomposeGoalTool implements BaseTool {
         var vm = UI.AttachmentViewModel.forLlm(
                 taskId,
                 finalTargetKbId, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
-                System.currentTimeMillis(), finalTargetKbId, UI.LlmStatus.SENDING
+                System.currentTimeMillis(), finalTargetKbId, Cog.TaskStatus.SENDING
         );
         cog.events.emit(new Cog.LlmInfoEvent(vm));
 
@@ -85,16 +86,16 @@ public class DecomposeGoalTool implements BaseTool {
                 var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                 if (!(cause instanceof CancellationException)) {
                     System.err.println(interactionType + " failed for goal '" + goalDescription + "': " + cause.getMessage());
-                    cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
+                    cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
                     return "Error decomposing goal: " + cause.getMessage();
                 } else {
                     System.out.println(interactionType + " cancelled for goal '" + goalDescription + "'.");
-                    cog.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
+                    cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
                     return "Goal decomposition cancelled.";
                 }
             } else {
                 System.out.println(interactionType + " completed for goal '" + goalDescription + "'. Sub-tasks should have been added by tool calls.");
-                cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
+                cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
                 var text = chatResponse.text();
                 if (text != null && !text.isBlank()) {
                     System.out.println("LLM final message for decomposition: " + text);

@@ -1,9 +1,11 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
+
+import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class LogMessageTool implements BaseTool {
+public class LogMessageTool implements Tool {
 
     @Override
     public String name() {

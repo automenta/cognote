@@ -1,20 +1,26 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
+import dumb.cognote.Cog.Answer;
+import dumb.cognote.Cog.QueryType;
 import dumb.cognote.Logic;
+import dumb.cognote.Logic.KifParser.ParseException;
+import dumb.cognote.Term;
+import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.ID_PREFIX_QUERY;
+import static dumb.cognote.Cog.QueryType.valueOf;
 import static java.util.Objects.requireNonNullElse;
 
-public class RunQueryTool implements BaseTool {
+public class QueryTool implements Tool {
 
     private final Cog cog;
 
-    public RunQueryTool(Cog cog) {
+    public QueryTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -42,30 +48,16 @@ public class RunQueryTool implements BaseTool {
                 return "Error: Missing required parameter 'kif_pattern'.";
             }
 
-            Cog.QueryType queryType;
+            QueryType queryType;
             try {
-                queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
+                queryType = valueOf(queryTypeStr.toUpperCase());
             } catch (IllegalArgumentException e) {
                 return "Error: Invalid query type '" + queryTypeStr + "'. Must be ASK_BINDINGS, ASK_TRUE_FALSE, or ACHIEVE_GOAL.";
             }
 
             try {
-                var terms = Logic.KifParser.parseKif(kifPattern);
-                if (terms.size() != 1 || !(terms.getFirst() instanceof Logic.KifList patternList)) {
-                    return "Error: Invalid KIF pattern format. Must be a single KIF list.";
-                }
-
-                var finalTargetKbId = requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID);
-
-                var queryId = Cog.generateId(ID_PREFIX_QUERY + "tool_");
-                var query = new Cog.Query(queryId, queryType, patternList, finalTargetKbId, Map.of());
-
-                // Execute the query synchronously via Cog
-                var answer = cog.executeQuerySync(query);
-
-                return formatQueryResult(answer);
-
-            } catch (Logic.KifParser.ParseException e) {
+                return query(kifPattern, queryType, targetKbId);
+            } catch (ParseException e) {
                 System.err.println("Error parsing KIF pattern in tool 'run_query': " + e.getMessage());
                 return "Error parsing KIF pattern: " + e.getMessage();
             } catch (Exception e) {
@@ -76,7 +68,21 @@ public class RunQueryTool implements BaseTool {
         }, cog.events.exe);
     }
 
-    private String formatQueryResult(Cog.Answer answer) {
+    private String query(String kifPattern, QueryType queryType, String targetKbId) throws ParseException {
+        var terms = Logic.KifParser.parseKif(kifPattern);
+        if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst patternList))
+            return "Error: Invalid KIF pattern format. Must be a single KIF list.";
+
+        // Execute the query synchronously via Cog
+        return formatQueryResult(cog.querySync(
+                new Cog.Query(
+                        Cog.id(ID_PREFIX_QUERY + "tool_"),
+                        queryType, patternList,
+                        requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID),
+                        Map.of())));
+    }
+
+    private String formatQueryResult(Answer answer) {
         return switch (answer.status()) {
             case SUCCESS -> {
                 if (answer.bindings().isEmpty()) {

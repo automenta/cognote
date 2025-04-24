@@ -1,16 +1,14 @@
 package dumb.cognote;
 
-import dumb.cognote.tools.BaseTool;
-
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Tools {
-    private final Map<String, BaseTool> tools = new ConcurrentHashMap<>();
+    private final Map<String, Tool> tools = new ConcurrentHashMap<>();
 
-    public void register(BaseTool tool) {
+    public void register(Tool tool) {
         var n = tool.name();
         if (tools.containsKey(n))
             throw new IllegalArgumentException("Tool with name '" + n + "' already registered.");
@@ -19,15 +17,15 @@ public class Tools {
         System.out.println("Registered tool: " + n);
     }
 
-    public Optional<BaseTool> get(String name) {
+    public Optional<Tool> get(String name) {
         return Optional.ofNullable(tools.get(name));
     }
 
-    public Collection<BaseTool> getAll() {
+    public Collection<Tool> getAll() {
         return tools.values();
     }
 
-    public Collection<BaseTool> getLlmCallableTools() {
+    public Collection<Tool> getLlmCallableTools() {
         return tools.values().stream()
                 .filter(tool -> {
                     try {

@@ -1,12 +1,13 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
+import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class RetractTool implements BaseTool {
+public class RetractTool implements Tool {
 
     private final Cog cog;
 

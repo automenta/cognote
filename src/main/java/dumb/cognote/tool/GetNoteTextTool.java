@@ -1,13 +1,13 @@
-package dumb.cognote.tools;
+package dumb.cognote.tool;
 
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
+import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class GetNoteTextTool implements BaseTool {
+public class GetNoteTextTool implements Tool {
 
     private final Cog cog;
 
@@ -28,7 +28,7 @@ public class GetNoteTextTool implements BaseTool {
     // This method is called by LangChain4j's AiServices.
     // It needs to block or return a simple type.
     // It calls the internal execute logic and blocks for the result.
-    @Tool(name = "get_note_text", value = "Retrieve the full text content of a specific note by its ID. Input is a JSON object with 'note_id' (string). Returns the note text or an error message.")
+    @dev.langchain4j.agent.tool.Tool(name = "get_note_text", value = "Retrieve the full text content of a specific note by its ID. Input is a JSON object with 'note_id' (string). Returns the note text or an error message.")
     public String getNoteTextToolMethod(@P(value = "The ID of the note to retrieve text from.") String noteId) {
         try {
             // Call the internal execute logic and block for the result.

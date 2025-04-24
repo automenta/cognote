@@ -1,47 +1,49 @@
 package dumb.cognote.plugin;
 
 import dumb.cognote.Cog;
-import dumb.cognote.Logic;
+import dumb.cognote.Events;
+import dumb.cognote.Plugin;
+import dumb.cognote.Term;
 
 import java.util.Map;
 
 import static dumb.cognote.Logic.Cognition;
-import static dumb.cognote.Logic.KifList;
+import static dumb.cognote.Term.Lst;
 
 /**
  * Plugin that listens for (goal ...) assertions and uses the LLM to decompose them into sub-tasks.
  */
-public class TaskDecomposePlugin extends Cog.BasePlugin {
+public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(Cog.Events e, Cognition ctx) {
+    public void start(Events e, Cognition ctx) {
         super.start(e, ctx);
         // Listen for ExternalInputEvents that are KifLists starting with "goal"
-        e.on(new KifList(Logic.KifAtom.of("goal"), Logic.KifVar.of("?_")), this::handleGoalAssertion);
+        e.on(new Lst(Term.Atom.of("goal"), Term.Var.of("?_")), this::handleGoalAssertion);
     }
 
-    private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Logic.KifVar, Logic.KifTerm> bindings) {
+    private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof Cog.ExternalInputEvent(Logic.KifTerm term, String sourceId, String noteId))) {
+        if (!(event instanceof Cog.ExternalInputEvent(Term term, String sourceId, String noteId))) {
             return; // Should not happen with correct registration, but defensive
         }
         // This is the targetNoteId from the input event
 
 
-        if (!(term instanceof Logic.KifList goalList) || goalList.size() < 2 || goalList.op().filter("goal"::equals).isEmpty()) {
+        if (!(term instanceof Lst goalList) || goalList.size() < 2 || goalList.op().filter("goal"::equals).isEmpty()) {
             return; // Should not happen due to pattern matching, but defensive check
         }
 
         // Extract the goal description (everything after the "goal" atom)
         // Convert the terms to KIF string for the LLM prompt
-        var goalDescription = goalList.terms().stream().skip(1)
-                .map(Logic.KifTerm::toKif)
+        var goalDescription = goalList.terms.stream().skip(1)
+                .map(Term::toKif)
                 .collect(java.util.stream.Collectors.joining(" "));
 
         System.out.println("TaskDecompositionPlugin received goal: " + goalDescription + " from " + sourceId);
 
         // Use the DecomposeGoalTool
-        cog().toolRegistry().get("decompose_goal").ifPresentOrElse(tool -> {
+        cog().tools.get("decompose_goal").ifPresentOrElse(tool -> {
             Map<String, Object> params = new java.util.HashMap<>();
             params.put("goal_description", goalDescription);
             if (noteId != null) {
