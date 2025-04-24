@@ -20,17 +20,21 @@ import static java.util.Objects.requireNonNullElse;
 public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(Events e, Cog.Cognition ctx) {
-        super.start(e, ctx);
+    public void start(Events ev, Logic.Cognition ctx) {
+        super.start(ev, ctx);
         // Listen for ExternalInputEvents that are KifLists starting with "goal"
-        e.on(new Term.Lst(Term.Atom.of("goal"), Term.Var.of("?_")), this::handleGoalAssertion);
+        ev.on(new Term.Lst(Term.Atom.of("goal"), Term.Var.of("?_")), this::handleGoalAssertion);
     }
 
     private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof Cog.ExternalInputEvent(Term term, String sourceId, String noteId))) {
-            return; // Should not happen with correct registration, but defensive
+        if (!(event instanceof Cog.ExternalInputEvent)) {
+             return; // Should not happen with correct registration, but defensive
         }
+        Cog.ExternalInputEvent eiEvent = (Cog.ExternalInputEvent) event;
+        Term term = eiEvent.term();
+        String sourceId = eiEvent.sourceId();
+        String noteId = eiEvent.noteId();
         // This is the targetNoteId from the input event
 
 

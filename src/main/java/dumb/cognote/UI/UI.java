@@ -147,17 +147,21 @@ public class UI extends JFrame {
     private static String extractContentFromKif(String kifString) {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
-            if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
+            if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst) {
+                Term.Lst list = (Term.Lst) terms.getFirst();
                 // Attempt to extract a string literal from common positions
                 // This is a heuristic and might need refinement
-                if (list.size() >= 2 && list.get(1) instanceof Term.Atom(String value)) {
-                    return value;
+                if (list.size() >= 2 && list.get(1) instanceof Term.Atom) {
+                    Term.Atom atom = (Term.Atom) list.get(1);
+                    return atom.value();
                 }
-                if (list.size() >= 3 && list.get(2) instanceof Term.Atom(String value)) {
-                    return value;
+                if (list.size() >= 3 && list.get(2) instanceof Term.Atom) {
+                    Term.Atom atom = (Term.Atom) list.get(2);
+                    return atom.value();
                 }
-                if (list.size() >= 4 && list.get(3) instanceof Term.Atom(String value)) {
-                    return value;
+                if (list.size() >= 4 && list.get(3) instanceof Term.Atom) {
+                    Term.Atom atom = (Term.Atom) list.get(3);
+                    return atom.value();
                 }
             }
         } catch (KifParser.ParseException e) {
@@ -242,36 +246,34 @@ public class UI extends JFrame {
         AttachmentViewModel vm = null;
         String displayNoteId = null;
 
-        switch (payload) {
-            case Assertion assertion -> {
-                var sourceNoteId = assertion.sourceNoteId();
-                // Find the most specific note ID to display this assertion under
-                // Prefer sourceNoteId if present, otherwise try to find a common source from justifications
-                // Fallback to the KB ID if no specific note source is found
-                var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0 && cog != null) ? cog.context.commonSourceNodeId(assertion.justificationIds()) : null;
-                displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb());
-                vm = AttachmentViewModel.fromAssertion(assertion, type, displayNoteId);
-            }
-            case AttachmentViewModel llmVm -> {
-                vm = llmVm;
-                displayNoteId = vm.noteId();
-            }
-            case Cog.Answer result -> {
-                // Query results are typically global or associated with the query's target KB
-                displayNoteId = result.query().startsWith(ID_PREFIX_QUERY) && cog != null ?
-                        cog.context.findAssertionByIdAcrossKbs(result.query()).map(Assertion::kb).orElse(GLOBAL_KB_NOTE_ID) : GLOBAL_KB_NOTE_ID; // Attempt to find KB from query ID if it's an assertion-based query
-                var content = String.format("Query Result (%s): %s -> %d bindings", result.status(), result.query(), result.bindings().size());
-                vm = AttachmentViewModel.forQuery(result.query() + "_res", displayNoteId, content, AttachmentType.QUERY_RESULT, System.currentTimeMillis(), displayNoteId);
-            }
-            case Cog.Query query -> {
-                // Query sent is associated with its target KB
-                displayNoteId = requireNonNullElse(query.targetKbId(), GLOBAL_KB_NOTE_ID);
-                var content = "Query Sent: " + query.pattern().toKif();
-                vm = AttachmentViewModel.forQuery(query.id() + "_sent", displayNoteId, content, AttachmentType.QUERY_SENT, System.currentTimeMillis(), displayNoteId);
-            }
-            default -> {
-            }
+        if (payload instanceof Assertion) {
+            Assertion assertion = (Assertion) payload;
+            var sourceNoteId = assertion.sourceNoteId();
+            // Find the most specific note ID to display this assertion under
+            // Prefer sourceNoteId if present, otherwise try to find a common source from justifications
+            // Fallback to the KB ID if no specific note source is found
+            var derivedNoteId = (sourceNoteId == null && assertion.derivationDepth() > 0 && cog != null) ? cog.context.commonSourceNodeId(assertion.justificationIds()) : null;
+            displayNoteId = requireNonNullElse(sourceNoteId != null ? sourceNoteId : derivedNoteId, assertion.kb());
+            vm = AttachmentViewModel.fromAssertion(assertion, type, displayNoteId);
+        } else if (payload instanceof AttachmentViewModel) {
+            AttachmentViewModel llmVm = (AttachmentViewModel) payload;
+            vm = llmVm;
+            displayNoteId = vm.noteId();
+        } else if (payload instanceof Cog.Answer) {
+            Cog.Answer result = (Cog.Answer) payload;
+            // Query results are typically global or associated with the query's target KB
+            displayNoteId = result.query().startsWith(ID_PREFIX_QUERY) && cog != null ?
+                    cog.context.findAssertionByIdAcrossKbs(result.query()).map(Assertion::kb).orElse(GLOBAL_KB_NOTE_ID) : GLOBAL_KB_NOTE_ID; // Attempt to find KB from query ID if it's an assertion-based query
+            var content = String.format("Query Result (%s): %s -> %d bindings", result.status(), result.query(), result.bindings().size());
+            vm = AttachmentViewModel.forQuery(result.query() + "_res", displayNoteId, content, AttachmentType.QUERY_RESULT, System.currentTimeMillis(), displayNoteId);
+        } else if (payload instanceof Cog.Query) {
+            Cog.Query query = (Cog.Query) payload;
+            // Query sent is associated with its target KB
+            displayNoteId = requireNonNullElse(query.targetKbId(), GLOBAL_KB_NOTE_ID);
+            var content = "Query Sent: " + query.pattern().toKif();
+            vm = AttachmentViewModel.forQuery(query.id() + "_sent", displayNoteId, content, AttachmentType.QUERY_SENT, System.currentTimeMillis(), displayNoteId);
         }
+
 
         if (vm != null && displayNoteId != null)
             handleSystemUpdate(vm, displayNoteId);
@@ -297,7 +299,189 @@ public class UI extends JFrame {
 
 
     private void updateLlmItem(Cog.TaskUpdateEvent e) {
-        findViewModelInAnyModel(e.taskId()).ifPresent(entry -> {
+        invokeLater(() -> updateLlmItem(e.taskId(), e.status(), e.content()));
+    }
+
+    private void applyFonts() {
+        Stream.of(
+                noteListPanel.noteList, editorPanel.edit, editorPanel.title,
+                attachmentPanel.filterField, attachmentPanel.queryInputField, attachmentPanel.queryButton,
+                mainControlPanel.addButton, mainControlPanel.pauseResumeButton, mainControlPanel.clearAllButton,
+                mainControlPanel.statusLabel, menuBarHandler.settingsItem, menuBarHandler.viewRulesItem,
+                menuBarHandler.askQueryItem, menuBarHandler.runTestsItem, // Add runTestsItem
+                noteListPanel.analyzeItem, noteListPanel.enhanceItem,
+                noteListPanel.summarizeItem, noteListPanel.conceptsItem, noteListPanel.questionsItem,
+                noteListPanel.removeItem, attachmentPanel.retractItem, attachmentPanel.showSupportItem,
+                attachmentPanel.queryItem, attachmentPanel.cancelLlmItem, attachmentPanel.insertSummaryItem,
+                attachmentPanel.answerQuestionItem, attachmentPanel.findRelatedConceptsItem,
+                noteListPanel.startNoteItem, noteListPanel.pauseNoteItem, noteListPanel.completeNoteItem // Add new menu items
+        ).forEach(c -> c.setFont(UI_DEFAULT_FONT));
+        attachmentPanel.attachmentList.setFont(MONOSPACED_FONT);
+    }
+
+    private void setupLayout() {
+        var leftPane = new JScrollPane(noteListPanel.noteList);
+        leftPane.setPreferredSize(new Dimension(250, 0));
+
+        var rightPanel = new JSplitPane(JSplitPane.VERTICAL_SPLIT, editorPanel, attachmentPanel);
+        rightPanel.setResizeWeight(0.7);
+
+        var mainSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPane, rightPanel);
+        mainSplitPane.setResizeWeight(0.2);
+
+        var p = getContentPane();
+        p.setLayout(new BorderLayout());
+        p.add(mainSplitPane, BorderLayout.CENTER);
+        p.add(mainControlPanel, BorderLayout.SOUTH);
+    }
+
+    private void setupWindowListener() {
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                saveCurrentNote(); // Save current note text before stopping
+                ofNullable(cog).ifPresent(Cog::stop);
+                dispose();
+                System.exit(0);
+            }
+        });
+    }
+
+    private void saveCurrentNote() {
+        ofNullable(note).filter(_ -> cog != null).ifPresent(n -> {
+            // Only save text/title for non-system notes
+            if (!GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(n.id)) {
+                n.text = editorPanel.edit.getText();
+                n.title = editorPanel.title.getText();
+                cog.save(); // Save all notes if a regular note is edited
+            } else if (Cog.CONFIG_NOTE_ID.equals(n.id)) {
+                // Handle config note separately
+                if (!cog.updateConfig(editorPanel.edit.getText())) {
+                    JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration note. Changes not applied.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
+                } else {
+                    // Config update already calls save internally on success
+                }
+            } else if (Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id)) {
+                 // Save changes to Test Definitions note text
+                 n.text = editorPanel.edit.getText();
+                 cog.save();
+            }
+            // Status changes are saved via CogNote.updateNoteStatus
+        });
+    }
+
+    void updateUIForSelection() {
+        var noteSelected = (note != null);
+        var isGlobalSelected = noteSelected && GLOBAL_KB_NOTE_ID.equals(note.id);
+        var isConfigSelected = noteSelected && Cog.CONFIG_NOTE_ID.equals(note.id);
+        var isTestDefsSelected = noteSelected && Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id);
+        var isTestResultsSelected = noteSelected && Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
+
+
+        editorPanel.updateForSelection(note, isGlobalSelected, isConfigSelected);
+        attachmentPanel.updateForSelection(note);
+        mainControlPanel.updatePauseResumeButton(); // Update button text based on system state
+
+        if (noteSelected) {
+            setTitle("Cognote - " + note.title + (isGlobalSelected || isConfigSelected || isTestDefsSelected || isTestResultsSelected ? "" : " [" + note.id + "]"));
+            SwingUtilities.invokeLater(() -> {
+                if (!isGlobalSelected && !isConfigSelected && !isTestResultsSelected) editorPanel.edit.requestFocusInWindow(); // Focus editor for editable notes
+                else if (isConfigSelected || isTestDefsSelected) editorPanel.edit.requestFocusInWindow(); // Allow editing config/test defs text
+                else attachmentPanel.filterField.requestFocusInWindow(); // Focus filter for global KB or test results
+            });
+        } else {
+            setTitle("Cognote - Event Driven");
+        }
+        setControlsEnabled(true); // Re-enable controls after selection change
+    }
+
+    private void setControlsEnabled(boolean enabled) {
+        var noteSelected = (note != null);
+        var isGlobalSelected = noteSelected && GLOBAL_KB_NOTE_ID.equals(note.id);
+        var isConfigSelected = noteSelected && Cog.CONFIG_NOTE_ID.equals(note.id);
+        var isTestDefsSelected = noteSelected && Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id);
+        var isTestResultsSelected = noteSelected && Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
+        var systemReady = (cog != null && cog.running.get() && !cog.paused.get()); // System is running and not explicitly paused
+
+        mainControlPanel.setControlsEnabled(enabled);
+        editorPanel.setControlsEnabled(enabled, noteSelected, isGlobalSelected, isConfigSelected);
+        attachmentPanel.setControlsEnabled(enabled, noteSelected, systemReady);
+        noteListPanel.setControlsEnabled(enabled);
+    }
+
+    private void performNoteAction(String actionName, String confirmTitle, String confirmMsgFormat, int confirmMsgType, Consumer<Note> action) {
+        ofNullable(note).filter(_ -> cog != null).filter(n -> !GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(n.id))
+                .filter(note -> JOptionPane.showConfirmDialog(this, String.format(confirmMsgFormat, note.title), confirmTitle, JOptionPane.YES_NO_OPTION, confirmMsgType) == JOptionPane.YES_OPTION)
+                .ifPresent(note -> {
+                    updateStatus(String.format("%s '%s'...", actionName, note.title));
+                    setControlsEnabled(false); // Disable controls during action
+                    try {
+                        action.accept(note);
+                        // Status update and re-enabling controls will happen via events (e.g., TaskUpdateEvent)
+                    } catch (Exception ex) {
+                        updateStatus(String.format("Error %s '%s'.", actionName, note.title));
+                        handleActionError(actionName, ex);
+                        setControlsEnabled(true); // Re-enable on immediate error
+                    }
+                });
+    }
+
+    private void handleActionError(String actionName, Throwable ex) {
+        var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
+        System.err.println("Error during " + actionName + ": " + cause.getMessage());
+        cause.printStackTrace();
+        JOptionPane.showMessageDialog(this, "Error during " + actionName + ":\n" + cause.getMessage(), "Action Error", JOptionPane.ERROR_MESSAGE);
+    }
+
+    public void handleSystemUpdate(AttachmentViewModel vm, @Nullable String displayNoteId) {
+        if (!isDisplayable()) return;
+        var targetNoteIdForList = requireNonNullElse(displayNoteId, GLOBAL_KB_NOTE_ID);
+        var sourceModel = noteAttachmentModels.computeIfAbsent(targetNoteIdForList, id -> new DefaultListModel<>());
+        updateOrAddModelItem(sourceModel, vm);
+
+        if (vm.isKifBased()) {
+            var status = vm.status;
+            if (status == AttachmentStatus.RETRACTED || status == AttachmentStatus.EVICTED || status == AttachmentStatus.INACTIVE)
+                updateAttachmentStatusInOtherNoteModels(vm.id, status, targetNoteIdForList);
+            if (cog != null) {
+                cog.context.findAssertionByIdAcrossKbs(vm.id)
+                        .ifPresent(assertion -> editorPanel.highlightAffectedNoteText(assertion, status));
+            }
+        }
+
+        if (note != null && note.id.equals(targetNoteIdForList))
+            attachmentPanel.refreshAttachmentDisplay();
+        attachmentPanel.updateAttachmentPanelTitle();
+    }
+
+    private void updateAttachmentStatusInOtherNoteModels(String attachmentId, AttachmentStatus newStatus, @Nullable String primaryNoteId) {
+        noteAttachmentModels.forEach((noteId, model) -> {
+            if (!Objects.equals(noteId, primaryNoteId)) { // Only update in *other* models
+                var idx = findViewModelIndexById(model, attachmentId);
+                if (idx != -1) { // Found in another note's attachments
+                    var existingItem = model.getElementAt(idx);
+                    if (existingItem.status != newStatus) {
+                        // Create a new ViewModel with updated status
+                        var updatedItem = new AttachmentViewModel(
+                                existingItem.id(), existingItem.noteId(), existingItem.content(),
+                                existingItem.attachmentType(), newStatus, existingItem.priority(),
+                                existingItem.depth(), existingItem.timestamp(), existingItem.associatedNoteId(),
+                                existingItem.kbId(), existingItem.justifications(), existingItem.llmStatus()
+                        );
+                        model.setElementAt(updatedItem, idx);
+                        if (note != null && note.id.equals(noteId)) {
+                            // If that other note is currently selected, refresh its display
+                            attachmentPanel.refreshAttachmentDisplay();
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+
+    public void updateLlmItem(String taskId, Cog.TaskStatus status, String content) {
+        findViewModelInAnyModel(taskId).ifPresent(entry -> {
             var model = entry.getKey();
             var index = entry.getValue();
             var oldVm = model.getElementAt(index);

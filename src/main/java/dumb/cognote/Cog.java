@@ -345,8 +345,11 @@ public class Cog {
 
         Consumer<CogEvent> listener = event -> {
             // Use a standard type pattern variable for broader compatibility
-            if (event instanceof Answer.AnswerEvent(Answer result) && result.query().equals(query.id())) {
-                resultFuture.complete(result);
+            if (event instanceof Answer.AnswerEvent) {
+                Answer result = ((Answer.AnswerEvent) event).result();
+                if (result.query().equals(query.id())) {
+                    resultFuture.complete(result);
+                }
             }
         };
 

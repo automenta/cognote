@@ -692,7 +692,8 @@ public class Reason {
             Stream<Map<Term.Var, Term>> resultStream = Stream.empty();
 
             // Handle Logical Connectives (and, or, not)
-            if (currentGoal instanceof Term.Lst goalList) {
+            if (currentGoal instanceof Term.Lst) {
+                Term.Lst goalList = (Term.Lst) currentGoal;
                 var opOpt = goalList.op();
                 if (opOpt.isPresent()) {
                     var op = opOpt.get();
@@ -805,7 +806,9 @@ public class Reason {
                 if (opResult == null) return Optional.empty();
 
                 // If the operator returns a boolean atom ("true" or "false")
-                if (opResult instanceof Term.Atom(String value)) {
+                if (opResult instanceof Term.Atom) {
+                    Term.Atom atomResult = (Term.Atom) opResult;
+                    String value = atomResult.value();
                     if ("true".equals(value)) {
                         return Optional.of(bindings); // Operator evaluated to true, goal is proven with current bindings
                     } else if ("false".equals(value)) {
