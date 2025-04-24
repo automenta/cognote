@@ -1,8 +1,6 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
-import dumb.cognote.tools.ToolRegistry; // Import ToolRegistry
-
 
 import java.util.*;
 import java.util.concurrent.CancellationException;
@@ -47,7 +45,7 @@ public class Reason {
     }
 
     // --- Reasoner Related Records & Classes ---
-    record ReasonerContext(Logic.Cognition cognition, Cog.Events events) {
+    public record ReasonerContext(Logic.Cognition cognition, Cog.Events events) {
         Logic.Knowledge getKb(@Nullable String noteId) {
             return cognition.kb(noteId);
         }
@@ -66,10 +64,6 @@ public class Reason {
 
         Op.Operators operators() {
             return cognition.operators();
-        }
-
-        public ToolRegistry toolRegistry() { // Add getter for ToolRegistry
-            return cognition.cog().toolRegistry();
         }
     }
 
@@ -131,10 +125,10 @@ public class Reason {
 
         private void dispatchRuleEvent(Cog.CogEvent event) {
             if (event instanceof Cog.RuleAddedEvent) {
-                Cog.RuleAddedEvent rae = (Cog.RuleAddedEvent) event;
+                var rae = (Cog.RuleAddedEvent) event;
                 plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rae.rule())));
             } else if (event instanceof Cog.RuleRemovedEvent) {
-                Cog.RuleRemovedEvent rre = (Cog.RuleRemovedEvent) event;
+                var rre = (Cog.RuleRemovedEvent) event;
                 plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rre.rule())));
             }
             // No default needed as there are no other RuleEvent types currently
@@ -274,7 +268,7 @@ public class Reason {
                 return;
 
             context.rules().forEach(rule -> rule.antecedents().forEach(clause -> {
-                boolean neg = (clause instanceof Logic.KifList l && l.op().filter(KIF_OP_NOT::equals).isPresent());
+                var neg = (clause instanceof Logic.KifList l && l.op().filter(KIF_OP_NOT::equals).isPresent());
                 if (neg == newAssertion.negated()) {
                     var pattern = neg ? ((Logic.KifList) clause).get(1) : clause;
                     ofNullable(Logic.Unifier.unify(pattern, newAssertion.getEffectiveTerm(), Map.of()))
@@ -289,7 +283,7 @@ public class Reason {
 
             var clause = Logic.Unifier.substFully(remaining.getFirst(), bindings);
             var nextRemaining = remaining.subList(1, remaining.size());
-            boolean neg = (clause instanceof Logic.KifList l && l.op().filter(KIF_OP_NOT::equals).isPresent());
+            var neg = (clause instanceof Logic.KifList l && l.op().filter(KIF_OP_NOT::equals).isPresent());
             var pattern = neg ? ((Logic.KifList) clause).get(1) : clause;
             if (!(pattern instanceof Logic.KifList)) return Stream.empty(); // Cannot match non-lists
 

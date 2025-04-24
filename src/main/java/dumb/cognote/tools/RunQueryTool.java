@@ -2,7 +2,6 @@ package dumb.cognote.tools;
 
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -31,9 +30,9 @@ public class RunQueryTool implements BaseTool {
 
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String kifPattern = (String) parameters.get("kif_pattern");
-        String targetKbId = (String) parameters.get("target_kb_id");
-        String queryTypeStr = (String) parameters.getOrDefault("query_type", "ASK_BINDINGS"); // Default type
+        var kifPattern = (String) parameters.get("kif_pattern");
+        var targetKbId = (String) parameters.get("target_kb_id");
+        var queryTypeStr = (String) parameters.getOrDefault("query_type", "ASK_BINDINGS"); // Default type
 
         return CompletableFuture.supplyAsync(() -> {
             if (cog == null) {
@@ -43,9 +42,9 @@ public class RunQueryTool implements BaseTool {
                 return "Error: Missing required parameter 'kif_pattern'.";
             }
 
-            Logic.QueryType queryType;
+            Cog.QueryType queryType;
             try {
-                queryType = Logic.QueryType.valueOf(queryTypeStr.toUpperCase());
+                queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
             } catch (IllegalArgumentException e) {
                 return "Error: Invalid query type '" + queryTypeStr + "'. Must be ASK_BINDINGS, ASK_TRUE_FALSE, or ACHIEVE_GOAL.";
             }
@@ -93,7 +92,8 @@ public class RunQueryTool implements BaseTool {
             }
             case FAILURE -> "Query failed.";
             case TIMEOUT -> "Query timed out.";
-            case ERROR -> "Query error: " + (answer.explanation() != null ? answer.explanation().details() : "Unknown error.");
+            case ERROR ->
+                    "Query error: " + (answer.explanation() != null ? answer.explanation().details() : "Unknown error.");
         };
     }
 }

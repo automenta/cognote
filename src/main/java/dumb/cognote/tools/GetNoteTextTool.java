@@ -44,10 +44,10 @@ public class GetNoteTextTool implements BaseTool {
     // It parses parameters from the map and returns a CompletableFuture.
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String noteId = (String) parameters.get("note_id");
+        var noteId = (String) parameters.get("note_id");
         return CompletableFuture.supplyAsync(() -> {
             if (noteId == null || noteId.isBlank()) {
-                 return "Error: Missing required parameter 'note_id'.";
+                return "Error: Missing required parameter 'note_id'.";
             }
             if (cog == null || cog.ui == null) {
                 return "Error: System UI not available.";

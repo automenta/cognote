@@ -17,7 +17,7 @@ public class LogMessageTool implements BaseTool {
 
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String message = (String) parameters.get("message");
+        var message = (String) parameters.get("message");
         return CompletableFuture.supplyAsync(() -> {
             if (message != null) {
                 System.out.println("TOOL LOG: " + message);

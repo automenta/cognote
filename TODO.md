@@ -72,7 +72,9 @@ relevant information.
 • Task 5.3: Implement Continuous Matching: Develop a background process that continuously evaluates new incoming
 assertions/notes from the       
 network against the local node's persistent queries, using the combined KIF/semantic matching from Phase
-3.                                    
+
+3.
+
 • Task 5.4: Implement Notification System: When a match is found, generate a notification event. Design how these
 notifications are presented to
 the user (e.g., via the UI, or potentially pushed to other systems).

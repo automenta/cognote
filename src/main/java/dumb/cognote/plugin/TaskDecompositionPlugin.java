@@ -1,16 +1,12 @@
-package dumb.cognote;
+package dumb.cognote.plugin;
 
-import dev.langchain4j.data.message.AiMessage;
-import org.jetbrains.annotations.Nullable;
-import dumb.cognote.tools.BaseTool; // Import BaseTool
+import dumb.cognote.Cog;
+import dumb.cognote.Logic;
 
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.Map; // Import Map
+import java.util.Map;
 
-import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
-import static dumb.cognote.Logic.*;
+import static dumb.cognote.Logic.Cognition;
+import static dumb.cognote.Logic.KifList;
 
 /**
  * Plugin that listens for (goal ...) assertions and uses the LLM to decompose them into sub-tasks.
@@ -18,10 +14,10 @@ import static dumb.cognote.Logic.*;
 public class TaskDecompositionPlugin extends Cog.BasePlugin {
 
     @Override
-    public void start(Cog.Events e, Logic.Cognition ctx) {
+    public void start(Cog.Events e, Cognition ctx) {
         super.start(e, ctx);
         // Listen for ExternalInputEvents that are KifLists starting with "goal"
-        e.on(new Logic.KifList(Logic.KifAtom.of("goal"), Logic.KifVar.of("?_")), this::handleGoalAssertion);
+        e.on(new KifList(Logic.KifAtom.of("goal"), Logic.KifVar.of("?_")), this::handleGoalAssertion);
     }
 
     private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Logic.KifVar, Logic.KifTerm> bindings) {
@@ -29,9 +25,9 @@ public class TaskDecompositionPlugin extends Cog.BasePlugin {
         if (!(event instanceof Cog.ExternalInputEvent externalInputEvent)) {
             return; // Should not happen with correct registration, but defensive
         }
-        Logic.KifTerm term = externalInputEvent.term();
-        String sourceId = externalInputEvent.sourceId();
-        String noteId = externalInputEvent.targetNoteId(); // This is the targetNoteId from the input event
+        var term = externalInputEvent.term();
+        var sourceId = externalInputEvent.sourceId();
+        var noteId = externalInputEvent.targetNoteId(); // This is the targetNoteId from the input event
 
 
         if (!(term instanceof Logic.KifList goalList) || goalList.size() < 2 || !goalList.op().filter("goal"::equals).isPresent()) {

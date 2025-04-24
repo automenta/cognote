@@ -3,6 +3,7 @@ package dumb.cognote.tools;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
+import dumb.cognote.LM;
 import dumb.cognote.Logic;
 import org.jetbrains.annotations.Nullable;
 
@@ -11,7 +12,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
-import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
 
 public class AddKifAssertionTool implements BaseTool {
@@ -51,12 +51,12 @@ public class AddKifAssertionTool implements BaseTool {
     // It parses parameters from the map and returns a CompletableFuture.
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String kifAssertion = (String) parameters.get("kif_assertion");
-        String targetKbId = (String) parameters.get("target_kb_id");
+        var kifAssertion = (String) parameters.get("kif_assertion");
+        var targetKbId = (String) parameters.get("target_kb_id");
 
         return CompletableFuture.supplyAsync(() -> {
             if (kifAssertion == null || kifAssertion.isBlank()) {
-                 return "Error: Missing required parameter 'kif_assertion'.";
+                return "Error: Missing required parameter 'kif_assertion'.";
             }
             try {
                 var terms = Logic.KifParser.parseKif(kifAssertion);

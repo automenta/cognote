@@ -1,21 +1,8 @@
 package dumb.cognote;
 
-// LangChain4j Core Imports
-
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.service.AiServices;
-import org.jetbrains.annotations.Nullable;
-import dumb.cognote.tools.BaseTool; // Import BaseTool
-import dumb.cognote.tools.ToolRegistry; // Import ToolRegistry
-import dev.langchain4j.agent.tool.ToolSpecification; // Needed for AiServices builder
-
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -24,15 +11,13 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
-// Remove the nested Tools class entirely
 
 public class LM {
+    public static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
     static final String DEFAULT_LLM_URL = "http://localhost:11434"; // Base URL for Ollama
     static final String DEFAULT_LLM_MODEL = "hf.co/mradermacher/phi-4-GGUF:Q4_K_S";
-    static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
-    final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
+    public final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
     // Removed final Tools tools; // No longer needed
 
     private final Cog cog; // Keep reference to Cog
@@ -70,8 +55,8 @@ public class LM {
             System.out.printf("LM ChatModel reconfigured: Base URL=%s, Model=%s%s%n", baseUrl, llmModel, (chatModel == null ? " (Failed)" : ""));
 
             if (this.chatModel == null) {
-                 this.llmService = null;
-                 return;
+                this.llmService = null;
+                return;
             }
 
             // Get LLM-callable tools from the registry
@@ -79,7 +64,7 @@ public class LM {
             // or a list of ToolSpecification.
             // Let's pass the list of BaseTool instances that have @Tool methods.
             // AiServices will reflect on these instances.
-            List<BaseTool> llmCallableTools = cog.toolRegistry().getLlmCallableTools().stream().toList();
+            var llmCallableTools = cog.toolRegistry().getLlmCallableTools().stream().toList();
 
 
             this.llmService = AiServices.builder(LlmService.class)
@@ -98,7 +83,7 @@ public class LM {
     }
 
     // Simplified llmAsync: Delegates to AiService.chat()
-    CompletableFuture<dev.langchain4j.data.message.AiMessage> llmAsync(String taskId, List<dev.langchain4j.data.message.ChatMessage> history, String interactionType, String noteId) {
+    public CompletableFuture<dev.langchain4j.data.message.AiMessage> llmAsync(String taskId, List<dev.langchain4j.data.message.ChatMessage> history, String interactionType, String noteId) {
         if (llmService == null) {
             var errorMsg = interactionType + " Error: LLM Service not configured.";
             cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, errorMsg);
@@ -123,7 +108,7 @@ public class LM {
             cog.updateLlmItemStatus(taskId, UI.LlmStatus.PROCESSING, interactionType + ": Sending to LLM Service...");
 
             try {
-                dev.langchain4j.data.message.AiMessage finalAiMessage = llmService.chat(conversationHistory);
+                var finalAiMessage = llmService.chat(conversationHistory);
 
                 cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + ": Received final response.");
                 return finalAiMessage;

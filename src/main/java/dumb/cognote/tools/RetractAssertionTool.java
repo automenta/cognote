@@ -2,7 +2,6 @@ package dumb.cognote.tools;
 
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -27,9 +26,9 @@ public class RetractAssertionTool implements BaseTool {
 
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String target = (String) parameters.get("target");
-        String typeStr = (String) parameters.get("type");
-        String targetNoteId = (String) parameters.get("target_note_id"); // Optional
+        var target = (String) parameters.get("target");
+        var typeStr = (String) parameters.get("type");
+        var targetNoteId = (String) parameters.get("target_note_id"); // Optional
 
         return CompletableFuture.supplyAsync(() -> {
             if (cog == null) {
@@ -49,7 +48,7 @@ public class RetractAssertionTool implements BaseTool {
             // Note: BY_NOTE retraction is handled by the UI directly when removing a note.
             // This tool focuses on ID or Rule form retraction.
             if (type == Logic.RetractionType.BY_NOTE) {
-                 return "Error: Retraction type BY_NOTE is not supported by this tool. Use the UI to remove notes.";
+                return "Error: Retraction type BY_NOTE is not supported by this tool. Use the UI to remove notes.";
             }
 
             var sourceId = "tool:retract_assertion";

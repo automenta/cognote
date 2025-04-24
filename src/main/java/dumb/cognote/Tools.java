@@ -1,4 +1,6 @@
-package dumb.cognote.tools;
+package dumb.cognote;
+
+import dumb.cognote.tools.BaseTool;
 
 import java.util.Collection;
 import java.util.Map;
@@ -6,26 +8,29 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Central registry for all tools available in the system.
+ * Tool registry
  */
-public class ToolRegistry {
+public class Tools {
     private final Map<String, BaseTool> tools = new ConcurrentHashMap<>();
 
     /**
      * Registers a tool with the registry.
+     *
      * @param tool The tool to register.
      * @throws IllegalArgumentException if a tool with the same name is already registered.
      */
     public void register(BaseTool tool) {
-        if (tools.containsKey(tool.name())) {
-            throw new IllegalArgumentException("Tool with name '" + tool.name() + "' already registered.");
-        }
-        tools.put(tool.name(), tool);
-        System.out.println("Registered tool: " + tool.name());
+        var n = tool.name();
+        if (tools.containsKey(n))
+            throw new IllegalArgumentException("Tool with name '" + n + "' already registered.");
+
+        tools.put(n, tool);
+        System.out.println("Registered tool: " + n);
     }
 
     /**
      * Retrieves a tool by its name.
+     *
      * @param name The name of the tool.
      * @return An Optional containing the tool if found, otherwise empty.
      */
@@ -35,6 +40,7 @@ public class ToolRegistry {
 
     /**
      * Gets all registered tools.
+     *
      * @return A collection of all registered tools.
      */
     public Collection<BaseTool> getAll() {
@@ -44,6 +50,7 @@ public class ToolRegistry {
     /**
      * Gets all registered tools that are callable by the LLM (i.e., have an @Tool annotation
      * on their execute method). This requires reflection.
+     *
      * @return A collection of LLM-callable tools.
      */
     public Collection<BaseTool> getLlmCallableTools() {
@@ -58,7 +65,7 @@ public class ToolRegistry {
                         // In our design, the BaseTool.execute(Map) method is for internal calls.
                         // The @Tool annotated method is a separate method (e.g., addKifAssertionToolMethod).
                         // We need to find any method in the tool's class that has the @Tool annotation.
-                        for (java.lang.reflect.Method method : tool.getClass().getDeclaredMethods()) {
+                        for (var method : tool.getClass().getDeclaredMethods()) {
                             if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
                                 return true; // Found an LLM-callable method
                             }

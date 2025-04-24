@@ -3,8 +3,6 @@ package dumb.cognote;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
-import dumb.cognote.tools.BaseTool; // Import BaseTool
-import dumb.cognote.tools.ToolRegistry; // Import ToolRegistry
 
 import javax.swing.*;
 import javax.swing.border.*;
@@ -21,10 +19,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
@@ -34,7 +30,7 @@ import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
-class UI extends JFrame {
+public class UI extends JFrame {
     private static final int UI_FONT_SIZE = 16;
     public static final Font MONOSPACED_FONT = new Font(Font.MONOSPACED, Font.PLAIN, UI_FONT_SIZE - 2);
     public static final Font UI_DEFAULT_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, UI_FONT_SIZE);
@@ -105,7 +101,7 @@ class UI extends JFrame {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
             if (terms.size() == 1 && terms.getFirst() instanceof Logic.KifList list && list.size() >= 4 && list.get(3) instanceof KifAtom(
-                    String value
+                    var value
             )) {
                 return value;
             }
@@ -247,7 +243,7 @@ class UI extends JFrame {
         mainControlPanel.setControlsEnabled(enabled);
         editorPanel.setControlsEnabled(enabled, noteSelected, isGlobalSelected, isConfigSelected);
         attachmentPanel.setControlsEnabled(enabled, noteSelected, systemReady);
-        noteListPanel.setControlsEnabled(enabled, noteSelected, isGlobalSelected, isConfigSelected, systemReady);
+        noteListPanel.setControlsEnabled(enabled/*, noteSelected, isGlobalSelected, isConfigSelected, systemReady*/);
     }
 
     private void performNoteAction(String actionName, String confirmTitle, String confirmMsgFormat, int confirmMsgType, Consumer<Cog.Note> action) {
@@ -431,9 +427,9 @@ class UI extends JFrame {
     // --- Static Helper Classes/Records/Enums ---
     enum AttachmentStatus {ACTIVE, RETRACTED, EVICTED, INACTIVE}
 
-    enum LlmStatus {IDLE, SENDING, PROCESSING, DONE, ERROR, CANCELLED}
+    public enum LlmStatus {IDLE, SENDING, PROCESSING, DONE, ERROR, CANCELLED}
 
-    enum AttachmentType {FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION, LLM_INFO, LLM_ERROR, QUERY_SENT, QUERY_RESULT, OTHER}
+    public enum AttachmentType {FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION, LLM_INFO, LLM_ERROR, QUERY_SENT, QUERY_RESULT, OTHER}
 
     // Removed NoteAsyncAction interface
 
@@ -478,20 +474,20 @@ class UI extends JFrame {
         }
     }
 
-    record AttachmentViewModel(String id, @Nullable String noteId, String content, AttachmentType attachmentType,
-                               AttachmentStatus status, double priority, int depth, long timestamp,
-                               @Nullable String associatedNoteId, @Nullable String kbId,
-                               @Nullable Set<String> justifications,
-                               LlmStatus llmStatus) implements Comparable<AttachmentViewModel> {
-        static AttachmentViewModel fromAssertion(Logic.Assertion a, String callbackType, @Nullable String associatedNoteId) {
+    public record AttachmentViewModel(String id, @Nullable String noteId, String content, AttachmentType attachmentType,
+                                      AttachmentStatus status, double priority, int depth, long timestamp,
+                                      @Nullable String associatedNoteId, @Nullable String kbId,
+                                      @Nullable Set<String> justifications,
+                                      LlmStatus llmStatus) implements Comparable<AttachmentViewModel> {
+        public static AttachmentViewModel fromAssertion(Logic.Assertion a, String callbackType, @Nullable String associatedNoteId) {
             return new AttachmentViewModel(a.id(), a.sourceNoteId(), a.toKifString(), determineTypeFromAssertion(a), determineStatusFromCallback(callbackType, a.isActive()), a.pri(), a.derivationDepth(), a.timestamp(), requireNonNullElse(associatedNoteId, a.sourceNoteId()), a.kb(), a.justificationIds(), LlmStatus.IDLE);
         }
 
-        static AttachmentViewModel forLlm(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId, LlmStatus llmStatus) {
+        public static AttachmentViewModel forLlm(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId, LlmStatus llmStatus) {
             return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, llmStatus);
         }
 
-        static AttachmentViewModel forQuery(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId) {
+        public static AttachmentViewModel forQuery(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId) {
             return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, LlmStatus.IDLE);
         }
 
@@ -538,7 +534,7 @@ class UI extends JFrame {
 
         @Override
         public int compareTo(AttachmentViewModel other) {
-            int cmp = Integer.compare(status.ordinal(), other.status.ordinal());
+            var cmp = Integer.compare(status.ordinal(), other.status.ordinal());
             if (cmp != 0) return cmp;
             cmp = Integer.compare(attachmentType.ordinal(), other.attachmentType.ordinal());
             if (cmp != 0) return cmp;
@@ -835,7 +831,7 @@ class UI extends JFrame {
                     .forEach(i -> i.setEnabled(isEditableNote && systemReady));
         }
 
-        void setControlsEnabled(boolean enabled, boolean noteSelected, boolean isGlobal, boolean isConfig, boolean systemReady) {
+        void setControlsEnabled(boolean enabled/*, boolean noteSelected, boolean isGlobal, boolean isConfig, boolean systemReady*/) {
             noteList.setEnabled(enabled);
         }
 
@@ -844,8 +840,8 @@ class UI extends JFrame {
         }
 
         private void removeNoteAction() {
-             // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
-             // For now, keep as is to minimize changes outside the tool system core.
+            // This currently emits RetractionRequestEvent. Could refactor to use RetractAssertionTool.
+            // For now, keep as is to minimize changes outside the tool system core.
             performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
         }
 
@@ -861,7 +857,7 @@ class UI extends JFrame {
             findNoteIndexById(noteId).ifPresent(indexToRemove -> {
                 var selectedIdxBeforeRemove = noteList.getSelectedIndex();
                 noteListModel.removeElementAt(indexToRemove);
-                boolean stateChanged = false;
+                var stateChanged = false;
                 if (currentNote != null && currentNote.id.equals(noteId)) {
                     currentNote = null;
                     stateChanged = true;
@@ -942,9 +938,9 @@ class UI extends JFrame {
                         System.out.println("Tool '" + tool.name() + "' completed for note '" + note.id + "'. Result: " + result);
                         // Optional: Show result in UI if the tool returns a message
                         if (result instanceof String msg && !msg.isBlank()) {
-                             // JOptionPane.showMessageDialog(UI.this, msg, tool.name() + " Result", JOptionPane.INFORMATION_MESSAGE);
-                             // Or log to status bar briefly
-                             updateStatus(tool.name() + " Result: " + msg);
+                            // JOptionPane.showMessageDialog(UI.this, msg, tool.name() + " Result", JOptionPane.INFORMATION_MESSAGE);
+                            // Or log to status bar briefly
+                            updateStatus(tool.name() + " Result: " + msg);
                         }
                     }
                 }, SwingUtilities::invokeLater); // Handle completion on EDT
@@ -1131,6 +1127,12 @@ class UI extends JFrame {
             attachmentList.setModel(new DefaultListModel<>());
         }
 
+        private void findRelatedConceptsAction() {
+            getSelectedAttachmentViewModel().filter(vm ->
+                    vm.attachmentType == AttachmentType.CONCEPT && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm ->
+                    JOptionPane.showMessageDialog(UI.this, "Find related notes for concept '" + extractContentFromKif(vm.content()) + "' NYI.", "Find Related Notes", JOptionPane.INFORMATION_MESSAGE));
+        }
+
         void refreshAttachmentDisplay() {
             if (currentNote == null) {
                 clearAttachments();
@@ -1184,7 +1186,7 @@ class UI extends JFrame {
                     params.put("type", "BY_ID");
                     // Optional: Pass target_note_id if retraction is context-specific
                     if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
-                         params.put("target_note_id", currentNote.id);
+                        params.put("target_note_id", currentNote.id);
                     }
 
                     tool.execute(params).whenCompleteAsync((result, ex) -> {
@@ -1255,7 +1257,7 @@ class UI extends JFrame {
                 params.put("kif_pattern", queryText);
                 // Optional: Pass target_kb_id if query is context-specific
                 if (currentNote != null && !Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
-                     params.put("target_kb_id", currentNote.id);
+                    params.put("target_kb_id", currentNote.id);
                 }
                 // Default query_type is ASK_BINDINGS, no need to add if that's the intent
 

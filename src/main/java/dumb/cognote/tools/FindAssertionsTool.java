@@ -50,8 +50,8 @@ public class FindAssertionsTool implements BaseTool {
     // It parses parameters from the map and returns a CompletableFuture.
     @Override
     public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String kifPattern = (String) parameters.get("kif_pattern");
-        String targetKbId = (String) parameters.get("target_kb_id");
+        var kifPattern = (String) parameters.get("kif_pattern");
+        var targetKbId = (String) parameters.get("target_kb_id");
 
         return CompletableFuture.supplyAsync(() -> {
             if (cog == null) {

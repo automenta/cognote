@@ -60,11 +60,11 @@ public class Logic {
         return a.type == AssertionType.GROUND || a.type == AssertionType.SKOLEMIZED;
     }
 
-    enum AssertionType {GROUND, UNIVERSAL, SKOLEMIZED}
+    public enum AssertionType {GROUND, UNIVERSAL, SKOLEMIZED}
 
-    enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
+    public enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM}
 
-    sealed interface KifTerm permits KifAtom, KifVar, KifList {
+    sealed public interface KifTerm permits KifAtom, KifVar, KifList {
         static Set<KifVar> collectSpecVars(KifTerm varsTerm) {
             return switch (varsTerm) {
                 case KifVar v -> Set.of(v);
@@ -95,7 +95,7 @@ public class Logic {
         }
     }
 
-    record Explanation(String details) {
+    public record Explanation(String details) {
     }
 
     static class Skolemizer {
@@ -125,12 +125,12 @@ public class Logic {
         }
     }
 
-    record KifAtom(String value) implements KifTerm {
+    public record KifAtom(String value) implements KifTerm {
         // Relaxed pattern slightly to allow more common symbols, but still restrictive
         private static final Pattern SAFE_ATOM_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\-+*/.<>=:!#%&']+$");
         private static final Map<String, KifAtom> internCache = new ConcurrentHashMap<>(1024);
 
-        KifAtom {
+        public KifAtom {
             requireNonNull(value);
         }
 
@@ -166,10 +166,10 @@ public class Logic {
         }
     }
 
-    record KifVar(String name) implements KifTerm {
+    public record KifVar(String name) implements KifTerm {
         private static final Map<String, KifVar> internCache = new ConcurrentHashMap<>(256);
 
-        KifVar {
+        public KifVar {
             requireNonNull(name);
             if (!name.startsWith("?") || name.length() < 2)
                 throw new IllegalArgumentException("Variable name must start with '?' and have length > 1: " + name);
@@ -205,7 +205,7 @@ public class Logic {
         }
     }
 
-    static final class KifList implements KifTerm {
+    public static final class KifList implements KifTerm {
         final List<KifTerm> terms;
         private volatile int hashCodeCache;
         private volatile boolean hashCodeCalculated = false;
@@ -219,7 +219,7 @@ public class Logic {
             this.terms = List.copyOf(requireNonNull(terms));
         }
 
-        KifList(KifTerm... terms) {
+        public KifList(KifTerm... terms) {
             this(List.of(terms));
         }
 
@@ -227,15 +227,15 @@ public class Logic {
             return terms;
         }
 
-        KifTerm get(int index) {
+        public KifTerm get(int index) {
             return terms.get(index);
         }
 
-        int size() {
+        public int size() {
             return terms.size();
         }
 
-        Optional<String> op() {
+        public Optional<String> op() {
             return terms.isEmpty() || !(terms.getFirst() instanceof KifAtom(var v)) ? Optional.empty() : Optional.of(v);
         }
 
@@ -291,12 +291,12 @@ public class Logic {
         }
     }
 
-    record Assertion(String id, KifList kif, double pri, long timestamp, @Nullable String sourceNoteId,
-                     Set<String> justificationIds, AssertionType type,
-                     boolean isEquality, boolean isOrientedEquality, boolean negated,
-                     List<KifVar> quantifiedVars, int derivationDepth, boolean isActive,
-                     String kb) implements Comparable<Assertion> {
-        Assertion {
+    public record Assertion(String id, KifList kif, double pri, long timestamp, @Nullable String sourceNoteId,
+                            Set<String> justificationIds, AssertionType type,
+                            boolean isEquality, boolean isOrientedEquality, boolean negated,
+                            List<KifVar> quantifiedVars, int derivationDepth, boolean isActive,
+                            String kb) implements Comparable<Assertion> {
+        public Assertion {
             requireNonNull(id);
             requireNonNull(kif);
             requireNonNull(type);
@@ -334,7 +334,7 @@ public class Logic {
             return Long.compare(other.timestamp, this.timestamp);
         }
 
-        String toKifString() {
+        public String toKifString() {
             return kif.toKif();
         }
 
@@ -434,10 +434,10 @@ public class Logic {
         }
     }
 
-    record PotentialAssertion(KifList kif, double pri, Set<String> support, String sourceId, boolean isEquality,
-                              boolean isNegated, boolean isOrientedEquality, @Nullable String sourceNoteId,
-                              AssertionType derivedType, List<KifVar> quantifiedVars, int derivationDepth) {
-        PotentialAssertion {
+    public record PotentialAssertion(KifList kif, double pri, Set<String> support, String sourceId, boolean isEquality,
+                                     boolean isNegated, boolean isOrientedEquality, @Nullable String sourceNoteId,
+                                     AssertionType derivedType, List<KifVar> quantifiedVars, int derivationDepth) {
+        public PotentialAssertion {
             requireNonNull(kif);
             requireNonNull(sourceId);
             requireNonNull(derivedType);
@@ -469,11 +469,11 @@ public class Logic {
         }
     }
 
-    static class TruthMaintenance {
+    public static class TruthMaintenance {
 
-        enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
+        public enum ResolutionStrategy {RETRACT_WEAKEST, LOG_ONLY}
 
-        interface Truths {
+        public interface Truths {
             SupportTicket addAssertion(Assertion assertion, Set<String> justificationIds, String source);
 
             void retractAssertion(String assertionId, String source);
@@ -494,7 +494,7 @@ public class Logic {
         record SupportTicket(String ticketId, String assertionId) {
         }
 
-        record Contradiction(Set<String> conflictingAssertionIds) {
+        public record Contradiction(Set<String> conflictingAssertionIds) {
         }
 
         static class BasicTMS implements Truths {
@@ -641,7 +641,7 @@ public class Logic {
             public void resolveContradiction(Contradiction contradiction, ResolutionStrategy strategy) {
                 lock.writeLock().lock(); // Acquire lock to safely access assertions map
                 try {
-                    Set<String> conflictingIds = contradiction.conflictingAssertionIds();
+                    var conflictingIds = contradiction.conflictingAssertionIds();
                     System.err.printf("TMS Contradiction Resolution (Strategy: %s) for IDs: %s%n", strategy, conflictingIds);
 
                     switch (strategy) {
@@ -650,7 +650,7 @@ public class Logic {
                             System.err.println("Strategy LOG_ONLY: No assertions retracted.");
                         }
                         case RETRACT_WEAKEST -> {
-                            List<Assertion> activeConflicts = conflictingIds.stream()
+                            var activeConflicts = conflictingIds.stream()
                                     .map(assertions::get)
                                     .filter(Objects::nonNull)
                                     .filter(Assertion::isActive)
@@ -662,13 +662,13 @@ public class Logic {
                             }
 
                             // Find the minimum priority among active conflicts
-                            double minPri = activeConflicts.stream()
+                            var minPri = activeConflicts.stream()
                                     .mapToDouble(Assertion::pri)
                                     .min()
                                     .orElseThrow(); // Should not happen if activeConflicts is not empty
 
                             // Find assertions with the minimum priority
-                            List<Assertion> weakestAssertions = activeConflicts.stream()
+                            var weakestAssertions = activeConflicts.stream()
                                     .filter(a -> Double.compare(a.pri(), minPri) == 0)
                                     .toList();
 
@@ -676,7 +676,7 @@ public class Logic {
 
                             if (weakestAssertions.size() > 1) {
                                 // If there's a tie in priority, retract the oldest ones
-                                long maxTimestamp = weakestAssertions.stream()
+                                var maxTimestamp = weakestAssertions.stream()
                                         .mapToLong(Assertion::timestamp)
                                         .max()
                                         .orElseThrow(); // Should not happen
@@ -1032,7 +1032,7 @@ public class Logic {
         }
     }
 
-    static class Cognition {
+    public static class Cognition {
         final Cog cog;
         final Events events;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
@@ -1316,7 +1316,7 @@ public class Logic {
         }
     }
 
-    static class KifParser {
+    public static class KifParser {
         private final Reader reader;
         private int currentChar = -2; // -2: initial, -1: EOF, >=0: char value
         private int line = 1;
@@ -1327,7 +1327,7 @@ public class Logic {
             this.reader = reader;
         }
 
-        static List<KifTerm> parseKif(String input) throws ParseException {
+        public static List<KifTerm> parseKif(String input) throws ParseException {
             if (input == null || input.isBlank()) return List.of();
             try (var sr = new StringReader(input.trim())) {
                 return new KifParser(sr).parseTopLevel();
@@ -1365,7 +1365,7 @@ public class Logic {
                     if (isValidAtomChar(next)) {
                         yield parseAtom();
                     } else {
-                        throw createParseException("Invalid character at start of term", "'" + (char)next + "'");
+                        throw createParseException("Invalid character at start of term", "'" + (char) next + "'");
                     }
                 }
             };
@@ -1386,7 +1386,7 @@ public class Logic {
                 // Check if the next character is a valid start of a term
                 // Valid starts are '(', '"', '?', or a character valid for an unquoted atom
                 if (next != '(' && next != '"' && next != '?' && !isValidAtomChar(next)) {
-                    throw createParseException("Invalid character inside list", "'" + (char)next + "'");
+                    throw createParseException("Invalid character inside list", "'" + (char) next + "'");
                 }
 
                 terms.add(parseTerm()); // parseTerm handles its own errors
@@ -1398,7 +1398,7 @@ public class Logic {
             var sb = new StringBuilder("?");
             var next = peek();
             if (!isValidAtomChar(next)) {
-                throw createParseException("Variable name character expected after '?'", (next == -1) ? "EOF" : "'" + (char)next + "'");
+                throw createParseException("Variable name character expected after '?'", (next == -1) ? "EOF" : "'" + (char) next + "'");
             }
             while (isValidAtomChar(peek())) {
                 sb.append((char) consumeChar());
@@ -1415,7 +1415,7 @@ public class Logic {
             var next = peek();
             // This check is somewhat redundant if called from parseTerm, but safe
             if (!isValidAtomChar(next)) {
-                 throw createParseException("Invalid character at start of atom", "'" + (char)next + "'");
+                throw createParseException("Invalid character at start of atom", "'" + (char) next + "'");
             }
             while (isValidAtomChar(peek())) {
                 sb.append((char) consumeChar());
@@ -1439,7 +1439,8 @@ public class Logic {
                         case 'r' -> '\r';
                         case '"' -> '"'; // Escape for double quote
                         case '\\' -> '\\'; // Escape for backslash
-                        default -> throw createParseException("Invalid escape sequence in string literal", "'\\" + (char)next + "'");
+                        default ->
+                                throw createParseException("Invalid escape sequence in string literal", "'\\" + (char) next + "'");
                     });
                 } else sb.append((char) c);
             }
@@ -1497,11 +1498,11 @@ public class Logic {
         }
 
         private ParseException createParseException(String message, @Nullable String foundToken) {
-            String foundInfo = foundToken != null ? " found " + foundToken : "";
+            var foundInfo = foundToken != null ? " found " + foundToken : "";
             return new ParseException(message + foundInfo + " at line " + line + " col " + col);
         }
 
-        static class ParseException extends Exception {
+        public static class ParseException extends Exception {
             ParseException(String message) {
                 super(message);
             }

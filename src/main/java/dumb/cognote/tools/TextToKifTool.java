@@ -3,13 +3,12 @@ package dumb.cognote.tools;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.UI;
-import dumb.cognote.Logic;
 
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CancellationException;
 
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
 
@@ -32,8 +31,8 @@ public class TextToKifTool implements BaseTool {
     }
 
     @Override
-    public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String noteId = (String) parameters.get("note_id");
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
+        var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {
             return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
@@ -46,7 +45,7 @@ public class TextToKifTool implements BaseTool {
 
                     // Add a UI placeholder for the LLM task
                     // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                     var vm = UI.AttachmentViewModel.forLlm(
+                    var vm = UI.AttachmentViewModel.forLlm(
                             taskId,
                             note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
                             System.currentTimeMillis(), note.id, UI.LlmStatus.SENDING
@@ -56,19 +55,19 @@ public class TextToKifTool implements BaseTool {
 
                     var promptText = """
                             Convert the following note into a set of concise SUMO KIF assertions (standard Lisp-like syntax, e.g., (instance MyCat Cat)).
-
+                            
                              * standard SUMO predicates like 'instance', 'subclass', 'domain', 'range', 'attribute', 'partOf', etc.
                              * '=' for equality between terms. Use unique names for new entities derived from the note (start with uppercase, use CamelCase).
                              * '(not ...)' for negation where appropriate, e.g., (not (instance Pluto Planet)).
                              * '(forall (?X) (=> (instance ?X Dog) (attribute ?X Canine)))' for universal statements.
                              * '(exists (?Y) (and (instance ?Y Cat) (attribute ?Y BlackColor)))' for existential statements.
                              * Avoid trivial assertions like (instance X X) or (= X X) or (not (= X X)).
-
+                            
                             Note:
                             ```
                             "%s"
                             ```
-
+                            
                             For each assertion you generate, use the `add_kif_assertion` tool with the note ID "%s".
                             Do NOT output the KIF assertions directly in your response. Only use the tool.
                             Generate the KIF Assertions by adding them using the tool:""".formatted(note.text, note.id); // Pass note.id as target_kb_id hint
@@ -76,7 +75,7 @@ public class TextToKifTool implements BaseTool {
                     var history = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
                     history.add(UserMessage.from(promptText));
 
-                    CompletableFuture<dev.langchain4j.data.message.AiMessage> llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
+                    var llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
 
                     cog.lm.activeLlmTasks.put(taskId, llmFuture);
 
@@ -86,16 +85,16 @@ public class TextToKifTool implements BaseTool {
                             var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                             if (!(cause instanceof CancellationException)) {
                                 System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
+                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
                                 return "Error generating KIF: " + cause.getMessage();
                             } else {
                                 System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
+                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
                                 return "KIF generation cancelled.";
                             }
                         } else {
                             System.out.println(interactionType + " completed for note '" + note.id + "'. KIF assertions should have been added by tool calls.");
-                            cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
+                            cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
                             // The LLM should have used the tool. We can optionally log the final text response.
                             var text = chatResponse.text();
                             if (text != null && !text.isBlank()) {

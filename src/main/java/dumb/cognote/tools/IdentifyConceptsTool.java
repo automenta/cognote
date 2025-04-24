@@ -2,14 +2,14 @@ package dumb.cognote.tools;
 
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.UI;
 import dumb.cognote.Logic;
+import dumb.cognote.UI;
 
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
 
 import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
@@ -34,8 +34,8 @@ public class IdentifyConceptsTool implements BaseTool {
     }
 
     @Override
-    public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        String noteId = (String) parameters.get("note_id");
+    public CompletableFuture execute(Map<String, Object> parameters) {
+        var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {
             return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
@@ -48,7 +48,7 @@ public class IdentifyConceptsTool implements BaseTool {
 
                     // Add a UI placeholder for the LLM task
                     // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                     var vm = UI.AttachmentViewModel.forLlm(
+                    var vm = UI.AttachmentViewModel.forLlm(
                             taskId,
                             note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
                             System.currentTimeMillis(), note.id, UI.LlmStatus.SENDING
@@ -58,15 +58,15 @@ public class IdentifyConceptsTool implements BaseTool {
 
                     var promptText = """
                             Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.
-
+                            
                             Note:
                             "%s"
-
+                            
                             Key Concepts:""".formatted(note.text);
                     var history = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
                     history.add(UserMessage.from(promptText));
 
-                    CompletableFuture<dev.langchain4j.data.message.AiMessage> llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
+                    var llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
 
                     cog.lm.activeLlmTasks.put(taskId, llmFuture);
 
@@ -76,16 +76,16 @@ public class IdentifyConceptsTool implements BaseTool {
                             var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                             if (!(cause instanceof CancellationException)) {
                                 System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
+                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.ERROR, interactionType + " failed: " + cause.getMessage());
                                 return "Error identifying concepts: " + cause.getMessage();
                             } else {
                                 System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
+                                cog.updateLlmItemStatus(taskId, UI.LlmStatus.CANCELLED, interactionType + " cancelled.");
                                 return "Concept identification cancelled.";
                             }
                         } else {
                             System.out.println(interactionType + " completed for note '" + note.id + "'.");
-                            cog.ui.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
+                            cog.updateLlmItemStatus(taskId, UI.LlmStatus.DONE, interactionType + " completed.");
 
                             var conceptsText = chatResponse.text();
                             if (conceptsText != null && !conceptsText.isBlank()) {

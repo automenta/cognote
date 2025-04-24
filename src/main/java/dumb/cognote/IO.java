@@ -4,12 +4,10 @@ import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
-import dumb.cognote.tools.BaseTool; // Import BaseTool
 
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
-import java.util.HashMap; // Import HashMap
 
 
 /**

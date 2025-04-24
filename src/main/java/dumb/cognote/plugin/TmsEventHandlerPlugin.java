@@ -1,4 +1,7 @@
-package dumb.cognote;
+package dumb.cognote.plugin;
+
+import dumb.cognote.Cog;
+import dumb.cognote.Logic;
 
 import static dumb.cognote.Logic.TruthMaintenance.ResolutionStrategy.RETRACT_WEAKEST;
 
@@ -23,10 +26,10 @@ public class TmsEventHandlerPlugin extends Cog.BasePlugin {
      */
     private void handleContradiction(Cog.ContradictionDetectedEvent event) {
         System.out.printf("TmsEventHandlerPlugin: Handling contradiction in KB %s involving assertions %s%n",
-                event.kbId(), event.conflictingAssertionIds());
+                event.kbId(), event.contradictoryAssertionIds());
 
         // Create a Contradiction object from the event data
-        var contradiction = new Logic.TruthMaintenance.Contradiction(event.conflictingAssertionIds());
+        var contradiction = new Logic.TruthMaintenance.Contradiction(event.contradictoryAssertionIds());
 
         // Trigger the TMS to resolve the contradiction using the chosen strategy
         // We use RETRACT_WEAKEST here as the default strategy.
