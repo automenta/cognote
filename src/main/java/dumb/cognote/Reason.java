@@ -55,6 +55,10 @@ public class Reason {
         Op.Operators operators() {
             return cognition.operators;
         }
+
+        Set<String> getActiveNoteIds() {
+            return cognition.activeNoteIds;
+        }
     }
 
     static class ReasonerManager {
@@ -200,7 +204,7 @@ public class Reason {
         }
 
         protected boolean isActiveContext(@Nullable String noteId) {
-            return getCogNoteContext().isActiveNote(noteId);
+            return noteId != null && context.getActiveNoteIds().contains(noteId);
         }
 
         @Override
@@ -230,7 +234,6 @@ public class Reason {
             var newAssertion = event.assertion();
             var sourceKbId = event.kbId();
             // Only process assertions added to an active context (active note or global KB)
-            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(sourceKbId) && !isActiveContext(newAssertion.sourceNoteId())) return;
 
             if (!newAssertion.isActive() || (newAssertion.type() != Logic.AssertionType.GROUND && newAssertion.type() != Logic.AssertionType.SKOLEMIZED))
@@ -260,12 +263,28 @@ public class Reason {
             var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
             if (!(pattern instanceof Term.Lst)) return Stream.empty();
 
+            // Prioritize searching for matching assertions: Current KB -> Other Active Note KBs -> Global KB
             var currentKb = getKb(currentKbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
 
-            // Search for matching assertions in the current KB and global KB
-            return Stream.concat(currentKb.findUnifiableAssertions(pattern),
-                            (!currentKb.id.equals(Cog.GLOBAL_KB_NOTE_ID)) ? globalKb.findUnifiableAssertions(pattern) : Stream.empty())
+            Stream<Assertion> assertionStream = Stream.empty();
+
+            // 1. Search current KB
+            assertionStream = Stream.concat(assertionStream, currentKb.findUnifiableAssertions(pattern));
+
+            // 2. Search other active note KBs (excluding current and global)
+            context.getActiveNoteIds().stream()
+                    .filter(id -> !id.equals(currentKbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
+                    .map(this::getKb)
+                    .forEach(kb -> assertionStream = Stream.concat(assertionStream, kb.findUnifiableAssertions(pattern)));
+
+            // 3. Search global KB (if not already the current KB)
+            if (!currentKbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
+                assertionStream = Stream.concat(assertionStream, globalKb.findUnifiableAssertions(pattern));
+            }
+
+
+            return assertionStream
                     .distinct()
                     .filter(Assertion::isActive)
                     // Only use assertions from active contexts (active notes or global KB)
@@ -381,7 +400,6 @@ public class Reason {
             var isEq = !isNeg && derived.op().filter(KIF_OP_EQUAL::equals).isPresent();
             var isOriented = isEq && derived.size() == 3 && derived.get(1).weight() > derived.get(2).weight();
             var type = derived.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-            var targetNoteId = getCogNoteContext().findCommonSourceNodeId(result.supportIds());
             var pa = new Assertion.PotentialAssertion(derived, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
             tryCommit(pa, rule.id());
         }
@@ -418,7 +436,6 @@ public class Reason {
             var newA = event.assertion();
             var kbId = event.kbId();
             // Only trigger rewrite if the added assertion is in an active context
-            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
 
             if (!newA.isActive() || (newA.type() != AssertionType.GROUND && newA.type() != AssertionType.SKOLEMIZED))
@@ -505,7 +522,6 @@ public class Reason {
             var newA = event.assertion();
             var kbId = event.kbId();
             // Only trigger instantiation if the added assertion is in an active context
-            // FIX: Corrected condition to check if *either* the KB or the source note is active
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
 
             if (!newA.isActive()) return;
@@ -681,8 +697,9 @@ public class Reason {
                         default -> {
                             // Not a special connective, proceed with operator/fact/rule matching
                             // 1. Try operators
+                            var opAtom = Term.Atom.of(op);
                             resultStream = context.operators().get(opAtom)
-                                    .flatMap(op -> executeOperator(op, goalList, bindings, currentGoal))
+                                    .flatMap(opInstance -> executeOperator(opInstance, goalList, bindings, currentGoal))
                                     .stream();
                         }
                     }
@@ -695,18 +712,37 @@ public class Reason {
 
 
             // If not handled by connectives or operators, try facts and rules
-            if (resultStream == null || !resultStream.findAny().isPresent()) { // Check if any results came from connectives/operators
+            // Check if resultStream has any elements without consuming it fully
+            var hasOperatorResult = resultStream.findAny().isPresent();
+            if (!hasOperatorResult) {
                  resultStream = Stream.empty(); // Reset stream if it was consumed by findAny()
 
-                // 2. Try matching active facts in the target KB and global KB
-                var kbStream = Stream.concat(getKb(kbId).findUnifiableAssertions(currentGoal),
-                                (kbId != null && !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) ? context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal) : Stream.empty())
+                // 2. Try matching active facts, prioritizing KBs
+                Stream<Assertion> factStream = Stream.empty();
+
+                // 2a. Search target KB first
+                factStream = Stream.concat(factStream, getKb(kbId).findUnifiableAssertions(currentGoal));
+
+                // 2b. Search other active note KBs (excluding target and global)
+                context.getActiveNoteIds().stream()
+                        .filter(id -> !id.equals(kbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
+                        .map(this::getKb)
+                        .forEach(kb -> factStream = Stream.concat(factStream, kb.findUnifiableAssertions(currentGoal)));
+
+                // 2c. Search global KB (if not already the target KB)
+                if (kbId == null || !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
+                    factStream = Stream.concat(factStream, context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
+                }
+
+                var factBindingsStream = factStream
                         .distinct()
                         .filter(Assertion::isActive)
                         // Only use assertions from active contexts
                         .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                         .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
-                resultStream = Stream.concat(resultStream, kbStream);
+
+                resultStream = Stream.concat(resultStream, factBindingsStream);
+
 
                 // 3. Try backward chaining on active rules
                 var ruleStream = context.rules().stream()
