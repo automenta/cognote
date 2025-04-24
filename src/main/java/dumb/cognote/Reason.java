@@ -107,26 +107,39 @@ public class Reason {
                     .toList();
 
             if (futures.isEmpty()) {
+                // If no plugin supports the query type, return failure
                 events.emit(new Cog.Answer.AnswerEvent(Cog.Answer.failure(query.id())));
                 return;
             }
 
+            // For ASK queries, combine results. For ACHIEVE_GOAL, the first success is enough (or combine results if multiple paths).
+            // For now, let's just take the first successful result for ACHIEVE_GOAL or combine for ASK.
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .thenApplyAsync(v -> {
                         List<Map<Term.Var, Term>> allBindings = new ArrayList<>();
                         var overallStatus = Cog.QueryStatus.FAILURE;
                         Explanation combinedExplanation = null;
+
                         for (var future : futures) {
                             try {
                                 var result = future.join();
                                 var e = result.explanation();
                                 var s = result.status();
+
                                 if (s == Cog.QueryStatus.SUCCESS) {
+                                    // For ASK queries, collect all bindings
+                                    if (query.type() == Cog.QueryType.ASK_BINDINGS || query.type() == Cog.QueryType.ASK_TRUE_FALSE) {
+                                        allBindings.addAll(result.bindings());
+                                    }
+                                    // For ACHIEVE_GOAL, success means the goal is provable
+                                    // We might want to collect proof paths or actions here in the future
                                     overallStatus = Cog.QueryStatus.SUCCESS;
-                                    allBindings.addAll(result.bindings());
-                                    if (e != null)
-                                        combinedExplanation = e;
+                                    if (e != null) combinedExplanation = e;
+                                    // If ACHIEVE_GOAL is successful, we might stop processing other plugins
+                                    if (query.type() == Cog.QueryType.ACHIEVE_GOAL) break;
+
                                 } else if (s != Cog.QueryStatus.FAILURE && overallStatus == Cog.QueryStatus.FAILURE) {
+                                    // If the first successful plugin sets a status other than SUCCESS/FAILURE, use that
                                     overallStatus = s;
                                     if (e != null) combinedExplanation = e;
                                 }
@@ -138,6 +151,13 @@ public class Reason {
                                 }
                             }
                         }
+
+                        // For ASK_TRUE_FALSE, success means at least one binding was found
+                        if (query.type() == Cog.QueryType.ASK_TRUE_FALSE) {
+                            overallStatus = allBindings.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
+                        }
+
+
                         return new Cog.Answer(query.id(), overallStatus, allBindings, combinedExplanation);
                     }, reasonerContext.events.exe)
                     .thenAccept(result -> events.emit(new Cog.Answer.AnswerEvent(result)));
@@ -625,7 +645,7 @@ public class Reason {
 
         @Override
         public Set<Cog.QueryType> getSupportedQueryTypes() {
-            return Set.of(Cog.QueryType.ASK_BINDINGS, Cog.QueryType.ASK_TRUE_FALSE);
+            return Set.of(Cog.QueryType.ASK_BINDINGS, Cog.QueryType.ASK_TRUE_FALSE, Cog.QueryType.ACHIEVE_GOAL);
         }
 
         @Override
@@ -642,7 +662,14 @@ public class Reason {
                 try {
                     // Use a mutable set for the proof stack
                     prove(query.pattern(), query.targetKbId(), Map.of(), maxDepth, new HashSet<>()).forEach(results::add);
-                    return Cog.Answer.success(query.id(), results);
+
+                    // For ASK_BINDINGS and ASK_TRUE_FALSE, results are the bindings found.
+                    // For ACHIEVE_GOAL, success means the goal is provable (results is non-empty).
+                    // We don't currently extract actions for ACHIEVE_GOAL.
+                    var status = results.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
+
+                    return new Cog.Answer(query.id(), status, results, null);
+
                 } catch (Exception e) {
                     System.err.println("Backward chaining query failed: " + e.getMessage());
                     e.printStackTrace();

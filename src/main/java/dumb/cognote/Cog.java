@@ -2,6 +2,7 @@ package dumb.cognote;
 
 import dumb.cognote.plugin.StatusUpdaterPlugin;
 import dumb.cognote.plugin.TaskDecomposePlugin;
+import dumb.cognote.plugin.TestRunnerPlugin;
 import dumb.cognote.plugin.TmsPlugin;
 import dumb.cognote.tool.*;
 import org.java_websocket.WebSocket;
@@ -32,6 +33,12 @@ public class Cog {
     public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge";
     public static final String CONFIG_NOTE_ID = "note-config";
     public static final String CONFIG_NOTE_TITLE = "System Configuration";
+    public static final String TEST_DEFINITIONS_NOTE_ID = "note-test-definitions";
+    public static final String TEST_DEFINITIONS_NOTE_TITLE = "Test Definitions";
+    public static final String TEST_RESULTS_NOTE_ID = "note-test-results";
+    public static final String TEST_RESULTS_NOTE_TITLE = "Test Results";
+
+
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
@@ -111,6 +118,25 @@ public class Cog {
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE); // Default status
     }
 
+    static Note createDefaultTestDefinitionsNote() {
+        return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
+                "; Define your tests here using the (test ...) format\n\n" +
+                        "; Example: Test a simple fact query\n" +
+                        "(test \"Simple Fact Query\" (query (instance MyCat Cat)) (expectedResult true))\n\n" +
+                        "; Example: Test a query with bindings\n" +
+                        "; Note: Order of bindings in expectedBindings list matters for now\n" +
+                        "(test \"Query with Bindings\" (query (instance ?X Cat)) (expectedBindings ((?X MyCat) (?X YourCat))))\n\n" +
+                        "; Example: Test a query that should fail\n" +
+                        "(test \"Query Failure\" (query (instance MyDog Cat)) (expectedResult false))\n\n" +
+                        "; Example: Test a query with no matches\n" +
+                        "(test \"Query No Matches\" (query (instance ?Y Bird)) (expectedBindings ()))",
+                Note.Status.IDLE);
+    }
+
+    static Note createDefaultTestResultsNote() {
+        return new Note(TEST_RESULTS_NOTE_ID, TEST_RESULTS_NOTE_TITLE, "; Test results will appear here after running tests.", Note.Status.IDLE);
+    }
+
 
     private void setupDefaultPlugins() {
         plugins.loadPlugin(new InputPlugin());
@@ -118,6 +144,7 @@ public class Cog {
         plugins.loadPlugin(new TmsPlugin());
 
         plugins.loadPlugin(new TaskDecomposePlugin());
+        plugins.loadPlugin(new TestRunnerPlugin()); // Add the new test runner plugin
 
         plugins.loadPlugin(new WebSocketPlugin(new InetSocketAddress(PORT), this));
         plugins.loadPlugin(new StatusUpdaterPlugin());
@@ -209,14 +236,40 @@ public class Cog {
     public synchronized void clear() {
         System.out.println("Clearing all knowledge...");
         setPaused(true);
-        // Retract assertions from all notes except config and global
+        // Retract assertions from all notes except config, global, and test notes
         context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
         // Clear the logic context (KBs, rules, active notes)
         context.clear();
+
+        // Clear internal note map, but keep system notes
+        var configNote = notes.get(CONFIG_NOTE_ID);
+        var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
+        var testDefsNote = notes.get(TEST_DEFINITIONS_NOTE_ID);
+        var testResultsNote = notes.get(TEST_RESULTS_NOTE_ID);
+
+        notes.clear();
+        notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
+        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+        notes.put(TEST_DEFINITIONS_NOTE_ID, testDefsNote != null ? testDefsNote.withStatus(Note.Status.IDLE) : createDefaultTestDefinitionsNote());
+        notes.put(TEST_RESULTS_NOTE_ID, testResultsNote != null ? testResultsNote.withStatus(Note.Status.IDLE) : createDefaultTestResultsNote());
+
+
+        // Ensure system notes are marked as active in context (Global KB is always active)
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
+        // Config and Test notes are not typically active for reasoning, so don't add them
+
+        // Re-emit Added events for the system notes so UI can add them back if needed
+        events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(TEST_RESULTS_NOTE_ID)));
+
+
+        save(); // Save the cleared state (only system notes remain)
 
         status("Cleared");
         setPaused(false); // Unpause after clearing
@@ -319,6 +372,7 @@ public class Cog {
     }
 
     public Optional<Note> note(String id) {
+        // This method is implemented in CogNote
         return Optional.empty();
     }
 
@@ -408,7 +462,7 @@ public class Cog {
     }
 
     public record RetractionRequestEvent(String target, RetractionType type, String sourceId,
-                                         String noteId) implements NoteIDEvent {
+                                         @Nullable String noteId) implements NoteIDEvent {
     }
 
     record WebSocketBroadcastEvent(String message) implements CogEvent {
@@ -474,6 +528,9 @@ public class Cog {
     public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
     }
 
+    public record RunTestsEvent() implements CogEvent {
+    }
+
 
     static class InputPlugin extends Plugin.BasePlugin {
         @Override
@@ -492,6 +549,7 @@ public class Cog {
                                 case KIF_OP_EXISTS -> inputExists(list, src, id);
                                 case KIF_OP_FORALL -> inputForall(list, src, id);
                                 case "goal" -> { /* Handled by TaskDecompositionPlugin */ }
+                                case "test" -> { /* Handled by TestRunnerPlugin */ }
                                 default -> inputAssertion(list, src, id);
                             }
                         },
@@ -532,7 +590,7 @@ public class Cog {
                 System.err.println("Invalid 'not' format ignored (" + sourceId + "): " + list.toKif());
                 return;
             }
-            var isEq = !isNeg && op.filter(KIF_OP_EQUAL::equals).isPresent();
+            var isEq = !isNeg && op.filter(Logic.KIF_OP_EQUAL::equals).isPresent();
             var isOriented = isEq && s == 3 && list.get(1).weight() > list.get(2).weight();
             var type = list.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
             var pri = (sourceId.startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + list.weight());
@@ -550,7 +608,7 @@ public class Cog {
             } else {
                 var skolemBody = Cognition.performSkolemization(body, vars, Map.of());
                 var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
-                var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
+                var isEq = !isNeg && skolemBody.op().filter(Logic.KIF_OP_EQUAL::equals).isPresent();
                 var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();
                 var type = skolemBody.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
                 var pri = (sourceId.startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + skolemBody.weight());
@@ -579,6 +637,8 @@ public class Cog {
     }
 
     static class RetractionPlugin extends Plugin.BasePlugin {
+        private static final Set<String> SYSTEM_NOTE_IDS = Set.of(GLOBAL_KB_NOTE_ID, CONFIG_NOTE_ID, TEST_DEFINITIONS_NOTE_ID, TEST_RESULTS_NOTE_ID);
+
         @Override
         public void start(Events e, Cognition ctx) {
             super.start(e, ctx);
@@ -591,13 +651,19 @@ public class Cog {
             var s = event.sourceId();
             switch (event.type) {
                 case BY_ID -> {
+                    // Check if the assertion belongs to a system note KB
+                    var assertion = context.findAssertionByIdAcrossKbs(event.target());
+                    if (assertion.isPresent() && SYSTEM_NOTE_IDS.contains(assertion.get().kb())) {
+                        System.err.println("Attempted to retract assertion " + event.target() + " from system KB " + assertion.get().kb() + " by " + s + ". Operation ignored.");
+                        return;
+                    }
                     context.truth.remove(event.target(), s);
                     System.out.printf("Retraction requested for [%s] by %s in KB '%s'.%n", event.target(), s, getKb(event.noteId()).id);
                 }
                 case BY_NOTE -> {
                     var noteId = event.target();
-                    if (CONFIG_NOTE_ID.equals(noteId)) {
-                        System.err.println("Attempted to retract config note " + noteId + " from " + s + ". Operation ignored.");
+                    if (SYSTEM_NOTE_IDS.contains(noteId)) {
+                        System.err.println("Attempted to retract system note " + noteId + " from " + s + ". Operation ignored.");
                         return;
                     }
                     var kb = context.getAllNoteKbs().get(noteId);

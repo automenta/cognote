@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static java.util.Optional.ofNullable;
 
@@ -28,51 +29,66 @@ public class CogNote extends Cog {
 
     static List<Note> loadNotesFromFile() {
         var filePath = Paths.get(NOTES_FILE);
-        if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
-        try {
-            var jsonText = Files.readString(filePath);
-            var jsonArray = new JSONArray(new JSONTokener(jsonText));
-            List<Note> notes = IntStream.range(0, jsonArray.length())
-                    .mapToObj(jsonArray::getJSONObject)
-                    .map(obj -> {
-                        var id = obj.getString("id");
-                        var title = obj.getString("title");
-                        var text = obj.getString("text");
-                        // Load status, default to IDLE if not present (for backward compatibility)
-                        var status = Note.Status.valueOf(obj.optString("status", Note.Status.IDLE.name()).toUpperCase());
-                        return new Note(id, title, text, status);
-                    })
-                    .collect(Collectors.toCollection(ArrayList::new));
+        List<Note> notes = new ArrayList<>();
 
-            // Ensure config note exists
-            if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-                notes.add(createDefaultConfigNote());
+        if (Files.exists(filePath)) {
+            try {
+                var jsonText = Files.readString(filePath);
+                var jsonArray = new JSONArray(new JSONTokener(jsonText));
+                notes = IntStream.range(0, jsonArray.length())
+                        .mapToObj(jsonArray::getJSONObject)
+                        .map(obj -> {
+                            var id = obj.getString("id");
+                            var title = obj.getString("title");
+                            var text = obj.getString("text");
+                            // Load status, default to IDLE if not present (for backward compatibility)
+                            var status = Note.Status.valueOf(obj.optString("status", Note.Status.IDLE.name()).toUpperCase());
+                            return new Note(id, title, text, status);
+                        })
+                        .collect(Collectors.toCollection(ArrayList::new));
+
+                System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
+            } catch (IOException | org.json.JSONException e) {
+                System.err.println("Error loading notes from " + NOTES_FILE + ": " + e.getMessage() + ". Starting with default system notes.");
+                notes.clear(); // Clear any partially loaded notes
             }
-            // Ensure global KB note exists (it's not saved, but needed internally)
-            if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
-                notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
-            }
-
-
-            System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
-            return notes;
-        } catch (IOException | org.json.JSONException e) {
-            System.err.println("Error loading notes from " + NOTES_FILE + ": " + e.getMessage() + ". Returning default config note.");
-            return new ArrayList<>(List.of(createDefaultConfigNote()));
+        } else {
+            System.out.println("Notes file not found: " + NOTES_FILE + ". Starting with default system notes.");
         }
+
+        // Ensure system notes exist (config, global KB, test defs, test results)
+        if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+            notes.add(createDefaultConfigNote());
+        }
+        // Global KB note is not saved, but needed internally
+        if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
+            notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+        }
+        if (notes.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
+            notes.add(createDefaultTestDefinitionsNote());
+        }
+        if (notes.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
+            notes.add(createDefaultTestResultsNote());
+        }
+
+
+        return notes;
     }
 
     private static synchronized void saveNotesToFile(List<Note> notes) {
         var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
-        // Filter out the Global KB note as it's not persisted
+        // Filter out system notes that are not persisted
         List<Note> notesToSave = notes.stream()
-                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
+                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID) && !note.id.equals(TEST_RESULTS_NOTE_ID))
                 .collect(Collectors.toCollection(ArrayList::new));
 
-        // Ensure config note is included if it wasn't in the filtered list (shouldn't happen if loaded correctly)
+        // Ensure config and test definitions notes are included if they weren't in the filtered list (shouldn't happen if loaded correctly)
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
             notesToSave.add(createDefaultConfigNote());
+        }
+        if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
+            notesToSave.add(createDefaultTestDefinitionsNote());
         }
 
 
@@ -105,6 +121,12 @@ public class CogNote extends Cog {
     }
 
     public void removeNote(String noteId) {
+        // Prevent removal of system notes
+        if (noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID)) {
+            System.err.println("Attempted to remove system note: " + noteId + ". Operation ignored.");
+            return;
+        }
+
         ofNullable(notes.remove(noteId)).ifPresent(note -> {
             // Trigger retraction of associated assertions via event
             events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
@@ -179,9 +201,9 @@ public class CogNote extends Cog {
     public synchronized void clear() {
         System.out.println("Clearing all knowledge...");
         setPaused(true);
-        // Retract assertions from all notes except config and global
+        // Retract assertions from all notes except config, global, and test notes
         context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
@@ -191,17 +213,26 @@ public class CogNote extends Cog {
         // Clear internal note map, but keep system notes
         var configNote = notes.get(CONFIG_NOTE_ID);
         var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
+        var testDefsNote = notes.get(TEST_DEFINITIONS_NOTE_ID);
+        var testResultsNote = notes.get(TEST_RESULTS_NOTE_ID);
+
         notes.clear();
         notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
         notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+        notes.put(TEST_DEFINITIONS_NOTE_ID, testDefsNote != null ? testDefsNote.withStatus(Note.Status.IDLE) : createDefaultTestDefinitionsNote());
+        notes.put(TEST_RESULTS_NOTE_ID, testResultsNote != null ? testResultsNote.withStatus(Note.Status.IDLE) : createDefaultTestResultsNote());
+
 
         // Ensure system notes are marked as active in context (Global KB is always active)
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
-        // Config note is not typically active for reasoning, so don't add it
+        // Config and Test notes are not typically active for reasoning, so don't add them
 
         // Re-emit Added events for the system notes so UI can add them back if needed
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(TEST_RESULTS_NOTE_ID)));
+
 
         save(); // Save the cleared state (only system notes remain)
 
@@ -236,6 +267,7 @@ public class CogNote extends Cog {
             }
         });
 
+        // Ensure config note exists and parse it
         var configNoteOpt = note(CONFIG_NOTE_ID);
         if (configNoteOpt.isPresent()) {
             parseConfig(configNoteOpt.get().text);
@@ -244,7 +276,7 @@ public class CogNote extends Cog {
             var configNote = createDefaultConfigNote();
             notes.put(CONFIG_NOTE_ID, configNote);
             parseConfig(configNote.text);
-            save();
+            save(); // Save the newly created config note
         }
 
         // Ensure Global KB note exists internally, even if not loaded from file
@@ -253,6 +285,16 @@ public class CogNote extends Cog {
         }
         // Ensure Global KB is always active in context
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
+
+        // Ensure Test Definition note exists internally
+        if (!notes.containsKey(TEST_DEFINITIONS_NOTE_ID)) {
+            notes.put(TEST_DEFINITIONS_NOTE_ID, createDefaultTestDefinitionsNote());
+        }
+
+        // Ensure Test Results note exists internally
+        if (!notes.containsKey(TEST_RESULTS_NOTE_ID)) {
+            notes.put(TEST_RESULTS_NOTE_ID, createDefaultTestResultsNote());
+        }
     }
 
     private void parseConfig(String jsonText) {
