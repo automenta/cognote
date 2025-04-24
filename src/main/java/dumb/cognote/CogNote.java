@@ -20,6 +20,7 @@ public class CogNote extends Cog {
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
+        // Notes are loaded in the constructor
         load();
     }
 
@@ -30,13 +31,27 @@ public class CogNote extends Cog {
             var jsonText = Files.readString(filePath);
             var jsonArray = new JSONArray(new JSONTokener(jsonText));
             List<Note> notes = IntStream.range(0, jsonArray.length())
-                    .mapToObj(jsonArray::getJSONObject)
-                    .map(obj -> new Note(obj.getString("id"), obj.getString("title"), obj.getString("text")))
+                    .map(jsonArray::getJSONObject)
+                    .map(obj -> {
+                        var id = obj.getString("id");
+                        var title = obj.getString("title");
+                        var text = obj.getString("text");
+                        // Load status, default to IDLE if not present (for backward compatibility)
+                        var status = Note.Status.valueOf(obj.optString("status", Note.Status.IDLE.name()).toUpperCase());
+                        return new Note(id, title, text, status);
+                    })
                     .collect(Collectors.toCollection(ArrayList::new));
 
+            // Ensure config note exists
             if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
                 notes.add(createDefaultConfigNote());
             }
+            // Ensure global KB note exists (it's not saved, but needed internally)
+             if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
+                 notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+             }
+
+
             System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
             return notes;
         } catch (IOException | org.json.JSONException e) {
@@ -48,15 +63,22 @@ public class CogNote extends Cog {
     private static synchronized void saveNotesToFile(List<Note> notes) {
         var filePath = Paths.get(NOTES_FILE);
         var jsonArray = new JSONArray();
-        List<Note> notesToSave = new ArrayList<>(notes);
+        // Filter out the Global KB note as it's not persisted
+        List<Note> notesToSave = notes.stream()
+                                      .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
+                                      .collect(Collectors.toCollection(ArrayList::new));
+
+        // Ensure config note is included if it wasn't in the filtered list (shouldn't happen if loaded correctly)
         if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            notesToSave.add(createDefaultConfigNote());
+             notesToSave.add(createDefaultConfigNote());
         }
+
 
         notesToSave.forEach(note -> jsonArray.put(new JSONObject()
                 .put("id", note.id)
                 .put("title", note.title)
-                .put("text", note.text)));
+                .put("text", note.text)
+                .put("status", note.status.name()))); // Save status
         try {
             Files.writeString(filePath, jsonArray.toString(2));
         } catch (IOException e) {
@@ -85,22 +107,54 @@ public class CogNote extends Cog {
             // Trigger retraction of associated assertions via event
             events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
             // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
+            events.emit(new RemovedEvent(note)); // Emit RemovedEvent with the Note object
             save();
         });
     }
 
+    public void updateNoteStatus(String noteId, Note.Status newStatus) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status != newStatus) {
+                var oldStatus = note.status;
+                note.status = newStatus; // Update status in the internal map
+                events.emit(new NoteStatusEvent(note, oldStatus, newStatus)); // Emit event
+                save(); // Save status change
+            }
+        });
+    }
+
+
     @Override
     public synchronized void clear() {
-        super.clear();
-        notes.clear(); // Clear internal map after triggering retractions
-        // Add default notes back
-        var globalKbNote = new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions");
-        var configNote = createDefaultConfigNote();
-        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote);
-        notes.put(CONFIG_NOTE_ID, configNote);
-        events.emit(new AddedEvent(globalKbNote));
-        events.emit(new AddedEvent(configNote));
-        save();
+        System.out.println("Clearing all knowledge...");
+        setPaused(true);
+        // Retract assertions from all notes except config and global
+        context.getAllNoteIds().stream()
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
+                .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
+        // Retract assertions from the global KB
+        context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
+        // Clear the logic context (KBs, rules)
+        context.clear();
+
+        // Clear internal note map, but keep system notes
+        var configNote = notes.get(CONFIG_NOTE_ID);
+        var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
+        notes.clear();
+        notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
+        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+
+
+        // Re-emit Added events for the system notes so UI can add them back if needed
+        events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
+        events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
+
+        save(); // Save the cleared state (only system notes remain)
+
+        status("Cleared");
+        setPaused(false); // Unpause after clearing
+        System.out.println("Knowledge cleared.");
+        events.emit(new SystemStatusEvent(status, 0, globalKbCapacity, 0, 0));
     }
 
     public boolean updateConfig(String newConfigJsonText) {
@@ -109,7 +163,8 @@ public class CogNote extends Cog {
             parseConfig(newConfigJsonText);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = newConfigJson.toString(2);
-                save();
+                // Status is not changed by config update
+                save(); // Save config note text
             });
             return true;
         } catch (org.json.JSONException e) {
@@ -135,7 +190,7 @@ public class CogNote extends Cog {
 
         // Ensure Global KB note exists internally, even if not loaded from file
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
-            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions"));
+            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
         }
     }
 
@@ -160,7 +215,7 @@ public class CogNote extends Cog {
 
     @Override
     public void stop() {
-        save();
+        save(); // Save notes before stopping
         super.stop();
     }
 

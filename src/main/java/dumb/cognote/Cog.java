@@ -48,7 +48,7 @@ public class Cog {
     public final Cognition context;
     public final LM lm;
     public final Tools tools;
-    final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(false);
+    final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true); // Start paused
     private final Plugins plugins;
     private final Reason.ReasonerManager reasonerManager;
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -108,7 +108,7 @@ public class Cog {
                 .put("globalKbCapacity", DEFAULT_KB_CAPACITY)
                 .put("reasoningDepthLimit", DEFAULT_REASONING_DEPTH)
                 .put("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2));
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE); // Default status
     }
 
 
@@ -146,8 +146,9 @@ public class Cog {
             System.err.println("Cannot restart a stopped system.");
             return;
         }
-        paused.set(false);
-        status = "Starting";
+        // System starts paused, UI will unpause it
+        paused.set(true);
+        status = "Initializing";
 
         context.operators.addBuiltin();
         setupDefaultPlugins();
@@ -155,8 +156,8 @@ public class Cog {
         reasonerManager.initializeAll();
 
 
-        status("Running");
-        System.out.println("System started.");
+        status("Paused (Ready to Start)"); // Initial status
+        System.out.println("System initialized and paused.");
     }
 
     public void stop() {
@@ -164,7 +165,7 @@ public class Cog {
         System.out.println("Stopping system...");
 
         status("Stopping");
-        paused.set(false);
+        paused.set(false); // Ensure pause lock is released
         synchronized (pauseLock) {
             pauseLock.notifyAll();
         }
@@ -215,7 +216,7 @@ public class Cog {
         context.clear();
 
         status("Cleared");
-        setPaused(false);
+        setPaused(false); // Unpause after clearing
         System.out.println("Knowledge cleared.");
         events.emit(new SystemStatusEvent(status, 0, globalKbCapacity, 0, 0));
     }
@@ -465,6 +466,10 @@ public class Cog {
         }
     }
 
+    public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
+    }
+
+
     static class InputPlugin extends Plugin.BasePlugin {
         @Override
         public void start(Events e, Cognition ctx) {
@@ -542,8 +547,9 @@ public class Cog {
                 var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
                 var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
                 var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();
+                var type = skolemBody.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
                 var pri = (sourceId.startsWith("llm-") ? LM.LLM_ASSERTION_BASE_PRIORITY : INPUT_ASSERTION_BASE_PRIORITY) / (1.0 + skolemBody.weight());
-                context.tryCommit(new Assertion.PotentialAssertion(skolemBody, pri, Set.of(), sourceId + "-skolemized", isEq, isNeg, isOriented, targetNoteId, AssertionType.SKOLEMIZED, List.of(), 0), sourceId + "-skolemized");
+                context.tryCommit(new Assertion.PotentialAssertion(skolemBody, pri, Set.of(), sourceId + "-skolemized", isEq, isNeg, isOriented, targetNoteId, type, List.of(), 0), sourceId + "-skolemized");
             }
         }
 
@@ -577,7 +583,7 @@ public class Cog {
         }
 
         private void retractRequest(RetractionRequestEvent event) {
-            var s = event.noteId();
+            var s = event.sourceId();
             switch (event.type) {
                 case BY_ID -> {
                     context.truth.remove(event.target(), s);
@@ -598,7 +604,8 @@ public class Cog {
                         } else
                             System.out.printf("Retraction by Note ID %s from %s: No associated assertions found in its KB.%n", noteId, s);
                         context.removeNoteKb(noteId, s);
-                        publish(new RemovedEvent(new Note(noteId, "Removed", "")));
+                        // RemovedEvent is now emitted by CogNote.removeNote
+                        // publish(new RemovedEvent(new Note(noteId, "Removed", "")));
                     } else
                         System.out.printf("Retraction by Note ID %s from %s failed: Note KB not found.%n", noteId, s);
                 }

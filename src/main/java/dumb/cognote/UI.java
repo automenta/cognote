@@ -66,7 +66,7 @@ public class UI extends JFrame {
         setJMenuBar(menuBarHandler.getMenuBar());
         applyFonts();
 
-        setCog(cog);
+        setCog(cog); // Set cog and load notes into UI
     }
 
     public static void main(String[] args) {
@@ -85,19 +85,22 @@ public class UI extends JFrame {
         }
 
         try {
-            var c = new CogNote();
+            var c = new CogNote(); // CogNote loads notes and config in constructor
+            c.start(); // Initialize Cog components, but keep paused
 
-            if (rulesFile != null)
+            if (rulesFile != null) {
+                // Load rules after Cog is initialized but before UI is fully ready/unpaused
+                // Rules are processed via events, which are handled by the executor
+                // The executor is running even when paused, but reasoning might be limited
+                // This is acceptable for loading static rules.
                 c.loadRules(rulesFile);
+            }
+
 
             SwingUtilities.invokeLater(() -> {
                 var ui = new UI(c);
                 ui.setVisible(true);
-
-                // UI now loads notes from CogNote after setCog
-                // ui.loadNotes(c.loadNotes());
-
-                c.start();
+                // UI is now responsible for calling c.setPaused(false) when the user starts the system
             });
 
         } catch (Exception e) {
@@ -118,10 +121,11 @@ public class UI extends JFrame {
         var existingIndex = findViewModelIndexById(sourceModel, newItem.id);
         if (existingIndex != -1) {
             var existingItem = sourceModel.getElementAt(existingIndex);
+            // Only update if relevant fields have changed
             if (newItem.status != existingItem.status || !newItem.content().equals(existingItem.content()) ||
                     newItem.priority() != existingItem.priority() || !Objects.equals(newItem.associatedNoteId(), existingItem.associatedNoteId()) ||
                     !Objects.equals(newItem.kbId(), existingItem.kbId()) || newItem.llmStatus != existingItem.llmStatus ||
-                    newItem.attachmentType != existingItem.attachmentType) {
+                    newItem.attachmentType != existingItem.attachmentType || newItem.depth() != existingItem.depth() || newItem.timestamp() != existingItem.timestamp()) {
                 sourceModel.setElementAt(newItem, existingIndex);
             }
         } else {
@@ -140,14 +144,22 @@ public class UI extends JFrame {
         try {
             var terms = Logic.KifParser.parseKif(kifString);
             if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
+                // Attempt to extract a string literal from common positions
+                // This is a heuristic and might need refinement
+                if (list.size() >= 2 && list.get(1) instanceof Term.Atom atom) {
+                    return atom.value();
+                }
+                if (list.size() >= 3 && list.get(2) instanceof Term.Atom atom) {
+                    return atom.value();
+                }
                 if (list.size() >= 4 && list.get(3) instanceof Term.Atom atom) {
-                    var value = atom.value();
-                    return value;
+                    return atom.value();
                 }
             }
         } catch (KifParser.ParseException e) {
             System.err.println("Failed to parse KIF for content extraction: " + kifString);
         }
+        // Fallback: return the original KIF string
         return kifString;
     }
 
@@ -210,13 +222,14 @@ public class UI extends JFrame {
         ev.on(LlmInfoEvent.class, e -> handleUiUpdate("llm-info", e.llmItem()));
         ev.on(Cog.TaskUpdateEvent.class, this::updateLlmItem);
         ev.on(Cog.AddedEvent.class, e -> invokeLater(() -> addNoteToList(e.note())));
-        ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.assocNote()))); // RemovedEvent now carries noteId
+        ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.note()))); // RemovedEvent now carries Note object
         ev.on(Cog.Answer.AnswerEvent.class, e -> handleUiUpdate("query-result", e.result()));
         ev.on(Cog.Query.QueryEvent.class, e -> handleUiUpdate("query-sent", e.query()));
+        ev.on(Cog.NoteStatusEvent.class, this::handleNoteStatusChange);
 
 
         cog.events.on(Cog.SystemStatusEvent.class, statusText ->
-                SwingUtilities.invokeLater(() -> mainControlPanel.statusLabel.setText(statusText.statusMessage())
+                SwingUtilities.invokeLater(() -> mainControlPanel.statusLabel.setText("Status: " + statusText.statusMessage())
                 ));
     }
 
@@ -266,6 +279,19 @@ public class UI extends JFrame {
                 .ifPresent(a -> handleUiUpdate(e.isActive() ? "status-active" : "status-inactive", a));
     }
 
+    private void handleNoteStatusChange(Cog.NoteStatusEvent e) {
+        invokeLater(() -> {
+            // Update the Note object in the UI list model
+            noteListPanel.updateNoteDisplay(e.note());
+            // If the currently selected note is the one that changed status, update UI elements that might depend on it
+            if (note != null && note.id.equals(e.note().id)) {
+                note = e.note(); // Update the UI's reference to the Note object
+                updateUIForSelection(); // Refresh UI based on the new status
+            }
+        });
+    }
+
+
     private void updateLlmItem(Cog.TaskUpdateEvent e) {
         invokeLater(() -> updateLlmItem(e.taskId(), e.status(), e.content()));
     }
@@ -314,18 +340,21 @@ public class UI extends JFrame {
     }
 
     private void saveCurrentNote() {
-        ofNullable(note).filter(n -> !GLOBAL_KB_NOTE_ID.equals(n.id)).ifPresent(n -> {
-            n.text = editorPanel.edit.getText();
-            if (!Cog.CONFIG_NOTE_ID.equals(n.id)) {
+        ofNullable(note).filter(_ -> cog != null).ifPresent(n -> {
+            // Only save text/title for non-system notes
+            if (!GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id)) {
+                n.text = editorPanel.edit.getText();
                 n.title = editorPanel.title.getText();
-                if (cog != null) cog.save(); // Save all notes if a regular note is edited
-            } else if (cog != null) {
-                if (!cog.updateConfig(n.text)) {
+                cog.save(); // Save all notes if a regular note is edited
+            } else if (Cog.CONFIG_NOTE_ID.equals(n.id)) {
+                // Handle config note separately
+                if (!cog.updateConfig(editorPanel.edit.getText())) {
                     JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration note. Changes not applied.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
                 } else {
                     // Config update already calls save internally on success
                 }
             }
+            // Status changes are saved via CogNote.updateNoteStatus
         });
     }
 
@@ -336,14 +365,13 @@ public class UI extends JFrame {
 
         editorPanel.updateForSelection(note, isGlobalSelected, isConfigSelected);
         attachmentPanel.updateForSelection(note);
-        mainControlPanel.updatePauseResumeButton();
+        mainControlPanel.updatePauseResumeButton(); // Update button text based on system state
 
         if (noteSelected) {
             setTitle("Cognote - " + note.title + (isGlobalSelected || isConfigSelected ? "" : " [" + note.id + "]"));
             SwingUtilities.invokeLater(() -> {
                 if (!isGlobalSelected && !isConfigSelected) editorPanel.edit.requestFocusInWindow();
-                else if (!isGlobalSelected)
-                    editorPanel.edit.requestFocusInWindow(); // Allow editing global KB description? Maybe not.
+                else if (isConfigSelected) editorPanel.edit.requestFocusInWindow(); // Allow editing config text
                 else attachmentPanel.filterField.requestFocusInWindow(); // Focus filter for global KB
             });
         } else {
@@ -356,7 +384,7 @@ public class UI extends JFrame {
         var noteSelected = (note != null);
         var isGlobalSelected = noteSelected && GLOBAL_KB_NOTE_ID.equals(note.id);
         var isConfigSelected = noteSelected && Cog.CONFIG_NOTE_ID.equals(note.id);
-        var systemReady = (cog != null && cog.running.get() && !cog.paused.get());
+        var systemReady = (cog != null && cog.running.get() && !cog.paused.get()); // System is running and not explicitly paused
 
         mainControlPanel.setControlsEnabled(enabled);
         editorPanel.setControlsEnabled(enabled, noteSelected, isGlobalSelected, isConfigSelected);
@@ -369,7 +397,7 @@ public class UI extends JFrame {
                 .filter(note -> JOptionPane.showConfirmDialog(this, String.format(confirmMsgFormat, note.title), confirmTitle, JOptionPane.YES_NO_OPTION, confirmMsgType) == JOptionPane.YES_OPTION)
                 .ifPresent(note -> {
                     updateStatus(String.format("%s '%s'...", actionName, note.title));
-                    setControlsEnabled(false);
+                    setControlsEnabled(false); // Disable controls during action
                     try {
                         action.accept(note);
                         // Status update and re-enabling controls will happen via events (e.g., TaskUpdateEvent)
@@ -445,8 +473,11 @@ public class UI extends JFrame {
             // Append content only if it's new and not just status updates
             if (content != null && !content.isBlank()) {
                 // Simple check to avoid appending the same status message repeatedly
-                if (!newContent.endsWith(content) && !(oldVm.llmStatus != status && newContent.endsWith(oldVm.llmStatus.toString()))) {
+                // Also avoid appending if the content is just the status itself
+                if (!newContent.endsWith(content) && !content.equals(status.toString()) && !(oldVm.llmStatus != status && newContent.endsWith(oldVm.llmStatus.toString()))) {
                     newContent += (newContent.isBlank() ? "" : "\n") + content;
+                } else if (newContent.isBlank() && !content.isBlank()) {
+                     newContent = content; // If content was blank, just set it
                 }
             }
 
@@ -488,17 +519,20 @@ public class UI extends JFrame {
     }
 
     public void addNoteToList(Note note) {
-        // Only add if not already present in the UI list model
+        // Add to the UI list model
         if (noteListPanel.findNoteById(note.id).isEmpty()) {
             noteListPanel.add(note);
             // Ensure attachment model exists for this note
             noteAttachmentModels.computeIfAbsent(note.id, id -> new DefaultListModel<>());
+        } else {
+            // If note already exists, update it in the list model (e.g., status might have changed)
+            noteListPanel.updateNoteDisplay(note);
         }
     }
 
-    public void removeNoteFromList(String noteId) {
-        noteListPanel.remove(noteId);
-        noteAttachmentModels.remove(noteId); // Remove the attachment model for the removed note
+    public void removeNoteFromList(Note note) {
+        noteListPanel.remove(note.id);
+        noteAttachmentModels.remove(note.id); // Remove the attachment model for the removed note
         // The note selection listener in NoteListPanel handles selecting a new note or clearing the editor
     }
 
@@ -518,9 +552,9 @@ public class UI extends JFrame {
             notes.forEach(this::addNoteToList); // Add notes from CogNote's list
             // Ensure default notes are in the UI list if they weren't loaded
             if (noteListPanel.findNoteById(GLOBAL_KB_NOTE_ID).isEmpty())
-                addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions."));
+                addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
             if (noteListPanel.findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
-                addNoteToList(cog != null ? CogNote.createDefaultConfigNote() : new Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
+                addNoteToList(cog != null ? CogNote.createDefaultConfigNote() : new Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}", Note.Status.IDLE));
 
 
             if (!noteListPanel.notes.isEmpty()) {
@@ -620,242 +654,31 @@ public class UI extends JFrame {
             if (value instanceof Note note) {
                 var f = l.getFont();
                 var noteID = note.id;
+                var statusText = switch (note.status) {
+                    case IDLE -> " (Idle)";
+                    case ACTIVE -> " (Active)";
+                    case PAUSED -> " (Paused)";
+                    case COMPLETED -> " (Done)";
+                };
+                l.setText(note.title + statusText);
+
                 if (Cog.CONFIG_NOTE_ID.equals(noteID)) {
                     f = f.deriveFont(Font.ITALIC);
                     l.setForeground(Color.GRAY);
                 } else if (GLOBAL_KB_NOTE_ID.equals(noteID)) {
                     f = f.deriveFont(Font.BOLD);
+                } else {
+                    // Color based on note status for regular notes
+                    l.setForeground(switch (note.status) {
+                        case IDLE -> Color.BLACK;
+                        case ACTIVE -> Color.BLUE;
+                        case PAUSED -> Color.ORANGE;
+                        case COMPLETED -> Color.GREEN.darker();
+                    });
                 }
                 l.setFont(f);
             }
             return l;
-        }
-    }
-
-    public record AttachmentViewModel(String id, @Nullable String noteId, String content, AttachmentType attachmentType,
-                                      AttachmentStatus status, double priority, int depth, long timestamp,
-                                      @Nullable String associatedNoteId, @Nullable String kbId,
-                                      @Nullable Set<String> justifications,
-                                      Cog.TaskStatus llmStatus) implements Comparable<AttachmentViewModel> {
-        public static AttachmentViewModel fromAssertion(Assertion a, String callbackType, @Nullable String associatedNoteId) {
-            return new AttachmentViewModel(a.id(), a.sourceNoteId(), a.toKifString(), determineTypeFromAssertion(a), determineStatusFromCallback(callbackType, a.isActive()), a.pri(), a.derivationDepth(), a.timestamp(), requireNonNullElse(associatedNoteId, a.sourceNoteId()), a.kb(), a.justificationIds(), Cog.TaskStatus.IDLE);
-        }
-
-        public static AttachmentViewModel forLlm(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId, Cog.TaskStatus taskStatus) {
-            return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, taskStatus);
-        }
-
-        public static AttachmentViewModel forQuery(String id, @Nullable String noteId, String content, AttachmentType type, long timestamp, @Nullable String kbId) {
-            return new AttachmentViewModel(id, noteId, content, type, AttachmentStatus.ACTIVE, 0.0, -1, timestamp, noteId, kbId, null, Cog.TaskStatus.IDLE);
-        }
-
-        private static AttachmentType determineTypeFromAssertion(Assertion a) {
-            return a.kif().op().map(op -> switch (op) {
-                case PRED_NOTE_SUMMARY -> AttachmentType.SUMMARY;
-                case PRED_NOTE_CONCEPT -> AttachmentType.CONCEPT;
-                case PRED_NOTE_QUESTION -> AttachmentType.QUESTION;
-                default -> detTypeFromAssertionType(a);
-            }).orElse(detTypeFromAssertionType(a));
-        }
-
-        private static AttachmentType detTypeFromAssertionType(Assertion a) {
-            return switch (a.type()) {
-                case GROUND -> (a.derivationDepth() == 0) ? AttachmentType.FACT : AttachmentType.DERIVED;
-                case SKOLEMIZED -> AttachmentType.SKOLEMIZED;
-                case UNIVERSAL -> AttachmentType.UNIVERSAL;
-            };
-        }
-
-        private static AttachmentStatus determineStatusFromCallback(String callbackType, boolean isActive) {
-            return switch (callbackType) {
-                case "retract" -> AttachmentStatus.RETRACTED;
-                case "evict" -> AttachmentStatus.EVICTED;
-                case "status-inactive" -> AttachmentStatus.INACTIVE;
-                default -> isActive ? AttachmentStatus.ACTIVE : AttachmentStatus.INACTIVE;
-            };
-        }
-
-        public AttachmentViewModel withStatus(AttachmentStatus newStatus) {
-            return new AttachmentViewModel(id, noteId, content, attachmentType, newStatus, priority, depth, timestamp, associatedNoteId, kbId, justifications, llmStatus);
-        }
-
-        public AttachmentViewModel withLlmUpdate(Cog.TaskStatus newLlmStatus, String newContent) {
-            return new AttachmentViewModel(id, noteId, newContent, attachmentType, status, priority, depth, timestamp, associatedNoteId, kbId, justifications, newLlmStatus);
-        }
-
-        public boolean isKifBased() {
-            return switch (attachmentType) {
-                case FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION -> true;
-                default -> false;
-            };
-        }
-
-        @Override
-        public int compareTo(AttachmentViewModel other) {
-            var cmp = Integer.compare(status.ordinal(), other.status.ordinal());
-            if (cmp != 0) return cmp;
-            cmp = Integer.compare(attachmentType.ordinal(), other.attachmentType.ordinal());
-            if (cmp != 0) return cmp;
-            if (isKifBased()) {
-                cmp = Double.compare(other.priority, this.priority);
-                if (cmp != 0) return cmp;
-                cmp = Integer.compare(this.depth, other.depth);
-                if (cmp != 0) return cmp;
-            }
-            return Long.compare(other.timestamp, this.timestamp);
-        }
-    }
-
-    static class AttachmentListCellRenderer extends JPanel implements ListCellRenderer<AttachmentViewModel> {
-        private final JLabel iconLabel = new JLabel();
-        private final JLabel contentLabel = new JLabel();
-        private final JLabel detailLabel = new JLabel();
-        private final Border activeBorder = new CompoundBorder(new LineBorder(Color.LIGHT_GRAY, 1), new EmptyBorder(3, 5, 3, 5));
-        private final Border inactiveBorder = new CompoundBorder(new LineBorder(new Color(240, 240, 240), 1), new EmptyBorder(3, 5, 3, 5));
-        private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
-
-        AttachmentListCellRenderer() {
-            setLayout(new BorderLayout(5, 0));
-            setOpaque(true);
-            var textPanel = new JPanel(new BorderLayout());
-            textPanel.setOpaque(false);
-            textPanel.add(contentLabel, BorderLayout.CENTER);
-            textPanel.add(detailLabel, BorderLayout.SOUTH);
-            add(iconLabel, BorderLayout.WEST);
-            add(textPanel, BorderLayout.CENTER);
-            contentLabel.setFont(MONOSPACED_FONT);
-            detailLabel.setFont(UI_SMALL_FONT);
-            iconLabel.setFont(UI_DEFAULT_FONT.deriveFont(Font.BOLD));
-            iconLabel.setBorder(new EmptyBorder(0, 4, 0, 4));
-            iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        }
-
-        @Override
-        public Component getListCellRendererComponent(JList<? extends AttachmentViewModel> list, AttachmentViewModel value, int index, boolean isSelected, boolean cellHasFocus) {
-            contentLabel.setText(value.content());
-            contentLabel.setFont(MONOSPACED_FONT);
-            String iconText;
-            Color iconColor, bgColor = Color.WHITE, fgColor = Color.BLACK;
-            switch (value.attachmentType) {
-                case FACT -> {
-                    iconText = "F";
-                    iconColor = new Color(0, 128, 0);
-                    bgColor = new Color(235, 255, 235);
-                }
-                case DERIVED -> {
-                    iconText = "D";
-                    iconColor = Color.BLUE;
-                    bgColor = new Color(230, 240, 255);
-                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
-                }
-                case UNIVERSAL -> {
-                    iconText = "∀";
-                    iconColor = new Color(0, 0, 128);
-                    bgColor = new Color(235, 235, 255);
-                }
-                case SKOLEMIZED -> {
-                    iconText = "∃";
-                    iconColor = new Color(139, 69, 19);
-                    bgColor = new Color(255, 255, 230);
-                    contentLabel.setFont(MONOSPACED_FONT.deriveFont(Font.ITALIC));
-                }
-                case SUMMARY -> {
-                    iconText = "Σ";
-                    iconColor = Color.DARK_GRAY;
-                    bgColor = new Color(240, 240, 240);
-                }
-                case CONCEPT -> {
-                    iconText = "C";
-                    iconColor = Color.DARK_GRAY;
-                    bgColor = new Color(240, 240, 240);
-                }
-                case QUESTION -> {
-                    iconText = "?";
-                    iconColor = Color.MAGENTA;
-                    bgColor = new Color(255, 240, 255);
-                }
-                case LLM_ERROR -> {
-                    iconText = "!";
-                    iconColor = Color.RED;
-                    bgColor = new Color(255, 230, 230);
-                }
-                case LLM_INFO -> {
-                    iconText = "i";
-                    iconColor = Color.GRAY;
-                }
-                case QUERY_SENT -> {
-                    iconText = "->";
-                    iconColor = new Color(0, 150, 150);
-                }
-                case QUERY_RESULT -> {
-                    iconText = "<-";
-                    iconColor = new Color(0, 150, 150);
-                }
-                default -> {
-                    iconText = "*";
-                    iconColor = Color.BLACK;
-                }
-            }
-            var kbDisp = ofNullable(value.kbId()).map(id -> switch (id) {
-                case GLOBAL_KB_NOTE_ID -> " [KB:G]";
-                case "unknown" -> "";
-                default -> " [KB:" + id.replace(Cog.ID_PREFIX_NOTE, "") + "]";
-            }).orElse("");
-            var assocNoteDisp = ofNullable(value.associatedNoteId()).filter(id -> !id.equals(value.kbId())).map(id -> " (N:" + id.replace(Cog.ID_PREFIX_NOTE, "") + ")").orElse("");
-            var timeStr = timeFormatter.format(Instant.ofEpochMilli(value.timestamp()));
-            var details = switch (value.attachmentType) {
-                case FACT, DERIVED, UNIVERSAL, SKOLEMIZED, SUMMARY, CONCEPT, QUESTION ->
-                        String.format("P:%.3f|D:%d|%s%s%s", value.priority(), value.depth(), timeStr, assocNoteDisp, kbDisp);
-                case LLM_INFO, LLM_ERROR -> String.format("%s|%s%s", value.llmStatus(), timeStr, kbDisp);
-                case QUERY_SENT, QUERY_RESULT -> String.format("%s|%s%s", value.attachmentType, timeStr, kbDisp);
-                default -> String.format("%s%s", timeStr, kbDisp);
-            };
-            detailLabel.setText(details);
-            iconLabel.setText(iconText);
-            if (value.status != AttachmentStatus.ACTIVE && value.isKifBased()) {
-                fgColor = Color.LIGHT_GRAY;
-                contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
-                detailLabel.setText(value.status + "|" + details);
-                bgColor = new Color(248, 248, 248);
-                setBorder(inactiveBorder);
-                iconColor = Color.LIGHT_GRAY;
-            } else {
-                setBorder(activeBorder);
-            }
-            if (value.attachmentType == AttachmentType.LLM_INFO || value.attachmentType == AttachmentType.LLM_ERROR) {
-                switch (value.llmStatus) {
-                    case SENDING, PROCESSING -> {
-                        bgColor = new Color(255, 255, 200);
-                        iconColor = Color.ORANGE;
-                    }
-                    case ERROR -> {
-                        bgColor = new Color(255, 220, 220);
-                        iconColor = Color.RED;
-                    }
-                    case CANCELLED -> {
-                        fgColor = Color.GRAY;
-                        contentLabel.setText("<html><strike>" + value.content().replace("<", "<").replace(">", ">") + "</strike></html>");
-                        bgColor = new Color(230, 230, 230);
-                        iconColor = Color.GRAY;
-                    }
-                    default -> {
-                    }
-                }
-            }
-            if (isSelected) {
-                setBackground(list.getSelectionBackground());
-                contentLabel.setForeground(list.getSelectionForeground());
-                detailLabel.setForeground(list.getSelectionForeground());
-                iconLabel.setForeground(list.getSelectionForeground());
-            } else {
-                setBackground(bgColor);
-                contentLabel.setForeground(fgColor);
-                detailLabel.setForeground((value.status == AttachmentStatus.ACTIVE || !value.isKifBased()) ? Color.GRAY : Color.LIGHT_GRAY);
-                iconLabel.setForeground(iconColor);
-            }
-            var justList = (value.justifications() == null || value.justifications().isEmpty()) ? "None" : String.join(", ", value.justifications());
-            setToolTipText(String.format("<html>ID: %s<br>KB: %s<br>Assoc Note: %s<br>Status: %s<br>LLM Status: %s<br>Type: %s<br>Pri: %.4f<br>Depth: %d<br>Time: %s<br>Just: %s</html>", value.id, value.kbId() != null ? value.kbId() : "N/A", value.associatedNoteId() != null ? value.associatedNoteId() : "N/A", value.status, value.llmStatus, value.attachmentType, value.priority(), value.depth(), Instant.ofEpochMilli(value.timestamp()).toString(), justList));
-            return this;
         }
     }
 
@@ -984,9 +807,10 @@ public class UI extends JFrame {
         private void updateNoteContextMenuState() {
             var noteSelected = note != null;
             var isEditableNote = noteSelected && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id);
-            var systemReady = cog != null && cog.running.get() && !cog.paused.get();
+            var systemRunning = cog != null && cog.running.get() && !cog.isPaused(); // System is running and not paused by user
+
             Stream.of(analyzeItem, enhanceItem, summarizeItem, conceptsItem, questionsItem)
-                    .forEach(i -> i.setEnabled(isEditableNote && systemReady));
+                    .forEach(i -> i.setEnabled(isEditableNote && systemRunning));
             removeItem.setEnabled(isEditableNote); // Allow removing non-system notes even if system is paused
         }
 
@@ -1073,7 +897,7 @@ public class UI extends JFrame {
 
                 tool.execute(params).whenCompleteAsync((result, ex) -> {
                     setControlsEnabled(true); // Re-enable controls
-                    updateStatus("Running"); // Reset status or show tool result
+                    updateStatus(cog.status); // Reset status to current system status
 
                     if (ex != null) {
                         handleActionError(tool.name(), ex);
@@ -1350,15 +1174,17 @@ public class UI extends JFrame {
             var isSummary = isActiveKif && vm.attachmentType == AttachmentType.SUMMARY;
             var isQuestion = isActiveKif && vm.attachmentType == AttachmentType.QUESTION;
             var isConcept = isActiveKif && vm.attachmentType == AttachmentType.CONCEPT;
+            var systemRunning = cog != null && cog.running.get() && !cog.isPaused(); // System is running and not paused by user
 
-            // Enable/disable menu items based on selected attachment properties
-            retractItem.setEnabled(isActiveKif);
+
+            // Enable/disable menu items based on selected attachment properties and system state
+            retractItem.setEnabled(isActiveKif && systemRunning); // Can only retract if system is running
             showSupportItem.setEnabled(isKif && cog != null); // Need cog to show support
-            queryItem.setEnabled(isKif);
+            queryItem.setEnabled(isKif && systemRunning); // Can only query if system is running
             cancelLlmItem.setEnabled(isCancelableLlm && cog != null); // Need cog to cancel LLM task
             insertSummaryItem.setEnabled(isSummary && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only insert into editable notes
             answerQuestionItem.setEnabled(isQuestion && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only answer in editable notes
-            findRelatedConceptsItem.setEnabled(isConcept && cog != null); // Need cog for concept search (NYI)
+            findRelatedConceptsItem.setEnabled(isConcept && cog != null && systemRunning); // Need cog for concept search (NYI) and system running
         }
 
         private Optional<AttachmentViewModel> getSelectedAttachmentViewModel() {
@@ -1474,7 +1300,7 @@ public class UI extends JFrame {
 
     class MainControlPanel extends JPanel {
         public final JLabel statusLabel = new JLabel("Status: Initializing...");
-        final JButton addButton = new JButton("Add Note"), pauseResumeButton = new JButton("Pause"), clearAllButton = new JButton("Clear All");
+        final JButton addButton = new JButton("Add Note"), pauseResumeButton = new JButton("Start"), clearAllButton = new JButton("Clear All"); // Button text defaults to "Start"
 
         MainControlPanel() {
             setLayout(new BorderLayout());
@@ -1495,20 +1321,34 @@ public class UI extends JFrame {
         }
 
         void updatePauseResumeButton() {
-            pauseResumeButton.setText((cog != null && cog.running.get()) ? (cog.isPaused() ? "Resume" : "Pause") : "Pause");
+            if (cog == null || !cog.running.get()) {
+                pauseResumeButton.setText("Stopped");
+                pauseResumeButton.setEnabled(false);
+            } else if (cog.isPaused()) {
+                // Check if it's the initial paused state or user-paused
+                if ("Paused (Ready to Start)".equals(cog.status)) {
+                     pauseResumeButton.setText("Start");
+                } else {
+                     pauseResumeButton.setText("Resume");
+                }
+                pauseResumeButton.setEnabled(true);
+            } else {
+                pauseResumeButton.setText("Pause");
+                pauseResumeButton.setEnabled(true);
+            }
         }
 
         void setControlsEnabled(boolean enabled) {
             boolean systemExists = cog != null, systemRunning = systemExists && cog.running.get();
             addButton.setEnabled(enabled && systemExists);
             clearAllButton.setEnabled(enabled && systemExists);
-            pauseResumeButton.setEnabled(enabled && systemRunning);
-            updatePauseResumeButton(); // Ensure button text is correct
+            // Pause/Resume/Start button enabled state is handled by updatePauseResumeButton
+            updatePauseResumeButton();
         }
 
         private void addNoteAction() {
             ofNullable(JOptionPane.showInputDialog(UI.this, "Enter note title:", "New Note", JOptionPane.PLAIN_MESSAGE)).map(String::trim).filter(Predicate.not(String::isEmpty)).ifPresent(title -> {
-                var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, "");
+                var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, "", Note.Status.IDLE); // New notes start as IDLE
                 if (cog != null) {
                     cog.addNote(newNote); // Add note via CogNote
                     // UI update happens via AddedEvent
@@ -1520,7 +1360,7 @@ public class UI extends JFrame {
             ofNullable(cog).ifPresent(r -> {
                 r.setPaused(!r.isPaused());
                 updatePauseResumeButton();
-                updateStatus(r.isPaused() ? "Paused" : "Running");
+                // Status update is handled by Cog.setPaused and SystemStatusEvent
                 setControlsEnabled(true); // Re-enable controls after pause/resume
             });
         }
@@ -1528,8 +1368,7 @@ public class UI extends JFrame {
         private void clearAllAction() {
             if (cog != null && JOptionPane.showConfirmDialog(UI.this, "Clear all notes (except config), assertions, and rules? This cannot be undone.", "Confirm Clear All", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
                 cog.clear(); // Clear via CogNote
-                updateStatus("Clearing all...");
-                // UI clear happens via events (RemovedEvent for notes, RetractedEvent/EvictedEvent for assertions)
+                // Status update and UI clear happens via events
             }
         }
     }
