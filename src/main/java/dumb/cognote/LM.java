@@ -15,12 +15,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LM {
     public static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
     static final String DEFAULT_LLM_URL = "http://localhost:11434";
-    static final String DEFAULT_LLM_MODEL = "hf.co/mradermacher/phi-4-GGUF:Q4_K_S";
+    static final String DEFAULT_LLM_MODEL = "hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q8_0";
     public final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
 
     private final Cog cog;
-    volatile String llmApiUrl;
-    volatile String llmModel;
+    volatile String llmApiUrl, llmModel;
     private volatile ChatLanguageModel chatModel;
     private volatile LlmService llmService;
 
@@ -80,7 +79,7 @@ public class LM {
         }
 
         var systemMessage = dev.langchain4j.data.message.SystemMessage.from("""
-                You are an intelligent agent interacting with a knowledge base system.
+                You are an intelligent cognitive agent interacting with a semantic knowledge system.
                 Your primary goal is to assist the user by processing information, answering questions, or performing tasks using the available tools and your knowledge.
                 Available tools have been provided to you. If a tool call is required to fulfill the request, use the tool(s). Otherwise, provide a direct text response.
                 When using tools, output ONLY the tool call(s) in the specified format. Your response will be intercepted, the tool(s) executed, and the results provided back to you in the next turn.

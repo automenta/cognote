@@ -9,7 +9,7 @@ import static dumb.cognote.Logic.TruthMaintenance.ResolutionStrategy.RETRACT_WEA
  * Plugin that listens for TMS events, such as contradiction detection,
  * and triggers appropriate actions like contradiction resolution.
  */
-public class TmsEventHandlerPlugin extends Cog.BasePlugin {
+public class TmsPlugin extends Cog.BasePlugin {
 
     @Override
     public void start(Cog.Events ev, Logic.Cognition ctx) {

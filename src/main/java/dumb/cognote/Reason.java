@@ -120,10 +120,10 @@ public class Reason {
         }
 
         private void dispatchRuleEvent(Cog.CogEvent event) {
-            if (event instanceof Cog.RuleAddedEvent rae) {
-                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rae.rule())));
-            } else if (event instanceof Cog.RuleRemovedEvent rre) {
-                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rre.rule())));
+            if (event instanceof Cog.RuleAddedEvent(Rule rule)) {
+                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
+            } else if (event instanceof Cog.RuleRemovedEvent(Rule rule)) {
+                plugins.forEach(p -> p.processRuleEvent(new Cog.RuleEvent(rule)));
             }
         }
 

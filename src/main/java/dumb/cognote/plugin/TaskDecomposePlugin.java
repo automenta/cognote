@@ -11,7 +11,7 @@ import static dumb.cognote.Logic.KifList;
 /**
  * Plugin that listens for (goal ...) assertions and uses the LLM to decompose them into sub-tasks.
  */
-public class TaskDecompositionPlugin extends Cog.BasePlugin {
+public class TaskDecomposePlugin extends Cog.BasePlugin {
 
     @Override
     public void start(Cog.Events e, Cognition ctx) {
@@ -22,12 +22,10 @@ public class TaskDecompositionPlugin extends Cog.BasePlugin {
 
     private void handleGoalAssertion(Cog.CogEvent event, java.util.Map<Logic.KifVar, Logic.KifTerm> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof Cog.ExternalInputEvent externalInputEvent)) {
+        if (!(event instanceof Cog.ExternalInputEvent(Logic.KifTerm term, String sourceId, String noteId))) {
             return; // Should not happen with correct registration, but defensive
         }
-        var term = externalInputEvent.term();
-        var sourceId = externalInputEvent.sourceId();
-        var noteId = externalInputEvent.targetNoteId(); // This is the targetNoteId from the input event
+        // This is the targetNoteId from the input event
 
 
         if (!(term instanceof Logic.KifList goalList) || goalList.size() < 2 || !goalList.op().filter("goal"::equals).isPresent()) {

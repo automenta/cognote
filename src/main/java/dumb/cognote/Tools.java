@@ -32,9 +32,8 @@ public class Tools {
                 .filter(tool -> {
                     try {
                         for (var method : tool.getClass().getDeclaredMethods()) {
-                            if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
+                            if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class))
                                 return true;
-                            }
                         }
                         return false;
                     } catch (Exception e) {

@@ -84,7 +84,7 @@ public class UI extends JFrame {
                     newItem.attachmentType != existingItem.attachmentType) {
                 sourceModel.setElementAt(newItem, existingIndex);
             }
-        } else if (newItem.status == AttachmentStatus.ACTIVE || !newItem.isKifBased()) {
+        } else {
             sourceModel.addElement(newItem);
         }
     }
@@ -823,7 +823,7 @@ public class UI extends JFrame {
             performNoteAction("Removing", "Confirm Removal", "Remove note '%s' and retract all associated assertions?", JOptionPane.WARNING_MESSAGE, note -> ofNullable(cog).ifPresent(s -> s.events.emit(new Cog.RetractionRequestEvent(note.id, Logic.RetractionType.BY_NOTE, "UI-Remove", note.id))));
         }
 
-        private void addNoteToListInternal(Cog.Note note) {
+        void addNoteToList(Cog.Note note) {
             if (findNoteById(note.id).isEmpty()) {
                 noteListModel.addElement(note);
                 noteAttachmentModels.computeIfAbsent(note.id, id -> new DefaultListModel<>());
@@ -879,11 +879,11 @@ public class UI extends JFrame {
 
         void loadNotes(List<Cog.Note> notes) {
             noteListModel.clear();
-            notes.forEach(this::addNoteToListInternal);
+            notes.forEach(this::addNoteToList);
             if (findNoteById(Cog.GLOBAL_KB_NOTE_ID).isEmpty())
-                addNoteToListInternal(new Cog.Note(Cog.GLOBAL_KB_NOTE_ID, Cog.GLOBAL_KB_NOTE_TITLE, "Global KB assertions."));
+                addNoteToList(new Cog.Note(Cog.GLOBAL_KB_NOTE_ID, Cog.GLOBAL_KB_NOTE_TITLE, "Global KB assertions."));
             if (findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
-                addNoteToListInternal(cog != null ? Cog.createDefaultConfigNote() : new Cog.Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
+                addNoteToList(cog != null ? Cog.createDefaultConfigNote() : new Cog.Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}"));
             if (!noteListModel.isEmpty()) {
                 var firstSelectable = IntStream.range(0, noteListModel.getSize())
                         .filter(i -> !noteListModel.getElementAt(i).id.equals(Cog.GLOBAL_KB_NOTE_ID) && !noteListModel.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID))
@@ -1103,19 +1103,45 @@ public class UI extends JFrame {
                     JOptionPane.showMessageDialog(UI.this, "Find related notes for concept '" + extractContentFromKif(vm.content()) + "' NYI.", "Find Related Notes", JOptionPane.INFORMATION_MESSAGE));
         }
 
+
         void refreshAttachmentDisplay() {
             if (currentNote == null) {
                 clearAttachments();
                 return;
             }
             var filterText = filterField.getText().trim().toLowerCase();
-            var sourceModel = noteAttachmentModels.computeIfAbsent(currentNote.id, id -> new DefaultListModel<>());
-            List<AttachmentViewModel> sortedSource = Collections.list(sourceModel.elements());
-            sortedSource.sort(Comparator.naturalOrder());
+            List<AttachmentViewModel> allRelevantItems = new ArrayList<>();
+
+            // Always include items from the Global KB model
+//            var globalKbModel = noteAttachmentModels.get(Cog.GLOBAL_KB_NOTE_ID);
+//            if (globalKbModel != null) {
+//                Collections.list(globalKbModel.elements()).forEach(allRelevantItems::add);
+//            }
+
+            // If a specific note is selected, also include items from that note's model
+            // (These include items sourced from the note or committed to its specific KB,
+            // as well as LLM-generated items like Concepts/Questions/Summaries)
+            if (!Cog.GLOBAL_KB_NOTE_ID.equals(currentNote.id)) {
+                var currentNoteModel = noteAttachmentModels.get(currentNote.id);
+                if (currentNoteModel != null) {
+                    // Add items from the current note's model, avoiding duplicates
+                    Collections.list(currentNoteModel.elements()).stream()
+                            .filter(vm -> !allRelevantItems.stream().anyMatch(existing -> existing.id.equals(vm.id))) // Avoid duplicates
+                            .forEach(allRelevantItems::add);
+                }
+            }
+
+            // Sort and filter the combined list
+            allRelevantItems.sort(Comparator.naturalOrder());
             var displayModel = new DefaultListModel<AttachmentViewModel>();
-            sortedSource.stream().filter(vm -> filterText.isEmpty() || vm.content().toLowerCase().contains(filterText)).forEach(displayModel::addElement);
+            allRelevantItems.stream()
+                    .filter(vm -> filterText.isEmpty() || vm.content().toLowerCase().contains(filterText))
+                    .forEach(displayModel::addElement);
+
+            // Set the display model
             attachmentList.setModel(displayModel);
         }
+
 
         void updateAttachmentPanelTitle() {
             var count = (currentNote != null) ? noteAttachmentModels.getOrDefault(currentNote.id, new DefaultListModel<>()).getSize() : 0;

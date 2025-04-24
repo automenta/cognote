@@ -1,7 +1,7 @@
 package dumb.cognote;
 
-import dumb.cognote.plugin.TaskDecompositionPlugin;
-import dumb.cognote.plugin.TmsEventHandlerPlugin;
+import dumb.cognote.plugin.TaskDecomposePlugin;
+import dumb.cognote.plugin.TmsPlugin;
 import dumb.cognote.tools.*;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
@@ -222,8 +222,8 @@ public class Cog {
         plugins.loadPlugin(new IO.StatusUpdaterPlugin(statusEvent -> updateStatusLabel(statusEvent.statusMessage())));
         plugins.loadPlugin(new IO.WebSocketBroadcasterPlugin(this));
         plugins.loadPlugin(new IO.UiUpdatePlugin(ui));
-        plugins.loadPlugin(new TaskDecompositionPlugin());
-        plugins.loadPlugin(new TmsEventHandlerPlugin());
+        plugins.loadPlugin(new TaskDecomposePlugin());
+        plugins.loadPlugin(new TmsPlugin());
 
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
@@ -682,6 +682,146 @@ public class Cog {
     }
 
     public record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds, String kbId) implements CogEvent {
+    }
+
+    public static class Events {
+        public final ExecutorService exe;
+        private final ConcurrentMap<Class<? extends CogEvent>, CopyOnWriteArrayList<Consumer<CogEvent>>> listeners = new ConcurrentHashMap<>();
+        private final ConcurrentMap<KifTerm, CopyOnWriteArrayList<BiConsumer<CogEvent, Map<KifVar, KifTerm>>>> patternListeners = new ConcurrentHashMap<>();
+
+        Events(ExecutorService exe) {
+            this.exe = requireNonNull(exe);
+        }
+
+        private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
+            try {
+                listener.accept(event);
+            } catch (Exception e) {
+                logExeError(e, type, event.getClass().getSimpleName());
+            }
+        }
+
+        private static void exeSafe(BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener, CogEvent event, Map<KifVar, KifTerm> bindings, String type) {
+            try {
+                listener.accept(event, bindings);
+            } catch (Exception e) {
+                logExeError(e, type, event.getClass().getSimpleName() + " (Pattern Match)");
+            }
+        }
+
+        private static void logExeError(Exception e, String type, String eventName) {
+            System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
+            e.printStackTrace();
+        }
+
+        public <T extends CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
+            listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
+        }
+
+        public void on(KifTerm pattern, BiConsumer<CogEvent, Map<KifVar, KifTerm>> listener) {
+            patternListeners.computeIfAbsent(pattern, k -> new CopyOnWriteArrayList<>()).add(listener);
+        }
+
+        public void emit(CogEvent event) {
+            if (exe.isShutdown()) {
+                System.err.println("Warning: Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
+                return;
+            }
+            exe.submit(() -> {
+                listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "Direct Listener"));
+                switch (event) {
+                    case AssertionAddedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), event);
+                    case TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), event);
+                    case ExternalInputEvent eiEvent ->
+                            handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
+                    default -> {
+                    }
+                }
+            });
+        }
+
+        private void handlePatternMatching(KifTerm eventTerm, CogEvent event) {
+            patternListeners.forEach((pattern, listeners) ->
+                    ofNullable(Unifier.match(pattern, eventTerm, Map.of()))
+                            .ifPresent(bindings -> listeners.forEach(listener -> exeSafe(listener, event, bindings, "Pattern Listener")))
+            );
+        }
+
+        public void shutdown() {
+            listeners.clear();
+            patternListeners.clear();
+        }
+    }
+
+    static class Plugins {
+        private final Events events;
+        private final Cognition context;
+        private final List<Plugin> plugins = new CopyOnWriteArrayList<>();
+        private final AtomicBoolean initialized = new AtomicBoolean(false);
+
+        Plugins(Events events, Cognition context) {
+            this.events = events;
+            this.context = context;
+        }
+
+        public void loadPlugin(Plugin plugin) {
+            if (initialized.get()) {
+                System.err.println("Cannot load plugin " + plugin.id() + " after initialization.");
+                return;
+            }
+            plugins.add(plugin);
+            System.out.println("Plugin loaded: " + plugin.id());
+        }
+
+        public void initializeAll() {
+            if (!initialized.compareAndSet(false, true)) return;
+            System.out.println("Initializing " + plugins.size() + " general plugins...");
+            plugins.forEach(plugin -> {
+                try {
+                    plugin.start(events, context);
+                    System.out.println("Initialized plugin: " + plugin.id());
+                } catch (Exception e) {
+                    System.err.println("Failed to initialize plugin " + plugin.id() + ": " + e.getMessage());
+                    e.printStackTrace();
+                    plugins.remove(plugin); // Remove failed plugin
+                }
+            });
+            System.out.println("General plugin initialization complete.");
+        }
+
+        public void shutdownAll() {
+            System.out.println("Shutting down " + plugins.size() + " general plugins...");
+            plugins.forEach(plugin -> {
+                try {
+                    plugin.stop();
+                    System.out.println("Shutdown plugin: " + plugin.id());
+                } catch (Exception e) {
+                    System.err.println("Error shutting down plugin " + plugin.id() + ": " + e.getMessage());
+                    e.printStackTrace();
+                }
+            });
+            plugins.clear();
+            System.out.println("General plugin shutdown complete.");
+        }
+    }
+
+    public record Query(String id, QueryType type, KifTerm pattern, @Nullable String targetKbId,
+                        Map<String, Object> parameters) {
+    }
+
+    public record Answer(String query, QueryStatus status, List<Map<KifVar, KifTerm>> bindings,
+                         @Nullable Explanation explanation) {
+        static Answer success(String queryId, List<Map<KifVar, KifTerm>> bindings) {
+            return new Answer(queryId, QueryStatus.SUCCESS, bindings, null);
+        }
+
+        static Answer failure(String queryId) {
+            return new Answer(queryId, QueryStatus.FAILURE, List.of(), null);
+        }
+
+        static Answer error(String queryId, String message) {
+            return new Answer(queryId, QueryStatus.ERROR, List.of(), new Explanation(message));
+        }
     }
 
     record QueryRequestEvent(Query query) implements CogEvent {
