@@ -1,3 +1,173 @@
+> /ask Revise and show the plan to complete the changes.                                                                                          
+
+Warning: it's best to only add files that need changes to the chat.
+https://aider.chat/docs/troubleshooting/edit-errors.html
+                    
+Okay, I understand. We will proceed with the plan, focusing on building the Prolog-inspired backward chaining engine internally within the        
+existing Java codebase, rather than integrating an external Prolog system.                                                                        
+
+Based on our previous discussion and the code changes already committed (ab99ea8, b0da39c), here is the revised comprehensive plan to complete the
+changes, incorporating the internal backward chaining engine, Note lifecycle management, and System Notes:                                        
+
+Overall Vision:                                                                                                                                   
+
+The system will be centered around Notes, which serve as scoped knowledge bases and execution contexts. An internally developed Prolog-inspired   
+backward chaining engine will be implemented to handle complex queries and goal achievement. The UI is now decoupled and interacts with the core  
+CogNote backend via events and a defined API. Notes will have explicit states (IDLE, ACTIVE, PAUSED, COMPLETED), controlling their processing     
+activity. Special "System Notes" will manage configuration, testing, and test results.                                                            
+
+Current Status:                                                                                                                                   
+
+ • Phase 1: Foundation & Decoupling (CogNote and UI) is largely complete. CogNote now manages the internal notes map and persistence, and the UI  
+   interacts via CogNote methods and listens to Cog.CogEvents.                                                                                    
+
+Revised Plan:                                                                                                                                     
+
+Phase 2: Note Lifecycle and Quiescent Startup                                                                                                     
+
+ 1 Note State:                                                                                                                                    
+    • Add a Status enum (IDLE, ACTIVE, PAUSED, COMPLETED) to the Note class. Default to IDLE.                                                     
+    • Add a status field to the Note class.                                                                                                       
+    • Add NoteStatusEvent to Cog.CogEvent to signal status changes.                                                                               
+ 2 Quiescent Startup:                                                                                                                             
+    • Modify Cog.start(): Initialize components but keep the system in a paused state (paused.set(true)).                                         
+    • The UI (or a new SystemManager class within CogNote) will be responsible for calling cog.setPaused(false) when the user explicitly "starts" 
+      the system.                                                                                                                                 
+ 3 "Starting" a Note:                                                                                                                             
+    • Add a UI action (e.g., button, context menu) to "Start" an IDLE Note.                                                                       
+    • This UI action calls a method on CogNote (e.g., startNote(String noteId)).                                                                  
+    • CogNote.startNote(noteId):                                                                                                                  
+       • Find the Note in the internal map.                                                                                                       
+       • If IDLE, change its status to ACTIVE.                                                                                                    
+       • Add the Note's ID to a new Set<String> activeNoteIds in Cognition.                                                                       
+       • Emit a NoteStatusEvent.                                                                                                                  
+       • Trigger initial processing: Re-emit ExternalInputEvent for all assertions currently in this Note's KB (or sourced from this Note) to kick
+         off reasoning as if they were just added.                                                                                                
+ 4 Note Status Transitions:                                                                                                                       
+    • Implement UI actions for "Pause Note" and "Complete Note".                                                                                  
+    • These actions update the Note status in CogNote, remove/add the Note ID from Cognition.activeNoteIds, and emit NoteStatusEvents.            
+    • Reasoners/plugins should check the status of the Note associated with an assertion/rule/query and potentially skip or deprioritize          
+      processing if the Note is not ACTIVE.                                                                                                       
+
+Phase 3: Internal Prolog-Inspired Backward Chaining                                                                                               
+
+ 1 Core prove Function:                                                                                                                           
+    • Create a private recursive method in Reason.BackwardChainingReasonerPlugin (or a new helper class) like Stream<Map<Term.Var, Term>>         
+      prove(Term goal, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack).                                     
+    • Parameters:                                                                                                                                 
+       • goal: The term currently being proven (potentially with variables).                                                                      
+       • kbId: The ID of the primary KB to search (usually the query's target KB or the current Note's KB).                                       
+       • bindings: The current set of variable bindings accumulated so far.                                                                       
+       • depth: The current recursion depth (for limit checks).                                                                                   
+       • proofStack: A set of goals currently in the recursion stack (for loop detection).                                                        
+    • Return: A Stream of Map<Term.Var, Term> representing successful bindings found.                                                             
+ 2 Base Cases:                                                                                                                                    
+    • If depth <= 0, return an empty stream (depth limit reached).                                                                                
+    • If the goal (after applying bindings) is already in proofStack, return an empty stream (loop detected). Add the goal to the stack at the    
+      start of the function, remove it before returning.                                                                                          
+ 3 Operator Execution:                                                                                                                            
+    • If the goal is an operator term (e.g., (+ 2 3)), attempt to execute it using context.operators().get(...).exe(...).                         
+    • If execution succeeds and returns a result, unify the goal with the result. If unification succeeds, yield the resulting bindings.          
+ 4 Fact Matching:                                                                                                                                 
+    • Search for active assertions in the specified kbId (and potentially the global KB) that unify with the goal using                           
+      Knowledge.findUnifiableAssertions.                                                                                                          
+      Knowledge.findUnifiableAssertions.                                                                                                          
+    • For each matching assertion, unify the goal with the assertion's KIF form using Unifier.unify.                                              
+    • If unification succeeds, yield the resulting bindings.                                                                                      
+ 5 Rule Application:                                                                                                                              
+    • Iterate through the rules (context.rules()).                                                                                                
+    • Attempt to unify the renamed rule's consequent with the goal using Unifier.unify.                                                           
+    • If unification succeeds, recursively call proveAntecedents for the renamed rule's antecedents, passing the new bindings and reduced depth.  
+    • Collect the results (bindings) from the recursive calls.                                                                                    
+ 6 proveAntecedents Function:                                                                                                                     
+    • A helper recursive method Stream<Map<Term.Var, Term>> proveAntecedents(List<Term> antecedents, @Nullable String kbId, Map<Term.Var, Term>   
+      bindings, int depth, Set<Term> proofStack).                                                                                                 
+    • Base Case: If antecedents is empty, yield the current bindings (all antecedents proven).                                                    
+    • Recursive Step: Take the first antecedent. Call prove for this antecedent, passing the current kbId, bindings, depth, and proofStack. For   
+      each successful binding set returned by this call, recursively call proveAntecedents for the rest of the antecedents (antecedents.subList(1,
+      ...)), passing the new bindings.                                                                                                            
+ 7 Logical Connectives (and, or, not):                                                                                                            
+    • Modify the prove function to handle these explicitly if the goal is a list with these operators:                                            
+       • (and A B C): Equivalent to proveAntecedents(List.of(A, B, C), ...).                                                                      
+       • (or A B): Prove A and B separately and combine the resulting streams of bindings.                                                        
+       • (not A): Attempt to prove(A, ...). If the resulting stream is empty, the not succeeds, yield the current bindings. If the stream is      
+         non-empty, the not fails, yield an empty stream.                                                                                         
+ 8 Integrate into BackwardChainingReasonerPlugin:                                                                                                 
+    • Modify executeQuery to call the new prove method with the query pattern, target KB, initial empty bindings, and configured depth limit.     
+    • Collect the results from the stream and format them into a Cog.Answer.                                                                      
+
+Phase 4: Per-Note Reasoning Control (Refining Inference)                                                                                          
+
+ 1 Active Note Prioritization in BC:                                                                                                              
+    • Modify the prove function's fact-matching and rule-application steps to prioritize searching KBs listed in Cognition.activeNoteIds. For     
+      example, search the target KB first, then any other active Note KBs, then the global KB.                                                    
+ 2 Active Note Prioritization in FC/Rewrite:                                                                                                      
+    • Review ForwardChainingReasonerPlugin and RewriteRuleReasonerPlugin. Consider if their event handlers or internal loops should prioritize    
+      processing assertions originating from or committed to activeNoteIds. This might involve using a priority queue for events or assertions.   
+      (This is a potential optimization, focus on correctness first).                                                                             
+
+Phase 5: System Notes and Advanced Features                                                                                                       
+
+ 1 Define System Note IDs:                                                                                                                        
+    • Confirm CONFIG_NOTE_ID.                                                                                                                     
+    • Add TEST_RESULTS_NOTE_ID = "note-test-results".                                                                                             
+    • Add TEST_DEFINITIONS_NOTE_ID = "note-test-definitions".                                                                                     
+ 2 Backend Handling for System Notes:                                                                                                             
+    • Modify CogNote.load() to ensure TEST_RESULTS_NOTE_ID and TEST_DEFINITIONS_NOTE_ID notes are created if they don't exist and added to the    
+      internal notes map.                                                                                                                         
+    • Modify CogNote.clear() to not remove these system notes.                                                                                    
+    • Modify RetractionPlugin.retractRequest to prevent retraction of these system note IDs.                                                      
+ 3 UI Handling for System Notes:                                                                                                                  
+    • Modify UI.NoteListPanel to prevent deletion and title editing for system notes.                                                             
+    • Modify UI.EditorPanel to prevent content editing for TEST_RESULTS_NOTE_ID.                                                                  
+    • Add a UI action (e.g., menu item, button) for "Run Tests".                                                                                  
+ 4 Testing System (TestRunnerPlugin):                                                                                                             
+    • Create a new TestRunnerPlugin extending Plugin.BasePlugin.                                                                                  
+    • Implement a method (e.g., runTests()) that is triggered by a new event type (e.g., RunTestsEvent) emitted by the UI's "Run Tests" action.   
+    • TestRunnerPlugin.runTests():                                                                                                                
+       • Retrieve the text content of TEST_DEFINITIONS_NOTE_ID using cog().note(...).map(n -> n.text).                                            
+       • Parse the text content into KIF terms. Define a KIF format for tests (e.g., (test "Test Name" (query (pattern ...)) (expectedBindings    
+         (...))) or (test "Test Name" (query (pattern ...)) (expectedResult true/false))).                                                        
+       • For each parsed test definition:                                                                                                         
+          • Extract the query pattern and expected result/bindings.                                                                               
+          • Create a Cog.Query object (using Cog.QueryType.ASK_BINDINGS or ASK_TRUE_FALSE).                                                       
+          • Execute the query using cog().querySync(query).                                                                                       
+          • Compare the Answer received from querySync with the expected result/bindings.                                                         
+          • Format the test result (PASS/FAIL, details).                                                                                          
+       • Collect all formatted test results.                                                                                                      
+       • Update the text content of the TEST_RESULTS_NOTE_ID note with the collected results using cog().note(...).ifPresent(n -> n.text = "...") 
+         and cog().save().                                                                                                                        
+ 5 Leveraging Internal BC for Goal Achievement:                                                                                                   
+    • Review TaskDecomposePlugin. Instead of relying solely on the LLM to call assert_kif, modify it to potentially formulate a KIF goal (e.g.,   
+      (achieve (findInformation about Cats))) and emit a new Cog.Query with type ACHIEVE_GOAL.                                                    
+    • Add ACHIEVE_GOAL to Cog.QueryType.                                                                                                          
+    • Modify BackwardChainingReasonerPlugin.executeQuery to handle ACHIEVE_GOAL. This would involve proving the goal using the internal BC engine.
+      A successful proof might involve identifying actions (represented as KIF terms like (action ...)) that need to be executed. The reasoner    
+      would need a mechanism to report these required actions back (perhaps via a special binding or a new event type). (This is a more advanced  
+      step and could be deferred).                                                                                                                
+
+Phase 6: Refinement and README Alignment                                                                                                          
+
+ 1 Code Cleanup:                                                                                                                                  
+    • Review all code against the README guidelines (Compact, Correct, Consolidated, Deduplicated, Modular, No Comments, Latest Language/APIs).   
+    • Refactor repetitive code.                                                                                                                   
+    • Ensure consistent error handling and logging.                                                                                               
+    • Verify thread safety and concurrency logic, especially with the new internal BC and Note states.                                            
+ 2 Documentation: Update the README to reflect the new architecture, Note states, quiescent startup, System Notes, and the internal               
+   Prolog-inspired reasoning engine.                                                                                                              
+ 3 Testing: Although automated tests are not a code guideline yet, consider adding basic unit tests for the core Unifier and the new internal     
+   backward chaining logic as these are complex and critical components.                                                                          
+
+This revised plan maintains the overall structure while adapting Phase 3 to the requirement of an internal BC engine and detailing the steps      
+involved in implementing it. It also integrates the Note lifecycle and System Notes as requested.                                                 
+
+----
+
+• Structured Error Handling: Implement a more robust error handling mechanism beyond printing to System.err and returning strings.               
+
+• Refine LLM Integration: The pattern of blocking the @Tool method to call the async execute and join() seems necessary for LangChain4j but could
+   be wrapped or abstracted further if possible. The boilerplate for managing activeLlmTasks could potentially be centralized.        
+ 
 # Semantic Matching
 
 • Task 3.1: Integrate Embedding Model: Choose and integrate a text embedding model (potentially via LangChain4j or a
