@@ -48,12 +48,11 @@ public class DecomposeGoalTool implements Tool {
 
         // Add a UI placeholder for the LLM task
         // cog.ui.addLlmUiPlaceholder(finalTargetKbId, interactionType + ": " + goalDescription); // Use target KB ID for UI
-        var vm = UI.AttachmentViewModel.forLlm(
+        cog.events.emit(new Cog.LlmInfoEvent(UI.AttachmentViewModel.forLlm(
                 taskId,
                 finalTargetKbId, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
                 System.currentTimeMillis(), finalTargetKbId, Cog.TaskStatus.SENDING
-        );
-        cog.events.emit(new Cog.LlmInfoEvent(vm));
+        )));
 
 
         var promptText = """

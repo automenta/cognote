@@ -38,7 +38,7 @@ public class SummarizeTool implements Tool {
             return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
         }
 
-        return cog.ui.findNoteById(noteId)
+        return cog.note(noteId)
                 .map(note -> {
                     var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "summarize_");
                     var interactionType = "Note Summarization";

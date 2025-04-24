@@ -39,20 +39,17 @@ public class IdentifyConceptsTool implements Tool {
             return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
         }
 
-        return cog.ui.findNoteById(noteId)
-                .map(note -> {
+        return cog.note(noteId).map(note -> {
                     var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "concepts_");
                     var interactionType = "Key Concept Identification";
 
                     // Add a UI placeholder for the LLM task
                     // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                    var vm = UI.AttachmentViewModel.forLlm(
+                    cog.events.emit(new Cog.LlmInfoEvent(UI.AttachmentViewModel.forLlm(
                             taskId,
                             note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
                             System.currentTimeMillis(), note.id, Cog.TaskStatus.SENDING
-                    );
-                    cog.events.emit(new Cog.LlmInfoEvent(vm));
-
+                    )));
 
                     var promptText = """
                             Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.

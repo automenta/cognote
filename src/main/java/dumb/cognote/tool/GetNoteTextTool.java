@@ -49,10 +49,7 @@ public class GetNoteTextTool implements Tool {
             if (noteId == null || noteId.isBlank()) {
                 return "Error: Missing required parameter 'note_id'.";
             }
-            if (cog == null || cog.ui == null) {
-                return "Error: System UI not available.";
-            }
-            return cog.ui.findNoteById(noteId)
+            return cog.note(noteId)
                     .map(note -> note.text)
                     .orElse("Error: Note with ID '" + noteId + "' not found.");
         }, cog.events.exe);

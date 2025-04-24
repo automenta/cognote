@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.service.AiServices;
@@ -72,35 +74,37 @@ public class LM {
         }
     }
 
-    public CompletableFuture<dev.langchain4j.data.message.AiMessage> llmAsync(String taskId, List<dev.langchain4j.data.message.ChatMessage> history, String interactionType, String noteId) {
+    public CompletableFuture<AiMessage> llmAsync(String taskId, List<ChatMessage> history, String interactionType, String noteId) {
         if (llmService == null) {
             var errorMsg = interactionType + " Error: LLM Service not configured.";
             cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, errorMsg);
             return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
         }
 
-        var systemMessage = dev.langchain4j.data.message.SystemMessage.from("""
-                You are an intelligent cognitive agent interacting with a semantic knowledge system.
-                Your primary goal is to assist the user by processing information, answering questions, or performing tasks using the available tools and your knowledge.
-                Available tools have been provided to you. If a tool call is required to fulfill the request, use the tool(s). Otherwise, provide a direct text response.
-                When using tools, output ONLY the tool call(s) in the specified format. Your response will be intercepted, the tool(s) executed, and the results provided back to you in the next turn.
-                When providing a final answer or explanation after any necessary tool use, output plain text.
-                """);
+        var conversationHistory = new ArrayList<ChatMessage>();
 
-        var conversationHistory = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
-        conversationHistory.add(systemMessage);
+//        var systemMessage = dev.langchain4j.data.message.SystemMessage.from("""
+//                You are an intelligent cognitive agent interacting with a semantic knowledge system.
+//                Your primary goal is to assist the user by processing information, answering questions, or performing tasks using the available tools and your knowledge.
+//                Available tools have been provided to you. If a tool call is required to fulfill the request, use the tool(s). Otherwise, provide a direct text response.
+//                When using tools, output ONLY the tool call(s) in the specified format. Your response will be intercepted, the tool(s) executed, and the results provided back to you in the next turn.
+//                When providing a final answer or explanation after any necessary tool use, output plain text.
+//                """);
+//        conversationHistory.add(systemMessage);
+
         conversationHistory.addAll(history);
-
 
         return CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
             cog.updateTaskStatus(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service...");
 
             try {
-                var finalAiMessage = llmService.chat(conversationHistory);
+
+                var m = llmService.chat(conversationHistory);
 
                 cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + ": Received final response.");
-                return finalAiMessage;
+
+                return m;
 
             } catch (Exception e) {
                 var cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
@@ -114,6 +118,6 @@ public class LM {
     }
 
     interface LlmService {
-        dev.langchain4j.data.message.AiMessage chat(List<dev.langchain4j.data.message.ChatMessage> messages);
+        AiMessage chat(List<ChatMessage> messages);
     }
 }

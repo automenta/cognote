@@ -39,8 +39,7 @@ public class GenerateQuestionsTool implements Tool {
             return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
         }
 
-        return cog.ui.findNoteById(noteId)
-                .map(note -> {
+        return cog.note(noteId).map(note -> {
                     var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "questions_");
                     var interactionType = "Question Generation";
 

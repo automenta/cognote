@@ -8,11 +8,8 @@ import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONArray;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
-import javax.swing.*;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
@@ -22,8 +19,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
@@ -41,10 +36,10 @@ public class Cog {
     static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
-    private static final String NOTES_FILE = "cognote_notes.json";
-    private static final int DEFAULT_KB_CAPACITY = 64 * 1024;
-    private static final int DEFAULT_REASONING_DEPTH = 4;
-    private static final boolean DEFAULT_BROADCAST_INPUT = false;
+    static final String NOTES_FILE = "cognote_notes.json";
+    static final int DEFAULT_KB_CAPACITY = 64 * 1024;
+    static final int DEFAULT_REASONING_DEPTH = 4;
+    static final boolean DEFAULT_BROADCAST_INPUT = false;
     private static final double DEFAULT_RULE_PRIORITY = 1;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50, MAX_WS_PARSE_PREVIEW = 100;
@@ -59,11 +54,9 @@ public class Cog {
     private final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
-    @Deprecated
-    public UI ui;
     volatile boolean broadcastInputAssertions;
-    private volatile int globalKbCapacity;
-    private volatile int reasoningDepthLimit;
+    volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
+    volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
 
     public Cog() {
         this.events = new Events(mainExecutor);
@@ -81,55 +74,11 @@ public class Cog {
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
 
-        load();
 
-        System.out.printf("System config: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d%n",
-                globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit);
+//        System.out.printf("System config: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d%n",
+//                globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit);
     }
 
-    public static void main(String[] args) {
-        String rulesFile = null;
-
-        for (var i = 0; i < args.length; i++) {
-            try {
-                switch (args[i]) {
-                    case "-r", "--rules" -> rulesFile = args[++i];
-                    default -> System.err.println("Warning: Unknown option: " + args[i] + ". Config via UI/JSON.");
-                }
-            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
-                System.err.printf("Error parsing argument for %s: %s%n", (i > 0 ? args[i - 1] : args[i]), e.getMessage());
-                printUsageAndExit();
-            }
-        }
-
-        try {
-            var c = new Cog();
-
-            if (rulesFile != null)
-                c.loadRules(rulesFile);
-
-            SwingUtilities.invokeLater(() -> {
-                var ui = new UI(c);
-                ui.setVisible(true);
-
-                c.start();
-            });
-
-        } catch (Exception e) {
-            System.err.println("Initialization/Startup failed: " + e.getMessage());
-            e.printStackTrace();
-            //ofNullable(ui).ifPresent(JFrame::dispose);
-            System.exit(1);
-        }
-
-
-    }
-
-    private static void printUsageAndExit() {
-        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
-        System.err.println("Note: Most configuration is now managed via the UI and persisted in " + NOTES_FILE);
-        System.exit(1);
-    }
 
     public static String id(String prefix) {
         return prefix + id.incrementAndGet();
@@ -162,46 +111,6 @@ public class Cog {
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2));
     }
 
-    private static List<Note> loadNotes() {
-        var filePath = Paths.get(NOTES_FILE);
-        if (!Files.exists(filePath)) return new ArrayList<>(List.of(createDefaultConfigNote()));
-        try {
-            var jsonText = Files.readString(filePath);
-            var jsonArray = new JSONArray(new JSONTokener(jsonText));
-            List<Note> notes = IntStream.range(0, jsonArray.length())
-                    .mapToObj(jsonArray::getJSONObject)
-                    .map(obj -> new Note(obj.getString("id"), obj.getString("title"), obj.getString("text")))
-                    .collect(Collectors.toCollection(ArrayList::new));
-
-            if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-                notes.add(createDefaultConfigNote());
-            }
-            System.out.println("Loaded " + notes.size() + " notes from " + NOTES_FILE);
-            return notes;
-        } catch (IOException | org.json.JSONException e) {
-            System.err.println("Error loading notes from " + NOTES_FILE + ": " + e.getMessage() + ". Returning default config note.");
-            return new ArrayList<>(List.of(createDefaultConfigNote()));
-        }
-    }
-
-    private static synchronized void save(List<Note> notes) {
-        var filePath = Paths.get(NOTES_FILE);
-        var jsonArray = new JSONArray();
-        List<Note> notesToSave = new ArrayList<>(notes);
-        if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            notesToSave.add(createDefaultConfigNote());
-        }
-
-        notesToSave.forEach(note -> jsonArray.put(new JSONObject()
-                .put("id", note.id)
-                .put("title", note.title)
-                .put("text", note.text)));
-        try {
-            Files.writeString(filePath, jsonArray.toString(2));
-        } catch (IOException e) {
-            System.err.println("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
-        }
-    }
 
     private void setupDefaultPlugins() {
         plugins.loadPlugin(new InputPlugin());
@@ -230,10 +139,6 @@ public class Cog {
         tools.register(new GenerateQuestionsTool(this));
         tools.register(new TextToKifTool(this));
         tools.register(new DecomposeGoalTool(this));
-
-
-        context.operators.addBuiltin();
-
     }
 
     public void start() {
@@ -244,11 +149,11 @@ public class Cog {
         paused.set(false);
         status = "Starting";
 
+        context.operators.addBuiltin();
         setupDefaultPlugins();
         plugins.initializeAll();
         reasonerManager.initializeAll();
 
-        ui.loadNotes(loadNotes());
 
         status("Running");
         System.out.println("System started.");
@@ -266,7 +171,6 @@ public class Cog {
 
         lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
         lm.activeLlmTasks.clear();
-        save();
 
         plugins.shutdownAll();
         reasonerManager.shutdownAll();
@@ -309,16 +213,6 @@ public class Cog {
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
         context.clear();
-
-        SwingUtilities.invokeLater(() -> {
-            ui.clearAllUILists();
-            ui.addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions"));
-            if (ui.findNoteById(CONFIG_NOTE_ID).isEmpty()) {
-                ui.addNoteToList(createDefaultConfigNote());
-            }
-            ui.noteListPanel.noteList.setSelectedIndex(0);
-        });
-
 
         status("Cleared");
         setPaused(false);
@@ -385,62 +279,6 @@ public class Cog {
         if (!running.get()) throw new RuntimeException("System stopped");
     }
 
-    private void load() {
-        var notes = loadNotes();
-
-        var configNoteOpt = notes.stream().filter(n -> n.id.equals(CONFIG_NOTE_ID)).findFirst();
-        if (configNoteOpt.isPresent()) {
-            parseConfig(configNoteOpt.get().text);
-        } else {
-            System.out.println("Configuration note not found, using defaults and creating one.");
-            var configNote = createDefaultConfigNote();
-            notes.add(configNote);
-            parseConfig(configNote.text);
-            save(notes);
-        }
-    }
-
-    private void parseConfig(String jsonText) {
-        try {
-            var configJson = new JSONObject(new JSONTokener(jsonText));
-            this.lm.llmApiUrl = configJson.optString("llmApiUrl", LM.DEFAULT_LLM_URL);
-            this.lm.llmModel = configJson.optString("llmModel", LM.DEFAULT_LLM_MODEL);
-            this.globalKbCapacity = configJson.optInt("globalKbCapacity", DEFAULT_KB_CAPACITY);
-            this.reasoningDepthLimit = configJson.optInt("reasoningDepthLimit", DEFAULT_REASONING_DEPTH);
-            this.broadcastInputAssertions = configJson.optBoolean("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
-        } catch (Exception e) {
-            System.err.println("Error parsing configuration JSON, using defaults: " + e.getMessage());
-            this.lm.llmApiUrl = LM.DEFAULT_LLM_URL;
-            this.lm.llmModel = LM.DEFAULT_LLM_MODEL;
-            this.globalKbCapacity = DEFAULT_KB_CAPACITY;
-            this.reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
-            this.broadcastInputAssertions = DEFAULT_BROADCAST_INPUT;
-        }
-        lm.reconfigure();
-    }
-
-    public boolean updateConfig(String newConfigJsonText) {
-        try {
-            var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText));
-            parseConfig(newConfigJsonText);
-            ui.findNoteById(CONFIG_NOTE_ID).ifPresent(note -> {
-                note.text = newConfigJson.toString(2);
-                save();
-            });
-            System.out.println("Configuration updated and saved.");
-            System.out.printf("New Config: KBSize=%d, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d, BroadcastInput=%b%n",
-                    globalKbCapacity, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit, broadcastInputAssertions);
-            return true;
-        } catch (org.json.JSONException e) {
-            System.err.println("Failed to parse new configuration JSON: " + e.getMessage());
-            return false;
-        }
-    }
-
-    public void save() {
-        save(ui.getAllNotes());
-    }
-
     public void updateTaskStatus(String taskId, TaskStatus status, String content) {
         events.emit(new TaskUpdateEvent(taskId, status, content));
     }
@@ -472,6 +310,10 @@ public class Cog {
         } finally {
             queryResultListeners.remove(listener);
         }
+    }
+
+    public Optional<Note> note(String id) {
+        return Optional.empty();
     }
 
     public enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
@@ -542,12 +384,6 @@ public class Cog {
     public record RuleRemovedEvent(Rule rule) implements CogEvent {
     }
 
-    public record LlmInfoEvent(UI.AttachmentViewModel llmItem) implements CogEvent {
-        @Override
-        public String assocNote() {
-            return llmItem.noteId();
-        }
-    }
 
     public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
     }
@@ -804,7 +640,6 @@ public class Cog {
             ev.on(AssertedEvent.class, e -> broadcastMessage("assert-added", e.assertion(), e.kbId()));
             ev.on(RetractedEvent.class, e -> broadcastMessage("retract", e.assertion(), e.kbId()));
             ev.on(AssertionEvictedEvent.class, e -> broadcastMessage("evict", e.assertion(), e.kbId()));
-            ev.on(LlmInfoEvent.class, e -> broadcastMessage("llm-info", e.llmItem()));
             ev.on(TaskUpdateEvent.class, e -> broadcastMessage("llm-update", e));
             ev.on(WebSocketBroadcastEvent.class, e -> safeBroadcast(e.message()));
             if (ctx.cog.broadcastInputAssertions) ev.on(ExternalInputEvent.class, this::onExternalInput);
@@ -846,18 +681,9 @@ public class Cog {
             safeBroadcast(msg);
         }
 
-        private void broadcastMessage(String type, UI.AttachmentViewModel llmItem) {
-            if (type.equals("llm-info") && llmItem.noteId() != null) {
-                safeBroadcast(String.format("llm-info %s [%s] {type:%s, status:%s, content:\"%s\"}",
-                        llmItem.noteId(), llmItem.id(), llmItem.attachmentType(), llmItem.llmStatus(), llmItem.content().replace("\"", "\\\"")));
-            }
-        }
-
         private void broadcastMessage(String type, TaskUpdateEvent event) {
-            if (type.equals("llm-update")) {
-                safeBroadcast(String.format("llm-update %s {status:%s, content:\"%s\"}",
-                        event.taskId(), event.status(), event.content().replace("\"", "\\\"")));
-            }
+            safeBroadcast(String.format("TaskUpdate %s {status:%s, content:\"%s\"}",
+                    event.taskId(), event.status(), event.content().replace("\"", "\\\"")));
         }
 
         private void safeBroadcast(String message) {
@@ -979,4 +805,11 @@ public class Cog {
     }
 
 
+    @Deprecated
+    public record LlmInfoEvent(UI.AttachmentViewModel llmItem) implements CogEvent {
+        @Override
+        public String assocNote() {
+            return llmItem.noteId();
+        }
+    }
 }

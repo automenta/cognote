@@ -26,14 +26,14 @@ import java.util.function.Predicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import static dumb.cognote.Cog.GLOBAL_KB_NOTE_ID;
-import static dumb.cognote.Cog.GLOBAL_KB_NOTE_TITLE;
+import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
 
 public class UI extends JFrame {
+
     private static final int UI_FONT_SIZE = 16;
     public static final Font MONOSPACED_FONT = new Font(Font.MONOSPACED, Font.PLAIN, UI_FONT_SIZE - 2);
     public static final Font UI_DEFAULT_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, UI_FONT_SIZE);
@@ -45,9 +45,8 @@ public class UI extends JFrame {
     private final AttachmentPanel attachmentPanel;
     private final MenuBarHandler menuBarHandler;
     Note note = null;
-    private Cog cog;
-
-    public UI(Cog cog) {
+    private CogNote cog;
+    public UI(CogNote cog) {
         super("Cognote - Event Driven");
 
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
@@ -68,6 +67,53 @@ public class UI extends JFrame {
         setCog(cog);
     }
 
+    public static void main(String[] args) {
+        String rulesFile = null;
+
+        for (var i = 0; i < args.length; i++) {
+            try {
+                switch (args[i]) {
+                    case "-r", "--rules" -> rulesFile = args[++i];
+                    default -> System.err.println("Warning: Unknown option: " + args[i] + ". Config via UI/JSON.");
+                }
+            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
+                System.err.printf("Error parsing argument for %s: %s%n", (i > 0 ? args[i - 1] : args[i]), e.getMessage());
+                printUsageAndExit();
+            }
+        }
+
+        try {
+            var c = new CogNote();
+
+            if (rulesFile != null)
+                c.loadRules(rulesFile);
+
+            SwingUtilities.invokeLater(() -> {
+                var ui = new UI(c);
+                ui.setVisible(true);
+
+                ui.loadNotes(c.loadNotes());
+
+                c.start();
+            });
+
+        } catch (Exception e) {
+            System.err.println("Initialization/Startup failed: " + e.getMessage());
+            e.printStackTrace();
+            //ofNullable(ui).ifPresent(JFrame::dispose);
+            System.exit(1);
+        }
+    }
+
+    private static void printUsageAndExit() {
+        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
+        System.err.println("Note: Most configuration is now managed via the UI and persisted in " + NOTES_FILE);
+        System.exit(1);
+    }
+
+    /**
+     * TODO this needs to be called from somewhere
+     */
     private static void handleLlmFailure(Throwable ex, Note contextNote) {
         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
         if (!(cause instanceof CancellationException)) {
@@ -155,7 +201,7 @@ public class UI extends JFrame {
         };
     }
 
-    private void setCog(Cog c) {
+    private void setCog(CogNote c) {
         this.cog = c;
         cog.ui = this;
 
@@ -168,7 +214,7 @@ public class UI extends JFrame {
         ev.on(Cog.RetractedEvent.class, e -> handleUiUpdate("retract", e.assertion()));
         ev.on(Cog.AssertionEvictedEvent.class, e -> handleUiUpdate("evict", e.assertion()));
         ev.on(Cog.AssertionStateEvent.class, this::handleStatusChange);
-        ev.on(Cog.LlmInfoEvent.class, e -> handleUiUpdate("llm-info", e.llmItem()));
+        ev.on(LlmInfoEvent.class, e -> handleUiUpdate("llm-info", e.llmItem()));
         ev.on(Cog.TaskUpdateEvent.class, this::updateLlmItem);
         ev.on(Cog.AddedEvent.class, e -> invokeLater(() -> addNoteToList(e.note())));
         ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.note().id)));
@@ -435,6 +481,7 @@ public class UI extends JFrame {
         return noteListPanel.getAllNotes();
     }
 
+    @Deprecated
     public void loadNotes(java.util.List<Note> notes) {
         SwingUtilities.invokeLater(() -> {
             addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Assertions in the global knowledge base."));
@@ -759,11 +806,11 @@ public class UI extends JFrame {
         private final JTextField llmUrlField, llmModelField;
         private final JSpinner kbCapacitySpinner, depthLimitSpinner;
         private final JCheckBox broadcastInputCheckbox;
-        private final Cog systemRef;
+        private final CogNote cog;
 
-        SettingsDialog(Frame owner, Cog cog) {
+        SettingsDialog(Frame owner, CogNote cog) {
             super(owner, "Settings", true);
-            this.systemRef = cog;
+            this.cog = cog;
             setSize(500, 300);
             setLocationRelativeTo(owner);
             setLayout(new BorderLayout(10, 10));
@@ -830,7 +877,7 @@ public class UI extends JFrame {
 
         private void saveSettings() {
             var newConfigJson = new JSONObject().put("llmApiUrl", llmUrlField.getText()).put("llmModel", llmModelField.getText()).put("globalKbCapacity", kbCapacitySpinner.getValue()).put("reasoningDepthLimit", depthLimitSpinner.getValue()).put("broadcastInputAssertions", broadcastInputCheckbox.isSelected());
-            if (systemRef.updateConfig(newConfigJson.toString())) dispose();
+            if (cog.updateConfig(newConfigJson.toString())) dispose();
             else
                 JOptionPane.showMessageDialog(this, "Invalid JSON format in Configuration. Please correct.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
         }
