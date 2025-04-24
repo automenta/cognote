@@ -126,7 +126,8 @@ public class Logic {
     }
 
     record KifAtom(String value) implements KifTerm {
-        private static final Pattern SAFE_ATOM_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\-+*/.<>=:]+$");
+        // Relaxed pattern slightly to allow more common symbols, but still restrictive
+        private static final Pattern SAFE_ATOM_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\-+*/.<>=:!#%&']+$");
         private static final Map<String, KifAtom> internCache = new ConcurrentHashMap<>(1024);
 
         KifAtom {
@@ -139,6 +140,7 @@ public class Logic {
 
         @Override
         public String toKif() {
+            // Check if quoting is necessary based on the relaxed pattern and common KIF delimiters
             var needsQuotes = value.isEmpty() || !SAFE_ATOM_PATTERN.matcher(value).matches() || value.chars().anyMatch(c -> Character.isWhitespace(c) || "()\";?".indexOf(c) != -1);
             return needsQuotes ? '"' + value.replace("\\", "\\\\").replace("\"", "\\\"") + '"' : value;
         }
@@ -1316,9 +1318,10 @@ public class Logic {
 
     static class KifParser {
         private final Reader reader;
-        private int currentChar = -2;
+        private int currentChar = -2; // -2: initial, -1: EOF, >=0: char value
         private int line = 1;
         private int col = 0;
+        private int charPos = 0; // Absolute character position
 
         private KifParser(Reader reader) {
             this.reader = reader;
@@ -1329,11 +1332,14 @@ public class Logic {
             try (var sr = new StringReader(input.trim())) {
                 return new KifParser(sr).parseTopLevel();
             } catch (IOException e) {
+                // This should ideally not happen with StringReader, but handle it
                 throw new ParseException("Internal Read error: " + e.getMessage());
             }
         }
 
+        // Determines if a character is valid within an unquoted atom
         private static boolean isValidAtomChar(int c) {
+            // Matches the pattern used in KifAtom, plus checks for EOF and delimiters
             return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
         }
 
@@ -1349,17 +1355,24 @@ public class Logic {
 
         private KifTerm parseTerm() throws IOException, ParseException {
             consumeWhitespaceAndComments();
-            return switch (peek()) {
-                case -1 -> throw createParseException("Unexpected EOF");
+            var next = peek();
+            return switch (next) {
+                case -1 -> throw createParseException("Unexpected EOF while looking for term", "EOF");
                 case '(' -> parseList();
                 case '"' -> parseQuotedString();
                 case '?' -> parseVariable();
-                default -> parseAtom();
+                default -> {
+                    if (isValidAtomChar(next)) {
+                        yield parseAtom();
+                    } else {
+                        throw createParseException("Invalid character at start of term", "'" + (char)next + "'");
+                    }
+                }
             };
         }
 
         private KifList parseList() throws IOException, ParseException {
-            consumeChar('(');
+            consumeChar('('); // This already throws a good error if not '('
             List<KifTerm> terms = new ArrayList<>();
             while (true) {
                 consumeWhitespaceAndComments();
@@ -1368,83 +1381,124 @@ public class Logic {
                     consumeChar(')');
                     return new KifList(terms);
                 }
-                if (next == -1) throw createParseException("Unmatched parenthesis");
-                terms.add(parseTerm());
+                if (next == -1) throw createParseException("Unmatched parenthesis", "EOF");
+
+                // Check if the next character is a valid start of a term
+                // Valid starts are '(', '"', '?', or a character valid for an unquoted atom
+                if (next != '(' && next != '"' && next != '?' && !isValidAtomChar(next)) {
+                    throw createParseException("Invalid character inside list", "'" + (char)next + "'");
+                }
+
+                terms.add(parseTerm()); // parseTerm handles its own errors
             }
         }
 
         private KifVar parseVariable() throws IOException, ParseException {
-            consumeChar('?');
+            consumeChar('?'); // This already throws if not '?'
             var sb = new StringBuilder("?");
-            if (!isValidAtomChar(peek())) throw createParseException("Variable name character expected after '?'");
-            while (isValidAtomChar(peek())) sb.append((char) consumeChar());
-            if (sb.length() < 2) throw createParseException("Empty variable name after '?'");
+            var next = peek();
+            if (!isValidAtomChar(next)) {
+                throw createParseException("Variable name character expected after '?'", (next == -1) ? "EOF" : "'" + (char)next + "'");
+            }
+            while (isValidAtomChar(peek())) {
+                sb.append((char) consumeChar());
+            }
+            if (sb.length() < 2) {
+                // This case should ideally be caught by the check after '?', but defensive
+                throw createParseException("Empty variable name after '?'", null);
+            }
             return KifVar.of(sb.toString());
         }
 
         private KifAtom parseAtom() throws IOException, ParseException {
             var sb = new StringBuilder();
-            if (!isValidAtomChar(peek())) throw createParseException("Invalid character at start of atom");
-            while (isValidAtomChar(peek())) sb.append((char) consumeChar());
+            var next = peek();
+            // This check is somewhat redundant if called from parseTerm, but safe
+            if (!isValidAtomChar(next)) {
+                 throw createParseException("Invalid character at start of atom", "'" + (char)next + "'");
+            }
+            while (isValidAtomChar(peek())) {
+                sb.append((char) consumeChar());
+            }
             return KifAtom.of(sb.toString());
         }
 
         private KifAtom parseQuotedString() throws IOException, ParseException {
-            consumeChar('"');
+            consumeChar('"'); // Throws if not '"'
             var sb = new StringBuilder();
             while (true) {
                 var c = consumeChar();
                 if (c == '"') return KifAtom.of(sb.toString());
-                if (c == -1) throw createParseException("Unmatched quote in string literal");
+                if (c == -1) throw createParseException("Unmatched quote in string literal", "EOF");
                 if (c == '\\') {
                     var next = consumeChar();
-                    if (next == -1) throw createParseException("EOF after escape character");
+                    if (next == -1) throw createParseException("EOF after escape character in string literal", "EOF");
                     sb.append((char) switch (next) {
                         case 'n' -> '\n';
                         case 't' -> '\t';
                         case 'r' -> '\r';
-                        default -> next;
+                        case '"' -> '"'; // Escape for double quote
+                        case '\\' -> '\\'; // Escape for backslash
+                        default -> throw createParseException("Invalid escape sequence in string literal", "'\\" + (char)next + "'");
                     });
                 } else sb.append((char) c);
             }
         }
 
         private int peek() throws IOException {
-            if (currentChar == -2) currentChar = reader.read();
+            if (currentChar == -2) {
+                currentChar = reader.read();
+            }
             return currentChar;
         }
 
         private int consumeChar() throws IOException {
             var c = peek();
             if (c != -1) {
-                currentChar = -2;
+                currentChar = -2; // Mark for next read
+                charPos++;
                 if (c == '\n') {
                     line++;
                     col = 0;
-                } else col++;
+                } else {
+                    col++;
+                }
             }
             return c;
         }
 
         private void consumeChar(char expected) throws IOException, ParseException {
             var actual = consumeChar();
-            if (actual != expected)
-                throw createParseException("Expected '" + expected + "' but found " + ((actual == -1) ? "EOF" : "'" + (char) actual + "'"));
+            if (actual != expected) {
+                throw createParseException("Expected '" + expected + "'", ((actual == -1) ? "EOF" : "'" + (char) actual + "'"));
+            }
         }
 
         private void consumeWhitespaceAndComments() throws IOException {
             while (true) {
                 var c = peek();
                 if (c == -1) break;
-                if (Character.isWhitespace(c)) consumeChar();
-                else if (c == ';') {
-                    do consumeChar(); while (peek() != '\n' && peek() != '\r' && peek() != -1);
-                } else break;
+                if (Character.isWhitespace(c)) {
+                    consumeChar();
+                } else if (c == ';') {
+                    // Consume characters until newline or EOF
+                    do {
+                        consumeChar();
+                    } while (peek() != '\n' && peek() != '\r' && peek() != -1);
+                } else {
+                    break; // Not whitespace or comment start
+                }
             }
         }
 
         private ParseException createParseException(String message) {
+            // Default message without specific token info
             return new ParseException(message + " at line " + line + " col " + col);
+        }
+
+        private ParseException createParseException(String message, @Nullable String foundToken) {
+            String foundInfo = foundToken != null ? " found " + foundToken : "";
+            return new ParseException(message + foundInfo + " at line " + line + " col " + col);
         }
 
         static class ParseException extends Exception {
