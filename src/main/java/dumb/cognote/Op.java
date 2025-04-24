@@ -34,27 +34,25 @@ public class Op {
 
         public void addBuiltin() {
             BiFunction<Term.Lst, DoubleBinaryOperator, Optional<Term>> numeric = (args, op) -> {
-                if (args.size() == 3 && args.get(1) instanceof Term.Atom(
-                        var value1
-                ) && args.get(2) instanceof Term.Atom(
-                        var value2
-                )) {
+                if (args.size() == 3 && args.get(1) instanceof Term.Atom && args.get(2) instanceof Term.Atom) {
                     try {
+                        var value1 = ((Term.Atom) args.get(1)).value();
+                        var value2 = ((Term.Atom) args.get(2)).value();
                         return Optional.of(Term.Atom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
                     } catch (NumberFormatException e) {
+                        // Ignore if parsing fails
                     }
                 }
                 return Optional.empty();
             };
             BiFunction<Term.Lst, Cog.DoubleDoublePredicate, Optional<Term>> comparison = (args, op) -> {
-                if (args.size() == 3 && args.get(1) instanceof Term.Atom(
-                        var value1
-                ) && args.get(2) instanceof Term.Atom(
-                        var value2
-                )) {
+                if (args.size() == 3 && args.get(1) instanceof Term.Atom && args.get(2) instanceof Term.Atom) {
                     try {
+                        var value1 = ((Term.Atom) args.get(1)).value();
+                        var value2 = ((Term.Atom) args.get(2)).value();
                         return Optional.of(Term.Atom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
                     } catch (NumberFormatException e) {
+                        // Ignore if parsing fails
                     }
                 }
                 return Optional.empty();
