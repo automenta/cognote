@@ -1165,7 +1165,17 @@ class CognoteTests {
     @Test
     void runLogMessageTool() {
         // Need to register the tool manually for the test Cog instance
-        cog.tools.register(new Tool.BaseTool("log_message", "Logs a message") {
+        cog.tools.register(new Tool() {
+            @Override
+            public String name() {
+                return "log_message2";
+            }
+
+            @Override
+            public String description() {
+                return "Logs a message";
+            }
+
             @Override
             public CompletableFuture<Object> execute(Map<String, Object> params) {
                 String message = (String) params.get("message");
@@ -1177,7 +1187,7 @@ class CognoteTests {
         runKifTest("""
             (test "Run LogMessageTool"
               (setup)
-              (action (runTool (params (name "log_message") (message "Hello from test!"))))
+              (action (runTool (params (name "log_message2") (message "Hello from test!"))))
               (expected (expectedToolResult "Message logged."))
               (teardown))
             """);
@@ -1186,7 +1196,17 @@ class CognoteTests {
     @Test
     void runGetNoteTextTool() {
         // Need to register the tool manually
-        cog.tools.register(new Tool.BaseTool("get_note_text", "Gets note text") {
+        cog.tools.register(new Tool() {
+            @Override
+            public String name() {
+                return "get_note_text2";
+            }
+
+            @Override
+            public String description() {
+                return "Gets note text";
+            }
+
             @Override
             public CompletableFuture<Object> execute(Map<String, Object> params) {
                 String noteId = (String) params.get("note_id");
@@ -1200,7 +1220,7 @@ class CognoteTests {
         runKifTest("""
             (test "Run GetNoteTextTool"
               (setup)
-              (action (runTool (params (name "get_note_text") (note_id "note-dummy-for-tool"))))
+              (action (runTool (params (name "get_note_text2") (note_id "note-dummy-for-tool"))))
               (expected (expectedToolResultContains "; Define your tests here using the (test ...) format"))
               (teardown))
             """);
