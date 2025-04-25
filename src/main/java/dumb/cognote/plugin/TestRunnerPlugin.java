@@ -563,15 +563,12 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 }
             }
             case "expectedToolResult" -> {
-                // Check if the action result matches the expected value
-                // If both are strings, check if the actual result starts with the expected value
-                if (actionResult instanceof String actualString && expected.value instanceof String expectedString) {
-                    yield actualString.startsWith(expectedString);
-                }
-                // Otherwise, use exact equality check
-                yield Objects.equals(actionResult, expected.value);
+                if (expectedList.size() != 2)
+                    throw new IllegalArgumentException("expectedToolResult requires a single value argument.");
+                // The expected value can be any Term
+                yield new TestExpected(op, expectedList.get(1));
             }
-            default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
         };
     }
 
