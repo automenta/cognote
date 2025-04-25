@@ -10,6 +10,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
@@ -18,6 +20,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
     private static final String TEST_KB_PREFIX = "test-kb-";
     private static final long TEST_ACTION_TIMEOUT_SECONDS = 30; // Timeout for individual test actions
+    private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
+
 
     @Override
     public void start(Events ev, Logic.Cognition ctx) {
@@ -42,8 +46,9 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         try {
             tests = parseTestDefinitions(testDefinitionsText);
         } catch (ParseException e) {
-            System.err.println("TestRunnerPlugin: Error parsing test definitions: " + e.getMessage());
-            updateTestResults("Error parsing test definitions: " + e.getMessage());
+            String enhancedErrorMessage = formatParseException(e, testDefinitionsText);
+            System.err.println("TestRunnerPlugin: Error parsing test definitions: " + enhancedErrorMessage);
+            updateTestResults("Error parsing test definitions:\n" + enhancedErrorMessage);
             cog().status("Tests Failed");
             return;
         }
@@ -342,81 +347,74 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         List<TestDefinition> definitions = new ArrayList<>();
         if (text == null || text.isBlank()) return definitions;
 
-        try (var reader = new StringReader(text)) {
-            for (var term : Logic.KifParser.parseKif(text)) {
-                if (term instanceof Term.Lst list && list.size() >= 2 && list.op().filter("test"::equals).isPresent()) {
-                    var nameTerm = list.get(1);
-                    String name;
-                    // Check if the name term is an Atom and extract its value
-                    if (nameTerm instanceof Term.Atom(String value)) {
-                        name = value;
-                        if (name == null || name.isBlank()) {
-                            System.err.println("TestRunnerPlugin: Skipping test with invalid name format (empty or blank Atom): " + list.toKif());
-                            continue;
-                        }
-                    } else {
-                        System.err.println("TestRunnerPlugin: Skipping test with invalid name format (not an Atom): " + list.toKif());
+        // Use the static parseKif method which throws ParseException
+        for (var term : Logic.KifParser.parseKif(text)) {
+            if (term instanceof Term.Lst list && list.size() >= 2 && list.op().filter("test"::equals).isPresent()) {
+                var nameTerm = list.get(1);
+                String name;
+                // Check if the name term is an Atom and extract its value
+                if (nameTerm instanceof Term.Atom(String value)) {
+                    name = value;
+                    if (name == null || name.isBlank()) {
+                        System.err.println("TestRunnerPlugin: Skipping test with invalid name format (empty or blank Atom): " + list.toKif());
                         continue;
                     }
-
-                    List<TestAction> setup = new ArrayList<>();
-                    TestAction action = null;
-                    List<TestExpected> expected = new ArrayList<>();
-                    List<TestAction> teardown = new ArrayList<>();
-
-                    // Parse the rest of the list for setup, action, expected, teardown sections
-                    // Iterate through terms *after* the test name (index 2 onwards)
-                    for (var i = 2; i < list.size(); i++) {
-                        var sectionTerm = list.get(i); // This should be the section list, e.g., (action (query ...))
-                        if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
-                            System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid section format: " + sectionTerm.toKif());
-                            action = null; // Mark test as invalid
-                            break;
-                        }
-                        var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
-                        if (sectionOpOpt.isEmpty()) {
-                            throw new ParseException("Section without operator in test '" + name + "': " + sectionList.toKif());
-                        }
-                        var sectionOp = sectionOpOpt.get();
-                        var sectionContents = sectionList.terms.stream().skip(1).toList(); // These are the terms *inside* the section list
-
-
-                        switch (sectionOp) {
-                            case "setup" -> setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
-                            case "action" -> {
-                                if (sectionContents.size() == 1) {
-                                    action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
-                                } else {
-                                    throw new ParseException("Action section must contain exactly one action in test '" + name + "': " + sectionList.toKif());
-                                }
-                            }
-                            case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
-                            case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
-                            default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name + "': " + sectionList.toKif());
-                        }
-                    }
-
-                    if (action != null) { // Only add if parsing was successful
-                        definitions.add(new TestDefinition(name, setup, action, expected, teardown));
-                    }
-
                 } else {
-                    // Ignore non-(test ...) top-level terms
-                    // This check is redundant with the outer if, but kept for clarity if needed later
-                    // if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
-                    System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
-                    // }
+                    System.err.println("TestRunnerPlugin: Skipping test with invalid name format (not an Atom): " + list.toKif());
+                    continue;
                 }
-            }
 
-        } catch (ParseException e) {
-            throw e; // Re-throw ParseException
-        } catch (Exception e) {
-            System.err.println("TestRunnerPlugin: Unexpected error parsing test definitions: " + e.getMessage());
-            e.printStackTrace();
-            throw new ParseException("Unexpected error parsing test definitions: " + e.getMessage());
+                List<TestAction> setup = new ArrayList<>();
+                TestAction action = null;
+                List<TestExpected> expected = new ArrayList<>();
+                List<TestAction> teardown = new ArrayList<>();
+
+                // Parse the rest of the list for setup, action, expected, teardown sections
+                // Iterate through terms *after* the test name (index 2 onwards)
+                for (var i = 2; i < list.size(); i++) {
+                    var sectionTerm = list.get(i); // This should be the section list, e.g., (action (query ...))
+                    if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
+                        System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid section format: " + sectionTerm.toKif());
+                        action = null; // Mark test as invalid
+                        break;
+                    }
+                    var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
+                    if (sectionOpOpt.isEmpty()) {
+                        throw new ParseException("Section without operator in test '" + name + "': " + sectionList.toKif());
+                    }
+                    var sectionOp = sectionOpOpt.get();
+                    var sectionContents = sectionList.terms.stream().skip(1).toList(); // These are the terms *inside* the section list
+
+
+                    switch (sectionOp) {
+                        case "setup" -> setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
+                        case "action" -> {
+                            if (sectionContents.size() == 1) {
+                                action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
+                            } else {
+                                throw new ParseException("Action section must contain exactly one action in test '" + name + "': " + sectionList.toKif());
+                            }
+                        }
+                        case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
+                        case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
+                        default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name + "': " + sectionList.toKif());
+                    }
+                }
+
+                if (action != null) { // Only add if parsing was successful
+                    definitions.add(new TestDefinition(name, setup, action, expected, teardown));
+                }
+
+            } else {
+                // Ignore non-(test ...) top-level terms
+                // This check is redundant with the outer if, but kept for clarity if needed later
+                // if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
+                System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+                // }
+            }
         }
-        return definitions;
+
+        return definitions; // Return definitions list
     }
 
     private List<TestAction> parseActions(List<Term> terms) {
@@ -610,6 +608,53 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
             case Term.Lst list -> list; // Keep lists as Terms for now
             case Term.Var var -> var; // Keep vars as Terms for now
         };
+    }
+
+    /**
+     * Formats a ParseException to include the line and column context from the source text.
+     * Assumes the ParseException message ends with " at line X col Y".
+     *
+     * @param e The ParseException.
+     * @param sourceText The text that was being parsed.
+     * @return A formatted error message with context.
+     */
+    private String formatParseException(ParseException e, String sourceText) {
+        String message = e.getMessage();
+        Matcher matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
+        int lineNum = -1;
+        int colNum = -1;
+        String baseMessage = message;
+
+        if (matcher.find()) {
+            try {
+                lineNum = Integer.parseInt(matcher.group(1));
+                colNum = Integer.parseInt(matcher.group(2));
+                baseMessage = message.substring(0, matcher.start()); // Get message before " at line..."
+            } catch (NumberFormatException ex) {
+                // Should not happen if regex matches, but handle defensively
+                System.err.println("TestRunnerPlugin: Could not parse line/col from ParseException message: " + message);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(baseMessage);
+
+        if (lineNum > 0 && colNum > 0) {
+            String[] lines = sourceText.split("\\r?\\n");
+            if (lineNum <= lines.length) {
+                String errorLine = lines[lineNum - 1]; // lineNum is 1-based
+                sb.append("\n  --> at line ").append(lineNum).append(" col ").append(colNum).append(":\n");
+                sb.append("  ").append(errorLine).append("\n");
+                // Add pointer below the column
+                sb.append("  ").append(" ".repeat(Math.max(0, colNum - 1))).append("^\n");
+            } else {
+                sb.append("\n  (Could not retrieve line context for line ").append(lineNum).append(")");
+            }
+        } else {
+             sb.append("\n  (No line/column information available)");
+        }
+
+        return sb.toString();
     }
 
 
