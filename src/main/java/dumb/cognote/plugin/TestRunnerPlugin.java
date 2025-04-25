@@ -193,8 +193,9 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             var targetStr = switch (target) {
                                 case Term.Atom(String vv) -> vv;
                                 case Term.Lst l -> l.toKif();
-                                case null, default ->
-                                        throw new IllegalArgumentException("Invalid target for retract: " + target);
+                                case Term.Var v -> throw new IllegalArgumentException("Invalid target for retract: Cannot retract a variable " + v.toKif());
+                                default -> // Should not happen with current Term types, but defensive
+                                        throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
                             };
 
                             // Emit retraction request. Retraction is async.
@@ -447,33 +448,21 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         var op = opOpt.get();
 
         return switch (op) {
-            case "assert", "addRule", "retract", "removeRuleForm", "query" -> {
+            case "assert", "addRule", "removeRuleForm", "query" -> { // Removed "retract" from this case
                 if (actionList.size() < 1)
-                    throw new IllegalArgumentException(op + " action requires at least one argument."); // Changed from 2 to 1 because query payload is just the pattern
-                // For query, the payload is the pattern, toolParams might contain query_type
-                // For runTool, the payload is the tool name and params
-                // Let's make payload the main argument(s) and toolParams for extra config like query_type
+                    throw new IllegalArgumentException(op + " action requires at least one argument.");
                 Term payload = null;
                 Map<String, Object> toolParams = new HashMap<>();
 
                 if (op.equals("query")) {
                     if (actionList.size() < 2)
-                        throw new IllegalArgumentException("query action requires at least one argument (the pattern)."); // Changed from != 2 to < 2
+                        throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
                     payload = actionList.get(1);
-                    // Check for optional query_type parameter
                     if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                         toolParams = parseParams(paramsList);
                     } else if (actionList.size() > 2) {
-                        // Handle potential direct key-value pairs after the pattern?
-                        // Let's stick to (params (...)) for clarity as per runTool
                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
                     }
-                } else if (op.equals("retract")) {
-                    // Expecting (retract (TYPE TARGET))
-                    if (actionList.size() != 2 || !(actionList.get(1) instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
-                        throw new IllegalArgumentException("retract action requires a single argument which is a list (TYPE TARGET). Found: " + actionList.toKif());
-                    }
-                    payload = retractTargetList; // Store the inner list (TYPE TARGET) as payload
                 } else { // assert, addRule, removeRuleForm
                     if (actionList.size() < 2)
                         throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
@@ -482,20 +471,36 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
                 yield new TestAction(op, payload, toolParams);
             }
+            case "retract" -> { // Handle "retract" in its own case for clearer validation
+                // Expecting (retract (TYPE TARGET))
+                if (actionList.size() != 2) {
+                    throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+                }
+                Term targetTerm = actionList.get(1);
+                if (!(targetTerm instanceof Term.Lst retractTargetList)) {
+                     throw new IllegalArgumentException("retract action's argument must be a list (TYPE TARGET). Found: " + targetTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                if (retractTargetList.size() != 2) {
+                     throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
+                }
+                Term typeTerm = retractTargetList.get(0);
+                if (!(typeTerm instanceof Term.Atom typeAtom)) {
+                     throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                // If all checks pass, store the inner list as payload
+                yield new TestAction(op, retractTargetList, new HashMap<>()); // Retract doesn't use toolParams
+            }
             case "runTool" -> {
                 if (actionList.size() < 2)
                     throw new IllegalArgumentException("runTool action requires at least tool name.");
                 if (!(actionList.get(1) instanceof Term.Atom(String value)))
-                    // Corrected error message to refer to the second argument (index 1)
                     throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator).");
                 Map<String, Object> toolParams = new HashMap<>();
                 toolParams.put("name", value);
                 if (actionList.size() > 2) {
-                    // Assume remaining arguments are key-value pairs or a single params list
                     if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                         toolParams.putAll(parseParams(paramsList));
                     } else {
-                        // Simple key-value pairs? Let's stick to the (params (...)) format for clarity
                         throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
                     }
                 }
@@ -538,11 +543,14 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
             case "expectedBindings" -> {
                 // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...))
                 // The value is the list of binding pairs ((?V1 Val1) ...)
-                if (expectedList.size() != 2 || !(expectedList.get(1) instanceof Term.Lst expectedBindingsListTerm))
-                     throw new IllegalArgumentException("expectedBindings requires a single argument which is a list of binding pairs ((?V1 Val1) ...). Found: " + expectedList.toKif());
-
-                // We store the Term.Lst representing the list of binding pairs directly as the value.
-                // The checkSingleExpectation method will then iterate through this list.
+                if (expectedList.size() != 2) {
+                    throw new IllegalArgumentException("expectedBindings requires exactly one argument (the list of binding pairs). Found size: " + expectedList.size() + ". Term: " + expectedList.toKif());
+                }
+                Term bindingsTerm = expectedList.get(1);
+                if (!(bindingsTerm instanceof Term.Lst expectedBindingsListTerm)) {
+                     throw new IllegalArgumentException("expectedBindings argument must be a list of binding pairs ((?V1 Val1) ...). Found: " + bindingsTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
+                }
+                // If checks pass, store the inner list as value
                 yield new TestExpected(op, expectedBindingsListTerm);
             }
             case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
