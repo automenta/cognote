@@ -211,6 +211,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     if (toolName == null || toolName.isBlank())
                         throw new IllegalArgumentException("runTool requires 'name' parameter.");
                     // Fix: Use traditional instanceof check and cast
+                    Term.Lst actionList = (Term.Lst) action.payload;
                     if (!(actionList.get(1) instanceof Term.Atom))
                         throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
                     String value = ((Term.Atom) actionList.get(1)).value();
@@ -224,7 +225,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                             throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
                         }
                     }
-                    return new TestAction(op, null, toolParams); // Payload is null for runTool
+                    return new TestAction(action.type, null, toolParams); // Payload is null for runTool
                 }
                 case "query" -> {
                     if (!(action.payload instanceof Term.Lst pattern))
