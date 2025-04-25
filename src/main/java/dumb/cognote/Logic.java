@@ -543,8 +543,8 @@ public class Logic {
         public final Truths truth;
         public final Op.Operators operators;
         public final Set<String> activeNoteIds = ConcurrentHashMap.newKeySet();
-        final Cog cog;
         public final Events events;
+        final Cog cog;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();

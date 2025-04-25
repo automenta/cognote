@@ -6,7 +6,6 @@ import dumb.cognote.Cog.Answer;
 import dumb.cognote.Cog.QueryType;
 import dumb.cognote.Logic;
 import dumb.cognote.Logic.KifParser.ParseException;
-import dumb.cognote.Term;
 import dumb.cognote.Tool;
 import org.jetbrains.annotations.Nullable;
 
@@ -83,7 +82,7 @@ public class QueryTool implements Tool {
                         new Cog.Query(
                                 Cog.id(ID_PREFIX_QUERY + "tool_"),
                                 queryType,
-                                (Term.Lst) Logic.KifParser.parseKif(kifPattern).getFirst(), // Assuming parseKif returns a single list for a query pattern
+                                Logic.KifParser.parseKif(kifPattern).getFirst(), // Assuming parseKif returns a single list for a query pattern
                                 requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID),
                                 Map.of()));
             } catch (ParseException e) {

@@ -1,4 +1,0 @@
-(test "Simple Fact Query"
-  (query (instance MyCat Cat)) ; <--- This is being seen as an unknown section type
-  (expectedResult true)       ; <--- This is also being seen as an unknown section type
-)

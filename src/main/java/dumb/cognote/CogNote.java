@@ -69,7 +69,7 @@ public class CogNote extends Cog {
                     if ("Tests Complete".equals(statusEvent.statusMessage())) {
                         testsCompleteFuture.complete(null);
                     } else if ("Tests Failed".equals(statusEvent.statusMessage())) {
-                         testsCompleteFuture.completeExceptionally(new RuntimeException("Tests failed."));
+                        testsCompleteFuture.completeExceptionally(new RuntimeException("Tests failed."));
                     }
                 });
 
@@ -81,9 +81,7 @@ public class CogNote extends Cog {
                     testsCompleteFuture.get(120, TimeUnit.SECONDS); // Adjust timeout as needed
 
                     // Print results from the Test Results note
-                    c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
-                        System.out.println("\n" + note.text);
-                    });
+                    c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println("\n" + note.text));
 
                     System.out.println("Command-line test run finished.");
                     System.exit(0); // Exit successfully after tests
@@ -154,9 +152,9 @@ public class CogNote extends Cog {
         if (notes.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
             notes.add(createDefaultConfigNote());
         }
-         // Global KB note is internal, not persisted in this file, but needed in the map
+        // Global KB note is internal, not persisted in this file, but needed in the map
         if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
-             notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+            notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
         }
         if (notes.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
             notes.add(createDefaultTestDefinitionsNote());
@@ -184,7 +182,7 @@ public class CogNote extends Cog {
         if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
             notesToSave.add(createDefaultTestDefinitionsNote());
         }
-         if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
+        if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
             notesToSave.add(createDefaultTestResultsNote());
         }
 
@@ -201,6 +199,98 @@ public class CogNote extends Cog {
         }
     }
 
+    static Note createDefaultTestDefinitionsNote() {
+        return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
+                "; Define your tests here using the (test ...) format\n\n" +
+                        "; Test structure: (test \"Test Name\" (setup ...) (action ...) (expected ...) (teardown ...))\n" +
+                        "; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \"id\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\n" +
+                        "; action types: (query Pattern), (runTool (name \"tool_name\") (params (key1 value1) ...))\n" +
+                        "; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value)\n\n" +
+
+                        "; Example 1: Simple Fact Query\n" +
+                        "(test \"Simple Fact Query\" \n" +
+                        "  (setup (assert (instance MyCat Cat)))\n" +
+                        "  (action (query (instance ?X Cat)))\n" +
+                        "  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\n" +
+                        "  (teardown (retract (BY_KIF (instance MyCat Cat)))))\n\n" +
+
+                        "; Example 2: Query with Multiple Bindings\n" +
+                        "(test \"Query with Multiple Bindings\" \n" +
+                        "  (setup \n" +
+                        "    (assert (instance MyCat Cat))\n" +
+                        "    (assert (instance YourCat Cat))\n" +
+                        "    (assert (instance MyDog Dog)))\n" +
+                        "  (action (query (instance ?X Cat)))\n" +
+                        "  (expected \n" +
+                        "    (expectedResult true)\n" +
+                        "    ; Note: Order of bindings in expectedBindings list matters for now\n" +
+                        "    (expectedBindings ((?X MyCat) (?X YourCat))))\n" +
+                        "  (teardown \n" +
+                        "    (retract (BY_KIF (instance MyCat Cat)))\n" +
+                        "    (retract (BY_KIF (instance YourCat Cat)))\n" +
+                        "    (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
+
+                        "; Example 3: Query that should fail\n" +
+                        "(test \"Query Failure\" \n" +
+                        "  (setup (assert (instance MyDog Dog)))\n" +
+                        "  (action (query (instance MyDog Cat)))\n" +
+                        "  (expected (expectedResult false) (expectedBindings ())))\n" +
+                        "  (teardown (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
+
+                        "; Example 4: Test Forward Chaining Rule\n" +
+                        "(test \"Forward Chaining Rule\" \n" +
+                        "  (setup \n" +
+                        "    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))\n" +
+                        "    (assert (instance MyDog Dog)))\n" +
+                        "  (action (query (attribute MyDog Canine)))\n" +
+                        "  (expected \n" +
+                        "    (expectedResult true)\n" +
+                        "    (expectedBindings ())\n" +
+                        "    (expectedAssertionExists (attribute MyDog Canine)))\n" +
+                        "  (teardown \n" +
+                        "    (retract (BY_KIF (instance MyDog Dog)))\n" +
+                        "    (retract (BY_KIF (attribute MyDog Canine)))\n" +
+                        "    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\n\n" +
+
+                        "; Example 5: Test Retraction\n" +
+                        "(test \"Retract Assertion\" \n" +
+                        "  (setup (assert (instance TempFact Something)))\n" +
+                        "  (action (retract (BY_KIF (instance TempFact Something))))\n" +
+                        "  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\n" +
+                        "  (teardown))\n\n" + // Teardown is empty, cleanup is automatic
+
+                        "; Example 6: Test KB Size\n" +
+                        "(test \"KB Size Check\" \n" +
+                        "  (setup \n" +
+                        "    (assert (fact1 a))\n" +
+                        "    (assert (fact2 b)))\n" +
+                        "  (action (assert (fact3 c)))\n" +
+                        "  (expected (expectedKbSize 3))\n" +
+                        "  (teardown \n" +
+                        "    (retract (BY_KIF (fact1 a)))\n" +
+                        "    (retract (BY_KIF (fact2 b)))\n" +
+                        "    (retract (BY_KIF (fact3 c)))))\n\n" +
+
+                        "; Example 7: Test runTool (LogMessageTool)\n" +
+                        "(test \"Run LogMessageTool\" \n" +
+                        "  (setup)\n" +
+                        "  (action (runTool (name \"log_message\") (params (message \"Hello from test!\"))))\n" +
+                        "  (expected (expectedToolResult \"Message logged.\")))\n" +
+                        "  (teardown))\n\n" +
+
+                        "; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\n" +
+                        "; This test assumes the Test Definitions note itself exists and has text.\n" +
+                        "; It runs the tool against the Test Definitions note KB.\n" +
+                        "(test \"Run GetNoteTextTool\" \n" +
+                        "  (setup)\n" +
+                        "  (action (runTool (name \"get_note_text\") (params (note_id \"" + TEST_DEFINITIONS_NOTE_ID + "\"))))\n" +
+                        "  (expected (expectedToolResult \"; Define your tests here using the (test ...) format\\n\\n; Test structure: (test \\\"Test Name\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\"id\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\n; action types: (query Pattern), (runTool (name \\\"tool_name\\\") (params (key1 value1) ...))\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\n\\n; Example 1: Simple Fact Query\\n(test \\\"Simple Fact Query\\\" \\n  (setup (assert (instance MyCat Cat)))\\n  (action (query (instance ?X Cat)))\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\n\\n; Example 2: Query with Multiple Bindings\\n(test \\\"Query with Multiple Bindings\\\" \\n  (setup \\n    (assert (instance MyCat Cat))\\n    (assert (instance YourCat Cat))\\n    (assert (instance MyDog Dog)))\\n  (action (query (instance ?X Cat)))\\n  (expected \\n    (expectedResult true)\\n    ; Note: Order of bindings in expectedBindings list matters for now\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\n  (teardown \\n    (retract (BY_KIF (instance MyCat Cat)))\\n    (retract (BY_KIF (instance YourCat Cat)))\\n    (retract (BY_KIF (instance MyDog Dog)))))\\n\\n; Example 3: Query that should fail\\n(test \\\"Query Failure\\\" \\n  (setup (assert (instance MyDog Dog)))\\n  (action (query (instance MyDog Cat)))\\n  (expected (expectedResult false) (expectedBindings ())))\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\n\\n; Example 4: Test Forward Chaining Rule\\n(test \\\"Forward Chaining Rule\\\" \\n  (setup \\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))\\n    (assert (instance MyDog Dog)))\\n  (action (query (attribute MyDog Canine)))\\n  (expected \\n    (expectedResult true)\\n    (expectedBindings ())\n    (expectedAssertionExists (attribute MyDog Canine)))\\n  (teardown \\n    (retract (BY_KIF (instance MyDog Dog)))\\n    (retract (BY_KIF (attribute MyDog Canine)))\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\n\\n; Example 5: Test Retraction\\n(test \\\"Retract Assertion\\\" \\n  (setup (assert (instance TempFact Something)))\n  (action (retract (BY_KIF (instance TempFact Something))))\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\n  (teardown))\n\n; Example 6: Test KB Size\\n(test \\\"KB Size Check\\\" \\n  (setup \\n    (assert (fact1 a))\\n    (assert (fact2 b)))\\n  (action (assert (fact3 c)))\\n  (expected (expectedKbSize 3)))\\n  (teardown \\n    (retract (BY_KIF (fact1 a)))\\n    (retract (BY_KIF (fact2 b)))\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"; Define your tests here using the (test ...) format\\\\n\\\\n; Test structure: (test \\\\\\\"Test Name\\\\\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\\\\\"id\\\\\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\\\n; action types: (query Pattern), (runTool (name \\\\\\\"tool_name\\\\\\\") (params (key1 value1) ...))\\\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\\\n\\\\n; Example 1: Simple Fact Query\\\\n(test \\\\\\\"Simple Fact Query\\\\\\\" \\\\n  (setup (assert (instance MyCat Cat)))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\\\n\\\\n; Example 2: Query with Multiple Bindings\\\\n(test \\\\\\\"Query with Multiple Bindings\\\\\\\" \\\\n  (setup \\\\n    (assert (instance MyCat Cat))\\\\n    (assert (instance YourCat Cat))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    ; Note: Order of bindings in expectedBindings list matters for now\\\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyCat Cat)))\\\\n    (retract (BY_KIF (instance YourCat Cat)))\\\\n    (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 3: Query that should fail\\\\n(test \\\\\\\"Query Failure\\\\\\\" \\\\n  (setup (assert (instance MyDog Dog))))\\\\n  (action (query (instance MyDog Cat))))\\\\n  (expected (expectedResult false) (expectedBindings ())))\\\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 4: Test Forward Chaining Rule\\\\n(test \\\\\\\"Forward Chaining Rule\\\\\\\" \\\\n  (setup \\\\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine))))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (attribute MyDog Canine))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    (expectedBindings ())))\\\\n    (expectedAssertionExists (attribute MyDog Canine))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyDog Dog)))\\\\n    (retract (BY_KIF (attribute MyDog Canine)))\\\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\\\n\\\\n; Example 5: Test Retraction\\\\n(test \\\\\\\"Retract Assertion\\\\\\\" \\\\n  (setup (assert (instance TempFact Something))))\\\\n  (action (retract (BY_KIF (instance TempFact Something))))\\\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\\\n  (teardown))\\\\n\\\\n; Example 6: Test KB Size\\\\n(test \\\\\\\"KB Size Check\\\\\\\" \\\\n  (setup \\\\n    (assert (fact1 a))\\\\n    (assert (fact2 b))))\\\\n  (action (assert (fact3 c))))\\\\n  (expected (expectedKbSize 3))))\\\\n  (teardown \\\\n    (retract (BY_KIF (fact1 a)))\\\\n    (retract (BY_KIF (fact2 b)))\\\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"; Define your tests here using the (test ...) format\\\\n\\\\n; Test structure: (test \\\\\\\"Test Name\\\\\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\\\\\"id\\\\\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\\\n; action types: (query Pattern), (runTool (name \\\\\\\"tool_name\\\\\\\") (params (key1 value1) ...))\\\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\\\n\\\\n; Example 1: Simple Fact Query\\\\n(test \\\\\\\"Simple Fact Query\\\\\\\" \\\\n  (setup (assert (instance MyCat Cat)))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\\\n\\\\n; Example 2: Query with Multiple Bindings\\\\n(test \\\\\\\"Query with Multiple Bindings\\\\\\\" \\\\n  (setup \\\\n    (assert (instance MyCat Cat))\\\\n    (assert (instance YourCat Cat))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    ; Note: Order of bindings in expectedBindings list matters for now\\\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyCat Cat)))\\\\n    (retract (BY_KIF (instance YourCat Cat)))\\\\n    (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 3: Query that should fail\\\\n(test \\\\\\\"Query Failure\\\\\\\" \\\\n  (setup (assert (instance MyDog Dog))))\\\\n  (action (query (instance MyDog Cat))))\\\\n  (expected (expectedResult false) (expectedBindings ())))\\\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 4: Test Forward Chaining Rule\\\\n(test \\\\\\\"Forward Chaining Rule\\\\\\\" \\\\n  (setup \\\\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine))))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (attribute MyDog Canine))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    (expectedBindings ())))\\\\n    (expectedAssertionExists (attribute MyDog Canine))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyDog Dog)))\\\\n    (retract (BY_KIF (attribute MyDog Canine)))\\\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\\\n\\\\n; Example 5: Test Retraction\\\\n(test \\\\\\\"Retract Assertion\\\\\\\" \\\\n  (setup (assert (instance TempFact Something))))\\\\n  (action (retract (BY_KIF (instance TempFact Something))))\\\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\\\n  (teardown))\\\\n\\\\n; Example 6: Test KB Size\\\\n(test \\\\\\\"KB Size Check\\\\\\\" \\\\n  (setup \\\\n    (assert (fact1 a))\\\\n    (assert (fact2 b))))\\\\n  (action (assert (fact3 c))))\\\\n  (expected (expectedKbSize 3))))\\\\n  (teardown \\\\n    (retract (BY_KIF (fact1 a)))\\\\n    (retract (BY_KIF (fact2 b)))\\\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"\\\")))\\n  (teardown))\n" +
+                        "\"" + // This is a placeholder, the actual text will be inserted by the UI/CogNote
+                        ")))\n" +
+                        "  (teardown))\n",
+                Note.Status.IDLE);
+    }
+
     @Override
     public Optional<Note> note(String id) {
         return ofNullable(notes.get(id));
@@ -215,15 +305,14 @@ public class CogNote extends Cog {
             events.emit(new AddedEvent(note));
             // Don't save temporary test KBs
             if (!note.id.startsWith(TEST_KB_PREFIX)) {
-                 save();
+                save();
             }
         }
     }
 
     public void removeNote(String noteId) {
         // Prevent removal of system notes (except temporary test KBs)
-        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID))
-             && !noteId.startsWith(TEST_KB_PREFIX)) { // Allow removing temporary test KBs even if they match system ID pattern
+        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID))) { // Allow removing temporary test KBs even if they match system ID pattern
             System.err.println("Attempted to remove system note: " + noteId + ". Operation ignored.");
             return;
         }
@@ -254,9 +343,9 @@ public class CogNote extends Cog {
 
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus)); // Emit event
                 // Don't save temporary test KBs status
-                 if (!note.id.startsWith(TEST_KB_PREFIX)) {
+                if (!note.id.startsWith(TEST_KB_PREFIX)) {
                     save();
-                 }
+                }
             }
         });
     }
@@ -302,7 +391,6 @@ public class CogNote extends Cog {
             }
         });
     }
-
 
     @Override
     public synchronized void clear() {
@@ -436,97 +524,5 @@ public class CogNote extends Cog {
     // Provide access to the CogNote context for plugins/reasoners that extend BaseReasonerPlugin
     Logic.Cognition cogNoteContext() {
         return context;
-    }
-
-    static Note createDefaultTestDefinitionsNote() {
-        return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
-                "; Define your tests here using the (test ...) format\n\n" +
-                        "; Test structure: (test \"Test Name\" (setup ...) (action ...) (expected ...) (teardown ...))\n" +
-                        "; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \"id\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\n" +
-                        "; action types: (query Pattern), (runTool (name \"tool_name\") (params (key1 value1) ...))\n" +
-                        "; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value)\n\n" +
-
-                        "; Example 1: Simple Fact Query\n" +
-                        "(test \"Simple Fact Query\" \n" +
-                        "  (setup (assert (instance MyCat Cat)))\n" +
-                        "  (action (query (instance ?X Cat)))\n" +
-                        "  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\n" +
-                        "  (teardown (retract (BY_KIF (instance MyCat Cat)))))\n\n" +
-
-                        "; Example 2: Query with Multiple Bindings\n" +
-                        "(test \"Query with Multiple Bindings\" \n" +
-                        "  (setup \n" +
-                        "    (assert (instance MyCat Cat))\n" +
-                        "    (assert (instance YourCat Cat))\n" +
-                        "    (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (instance ?X Cat)))\n" +
-                        "  (expected \n" +
-                        "    (expectedResult true)\n" +
-                        "    ; Note: Order of bindings in expectedBindings list matters for now\n" +
-                        "    (expectedBindings ((?X MyCat) (?X YourCat))))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (instance MyCat Cat)))\n" +
-                        "    (retract (BY_KIF (instance YourCat Cat)))\n" +
-                        "    (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
-
-                        "; Example 3: Query that should fail\n" +
-                        "(test \"Query Failure\" \n" +
-                        "  (setup (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (instance MyDog Cat)))\n" +
-                        "  (expected (expectedResult false) (expectedBindings ())))\n" +
-                        "  (teardown (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
-
-                        "; Example 4: Test Forward Chaining Rule\n" +
-                        "(test \"Forward Chaining Rule\" \n" +
-                        "  (setup \n" +
-                        "    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))\n" +
-                        "    (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (attribute MyDog Canine)))\n" +
-                        "  (expected \n" +
-                        "    (expectedResult true)\n" +
-                        "    (expectedBindings ())\n" +
-                        "    (expectedAssertionExists (attribute MyDog Canine)))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (instance MyDog Dog)))\n" +
-                        "    (retract (BY_KIF (attribute MyDog Canine)))\n" +
-                        "    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\n\n" +
-
-                        "; Example 5: Test Retraction\n" +
-                        "(test \"Retract Assertion\" \n" +
-                        "  (setup (assert (instance TempFact Something)))\n" +
-                        "  (action (retract (BY_KIF (instance TempFact Something))))\n" +
-                        "  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\n" +
-                        "  (teardown))\n\n" + // Teardown is empty, cleanup is automatic
-
-                        "; Example 6: Test KB Size\n" +
-                        "(test \"KB Size Check\" \n" +
-                        "  (setup \n" +
-                        "    (assert (fact1 a))\n" +
-                        "    (assert (fact2 b)))\n" +
-                        "  (action (assert (fact3 c)))\n" +
-                        "  (expected (expectedKbSize 3))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (fact1 a)))\n" +
-                        "    (retract (BY_KIF (fact2 b)))\n" +
-                        "    (retract (BY_KIF (fact3 c)))))\n\n" +
-
-                         "; Example 7: Test runTool (LogMessageTool)\n" +
-                        "(test \"Run LogMessageTool\" \n" +
-                        "  (setup)\n" +
-                        "  (action (runTool (name \"log_message\") (params (message \"Hello from test!\"))))\n" +
-                        "  (expected (expectedToolResult \"Message logged.\")))\n" +
-                        "  (teardown))\n\n" +
-
-                        "; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\n" +
-                        "; This test assumes the Test Definitions note itself exists and has text.\n" +
-                        "; It runs the tool against the Test Definitions note KB.\n" +
-                        "(test \"Run GetNoteTextTool\" \n" +
-                        "  (setup)\n" +
-                        "  (action (runTool (name \"get_note_text\") (params (note_id \"" + TEST_DEFINITIONS_NOTE_ID + "\"))))\n" +
-                        "  (expected (expectedToolResult \"; Define your tests here using the (test ...) format\\n\\n; Test structure: (test \\\"Test Name\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\"id\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\n; action types: (query Pattern), (runTool (name \\\"tool_name\\\") (params (key1 value1) ...))\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\n\\n; Example 1: Simple Fact Query\\n(test \\\"Simple Fact Query\\\" \\n  (setup (assert (instance MyCat Cat)))\\n  (action (query (instance ?X Cat)))\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\n\\n; Example 2: Query with Multiple Bindings\\n(test \\\"Query with Multiple Bindings\\\" \\n  (setup \\n    (assert (instance MyCat Cat))\\n    (assert (instance YourCat Cat))\\n    (assert (instance MyDog Dog)))\\n  (action (query (instance ?X Cat)))\\n  (expected \\n    (expectedResult true)\\n    ; Note: Order of bindings in expectedBindings list matters for now\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\n  (teardown \\n    (retract (BY_KIF (instance MyCat Cat)))\\n    (retract (BY_KIF (instance YourCat Cat)))\\n    (retract (BY_KIF (instance MyDog Dog)))))\\n\\n; Example 3: Query that should fail\\n(test \\\"Query Failure\\\" \\n  (setup (assert (instance MyDog Dog)))\\n  (action (query (instance MyDog Cat)))\\n  (expected (expectedResult false) (expectedBindings ())))\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\n\\n; Example 4: Test Forward Chaining Rule\\n(test \\\"Forward Chaining Rule\\\" \\n  (setup \\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))\\n    (assert (instance MyDog Dog)))\\n  (action (query (attribute MyDog Canine)))\\n  (expected \\n    (expectedResult true)\\n    (expectedBindings ())\n    (expectedAssertionExists (attribute MyDog Canine)))\\n  (teardown \\n    (retract (BY_KIF (instance MyDog Dog)))\\n    (retract (BY_KIF (attribute MyDog Canine)))\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\n\\n; Example 5: Test Retraction\\n(test \\\"Retract Assertion\\\" \\n  (setup (assert (instance TempFact Something)))\n  (action (retract (BY_KIF (instance TempFact Something))))\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\n  (teardown))\n\n; Example 6: Test KB Size\\n(test \\\"KB Size Check\\\" \\n  (setup \\n    (assert (fact1 a))\\n    (assert (fact2 b)))\\n  (action (assert (fact3 c)))\\n  (expected (expectedKbSize 3)))\\n  (teardown \\n    (retract (BY_KIF (fact1 a)))\\n    (retract (BY_KIF (fact2 b)))\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"; Define your tests here using the (test ...) format\\\\n\\\\n; Test structure: (test \\\\\\\"Test Name\\\\\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\\\\\"id\\\\\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\\\n; action types: (query Pattern), (runTool (name \\\\\\\"tool_name\\\\\\\") (params (key1 value1) ...))\\\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\\\n\\\\n; Example 1: Simple Fact Query\\\\n(test \\\\\\\"Simple Fact Query\\\\\\\" \\\\n  (setup (assert (instance MyCat Cat)))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\\\n\\\\n; Example 2: Query with Multiple Bindings\\\\n(test \\\\\\\"Query with Multiple Bindings\\\\\\\" \\\\n  (setup \\\\n    (assert (instance MyCat Cat))\\\\n    (assert (instance YourCat Cat))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    ; Note: Order of bindings in expectedBindings list matters for now\\\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyCat Cat)))\\\\n    (retract (BY_KIF (instance YourCat Cat)))\\\\n    (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 3: Query that should fail\\\\n(test \\\\\\\"Query Failure\\\\\\\" \\\\n  (setup (assert (instance MyDog Dog))))\\\\n  (action (query (instance MyDog Cat))))\\\\n  (expected (expectedResult false) (expectedBindings ())))\\\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 4: Test Forward Chaining Rule\\\\n(test \\\\\\\"Forward Chaining Rule\\\\\\\" \\\\n  (setup \\\\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine))))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (attribute MyDog Canine))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    (expectedBindings ())))\\\\n    (expectedAssertionExists (attribute MyDog Canine))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyDog Dog)))\\\\n    (retract (BY_KIF (attribute MyDog Canine)))\\\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\\\n\\\\n; Example 5: Test Retraction\\\\n(test \\\\\\\"Retract Assertion\\\\\\\" \\\\n  (setup (assert (instance TempFact Something))))\\\\n  (action (retract (BY_KIF (instance TempFact Something))))\\\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\\\n  (teardown))\\\\n\\\\n; Example 6: Test KB Size\\\\n(test \\\\\\\"KB Size Check\\\\\\\" \\\\n  (setup \\\\n    (assert (fact1 a))\\\\n    (assert (fact2 b))))\\\\n  (action (assert (fact3 c))))\\\\n  (expected (expectedKbSize 3))))\\\\n  (teardown \\\\n    (retract (BY_KIF (fact1 a)))\\\\n    (retract (BY_KIF (fact2 b)))\\\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"; Define your tests here using the (test ...) format\\\\n\\\\n; Test structure: (test \\\\\\\"Test Name\\\\\\\" (setup ...) (action ...) (expected ...) (teardown ...))\\\\n; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \\\\\\\"id\\\\\\\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\\\\n; action types: (query Pattern), (runTool (name \\\\\\\"tool_name\\\\\\\") (params (key1 value1) ...))\\\\n; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\\\\n\\\\n; Example 1: Simple Fact Query\\\\n(test \\\\\\\"Simple Fact Query\\\\\\\" \\\\n  (setup (assert (instance MyCat Cat)))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\\\\n  (teardown (retract (BY_KIF (instance MyCat Cat)))))\\\\n\\\\n; Example 2: Query with Multiple Bindings\\\\n(test \\\\\\\"Query with Multiple Bindings\\\\\\\" \\\\n  (setup \\\\n    (assert (instance MyCat Cat))\\\\n    (assert (instance YourCat Cat))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (instance ?X Cat))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    ; Note: Order of bindings in expectedBindings list matters for now\\\\n    (expectedBindings ((?X MyCat) (?X YourCat))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyCat Cat)))\\\\n    (retract (BY_KIF (instance YourCat Cat)))\\\\n    (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 3: Query that should fail\\\\n(test \\\\\\\"Query Failure\\\\\\\" \\\\n  (setup (assert (instance MyDog Dog))))\\\\n  (action (query (instance MyDog Cat))))\\\\n  (expected (expectedResult false) (expectedBindings ())))\\\\n  (teardown (retract (BY_KIF (instance MyDog Dog)))))\\\\n\\\\n; Example 4: Test Forward Chaining Rule\\\\n(test \\\\\\\"Forward Chaining Rule\\\\\\\" \\\\n  (setup \\\\n    (addRule (=> (instance ?X Dog) (attribute ?X Canine))))\\\\n    (assert (instance MyDog Dog))))\\\\n  (action (query (attribute MyDog Canine))))\\\\n  (expected \\\\n    (expectedResult true)\\\\n    (expectedBindings ())))\\\\n    (expectedAssertionExists (attribute MyDog Canine))))\\\\n  (teardown \\\\n    (retract (BY_KIF (instance MyDog Dog)))\\\\n    (retract (BY_KIF (attribute MyDog Canine)))\\\\n    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\\\\n\\\\n; Example 5: Test Retraction\\\\n(test \\\\\\\"Retract Assertion\\\\\\\" \\\\n  (setup (assert (instance TempFact Something))))\\\\n  (action (retract (BY_KIF (instance TempFact Something))))\\\\n  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\\\\n  (teardown))\\\\n\\\\n; Example 6: Test KB Size\\\\n(test \\\\\\\"KB Size Check\\\\\\\" \\\\n  (setup \\\\n    (assert (fact1 a))\\\\n    (assert (fact2 b))))\\\\n  (action (assert (fact3 c))))\\\\n  (expected (expectedKbSize 3))))\\\\n  (teardown \\\\n    (retract (BY_KIF (fact1 a)))\\\\n    (retract (BY_KIF (fact2 b)))\\\\n    (retract (BY_KIF (fact3 c))))))\\n\\n; Example 7: Test runTool (LogMessageTool)\\n(test \\\"Run LogMessageTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"log_message\\\") (params (message \\\"Hello from test!\\\"))))\\n  (expected (expectedToolResult \\\"Message logged.\\\")))\\n  (teardown))\n\n; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\\n; This test assumes the Test Definitions note itself exists and has text.\\n; It runs the tool against the Test Definitions note KB.\\n(test \\\"Run GetNoteTextTool\\\" \\n  (setup)\\n  (action (runTool (name \\\"get_note_text\\\") (params (note_id \\\"note-test-definitions\\\"))))\\n  (expected (expectedToolResult \\\"\\\")))\\n  (teardown))\n" +
-                                        "\"" + // This is a placeholder, the actual text will be inserted by the UI/CogNote
-                                        ")))\n" +
-                        "  (teardown))\n",
-                Note.Status.IDLE);
     }
 }

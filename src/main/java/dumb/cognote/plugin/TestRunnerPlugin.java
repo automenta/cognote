@@ -2,7 +2,6 @@ package dumb.cognote.plugin;
 
 import dumb.cognote.*;
 import dumb.cognote.Logic.KifParser.ParseException;
-import dumb.cognote.Term;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.StringReader;
@@ -86,7 +85,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
         // Create a temporary note/KB for this test
         var testNote = new Note(testKbId, "Test KB: " + test.name, "", Note.Status.IDLE);
-        ((CogNote)cog()).addNote(testNote); // Add to CogNote's map, but don't activate it for general reasoning
+        ((CogNote) cog()).addNote(testNote); // Add to CogNote's map, but don't activate it for general reasoning
 
         // Ensure the test KB is active for the reasoner context during the test
         context.addActiveNote(testKbId);
@@ -96,7 +95,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 .thenCompose(setupResult -> executeAction(test, testKbId, "Action", test.action))
                 .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
                 .thenCompose(expectedResult -> executeActions(test, testKbId, "Teardown", test.teardown)
-                .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting"))) // Result determined by expectations
+                        .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting"))) // Result determined by expectations
                 .whenComplete((result, ex) -> {
                     // Cleanup the temporary KB regardless of success or failure
                     context.removeActiveNote(testKbId); // Deactivate the KB
@@ -157,10 +156,10 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     // However, for the action phase, we might need the *result* of the action (e.g., query bindings).
                     // Let's refine: setup/teardown just emit events. The main 'action' needs its result captured.
 
-                    if (phase.equals("Action") && action.type.equals("query")) {
-                        // Query action is handled below to capture result
-                        throw new IllegalStateException("Query action should be handled directly in the 'query' case.");
-                    }
+//                    if (phase.equals("Action") && action.type.equals("query")) {
+//                        // Query action is handled below to capture result
+//                        throw new IllegalStateException("Query action should be handled directly in the 'query' case.");
+//                    }
 
                     // For assert/addRule/retract/removeRuleForm in setup/teardown/action phases (except query action)
                     // We just emit the event and return a completed future.
@@ -188,7 +187,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                                 var targetStr = switch (target) {
                                     case Term.Atom(String vv) -> vv;
                                     case Term.Lst l -> l.toKif();
-                                    case null, default -> throw new IllegalArgumentException("Invalid target for retract: " + target);
+                                    case null, default ->
+                                            throw new IllegalArgumentException("Invalid target for retract: " + target);
                                 };
 
                                 // Emit retraction request. Retraction is async.
@@ -318,10 +318,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         // Check size of the test KB only
                         yield kb.getAssertionCount() == expectedSize;
                     }
-                    case "expectedToolResult" -> {
-                        // Check if the action result matches the expected value
-                        yield Objects.equals(actionResult, expected.value);
-                    }
+                    case "expectedToolResult" -> // Check if the action result matches the expected value
+                            Objects.equals(actionResult, expected.value);
                     default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
                 };
             } catch (Exception e) {
@@ -379,9 +377,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
 
                         switch (sectionOp) {
-                            case "setup" -> {
-                                setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
-                            }
+                            case "setup" -> setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
                             case "action" -> {
                                 if (sectionContents.size() == 1) {
                                     action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
@@ -390,16 +386,11 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                                     action = null; // Mark test as invalid
                                 }
                             }
-                            case "expected" -> {
-                                expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
-                            }
-                            case "teardown" -> {
-                                teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
-                            }
+                            case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
+                            case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
                             default -> {
                                 System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to unknown section type: " + sectionList.toKif());
                                 action = null; // Mark test as invalid
-                                break;
                             }
                         }
                     }
@@ -412,7 +403,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     // Ignore non-(test ...) top-level terms
                     // This check is redundant with the outer if, but kept for clarity if needed later
                     // if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
-                         System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+                    System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
                     // }
                 }
             }
@@ -451,7 +442,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
         return switch (op) {
             case "assert", "addRule", "retract", "removeRuleForm", "query" -> {
-                if (actionList.size() < 1) throw new IllegalArgumentException(op + " action requires at least one argument."); // Changed from 2 to 1 because query payload is just the pattern
+                if (actionList.size() < 1)
+                    throw new IllegalArgumentException(op + " action requires at least one argument."); // Changed from 2 to 1 because query payload is just the pattern
                 // For query, the payload is the pattern, toolParams might contain query_type
                 // For runTool, the payload is the tool name and params
                 // Let's make payload the main argument(s) and toolParams for extra config like query_type
@@ -459,36 +451,40 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 Map<String, Object> toolParams = new HashMap<>();
 
                 if (op.equals("query")) {
-                    if (actionList.size() < 2) throw new IllegalArgumentException("query action requires at least one argument (the pattern)."); // Changed from != 2 to < 2
+                    if (actionList.size() < 2)
+                        throw new IllegalArgumentException("query action requires at least one argument (the pattern)."); // Changed from != 2 to < 2
                     payload = actionList.get(1);
                     // Check for optional query_type parameter
                     if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                         toolParams = parseParams(paramsList);
+                        toolParams = parseParams(paramsList);
                     } else if (actionList.size() > 2) {
-                         // Handle potential direct key-value pairs after the pattern?
-                         // Let's stick to (params (...)) for clarity as per runTool
-                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
+                        // Handle potential direct key-value pairs after the pattern?
+                        // Let's stick to (params (...)) for clarity as per runTool
+                        throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
                     }
                 } else if (op.equals("retract")) {
-                     if (actionList.size() != 3 || !(actionList.get(1) instanceof Term.Atom typeAtom)) throw new IllegalArgumentException("retract action requires type and target.");
-                     payload = new Term.Lst(typeAtom, actionList.get(2)); // Store type and target as a list payload
-                }
-                else { // assert, addRule, removeRuleForm
-                    if (actionList.size() < 2) throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
+                    if (actionList.size() != 3 || !(actionList.get(1) instanceof Term.Atom typeAtom))
+                        throw new IllegalArgumentException("retract action requires type and target.");
+                    payload = new Term.Lst(typeAtom, actionList.get(2)); // Store type and target as a list payload
+                } else { // assert, addRule, removeRuleForm
+                    if (actionList.size() < 2)
+                        throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
                     payload = new Term.Lst(actionList.terms.stream().skip(1).toList()); // Payload is the rest of the list
                 }
 
                 yield new TestAction(op, payload, toolParams);
             }
             case "runTool" -> {
-                if (actionList.size() < 2) throw new IllegalArgumentException("runTool action requires at least tool name.");
-                if (!(actionList.get(1) instanceof Term.Atom(String value))) throw new IllegalArgumentException("runTool action requires tool name as the first argument.");
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("runTool action requires at least tool name.");
+                if (!(actionList.get(1) instanceof Term.Atom(String value)))
+                    throw new IllegalArgumentException("runTool action requires tool name as the first argument.");
                 Map<String, Object> toolParams = new HashMap<>();
                 toolParams.put("name", value);
                 if (actionList.size() > 2) {
                     // Assume remaining arguments are key-value pairs or a single params list
                     if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                         toolParams.putAll(parseParams(paramsList));
+                        toolParams.putAll(parseParams(paramsList));
                     } else {
                         // Simple key-value pairs? Let's stick to the (params (...)) format for clarity
                         throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
@@ -531,7 +527,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 yield new TestExpected(op, Boolean.parseBoolean(value));
             }
             case "expectedBindings" -> {
-                if (expectedList.size() < 1) throw new IllegalArgumentException("expectedBindings requires a list of bindings.");
+                if (expectedList.size() < 1)
+                    throw new IllegalArgumentException("expectedBindings requires a list of bindings.");
                 // Parse expected bindings: ((?V1 Val1) (?V2 Val2) ...)
                 List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
                 // Skip the operator "expectedBindings"
@@ -563,7 +560,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     throw new IllegalArgumentException("expectedKbSize value must be an integer.");
                 }
             }
-             case "expectedToolResult" -> {
+            case "expectedToolResult" -> {
                 if (expectedList.size() != 2)
                     throw new IllegalArgumentException("expectedToolResult requires a single value argument.");
                 // The expected value can be any Term
@@ -573,7 +570,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         };
     }
 
-     private Map<String, Object> parseParams(Term.Lst paramsList) {
+    private Map<String, Object> parseParams(Term.Lst paramsList) {
         Map<String, Object> params = new HashMap<>();
         if (paramsList.op().filter("params"::equals).isEmpty()) {
             throw new IllegalArgumentException("Parameter list must start with 'params'.");
@@ -653,7 +650,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     }
 
 
-    private record TestDefinition(String name, List<TestAction> setup, TestAction action, List<TestExpected> expected, List<TestAction> teardown) {
+    private record TestDefinition(String name, List<TestAction> setup, TestAction action, List<TestExpected> expected,
+                                  List<TestAction> teardown) {
     }
 
     private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {

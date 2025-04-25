@@ -805,8 +805,7 @@ public class Reason {
                 if (opResult == null) return Optional.empty();
 
                 // If the operator returns a boolean atom ("true" or "false")
-                if (opResult instanceof Term.Atom atomResult) {
-                    var value = atomResult.value();
+                if (opResult instanceof Term.Atom(String value)) {
                     if ("true".equals(value)) {
                         return Optional.of(bindings); // Operator evaluated to true, goal is proven with current bindings
                     } else if ("false".equals(value)) {

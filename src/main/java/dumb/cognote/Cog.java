@@ -37,10 +37,8 @@ public class Cog {
     public static final String TEST_DEFINITIONS_NOTE_TITLE = "Test Definitions";
     public static final String TEST_RESULTS_NOTE_ID = "note-test-results";
     public static final String TEST_RESULTS_NOTE_TITLE = "Test Results";
-
-
-    static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
+    static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
     static final String NOTES_FILE = "cognote_notes.json";
@@ -120,16 +118,21 @@ public class Cog {
 
     static Note createDefaultTestDefinitionsNote() {
         return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
-                "; Define your tests here using the (test ...) format\n\n" +
-                        "; Example: Test a simple fact query\n" +
-                        "(test \"Simple Fact Query\" (query (instance MyCat Cat)) (expectedResult true))\n\n" +
-                        "; Example: Test a query with bindings\n" +
-                        "; Note: Order of bindings in expectedBindings list matters for now\n" +
-                        "(test \"Query with Bindings\" (query (instance ?X Cat)) (expectedBindings ((?X MyCat) (?X YourCat))))\n\n" +
-                        "; Example: Test a query that should fail\n" +
-                        "(test \"Query Failure\" (query (instance MyDog Cat)) (expectedResult false))\n\n" +
-                        "; Example: Test a query with no matches\n" +
-                        "(test \"Query No Matches\" (query (instance ?Y Bird)) (expectedBindings ()))",
+                """
+                        ; Define your tests here using the (test ...) format
+                        
+                        ; Example: Test a simple fact query
+                        (test "Simple Fact Query" (query (instance MyCat Cat)) (expectedResult true))
+                        
+                        ; Example: Test a query with bindings
+                        ; Note: Order of bindings in expectedBindings list matters for now
+                        (test "Query with Bindings" (query (instance ?X Cat)) (expectedBindings ((?X MyCat) (?X YourCat))))
+                        
+                        ; Example: Test a query that should fail
+                        (test "Query Failure" (query (instance MyDog Cat)) (expectedResult false))
+                        
+                        ; Example: Test a query with no matches
+                        (test "Query No Matches" (query (instance ?Y Bird)) (expectedBindings ()))""",
                 Note.Status.IDLE);
     }
 

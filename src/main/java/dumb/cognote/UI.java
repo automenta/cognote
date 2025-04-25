@@ -1,6 +1,6 @@
 package dumb.cognote;
 
-import dumb.cognote.Logic.KifParser;
+import dumb.cognote.Logic.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
@@ -26,7 +26,6 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.*;
-import static dumb.cognote.Logic.*;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 import static javax.swing.SwingUtilities.invokeLater;
@@ -144,14 +143,14 @@ public class UI extends JFrame {
             if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                 // Attempt to extract a string literal from common positions
                 // This is a heuristic and might need refinement
-                if (list.size() >= 2 && list.get(1) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 2 && list.get(1) instanceof Term.Atom(String value)) {
+                    return value;
                 }
-                if (list.size() >= 3 && list.get(2) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 3 && list.get(2) instanceof Term.Atom(String value)) {
+                    return value;
                 }
-                if (list.size() >= 4 && list.get(3) instanceof Term.Atom atom) {
-                    return atom.value();
+                if (list.size() >= 4 && list.get(3) instanceof Term.Atom(String value)) {
+                    return value;
                 }
             }
         } catch (KifParser.ParseException e) {
@@ -373,7 +372,7 @@ public class UI extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 if (!isGlobalSelected && !isConfigSelected && !isTestResultsSelected)
                     editorPanel.edit.requestFocusInWindow(); // Focus editor for editable notes
-                else if (isConfigSelected || isTestDefsSelected)
+                else if (isConfigSelected)
                     editorPanel.edit.requestFocusInWindow(); // Allow editing config/test defs text
                 else attachmentPanel.filterField.requestFocusInWindow(); // Focus filter for global KB or test results
             });
