@@ -1123,7 +1123,7 @@ class CognoteTests {
                   (setup (assert (instance MyDog Dog)))
                   (action (query (instance MyDog Cat)))
                   (expected (expectedResult false) (expectedBindings ())) ; Expected empty bindings list (no solutions)
-                  (teardown (retract (BY_KIF (instance MyDog Dog))))
+                  (teardown (retract (BY_KIF (instance MyDog Dog)))))
                 """);
     }
 
@@ -1310,7 +1310,7 @@ class CognoteTests {
                     (expectedBindings (((?Rel isA))))) ; Corrected KIF for expectedBindings
                   (teardown
                     (retract (BY_KIF (isA Dog Animal)))
-                    (retract (BY_KIF (isA Cat Animal)))) ; Corrected KIF syntax
+                    (retract (BY_KIF (isA Cat Animal))))) ; Corrected KIF syntax
                 """);
     }
 
