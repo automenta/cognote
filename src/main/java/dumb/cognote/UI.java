@@ -140,17 +140,17 @@ public class UI extends JFrame {
 
     private static String extractContentFromKif(String kifString) {
         try {
-            var terms = Logic.KifParser.parseKif(kifString);
+            var terms = KifParser.parseKif(kifString);
             if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                 // Attempt to extract a string literal from common positions
                 // This is a heuristic and might need refinement
-                if (list.size() >= 2 && list.get(1) instanceof Term.Atom(String value)) {
+                if (list.size() >= 2 && list.get(1) instanceof Term.Atom(var value)) {
                     return value;
                 }
-                if (list.size() >= 3 && list.get(2) instanceof Term.Atom(String value)) {
+                if (list.size() >= 3 && list.get(2) instanceof Term.Atom(var value)) {
                     return value;
                 }
-                if (list.size() >= 4 && list.get(3) instanceof Term.Atom(String value)) {
+                if (list.size() >= 4 && list.get(3) instanceof Term.Atom(var value)) {
                     return value;
                 }
             }

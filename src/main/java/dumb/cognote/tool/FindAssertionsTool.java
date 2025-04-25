@@ -2,7 +2,7 @@ package dumb.cognote.tool;
 
 import dev.langchain4j.agent.tool.P;
 import dumb.cognote.Cog;
-import dumb.cognote.Logic;
+import dumb.cognote.KifParser;
 import dumb.cognote.Term;
 import dumb.cognote.Tool;
 import org.jetbrains.annotations.Nullable;
@@ -41,7 +41,7 @@ public class FindAssertionsTool implements Tool {
         try {
             // Call the internal execute logic and block for the result.
             // The execute method now returns Answer, so format it here.
-            Cog.Answer answer = (Cog.Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
+            var answer = (Cog.Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
 
             if (answer.status() == Cog.QueryStatus.SUCCESS) {
                 if (answer.bindings().isEmpty()) {
@@ -80,7 +80,7 @@ public class FindAssertionsTool implements Tool {
                 throw new IllegalArgumentException("Missing required parameter 'kif_pattern'.");
             }
             try {
-                var terms = Logic.KifParser.parseKif(kifPattern);
+                var terms = KifParser.parseKif(kifPattern);
                 if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst patternList)) {
                     throw new IllegalArgumentException("Invalid KIF pattern format. Must be a single KIF list.");
                 }
@@ -92,7 +92,7 @@ public class FindAssertionsTool implements Tool {
                 var query = new Cog.Query(queryId, Cog.QueryType.ASK_BINDINGS, patternList, finalTargetKbId, Map.of());
                 return cog.querySync(query); // Call the sync method in Cog and return the Answer object
 
-            } catch (Logic.KifParser.ParseException e) {
+            } catch (KifParser.ParseException e) {
                 System.err.println("Error parsing KIF pattern in tool 'find_assertions' (internal): " + e.getMessage());
                 throw new CompletionException(new IllegalArgumentException("Error parsing KIF pattern: " + e.getMessage()));
             } catch (Exception e) {

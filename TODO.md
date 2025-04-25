@@ -438,7 +438,7 @@ public class GeneratePluginTool implements Tool {
 
     @Override
     public CompletableFuture<?> execute(Map<String, Object> parameters) {
-        String pluginSpec = (String) parameters.get("plugin_spec");
+        var pluginSpec = (String) parameters.get("plugin_spec");
         if (pluginSpec == null || pluginSpec.isBlank()) {
             return CompletableFuture.completedFuture("Error: Missing plugin specification");
         }
@@ -567,29 +567,29 @@ Here are some concrete ideas and steps to evolve Cognote into an awesome self-pr
    For instance, you can refactor the LLM interaction with a self-reflective module:
 
    ```java name=LLMReflector.java
-   package dumb.cognote;
+package dumb.cognote;
 
-   import java.util.List;
-   import java.util.concurrent.CompletableFuture;
-   import dev.langchain4j.data.message.ChatMessage;
-   
-   public class LLMReflector {
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import dev.langchain4j.data.message.ChatMessage;
 
-       private final LM lm;
+public class LLMReflector {
 
-       public LLMReflector(LM lm) {
-           this.lm = lm;
-       }
+    private final LM lm;
 
-       public CompletableFuture<String> reflectAndImprove(String taskId, List<ChatMessage> history) {
-           // Ask the LLM to examine previous interactions to formulate a self-improvement suggestion.
-           String prompt = "Review the following history and suggest code improvements for self-programming capabilities:" +
-                   " " + history.toString();
-           return lm.llmAsync(taskId, history, "Self-Reflection", "")
-                   .thenApply(aiMessage -> "LLM Suggestion: " + aiMessage.getContent());
-       }
-   }
-   ```
+    public LLMReflector(LM lm) {
+        this.lm = lm;
+    }
+
+    public CompletableFuture<String> reflectAndImprove(String taskId, List<ChatMessage> history) {
+        // Ask the LLM to examine previous interactions to formulate a self-improvement suggestion.
+        var prompt = "Review the following history and suggest code improvements for self-programming capabilities:" +
+                " " + history.toString();
+        return lm.llmAsync(taskId, history, "Self-Reflection", "")
+                .thenApply(aiMessage -> "LLM Suggestion: " + aiMessage.getContent());
+    }
+}
+```
 
 5. Strengthen Security and Reliability  
    • With self-modification capabilities, security is paramount.  

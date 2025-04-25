@@ -91,13 +91,13 @@ public class IdentifyConceptsTool implements Tool {
                                         .forEach(concept -> {
                                             var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_CONCEPT, note.id, concept.replace("\"", "\\\""));
                                             try {
-                                                var terms = Logic.KifParser.parseKif(kif);
+                                                var terms = KifParser.parseKif(kif);
                                                 if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                                                     cog.events.emit(new Cog.ExternalInputEvent(list, "llm-concept-tool:" + note.id, note.id));
                                                 } else {
                                                     System.err.println("Generated concept KIF was not a single list: " + kif);
                                                 }
-                                            } catch (Logic.KifParser.ParseException e) {
+                                            } catch (KifParser.ParseException e) {
                                                 System.err.println("Error parsing generated concept KIF: " + e.getMessage() + " | KIF: " + kif);
                                             }
                                         });

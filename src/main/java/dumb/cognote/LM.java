@@ -58,13 +58,14 @@ public class LM {
                 return;
             }
 
-            var llmCallableTools = cog.tools.getLlmCallableTools().stream().toList();
+            var llmCallableTools = cog.tools.getLlmCallableTools().toArray(Tool[]::new);
 
             this.llmService = AiServices.builder(LlmService.class)
                     .chatLanguageModel(this.chatModel)
-                    .tools(llmCallableTools.toArray())
+                    .tools(llmCallableTools)
                     .build();
-            System.out.println("LM AiService configured with " + llmCallableTools.size() + " LLM-callable tools.");
+
+            System.out.println("LM AiService configured with " + llmCallableTools.length + " LLM-callable tools.");
 
         } catch (Exception e) {
             System.err.println("Failed to reconfigure LLM or AiService: " + e.getMessage());

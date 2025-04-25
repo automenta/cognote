@@ -1,16 +1,11 @@
 package dumb.cognote;
 
 import dumb.cognote.Logic.AssertionType;
-import dumb.cognote.Logic.KifParser;
-import dumb.cognote.Logic.KifParser.ParseException;
+import dumb.cognote.KifParser.ParseException;
 import dumb.cognote.Logic.RetractionType;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
-import org.opentest4j.AssertionFailedError;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -29,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * JUnit 5 tests for the CogNote system, based on the KIF test definitions.
  * Each test runs in an isolated, temporary Knowledge Base.
  */
-class CognoteTests {
+abstract class AbstractTest {
 
     // Timeout for individual actions within a test
     private static final long TEST_ACTION_TIMEOUT_SECONDS = 30;
@@ -38,7 +33,7 @@ class CognoteTests {
     private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100;
     // Pattern to extract line/column from KIF ParseException messages (for reporting)
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
-    private CogNote cog;
+    protected CogNote cog;
     private Logic.Cognition context;
     private String testKbId;
 
@@ -95,7 +90,7 @@ class CognoteTests {
      * Reports parsing errors using JUnit assertions.
      */
     private Term parseSingleTerm(String kifString) {
-        List<Term> terms = parseKif(kifString);
+        var terms = parseKif(kifString);
         if (terms.size() != 1) {
             fail("Expected exactly one top-level term, but found " + terms.size() + " in: " + kifString);
         }
@@ -152,7 +147,7 @@ class CognoteTests {
     private TestAction parseAssertAction(Term.Lst actionList) {
         if (actionList.size() != 2)
             throw new IllegalArgumentException("assert action requires exactly one argument (the KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
-        Term payload = actionList.get(1);
+        var payload = actionList.get(1);
         if (!(payload instanceof Term.Lst)) {
             throw new IllegalArgumentException("assert action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
@@ -162,7 +157,7 @@ class CognoteTests {
     private TestAction parseAddRuleAction(Term.Lst actionList) {
         if (actionList.size() != 2)
             throw new IllegalArgumentException("addRule action requires exactly one argument (the Rule KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
-        Term payload = actionList.get(1);
+        var payload = actionList.get(1);
         if (!(payload instanceof Term.Lst)) {
             throw new IllegalArgumentException("addRule action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
@@ -172,7 +167,7 @@ class CognoteTests {
     private TestAction parseRemoveRuleFormAction(Term.Lst actionList) {
         if (actionList.size() != 2)
             throw new IllegalArgumentException("removeRuleForm action requires exactly one argument (the Rule KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
-        Term payload = actionList.get(1);
+        var payload = actionList.get(1);
         if (!(payload instanceof Term.Lst)) {
             throw new IllegalArgumentException("removeRuleForm action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
@@ -183,14 +178,14 @@ class CognoteTests {
         if (actionList.size() != 2) {
             throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
         }
-        Term targetTerm = actionList.get(1);
+        var targetTerm = actionList.get(1);
         if (!(targetTerm instanceof Term.Lst retractTargetList)) {
             throw new IllegalArgumentException("retract action's argument must be a list (TYPE TARGET). Found: " + targetTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
         if (retractTargetList.size() != 2) {
             throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
         }
-        Term typeTerm = retractTargetList.get(0);
+        var typeTerm = retractTargetList.get(0);
         if (!(typeTerm instanceof Term.Atom typeAtom)) {
             throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
@@ -223,7 +218,7 @@ class CognoteTests {
     private TestAction parseQueryAction(Term.Lst actionList) {
         if (actionList.size() < 2)
             throw new IllegalArgumentException("query action requires at least one argument (the pattern). Term: " + actionList.toKif());
-        Term payload = actionList.get(1);
+        var payload = actionList.get(1);
         if (!(payload instanceof Term.Lst)) {
             throw new IllegalArgumentException("query action requires a KIF list pattern as its first argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
@@ -252,7 +247,7 @@ class CognoteTests {
     private TestAction parseWaitAction(Term.Lst actionList) {
         if (actionList.size() < 2)
             throw new IllegalArgumentException("wait action requires at least one argument (the condition list). Term: " + actionList.toKif());
-        Term payload = actionList.get(1);
+        var payload = actionList.get(1);
 
         Map<String, Object> toolParams = new HashMap<>();
         if (actionList.size() > 2) {
@@ -284,7 +279,7 @@ class CognoteTests {
         // Validate timeout/interval params early
         if (toolParams.containsKey("timeout")) {
             try {
-                long timeout = ((Number) toolParams.get("timeout")).longValue();
+                var timeout = ((Number) toolParams.get("timeout")).longValue();
                 if (timeout <= 0) throw new NumberFormatException();
             } catch (ClassCastException | NumberFormatException e) {
                 throw new IllegalArgumentException("Invalid 'timeout' parameter for wait: Must be a positive number. Term: " + actionList.toKif());
@@ -292,7 +287,7 @@ class CognoteTests {
         }
         if (toolParams.containsKey("interval")) {
             try {
-                long interval = ((Number) toolParams.get("interval")).longValue();
+                var interval = ((Number) toolParams.get("interval")).longValue();
                 if (interval <= 0) throw new NumberFormatException();
             } catch (ClassCastException | NumberFormatException e) {
                 throw new IllegalArgumentException("Invalid 'interval' parameter for wait: Must be a positive number. Term: " + actionList.toKif());
@@ -337,7 +332,7 @@ class CognoteTests {
         if (expectedList.size() < 2) {
             throw new IllegalArgumentException("Expectation '" + op + "' requires at least one argument. Term: " + expectedList.toKif());
         }
-        Term expectedValueTerm = expectedList.get(1);
+        var expectedValueTerm = expectedList.get(1);
 
         return switch (op) {
             case "expectedResult" -> parseExpectedResult(op, expectedValueTerm, expectedList);
@@ -360,7 +355,7 @@ class CognoteTests {
     private TestExpected parseExpectedResult(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom))
             throw new IllegalArgumentException(op + " requires a single boolean atom (true/false). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
-        String value = ((Term.Atom) expectedValueTerm).value();
+        var value = ((Term.Atom) expectedValueTerm).value();
 
         if (!value.equals("true") && !value.equals("false"))
             throw new IllegalArgumentException(op + " value must be 'true' or 'false'. Found: '" + value + "'. Term: " + fullTerm.toKif());
@@ -429,7 +424,7 @@ class CognoteTests {
     private TestExpected parseExpectedKbSize(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom))
             throw new IllegalArgumentException(op + " requires a single integer atom. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
-        String value = ((Term.Atom) expectedValueTerm).value();
+        var value = ((Term.Atom) expectedValueTerm).value();
         try {
             return new TestExpected(op, Integer.parseInt(value));
         } catch (NumberFormatException e) {
@@ -458,7 +453,7 @@ class CognoteTests {
         }
         for (var paramTerm : paramsList.terms.stream().skip(1).toList()) {
             if (paramTerm instanceof Term.Lst paramPair && paramPair.size() == 2 && paramPair.get(0) instanceof Term.Atom) {
-                String value = ((Term.Atom) paramPair.get(0)).value();
+                var value = ((Term.Atom) paramPair.get(0)).value();
                 params.put(value, termToObject(paramPair.get(1)));
             } else {
                 throw new IllegalArgumentException("Invalid parameter format: " + paramTerm.toKif() + ". Expected (key value). Term: " + paramsList.toKif());
@@ -473,15 +468,16 @@ class CognoteTests {
     private Object termToObject(Term term) {
         return switch (term) {
             case Term.Atom atom -> {
+                var v = atom.value();
                 try {
-                    yield Integer.parseInt(atom.value());
+                    yield Integer.parseInt(v);
                 } catch (NumberFormatException e1) {
                     try {
-                        yield Double.parseDouble(atom.value());
+                        yield Double.parseDouble(v);
                     } catch (NumberFormatException e2) {
-                        if (atom.value().equalsIgnoreCase("true")) yield true;
-                        if (atom.value().equalsIgnoreCase("false")) yield false;
-                        yield atom.value();
+                        if (v.equalsIgnoreCase("true")) yield true;
+                        if (v.equalsIgnoreCase("false")) yield false;
+                        yield v;
                     }
                 }
             }
@@ -494,21 +490,18 @@ class CognoteTests {
      * Converts a value (potentially a Term) to a String representation for reporting.
      */
     private String termValueToString(Object value) {
-        if (value instanceof Term term) {
-            return term.toKif();
-        }
-        return String.valueOf(value);
+        return value instanceof Term term ? term.toKif() : String.valueOf(value);
     }
 
     /**
      * Formats a KIF ParseException to include line and column context.
      */
     private String formatParseException(ParseException e, String sourceText) {
-        String message = e.getMessage();
-        Matcher matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
-        int lineNum = -1;
-        int colNum = -1;
-        String baseMessage = message;
+        var message = e.getMessage();
+        var matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
+        var lineNum = -1;
+        var colNum = -1;
+        var baseMessage = message;
 
         if (matcher.find()) {
             try {
@@ -520,13 +513,13 @@ class CognoteTests {
             }
         }
 
-        StringBuilder sb = new StringBuilder();
+        var sb = new StringBuilder();
         sb.append(baseMessage);
 
         if (lineNum > 0 && colNum > 0) {
-            String[] lines = sourceText.split("\\r?\\n");
+            var lines = sourceText.split("\\r?\\n");
             if (lineNum <= lines.length) {
-                String errorLine = lines[lineNum - 1];
+                var errorLine = lines[lineNum - 1];
                 sb.append("\n  --> at line ").append(lineNum).append(" col ").append(colNum).append(":\n");
                 sb.append("  ").append(errorLine).append("\n");
                 sb.append("  ").append(" ".repeat(Math.max(0, colNum - 1))).append("^\n");
@@ -560,7 +553,7 @@ class CognoteTests {
      * Throws an exception if the action fails or times out.
      */
     private @Nullable Object executeSingleAction(TestAction action) {
-        CompletableFuture<Object> actionFuture = executeActionLogic(action);
+        var actionFuture = executeActionLogic(action);
 
         try {
             // Wait for the action to complete with a timeout
@@ -722,11 +715,11 @@ class CognoteTests {
         if (conditionList.size() < 2) {
             throw new IllegalArgumentException("Invalid wait condition list: Missing target. Term: " + conditionList.toKif());
         }
-        Term conditionTarget = conditionList.get(1);
+        var conditionTarget = conditionList.get(1);
 
-        long timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
-        long timeoutMillis = timeoutSeconds * 1000;
-        long intervalMillis = ((Number) action.toolParams.getOrDefault("interval", TEST_WAIT_DEFAULT_INTERVAL_MILLIS)).longValue();
+        var timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
+        var timeoutMillis = timeoutSeconds * 1000;
+        var intervalMillis = ((Number) action.toolParams.getOrDefault("interval", TEST_WAIT_DEFAULT_INTERVAL_MILLIS)).longValue();
         if (timeoutMillis <= 0 || intervalMillis <= 0) {
             throw new IllegalArgumentException("Wait timeout and interval must be positive.");
         }
@@ -735,9 +728,9 @@ class CognoteTests {
         // This prevents the polling from blocking the main JUnit thread if it were synchronous.
         // The test method will block when calling .join() on the returned future.
         return CompletableFuture.supplyAsync(() -> {
-            long startTime = System.currentTimeMillis();
+            var startTime = System.currentTimeMillis();
             while (System.currentTimeMillis() - startTime < timeoutMillis) {
-                boolean conditionMet = false;
+                var conditionMet = false;
                 try {
                     conditionMet = switch (conditionOp) {
                         case "assertionExists" -> {
@@ -802,7 +795,7 @@ class CognoteTests {
             var kb = context.kb(testKbId);
 
             Cog.Answer answer = null;
-            boolean requiresAnswer = switch (expected.type) {
+            var requiresAnswer = switch (expected.type) {
                 case "expectedResult", "expectedBindings" -> true;
                 default -> false;
             };
@@ -818,7 +811,7 @@ class CognoteTests {
             }
 
             // Perform the specific expectation check
-            Optional<String> failureReason = switch (expected.type) {
+            var failureReason = switch (expected.type) {
                 case "expectedResult" -> checkExpectedResult(expected, answer);
                 case "expectedBindings" -> checkExpectedBindings(expected, answer);
                 case "expectedAssertionExists" -> checkExpectedAssertionExists(expected, testKbId);
@@ -849,7 +842,7 @@ class CognoteTests {
         if (!(expected.value instanceof Boolean expectedBoolean)) {
             return Optional.of("Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
-        boolean passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
+        var passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
         if (!passed) {
             return Optional.of("Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
         }
@@ -862,11 +855,11 @@ class CognoteTests {
             return Optional.of("Internal error - expected value is not a List. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
 
-        List<Map<Term.Var, Term>> actualBindings = answer.bindings();
+        var actualBindings = answer.bindings();
 
         // Case 1: Expecting no bindings (empty list of solutions)
         if (expectedBindingsList.isEmpty()) {
-            boolean passed = actualBindings.isEmpty();
+            var passed = actualBindings.isEmpty();
             if (!passed) {
                 return Optional.of("Expected no bindings, but got " + actualBindings.size() + " bindings.");
             }
@@ -880,7 +873,7 @@ class CognoteTests {
         }
 
         // Convert expected and actual bindings (List<Map<Var, Term>>) to a comparable format (sets of sorted strings)
-        Set<String> expectedBindingStrings = ((List<Map<Term.Var, Term>>) expectedBindingsList).stream()
+        var expectedBindingStrings = ((List<Map<Term.Var, Term>>) expectedBindingsList).stream()
                 .map(bindingMap -> {
                     List<String> entryStrings = new ArrayList<>();
                     bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + termValueToString(term))); // Use helper
@@ -889,7 +882,7 @@ class CognoteTests {
                 })
                 .collect(Collectors.toSet());
 
-        Set<String> actualBindingStrings = actualBindings.stream()
+        var actualBindingStrings = actualBindings.stream()
                 .map(bindingMap -> {
                     List<String> entryStrings = new ArrayList<>();
                     bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + termValueToString(term))); // Use helper
@@ -898,7 +891,7 @@ class CognoteTests {
                 })
                 .collect(Collectors.toSet());
 
-        boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
+        var passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
 
         if (!passed) {
             return Optional.of("Expected bindings " + expectedBindingStrings + ", but got " + actualBindingStrings);
@@ -910,7 +903,7 @@ class CognoteTests {
         if (!(expected.value instanceof Term.Lst expectedKif)) {
             return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
-        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isPresent();
+        var passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isPresent();
         if (!passed) {
             return Optional.of("Assertion not found: " + expectedKif.toKif());
         }
@@ -921,7 +914,7 @@ class CognoteTests {
         if (!(expected.value instanceof Term.Lst expectedKif)) {
             return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
-        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isEmpty();
+        var passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isEmpty();
         if (!passed) {
             return Optional.of("Assertion found unexpectedly: " + expectedKif.toKif());
         }
@@ -933,7 +926,7 @@ class CognoteTests {
             return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         // TODO: Adjust based on KB-scoped rules. Currently checks global context.
-        boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(ruleForm));
+        var passed = context.rules().stream().anyMatch(r -> r.form().equals(ruleForm));
         if (!passed) {
             return Optional.of("Rule not found: " + ruleForm.toKif());
         }
@@ -945,19 +938,19 @@ class CognoteTests {
             return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         // TODO: Adjust based on KB-scoped rules. Currently checks global context.
-        boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(ruleForm));
+        var passed = context.rules().stream().noneMatch(r -> r.form().equals(ruleForm));
         if (!passed) {
             return Optional.of("Rule found unexpectedly: " + ruleForm.toKif());
         }
         return Optional.empty();
     }
 
-    private Optional<String> checkExpectedKbSize(TestExpected expected, Logic.Knowledge kb) {
+    private Optional<String> checkExpectedKbSize(TestExpected expected, Knowledge kb) {
         if (!(expected.value instanceof Integer expectedSize)) {
             return Optional.of("Internal error - expected value is not an Integer. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
-        int actualSize = kb.getAssertionCount();
-        boolean passed = actualSize == expectedSize;
+        var actualSize = kb.getAssertionCount();
+        var passed = actualSize == expectedSize;
         if (!passed) {
             return Optional.of("Expected KB size " + expectedSize + ", but got " + actualSize);
         }
@@ -965,7 +958,7 @@ class CognoteTests {
     }
 
     private Optional<String> checkExpectedToolResult(TestExpected expected, @Nullable Object actionResult) {
-        boolean passed = Objects.equals(actionResult, expected.value);
+        var passed = Objects.equals(actionResult, expected.value);
         if (!passed) {
             return Optional.of("Expected tool result " + expected.value + ", but got " + actionResult);
         }
@@ -979,7 +972,7 @@ class CognoteTests {
         if (!(actionResult instanceof String actualResultString)) {
             return Optional.of("Action result is not a String. Found: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
         }
-        boolean passed = actualResultString.contains(expectedSubstring);
+        var passed = actualResultString.contains(expectedSubstring);
         if (!passed) {
             return Optional.of("Tool result '" + actualResultString + "' does not contain '" + expectedSubstring + "'");
         }
@@ -990,8 +983,8 @@ class CognoteTests {
     // --- Data Records (Copied from TestPlugin) ---
 
     // Helper method to run a test defined by KIF sections
-    private void runKifTest(String testKif) {
-        Term testTerm = parseSingleTerm(testKif);
+    protected void runKifTest(String testKif) {
+        var testTerm = parseSingleTerm(testKif);
 
         // Check if the top-level term is a valid (test ...) list
         if (!(testTerm instanceof Term.Lst testList) || testList.terms.isEmpty() || !testList.op().filter("test"::equals).isPresent()) {
@@ -1004,7 +997,7 @@ class CognoteTests {
             fail("Test definition must have a name as the second element. Term: " + testList.toKif());
             return; // Exit if parsing fails
         }
-        String testName = ((Term.Atom) testList.get(1)).value();
+        var testName = ((Term.Atom) testList.get(1)).value();
 
         List<TestAction> setup = new ArrayList<>();
         List<TestAction> action = new ArrayList<>();
@@ -1080,514 +1073,6 @@ class CognoteTests {
         }
     }
 
-    @Test
-    void simpleFactQuery() {
-        runKifTest("""
-                (test "Simple Fact Query"
-                  (setup (assert (instance MyCat Cat)))
-                  (action (query (instance ?X Cat)))
-                  (expected (expectedResult true) (expectedBindings (((?X MyCat))))) ; Corrected KIF for expectedBindings
-                  (teardown (retract (BY_KIF (instance MyCat Cat)))))
-                """);
-    }
-
-
-    // --- JUnit Test Methods ---
-
-    @Test
-    void queryWithMultipleBindings() {
-        runKifTest("""
-                (test "Query with Multiple Bindings"
-                  (setup
-                    (assert (instance MyCat Cat))
-                    (assert (instance YourCat Cat))
-                    (assert (instance MyDog Dog)))
-                  (action (query (instance ?X Cat)))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?X MyCat)) ((?X YourCat))))) ; Corrected KIF for expectedBindings (two solutions)
-                  (teardown
-                    (retract (BY_KIF (instance MyCat Cat)))
-                    (retract (BY_KIF (instance YourCat Cat)))
-                    (retract (BY_KIF (instance MyDog Dog)))))
-                """);
-    }
-
-
-    // --- Translated Tests ---
-
-    @Test
-    void queryFailure() {
-        runKifTest("""
-                (test "Query Failure"
-                  (setup (assert (instance MyDog Dog)))
-                  (action (query (instance MyDog Cat)))
-                  (expected (expectedResult false) (expectedBindings ())) ; Expected empty bindings list (no solutions)
-                  (teardown (retract (BY_KIF (instance MyDog Dog)))))
-                """);
-    }
-
-    @Test
-    void forwardChainingRule() {
-        runKifTest("""
-                (test "Forward Chaining Rule"
-                  (setup
-                    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))
-                    (assert (instance MyDog Dog)))
-                  (action (wait (assertionExists (attribute MyDog Canine)))) ; Wait for inference to happen
-                  (expected
-                    (expectedAssertionExists (attribute MyDog Canine)))
-                  (teardown
-                    (retract (BY_KIF (instance MyDog Dog)))
-                    (retract (BY_KIF (attribute MyDog Canine)))
-                    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))
-                """);
-    }
-
-    @Test
-    void retractAssertionByKif() {
-        runKifTest("""
-                (test "Retract Assertion BY_KIF"
-                  (setup (assert (instance TempFact Something)))
-                  (action
-                    (retract (BY_KIF (instance TempFact Something)))
-                    (wait (assertionDoesNotExist (instance TempFact Something))))
-                  (expected
-                    (expectedAssertionDoesNotExist (instance TempFact Something)))
-                  (teardown))
-                """);
-    }
-
-    @Test
-    void kbSizeCheck() {
-        runKifTest("""
-                (test "KB Size Check"
-                  (setup
-                    (assert (fact1 a))
-                    (assert (fact2 b))
-                  )
-                  (action (assert (fact3 c)))
-                  (expected (expectedKbSize 3))
-                  (teardown
-                    (retract (BY_KIF (fact1 a)))
-                    (retract (BY_KIF (fact2 b)))
-                    (retract (BY_KIF (fact3 c)))) ; Use BY_KIF for retracting assertions added by assert
-                  )
-                """);
-    }
-
-    @Test
-    void runLogMessageTool() {
-        // Need to register the tool manually for the test Cog instance
-        cog.tools.register(new Tool() {
-            @Override
-            public String name() {
-                return "log_message2";
-            }
-
-            @Override
-            public String description() {
-                return "Logs a message";
-            }
-
-            @Override
-            public CompletableFuture<Object> execute(Map<String, Object> params) {
-                String message = (String) params.get("message");
-                System.out.println("TOOL LOG: " + message);
-                return CompletableFuture.completedFuture("Message logged.");
-            }
-        });
-
-        runKifTest("""
-                (test "Run LogMessageTool"
-                  (setup)
-                  (action (runTool (params (name "log_message2") (message "Hello from test!"))))
-                  (expected (expectedToolResult "Message logged."))
-                  (teardown))
-                """);
-    }
-
-    @Test
-    void runGetNoteTextTool() {
-        // Need to register the tool manually
-        cog.tools.register(new Tool() {
-            @Override
-            public String name() {
-                return "get_note_text2";
-            }
-
-            @Override
-            public String description() {
-                return "Gets note text";
-            }
-
-            @Override
-            public CompletableFuture<Object> execute(Map<String, Object> params) {
-                String noteId = (String) params.get("note_id");
-                return CompletableFuture.completedFuture(cog.note(noteId).map(n -> (Object) n.text).orElse("Note not found"));
-            }
-        });
-
-        // Add a dummy note for the tool to read
-        cog.addNote(new Note("note-dummy-for-tool", "Dummy Note", "; Define your tests here using the (test ...) format", Note.Status.IDLE));
-
-        runKifTest("""
-                (test "Run GetNoteTextTool"
-                  (setup)
-                  (action (runTool (params (name "get_note_text2") (note_id "note-dummy-for-tool"))))
-                  (expected (expectedToolResultContains "; Define your tests here using the (test ...) format"))
-                  (teardown))
-                """);
-    }
-
-    @Test
-    void waitTimeoutExpectedFailure() {
-        // This test is expected to fail due to the wait timing out.
-        // We use assertThrows to verify that the action execution throws an exception.
-        assertThrows(RuntimeException.class, () -> {
-            runKifTest("""
-                    (test "Wait Timeout (Expected Failure)"
-                      (setup)
-                      (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1)))) ; Wait for 1 second
-                      (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail *if* the action didn't throw first
-                      (teardown))
-                    """);
-        }, "The wait action was expected to time out and throw an exception.");
-        // Note: The expectation check won't run because the action execution throws.
-        // The failure is the exception from the action itself.
-    }
-
-    @Test
-    void waitSuccess() {
-        runKifTest("""
-                (test "Wait Success"
-                  (setup)
-                  (action
-                    (assert (tempFact ToBeWaitedFor))
-                    (wait (assertionExists (tempFact ToBeWaitedFor)) (params (timeout 5))) ; Wait for 5 seconds max
-                  )
-                  (expected (expectedAssertionExists (tempFact ToBeWaitedFor))) ; Expect it to exist after waiting
-                  (teardown (retract (BY_KIF (tempFact ToBeWaitedFor))))
-                )
-                """);
-    }
-
-    @Test
-    void multipleExpectationFailures() {
-        // This test is expected to fail because some expectations will not be met.
-        // We use assertThrows to verify that the expectation checking throws an exception.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Multiple Expectation Failures"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B)))
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedAssertionExists (fact B)) ; PASS
-                        (expectedAssertionExists (fact C)) ; FAIL
-                        (expectedAssertionDoesNotExist (fact A)) ; FAIL
-                        (expectedKbSize 10) ; FAIL
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Multiple expectations were expected to fail.");
-    }
-
-    @Test
-    void queryWithVariableInPredicate() {
-        runKifTest("""
-                (test "Query with Variable in Predicate"
-                  (setup
-                    (assert (isA Dog Animal))
-                    (assert (isA Cat Animal)))
-                  (action (query (?Rel Dog Animal)))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?Rel isA))))) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (isA Dog Animal)))
-                    (retract (BY_KIF (isA Cat Animal))))) ; Corrected KIF syntax
-                """);
-    }
-
-    @Test
-    void queryWithMultipleVariables() {
-        runKifTest("""
-                (test "Query with Multiple Variables"
-                  (setup
-                    (assert (parent John Jane))
-                    (assert (parent Jane Jim))
-                    (assert (parent John Jill)))
-                  (action (query (parent ?Child ?Parent)))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill))))) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (parent John Jane)))
-                    (retract (BY_KIF (parent Jane Jim)))
-                    (retract (BY_KIF (parent John Jill)))))
-                """);
-    }
-
-    @Test
-    void queryWithNestedStructure() {
-        runKifTest("""
-                (test "Query with Nested Structure"
-                  (setup
-                    (assert (hasProperty (color Red) Apple))
-                    (assert (hasProperty (color Green) Apple)))
-                  (action (query (hasProperty (color ?C) Apple)))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?C Red)) ((?C Green))))) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (hasProperty (color Red) Apple)))
-                    (retract (BY_KIF (hasProperty (color Green) Apple)))))
-                """);
-    }
-
-    @Test
-    void queryWithList() {
-        runKifTest("""
-                (test "Query with List"
-                  (setup
-                    (assert (items (1 2 3)))
-                    (assert (items (A B C))))
-                  (action (query (items (?X ?Y ?Z))))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C))))) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (items (1 2 3))))
-                    (retract (BY_KIF (items (A B C))))))
-                """);
-    }
-
-    @Test
-    void queryWithEmptyList() {
-        runKifTest("""
-                (test "Query with Empty List"
-                  (setup
-                    (assert (emptyList ())))
-                  (action (query (emptyList ?L)))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?L ())))) ) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (emptyList ())))))
-                """);
-    }
-
-    @Test
-    void queryWithPartialListMatch() {
-        runKifTest("""
-                (test "Query with Partial List Match"
-                  (setup
-                    (assert (sequence (a b c d)))
-                    (assert (sequence (x y z))))
-                  (action (query (sequence (a b ?Rest))))
-                  (expected
-                    (expectedResult true)
-                    (expectedBindings (((?Rest (c d))))) ) ; Corrected KIF for expectedBindings
-                  (teardown
-                    (retract (BY_KIF (sequence (a b c d))))
-                    (retract (BY_KIF (sequence (x y z))))))
-                """);
-    }
-
-    @Test
-    void testWithMissingActionSection() {
-        // This test should fail because the 'action' section is missing.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Missing Action Section"
-                      (setup (assert (fact A)))
-                      (expected (expectedAssertionExists (fact A)))
-                      (teardown (retract (BY_KIF (fact A)))))
-                    """);
-        }, "Test was expected to fail due to missing action section.");
-    }
-
-    @Test
-    void testWithInvalidActionTerms() {
-        // This test should fail during parsing of the action section.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Invalid Action Terms"
-                      (setup (assert (fact A)))
-                      (action
-                        (assert (fact B)) ; Valid
-                        (invalidActionType (arg1 arg2)) ; Invalid action type - Parsing Error
-                        (assert) ; Invalid assert payload size - Parsing Error
-                        (runTool (params name "log_message")) ; Invalid runTool params format - Parsing Error
-                        (query "not a list") ; Invalid query payload type - Parsing Error
-                      )
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS (from setup)
-                        (expectedAssertionExists (fact B)) ; PASS (from valid action)
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Test was expected to fail due to invalid action terms.");
-    }
-
-    // --- Tests for Test Framework Error Conditions (Now JUnit Failures) ---
-
-    @Test
-    void testWithInvalidExpectationTerms() {
-        // This test should fail during parsing of the expectation section.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Invalid Expectation Terms"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B)))
-                      (expected
-                        (expectedAssertionExists (fact A)) ; Valid
-                        (invalidExpectationType (arg1 arg2)) ; Invalid expectation type - Parsing Error
-                        (expectedResult) ; Invalid expectedResult payload size - Parsing Error
-                        (expectedBindings "not a list") ; Invalid expectedBindings payload type - Parsing Error
-                        (expectedKbSize (not an integer)) ; Invalid expectedKbSize value - Parsing Error
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Test was expected to fail due to invalid expectation terms.");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "(assert \"not a list\")", // Invalid payload type
-            "(addRule \"not a list\")", // Invalid payload type
-            "(removeRuleForm \"not a list\")", // Invalid payload type
-            "(retract \"not a list\")", // Invalid payload type
-            "(retract (BY_KIF))", // Invalid target list size
-            "(retract (123 (fact A)))", // Invalid type (not atom)
-            "(retract (UNKNOWN_TYPE (fact A)))", // Invalid type value
-            "(runTool (params name \"log_message\"))", // Invalid runTool params format (missing value)
-            "(runTool (params (message \"hi\")))", // Missing name param
-            "(query \"not a list\")", // Invalid query payload type
-            "(query (a) (params name))", // Invalid params format
-            "(query (a) (params (query_type \"BAD_TYPE\")))", // Invalid query_type value
-            "(wait \"not a list\")", // Invalid payload type
-            "(wait (assertionExists))", // Invalid condition list size
-            "(wait (unknownCondition (fact A)))", // Unknown condition type
-            "(wait (assertionExists (fact A)) (params (timeout -5)))", // Invalid timeout value
-            "(wait (assertionExists (fact A)) (params (timeout \"abc\")))" // Invalid timeout type
-    })
-    void actionErrorParsing(String actionKif) {
-        // These actions should fail during the parsing phase within runKifTest
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest(String.format("""
-                    (test "Action Error Parsing: %s"
-                      (setup)
-                      (action %s)
-                      (expected (expectedResult false)) ; This expectation won't be checked
-                      (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)); // Escape quotes for string literal
-        }, "Action '" + actionKif + "' was expected to fail during parsing.");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "(retract (BY_KIF AtomValue))", // Invalid target type for BY_KIF (expects list)
-            "(retract (BY_ID (fact A)))", // Invalid target type for BY_ID (expects atom)
-            "(runTool (params (name \"nonexistent_tool\")))" // Tool not found
-    })
-    void actionErrorExecution(String actionKif) {
-        // These actions should parse correctly but fail during execution.
-        // The failure should be a RuntimeException from executeSingleAction.
-        assertThrows(RuntimeException.class, () -> {
-            runKifTest(String.format("""
-                    (test "Action Error Execution: %s"
-                      (setup)
-                      (action %s)
-                      (expected (expectedResult false)) ; This expectation won't be checked
-                      (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)); // Escape quotes for string literal
-        }, "Action '" + actionKif + "' was expected to fail during execution.");
-    }
-
-    // --- Action Execution Error Tests (Now JUnit Failures) ---
-
-    @Test
-    void expectationErrorExpectedBindingsOnNonQuery() {
-        // This test should fail because expectedBindings is used on a non-query action result.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Expectation Error: ExpectedBindings on NonQuery"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B))) ; Not a query
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedBindings (((?X A)))) ; FAIL - actionResult is not a Query Answer
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Expectation 'expectedBindings' was expected to fail on non-query result.");
-    }
-
-    @Test
-    void expectationErrorExpectedToolResultOnNonTool() {
-        // This test should fail because expectedToolResult is used on a non-tool action result.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Expectation Error: ExpectedToolResult on NonTool"
-                      (setup (assert (fact A)))
-                      (action (query (fact ?X))) ; Not a tool run (result is Cog.Answer)
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedToolResult "abc") ; FAIL - actionResult is not a String
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                      )
-                    )
-                    """);
-        }, "Expectation 'expectedToolResult' was expected to fail on non-tool result.");
-    }
-
-
-    // --- Expectation Check Error Tests (Now JUnit Failures) ---
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "(expectedResult \"maybe\")", // Invalid boolean string
-            "(expectedBindings \"not a list\")", // Not a list
-            "(expectedBindings ((?X)))", // Pair size != 2
-            "(expectedAssertionExists \"not a list\")", // Not a KIF list
-            "(expectedAssertionDoesNotExist \"not a list\")", // Not a KIF list
-            "(expectedRuleExists \"not a list\")", // Not a KIF list
-            "(expectedRuleDoesNotExist \"not a list\")", // Not a KIF list
-            "(expectedKbSize \"big\")", // Not an integer string
-            "(expectedToolResultContains 123)" // Not a string
-    })
-    void expectationErrorParsing(String expectationKif) {
-        // These expectations should fail during the parsing phase within runKifTest
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest(String.format("""
-                    (test "Expectation Error Parsing: %s"
-                      (setup)
-                      (action (query (a))) ; Provide a query action so expectedResult/Bindings parsing is attempted
-                      (expected %s)
-                      (teardown))
-                    """, expectationKif.replace("\"", "\\\""), expectationKif)); // Escape quotes for string literal
-        }, "Expectation '" + expectationKif + "' was expected to fail during parsing.");
-    }
 
     /**
      * Represents a single action within a test section.

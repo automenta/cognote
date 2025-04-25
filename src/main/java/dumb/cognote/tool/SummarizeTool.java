@@ -90,7 +90,7 @@ public class SummarizeTool implements Tool {
                                 // Add summary as a KIF assertion to the note's KB
                                 var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_SUMMARY, note.id, summary.replace("\"", "\\\""));
                                 try {
-                                    var terms = Logic.KifParser.parseKif(kif);
+                                    var terms = KifParser.parseKif(kif);
                                     if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                                         // Emit as external input, targeting the note's KB
                                         cog.events.emit(new Cog.ExternalInputEvent(list, "llm-summary-tool:" + note.id, note.id));
@@ -99,7 +99,7 @@ public class SummarizeTool implements Tool {
                                         System.err.println("Generated summary KIF was not a single list: " + kif);
                                         return "Summary generated, but failed to parse/add KIF.";
                                     }
-                                } catch (Logic.KifParser.ParseException e) {
+                                } catch (KifParser.ParseException e) {
                                     System.err.println("Error parsing generated summary KIF: " + e.getMessage() + " | KIF: " + kif);
                                     return "Summary generated, but failed to parse/add KIF: " + e.getMessage();
                                 }

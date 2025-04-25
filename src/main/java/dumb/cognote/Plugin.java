@@ -2,6 +2,9 @@ package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+
 public interface Plugin {
     String id();
 
@@ -12,6 +15,20 @@ public interface Plugin {
     void start(Events e, Logic.Cognition c);
 
     default void stop() {
+    }
+
+    interface ReasonerPlugin extends Plugin {
+        void initialize(Reason.Reasoning context);
+
+        CompletableFuture<Cog.Answer> executeQuery(Cog.Query query);
+
+        Set<Cog.QueryType> getSupportedQueryTypes();
+
+        Set<Cog.Feature> getSupportedFeatures();
+
+        @Override
+        default void start(Events events, Logic.Cognition ctx) {
+        }
     }
 
     abstract class BasePlugin implements Plugin {
@@ -34,7 +51,7 @@ public interface Plugin {
             if (events != null) events.emit(event);
         }
 
-        protected Logic.Knowledge getKb(@Nullable String noteId) {
+        protected Knowledge getKb(@Nullable String noteId) {
             return context.kb(noteId);
         }
 

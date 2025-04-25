@@ -56,7 +56,7 @@ public class AssertKIFTool implements Tool {
                 return "Error: Missing required parameter 'kif_assertion'.";
             }
             try {
-                var terms = Logic.KifParser.parseKif(kifAssertion);
+                var terms = KifParser.parseKif(kifAssertion);
                 if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst list)) {
                     return "Error: Invalid KIF format provided. Must be a single KIF list.";
                 }
@@ -83,7 +83,7 @@ public class AssertKIFTool implements Tool {
                     System.out.println("Tool 'assert_kif' (internal) failed to add assertion (might be duplicate, trivial, or KB full): " + list.toKif());
                     return "Assertion not added (might be duplicate, trivial, or KB full).";
                 }
-            } catch (Logic.KifParser.ParseException e) {
+            } catch (KifParser.ParseException e) {
                 System.err.println("Error parsing KIF in tool 'assert_kif' (internal): " + e.getMessage());
                 return "Error parsing KIF: " + e.getMessage();
             } catch (Exception e) {

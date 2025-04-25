@@ -17,10 +17,10 @@ public class Op {
 
         Term.Atom pred();
 
-        CompletableFuture<Term> exe(Term.Lst arguments, Reason.ReasonerContext context);
+        CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context);
     }
 
-    static class Operators {
+    public static class Operators {
         private final ConcurrentMap<Term.Atom, Operator> ops = new ConcurrentHashMap<>();
 
         void add(Operator operator) {
@@ -89,7 +89,7 @@ public class Op {
         }
 
         @Override
-        public CompletableFuture<Term> exe(Term.Lst arguments, Reason.ReasonerContext context) {
+        public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
             return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
         }
     }

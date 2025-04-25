@@ -4,8 +4,8 @@ import dev.langchain4j.agent.tool.P;
 import dumb.cognote.Cog;
 import dumb.cognote.Cog.Answer;
 import dumb.cognote.Cog.QueryType;
-import dumb.cognote.Logic;
-import dumb.cognote.Logic.KifParser.ParseException;
+import dumb.cognote.KifParser;
+import dumb.cognote.KifParser.ParseException;
 import dumb.cognote.Tool;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,7 +44,7 @@ public class QueryTool implements Tool {
         try {
             // Call the internal execute logic and block for the result.
             // The execute method now returns Answer, so format it here.
-            Answer answer = (Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
+            var answer = (Answer) execute(Map.of("kif_pattern", kifPattern, "target_kb_id", targetKbId)).join();
             return formatQueryResult(answer);
         } catch (Exception e) {
             System.err.println("Error in blocking tool method 'runQueryToolMethod': " + e.getMessage());
@@ -82,7 +82,7 @@ public class QueryTool implements Tool {
                         new Cog.Query(
                                 Cog.id(ID_PREFIX_QUERY + "tool_"),
                                 queryType,
-                                Logic.KifParser.parseKif(kifPattern).getFirst(), // Assuming parseKif returns a single list for a query pattern
+                                KifParser.parseKif(kifPattern).getFirst(), // Assuming parseKif returns a single list for a query pattern
                                 requireNonNullElse(targetKbId, Cog.GLOBAL_KB_NOTE_ID),
                                 Map.of()));
             } catch (ParseException e) {

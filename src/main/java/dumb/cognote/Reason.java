@@ -21,22 +21,8 @@ public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
 
-    interface ReasonerPlugin extends Plugin {
-        void initialize(ReasonerContext context);
-
-        CompletableFuture<Cog.Answer> executeQuery(Cog.Query query);
-
-        Set<Cog.QueryType> getSupportedQueryTypes();
-
-        Set<Cog.Feature> getSupportedFeatures();
-
-        @Override
-        default void start(Events events, Cognition ctx) {
-        }
-    }
-
-    public record ReasonerContext(Logic.Cognition cognition, Events events) {
-        Logic.Knowledge getKb(@Nullable String noteId) {
+    public record Reasoning(Logic.Cognition cognition, Events events) {
+        Knowledge getKb(@Nullable String noteId) {
             return cognition.kb(noteId);
         }
 
@@ -63,16 +49,16 @@ public class Reason {
 
     static class ReasonerManager {
         private final Events events;
-        private final ReasonerContext reasonerContext;
-        private final List<ReasonerPlugin> plugins = new CopyOnWriteArrayList<>();
+        private final Reasoning reasoning;
+        private final List<Plugin.ReasonerPlugin> plugins = new CopyOnWriteArrayList<>();
         private final AtomicBoolean initialized = new AtomicBoolean(false);
 
         ReasonerManager(Events events, Logic.Cognition ctx) {
             this.events = events;
-            this.reasonerContext = new ReasonerContext(ctx, events);
+            this.reasoning = new Reasoning(ctx, events);
         }
 
-        public void loadPlugin(ReasonerPlugin plugin) {
+        public void loadPlugin(Plugin.ReasonerPlugin plugin) {
             if (initialized.get()) {
                 System.err.println("Cannot load reasoner plugin " + plugin.id() + " after initialization.");
                 return;
@@ -86,7 +72,7 @@ public class Reason {
             System.out.println("Initializing " + plugins.size() + " reasoner plugins...");
             plugins.forEach(plugin -> {
                 try {
-                    plugin.initialize(reasonerContext);
+                    plugin.initialize(reasoning);
                     System.out.println("Initialized reasoner plugin: " + plugin.id());
                 } catch (Exception e) {
                     System.err.println("Failed to initialize reasoner plugin " + plugin.id() + ": " + e.getMessage());
@@ -159,7 +145,7 @@ public class Reason {
 
 
                         return new Cog.Answer(query.id(), overallStatus, allBindings, combinedExplanation);
-                    }, reasonerContext.events.exe)
+                    }, reasoning.events.exe)
                     .thenAccept(result -> events.emit(new Cog.Answer.AnswerEvent(result)));
         }
 
@@ -179,14 +165,14 @@ public class Reason {
         }
 
         private Truths getTMS() {
-            return reasonerContext.getTMS();
+            return reasoning.getTMS();
         }
     }
 
 
-    abstract static class BaseReasonerPlugin implements ReasonerPlugin {
+    abstract static class BaseReasonerPlugin implements Plugin.ReasonerPlugin {
         protected final String id = Cog.id(ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("ReasonerPlugin", "").toLowerCase() + "_");
-        protected ReasonerContext context;
+        protected Reasoning context;
 
         @Override
         public String id() {
@@ -194,7 +180,7 @@ public class Reason {
         }
 
         @Override
-        public void initialize(ReasonerContext ctx) {
+        public void initialize(Reasoning ctx) {
             this.context = ctx;
         }
 
@@ -202,7 +188,7 @@ public class Reason {
             if (context != null && context.events() != null) context.events().emit(event);
         }
 
-        protected Logic.Knowledge getKb(@Nullable String noteId) {
+        protected Knowledge getKb(@Nullable String noteId) {
             return context.getKb(noteId);
         }
 
@@ -240,7 +226,7 @@ public class Reason {
 
     static class ForwardChainingReasonerPlugin extends BaseReasonerPlugin {
         @Override
-        public void initialize(ReasonerContext ctx) {
+        public void initialize(Reasoning ctx) {
             super.initialize(ctx);
             ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
         }
@@ -446,7 +432,7 @@ public class Reason {
         }
 
         @Override
-        public void initialize(ReasonerContext ctx) {
+        public void initialize(Reasoning ctx) {
             super.initialize(ctx);
             ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
         }
@@ -539,7 +525,7 @@ public class Reason {
         }
 
         @Override
-        public void initialize(ReasonerContext ctx) {
+        public void initialize(Reasoning ctx) {
             super.initialize(ctx);
             ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
         }
@@ -593,13 +579,13 @@ public class Reason {
 
         private void tryInstantiate(Assertion uniA, Assertion groundA) {
             // Ensure both the universal and the ground assertion are from active contexts
-            if (!isActiveContext(uniA.sourceNoteId()) || (!isActiveContext(groundA.kb()) && !isActiveContext(groundA.sourceNoteId()))) {
+            if (!isActiveContext(uniA.sourceNoteId()) || (!isActiveContext(groundA.kb()) && !isActiveContext(groundA.sourceNoteId())))
                 return;
-            }
-
-            var formula = uniA.getEffectiveTerm();
             var vars = uniA.quantifiedVars();
-            if (vars.isEmpty() || !(formula instanceof Term.Lst))
+            if (vars.isEmpty())
+                return;
+            var formula = uniA.getEffectiveTerm();
+            if (!(formula instanceof Term.Lst))
                 return;
 
             findSubExpressionMatches(formula, groundA.kif())
@@ -628,8 +614,9 @@ public class Reason {
     static class BackwardChainingReasonerPlugin extends BaseReasonerPlugin {
         private static Rule renameRuleVariables(Rule rule, int depth) {
             var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
-            Map<Term.Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix)));
-            var renamedForm = (Term.Lst) Unifier.subst(rule.form(), renameMap);
+            var renamedForm = (Term.Lst) Unifier.subst(rule.form(),
+                    rule.form().vars().stream().collect(
+                        Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix))));
             try {
                 return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId()); // Pass sourceNoteId
             } catch (IllegalArgumentException e) {
@@ -651,31 +638,31 @@ public class Reason {
         @Override
         public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
             // Only execute query if the target KB is active or global
-            if (!isActiveContext(query.targetKbId())) {
+            if (isActiveContext(query.targetKbId())) {
+                return CompletableFuture.supplyAsync(() -> {
+                    var results = new ArrayList<Map<Term.Var, Term>>();
+                    var maxDepth = (Integer) query.parameters().getOrDefault("maxDepth", MAX_BACKWARD_CHAIN_DEPTH);
+                    try {
+                        // Use a mutable set for the proof stack
+                        prove(query.pattern(), query.targetKbId(), Map.of(), maxDepth, new HashSet<>()).forEach(results::add);
+
+                        // For ASK_BINDINGS and ASK_TRUE_FALSE, results are the bindings found.
+                        // For ACHIEVE_GOAL, success means the goal is provable (results is non-empty).
+                        // We don't currently extract actions for ACHIEVE_GOAL.
+                        var status = results.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
+
+                        return new Cog.Answer(query.id(), status, results, null);
+
+                    } catch (Exception e) {
+                        System.err.println("Backward chaining query failed: " + e.getMessage());
+                        e.printStackTrace();
+                        return Cog.Answer.error(query.id(), e.getMessage());
+                    }
+                }, context.events().exe);
+            } else {
                 System.out.println("Query skipped: Target KB '" + query.targetKbId() + "' is not active.");
                 return CompletableFuture.completedFuture(Cog.Answer.failure(query.id()));
             }
-
-            return CompletableFuture.supplyAsync(() -> {
-                var results = new ArrayList<Map<Term.Var, Term>>();
-                var maxDepth = (Integer) query.parameters().getOrDefault("maxDepth", MAX_BACKWARD_CHAIN_DEPTH);
-                try {
-                    // Use a mutable set for the proof stack
-                    prove(query.pattern(), query.targetKbId(), Map.of(), maxDepth, new HashSet<>()).forEach(results::add);
-
-                    // For ASK_BINDINGS and ASK_TRUE_FALSE, results are the bindings found.
-                    // For ACHIEVE_GOAL, success means the goal is provable (results is non-empty).
-                    // We don't currently extract actions for ACHIEVE_GOAL.
-                    var status = results.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
-
-                    return new Cog.Answer(query.id(), status, results, null);
-
-                } catch (Exception e) {
-                    System.err.println("Backward chaining query failed: " + e.getMessage());
-                    e.printStackTrace();
-                    return Cog.Answer.error(query.id(), e.getMessage());
-                }
-            }, context.events().exe);
         }
 
         private Stream<Map<Term.Var, Term>> prove(Term goal, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack) {
@@ -735,8 +722,7 @@ public class Reason {
                         default -> {
                             // Not a special connective, proceed with operator/fact/rule matching
                             // 1. Try operators
-                            var opAtom = Term.Atom.of(op);
-                            resultStream = context.operators().get(opAtom)
+                            resultStream = context.operators().get(Term.Atom.of(op))
                                     .flatMap(opInstance -> executeOperator(opInstance, goalList, bindings, currentGoal))
                                     .stream();
                         }
@@ -776,9 +762,6 @@ public class Reason {
                         .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                         .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
 
-                resultStream = Stream.concat(resultStream, factBindingsStream);
-
-
                 // 3. Try backward chaining on active rules
                 var ruleStream = context.rules().stream()
                         // Only consider rules from active contexts
@@ -789,7 +772,7 @@ public class Reason {
                                     .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack))) // Pass a copy of proofStack
                                     .orElse(Stream.empty());
                         });
-                resultStream = Stream.concat(resultStream, ruleStream);
+                resultStream = Stream.concat(Stream.concat(resultStream, factBindingsStream), ruleStream);
             }
 
 
@@ -805,7 +788,7 @@ public class Reason {
                 if (opResult == null) return Optional.empty();
 
                 // If the operator returns a boolean atom ("true" or "false")
-                if (opResult instanceof Term.Atom(String value)) {
+                if (opResult instanceof Term.Atom(var value)) {
                     if ("true".equals(value)) {
                         return Optional.of(bindings); // Operator evaluated to true, goal is proven with current bindings
                     } else if ("false".equals(value)) {
@@ -824,14 +807,16 @@ public class Reason {
         }
 
         private Stream<Map<Term.Var, Term>> proveAntecedents(List<Term> antecedents, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack) {
-            if (antecedents.isEmpty()) return Stream.of(bindings); // All antecedents proven, yield current bindings
-            var first = antecedents.getFirst();
-            var rest = antecedents.subList(1, antecedents.size());
+            var n = antecedents.size();
+            if (n == 0) return Stream.of(bindings); // All antecedents proven, yield current bindings
+            else {
+                var rest = antecedents.subList(1, n);
 
-            // Prove the first antecedent
-            return prove(first, kbId, bindings, depth, proofStack)
-                    // For each successful binding set from the first antecedent, recursively prove the rest
-                    .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
+                // Prove the first antecedent
+                return prove(antecedents.getFirst(), kbId, bindings, depth, proofStack)
+                        // For each successful binding set from the first antecedent, recursively prove the rest
+                        .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
+            }
         }
     }
 }

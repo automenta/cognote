@@ -96,13 +96,13 @@ public class GenerateQuestionsTool implements Tool {
                                         .forEach(question -> {
                                             var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_QUESTION, note.id, question.replace("\"", "\\\""));
                                             try {
-                                                var terms = Logic.KifParser.parseKif(kif);
+                                                var terms = KifParser.parseKif(kif);
                                                 if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
                                                     cog.events.emit(new Cog.ExternalInputEvent(list, "llm-question-tool:" + note.id, note.id));
                                                 } else {
                                                     System.err.println("Generated question KIF was not a single list: " + kif);
                                                 }
-                                            } catch (Logic.KifParser.ParseException e) {
+                                            } catch (KifParser.ParseException e) {
                                                 System.err.println("Error parsing generated question KIF: " + e.getMessage() + " | KIF: " + kif);
                                             }
                                         });
