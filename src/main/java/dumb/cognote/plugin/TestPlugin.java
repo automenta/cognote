@@ -151,67 +151,60 @@ public class TestPlugin extends Plugin.BasePlugin {
                     var pri = INPUT_ASSERTION_BASE_PRIORITY / (1.0 + list.weight());
                     // Assertions in test setup/action go into the temporary test KB
                     var pa = new Assertion.PotentialAssertion(list, pri, Set.of(), testKbId, isEq, isNeg, isOriented, testKbId, type, List.of(), 0);
-                    // Use tryCommit which handles duplicates, trivial, etc.
-                    // We need to wait for the assertion to be processed by the TMS
-                    // This is tricky with the event-driven nature. For tests, we can emit the event
-                    // and then potentially wait for the AssertedEvent for this specific assertion ID.
-                    // A simpler approach for now is to just emit the event and assume it will be processed.
-                    // The checkExpectations phase will verify the state.
-                    // However, for the action phase, we might need the *result* of the action (e.g., query bindings).
-                    // Let's refine: setup/teardown just emit events. The main 'action' needs its result captured.
 
-//                    if (phase.equals("Action") && action.type.equals("query")) {
-//                        // Query action is handled below to capture result
-//                        throw new IllegalStateException("Query action should be handled directly in the 'query' case.");
-//                    }
+                    var committed = context.tryCommit(pa, "test-runner:" + test.name);
+                    // Return the committed assertion ID or null
+                    yield CompletableFuture.completedFuture(committed != null ? committed.id() : null);
+                }
+                case "addRule" -> {
+                    if (!(action.payload instanceof Term.Lst ruleForm))
+                        throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
+                    // Need to parse the rule form into a Rule object
+                    // Use default priority 1.0 for test rules
+                    var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId);
+                    var added = context.addRule(r);
+                    yield CompletableFuture.completedFuture(added); // Return boolean success
+                }
+                case "removeRuleForm" -> {
+                    if (!(action.payload instanceof Term.Lst ruleForm))
+                        throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
+                    var removed = context.removeRule(ruleForm);
+                    yield CompletableFuture.completedFuture(removed); // Return boolean success
+                }
+                case "retract" -> {
+                    // Payload is the (TYPE TARGET) list
+                    if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
+                        throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
+                    }
+                    var rtype = typeAtom.value();
+                    var target = retractTargetList.get(1);
+                    String targetStr;
+                    // Need to convert the target Term to a string representation for the event
+                    // The RetractionRequestEvent constructor takes a String target.
+                    // Looking at RetractionRequestEvent, it seems the target string is the KIF representation.
+                    // Let's use toKif() for Lst and value() for Atom. Vars are not allowed per parseAction.
+                    if (target instanceof Term.Atom atom) {
+                         targetStr = atom.value();
+                    } else if (target instanceof Term.Lst list) {
+                         targetStr = list.toKif();
+                    } else {
+                         // This case should be prevented by parseAction, but keep defensive check
+                         throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
+                    }
 
-                    // For assert/addRule/removeRuleForm/retract in setup/teardown/action phases (except query action)
-                    // We just emit the event and return a completed future.
-                    // The success/failure is implicit (no exception thrown here).
-                    // The actual state change is verified in checkExpectations.
-                    yield switch (action.type) {
-                        case "assert" -> {
-                            var committed = context.tryCommit(pa, "test-runner:" + test.name);
-                            // Return the committed assertion ID or null
-                            yield CompletableFuture.completedFuture(committed != null ? committed.id() : null);
-                        }
-                        case "addRule" -> {
-                            if (!(action.payload instanceof Term.Lst ruleForm))
-                                throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
-                            var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId);
-                            var added = context.addRule(r);
-                            yield CompletableFuture.completedFuture(added); // Return boolean success
-                        }
-                        case "retract" -> {
-                            // Payload is the (TYPE TARGET) list
-                            if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
-                                throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
-                            }
-                            var rtype = typeAtom.value();
-                            var target = retractTargetList.get(1);
-                            var targetStr = switch (target) {
-                                case Term.Atom(String vv) -> vv;
-                                case Term.Lst l -> l.toKif();
-                                case Term.Var v -> throw new IllegalArgumentException("Invalid target for retract: Cannot retract a variable " + v.toKif());
-                                default -> // Should not happen with current Term types, but defensive
-                                        throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
-                            };
+                    RetractionType retractionType;
+                    try {
+                        retractionType = RetractionType.valueOf(rtype.toUpperCase());
+                    } catch (IllegalArgumentException e) {
+                         throw new IllegalArgumentException("Invalid retraction type: " + rtype);
+                    }
 
-                            // Emit retraction request. Retraction is async.
-                            // We can't return a direct success/failure here based on the request.
-                            // The expectation phase must check if the assertion/rule is gone.
-                            // Return the target string as a result? Or just null? Let's return the target.
-                            context.events.emit(new RetractionRequestEvent(targetStr, RetractionType.valueOf(rtype.toUpperCase()), "test-runner:" + test.name, testKbId));
-                            yield CompletableFuture.completedFuture(targetStr);
-                        }
-                        case "removeRuleForm" -> {
-                            if (!(action.payload instanceof Term.Lst ruleForm))
-                                throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
-                            var removed = context.removeRule(ruleForm);
-                            yield CompletableFuture.completedFuture(removed); // Return boolean success
-                        }
-                        default -> throw new IllegalArgumentException("Unknown action type: " + action.type);
-                    };
+                    // Emit retraction request. Retraction is async.
+                    // We can't return a direct success/failure here based on the request.
+                    // The expectation phase must check if the assertion/rule is gone.
+                    // Return the target string as a result? Or just null? Let's return the target string.
+                    context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + test.name, testKbId));
+                    yield CompletableFuture.completedFuture(targetStr); // Return the target string
                 }
                 case "runTool" -> {
                     var toolName = (String) action.toolParams.get("name");
@@ -435,10 +428,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
             } else {
                 // Ignore non-(test ...) top-level terms
-                // This check is redundant with the outer if, but kept for clarity if needed later
-                // if (!(term instanceof Term.Lst list && list.op().filter("test"::equals).isPresent())) {
                 System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
-                // }
             }
         }
 
