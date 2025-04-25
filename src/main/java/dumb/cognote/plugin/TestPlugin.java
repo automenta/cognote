@@ -20,6 +20,8 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private static final String TEST_KB_PREFIX = "test-kb-";
     private static final long TEST_ACTION_TIMEOUT_SECONDS = 30; // Timeout for individual test actions
+    private static final long TEST_WAIT_DEFAULT_TIMEOUT_SECONDS = 30; // Default timeout for wait action
+    private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100; // Default polling interval for wait action
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
 
 
@@ -125,6 +127,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         System.out.println("  " + phase + ": Executing " + action.type + "...");
 
         // Apply timeout to the action future
+        // Note: The 'wait' action has its own internal timeout mechanism,
+        // but the overall action timeout still applies as a safeguard.
         return executeSingleAction(test, testKbId, phase, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
@@ -237,6 +241,83 @@ public class TestPlugin extends Plugin.BasePlugin {
                     }
                     // Use querySync to get the Answer object directly
                     yield CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams))); // Return the Answer object
+                }
+                case "wait" -> { // Add the new wait action type execution
+                    if (!(action.payload instanceof Term.Lst conditionList)) {
+                        // This should have been caught by parseAction, but defensive check
+                        throw new IllegalArgumentException("Invalid payload for wait: Expected condition list.");
+                    }
+                    var conditionOpOpt = conditionList.op();
+                     if (conditionOpOpt.isEmpty()) {
+                         // This should have been caught by parseAction
+                         throw new IllegalArgumentException("Invalid wait condition list: Missing operator.");
+                     }
+                    var conditionOp = conditionOpOpt.get();
+                    if (conditionList.size() < 2) {
+                         // This should have been caught by parseAction
+                         throw new IllegalArgumentException("Invalid wait condition list: Missing target.");
+                    }
+                    Term conditionTarget = conditionList.get(1); // The KIF term for assertion/rule
+
+                    // Parse timeout and interval from toolParams (using termToObject helper)
+                    long timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
+                    long timeoutMillis = timeoutSeconds * 1000;
+                    long intervalMillis = ((Number) action.toolParams.getOrDefault("interval", TEST_WAIT_DEFAULT_INTERVAL_MILLIS)).longValue();
+                    if (timeoutMillis <= 0 || intervalMillis <= 0) {
+                         throw new IllegalArgumentException("Wait timeout and interval must be positive.");
+                    }
+
+
+                    System.out.println("  " + phase + ": Waiting for " + conditionList.toKif() + " (timeout: " + timeoutSeconds + "s, interval: " + intervalMillis + "ms)...");
+
+                    // Use supplyAsync for the waiting loop
+                    yield CompletableFuture.supplyAsync(() -> {
+                        long startTime = System.currentTimeMillis();
+                        while (System.currentTimeMillis() - startTime < timeoutMillis) {
+                            boolean conditionMet = false;
+                            try {
+                                var kb = context.kb(testKbId);
+                                var globalKb = context.kbGlobal();
+
+                                switch (conditionOp) {
+                                    case "assertionExists" -> {
+                                        if (!(conditionTarget instanceof Term.Lst kif))
+                                            throw new IllegalArgumentException("wait assertionExists requires a KIF list.");
+                                        conditionMet = ctx.findAssertionByKif(kif, testKbId).isPresent() || ctx.findAssertionByKif(kif, globalKb.id).isPresent();
+                                    }
+                                    case "assertionDoesNotExist" -> {
+                                        if (!(conditionTarget instanceof Term.Lst kif))
+                                            throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list.");
+                                        conditionMet = ctx.findAssertionByKif(kif, testKbId).isEmpty() && ctx.findAssertionByKif(kif, globalKb.id).isEmpty();
+                                    }
+                                    // TODO: Add other conditions later if needed (ruleExists, ruleDoesNotExist, kbSize)
+                                    default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
+                                }
+
+                                if (conditionMet) {
+                                    // Condition met, return null to indicate success
+                                    return null;
+                                }
+
+                            } catch (IllegalArgumentException e) {
+                                 // This indicates a problem with the condition format itself, fail immediately
+                                 throw new CompletionException(e);
+                            } catch (Exception e) {
+                                // Log other errors but continue waiting unless timeout
+                                System.err.println("    Error checking wait condition: " + e.getMessage());
+                                // Don't rethrow here, let the loop continue or timeout
+                            }
+
+                            try {
+                                Thread.sleep(intervalMillis);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new CompletionException(new InterruptedException("Wait interrupted"));
+                            }
+                        }
+                        // Timeout reached
+                        throw new CompletionException(new TimeoutException("Wait condition not met within " + timeoutSeconds + " seconds: " + conditionList.toKif()));
+                    }, cog().events.exe); // Run the waiting loop on the event executor
                 }
                 default -> throw new IllegalArgumentException("Unknown action type: " + action.type);
             };
@@ -381,7 +462,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                             System.err.println("    Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
                         }
                         // NOTE: This check may fail if the retraction is still pending due to its asynchronous nature.
-                        // A more robust test would require waiting for a retraction completion event.
+                        // The new 'wait' action should be used before this expectation in the test definition.
                         yield passed;
                     }
                     case "expectedRuleExists" -> {
@@ -624,6 +705,26 @@ public class TestPlugin extends Plugin.BasePlugin {
                 }
                 return new TestAction(op, payload, toolParams);
             }
+            case "wait" -> { // Add the new wait action type
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("wait action requires at least one argument (the condition list).");
+                Term payload = actionList.get(1); // Payload is the condition list
+
+                Map<String, Object> toolParams = new HashMap<>(); // Use toolParams for timeout/interval
+                // Parameters are in an optional third term, which must be (params (...))
+                if (actionList.size() > 2) {
+                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                        toolParams = parseParams(paramsList);
+                    } else {
+                         throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument.");
+                    }
+                }
+                // Validate payload is a list and has an operator
+                if (!(payload instanceof Term.Lst conditionList) || conditionList.terms.isEmpty() || conditionList.op().isEmpty()) {
+                     throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                return new TestAction(op, payload, toolParams);
+            }
             default -> throw new IllegalArgumentException("Unknown action operator: " + op);
         }
     }
@@ -847,7 +948,8 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {
         // Payload is used for assert, addRule, retract, removeRuleForm, query (the KIF term or list)
-        // ToolParams is used for runTool (name, params) and query (query_type)
+        // For 'wait', payload is the condition list (e.g., (assertionDoesNotExist <kif>))
+        // ToolParams is used for runTool (name, params), query (query_type), and wait (timeout, interval)
     }
 
     private record TestExpected(String type, Object value) {
