@@ -99,7 +99,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         // Use CompletableFuture to chain setup, action, expected, and teardown
         CompletableFuture<TestResult> c = executeActions(test, testKbId, "Setup", test.setup)
-                .thenCompose(setupResult -> executeAction(test, testKbId, "Action", test.action))
+                .thenCompose(setupResult -> executeActionList(test, testKbId, "Action", test.action)) // Execute list of actions
                 .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
                 .thenCompose(expectedResult -> executeActions(test, testKbId, "Teardown", test.teardown)
                         .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting"))) // Result determined by expectations
@@ -112,24 +112,24 @@ public class TestPlugin extends Plugin.BasePlugin {
         return c;
     }
 
-    private CompletableFuture<Void> executeActions(TestDefinition test, String testKbId, String phase, List<TestAction> actions) {
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+    // Helper to execute a list of actions and return the result of the last one
+    private CompletableFuture<Object> executeActionList(TestDefinition test, String testKbId, String phase, List<TestAction> actions) {
+        CompletableFuture<Object> future = CompletableFuture.completedFuture(null); // Start with null result
         for (var action : actions) {
-            future = future.thenCompose(v -> executeAction(test, testKbId, phase, action).thenAccept(result -> {
-                // Log action result if needed, but don't use it to determine test success/failure here
-                // Success/failure of setup/teardown actions is handled by exceptions
-            }));
+            // Chain actions, updating the future with the result of the current action
+            future = future.thenCompose(v -> executeSingleAction(test, testKbId, phase, action));
         }
-        return future;
+        return future; // Return the future holding the result of the last action
     }
 
-    private CompletableFuture<Object> executeAction(TestDefinition test, String testKbId, String phase, TestAction action) {
+
+    private CompletableFuture<Object> executeSingleAction(TestDefinition test, String testKbId, String phase, TestAction action) {
         System.out.println("  " + phase + ": Executing " + action.type + "...");
 
         // Apply timeout to the action future
         // Note: The 'wait' action has its own internal timeout mechanism,
         // but the overall action timeout still applies as a safeguard.
-        return executeSingleAction(test, testKbId, phase, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        return executeActionLogic(test, testKbId, phase, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                     if (cause instanceof TimeoutException) {
@@ -139,7 +139,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 });
     }
 
-    private CompletableFuture<Object> executeSingleAction(TestDefinition test, String testKbId, String phase, TestAction action) {
+    private CompletableFuture<Object> executeActionLogic(TestDefinition test, String testKbId, String phase, TestAction action) {
 
         try {
 
@@ -368,7 +368,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     answer = queryAnswer; // Assign the casted result to the 'answer' variable
                 }
 
-                // Fix: Use expected.type in the switch statement and use the correct types from expected.value
+                // Use expected.type in the switch statement and use the correct types from expected.value
                 return switch (expected.type) {
                     case "expectedResult" -> {
                         // expected.value is already a Boolean from parseExpectation
@@ -529,12 +529,12 @@ public class TestPlugin extends Plugin.BasePlugin {
                             System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
                             // If it was a string startsWith check that failed, provide more detail
                             if (actionResult instanceof String actualString && expected.value instanceof Term.Atom && ((Term.Atom) expected.value).value() != null) {
-                                System.err.println("      (String startsWith check failed: Expected '" + ((Term.Atom) expected.value).value() + "', got '" + actualString + "')");
+                                System.err.println("      (String startsWith check failed: Expected '" + ((Term.Atom) expected.value).value() + "', got '" + actualResultString + "')");
                             }
                         }
                         yield passed;
                     }
-                    case "expectedToolResultContains" -> { // Add new expectation type
+                     case "expectedToolResultContains" -> { // Add new expectation type
                         // expected.value is stored as a Term by parseExpectation
                         // Expecting an Atom containing the substring
                         if (!(expected.value instanceof Term.Atom expectedAtom)) {
@@ -584,7 +584,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 var nameTerm = list.get(1);
                 String name;
                 // Check if the name term is an Atom and extract its value
-                // Fix: Use traditional instanceof check and cast
+                // Use traditional instanceof check and cast
                 if (nameTerm instanceof Term.Atom) {
                     name = ((Term.Atom) nameTerm).value();
                     if (name == null || name.isBlank()) {
@@ -597,7 +597,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 }
 
                 List<TestAction> setup = new ArrayList<>();
-                TestAction action = null; // Action section must have exactly one action
+                List<TestAction> action = new ArrayList<>(); // Changed to List
                 List<TestExpected> expected = new ArrayList<>();
                 List<TestAction> teardown = new ArrayList<>();
 
@@ -607,8 +607,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                     var sectionTerm = list.get(i); // This should be the section list, e.g., (action (query ...))
                     if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
                         System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid section format: " + sectionTerm.toKif());
-                        action = null; // Mark test as invalid
-                        break;
+                        // Don't mark test as invalid here, just skip the malformed section
+                        continue;
                     }
                     var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
                     if (sectionOpOpt.isEmpty()) {
@@ -620,145 +620,392 @@ public class TestPlugin extends Plugin.BasePlugin {
 
                     switch (sectionOp) {
                         case "setup" -> setup.addAll(parseActions(sectionContents)); // Parse terms *inside* (setup ...)
-                        case "action" -> {
-                            // The action section can now contain multiple actions (e.g., retract followed by wait)
-                            // Parse all actions within the action section
-                            if (sectionContents.isEmpty()) {
-                                 throw new ParseException("Action section must contain at least one action in test '" + name, sectionList.toKif());
-                            }
-                            // Store the list of actions as the single 'action' for the TestDefinition
-                            // This requires changing TestDefinition.action from TestAction to List<TestAction>
-                            // OR, process the action list here and store the *result* of the last action?
-                            // Let's stick to the current TestDefinition structure and assume 'action' is a single action.
-                            // The 'wait' action should be part of the 'action' sequence, not a separate section.
-                            // Re-evaluating the structure: (action ...) should contain *one* primary action whose result is checked by expected.
-                            // Setup and Teardown can have multiple actions.
-                            // The 'wait' action is a *type* of action, not a section.
-                            // The test definition format should be:
-                            // (test "Name" (setup (action1) (action2) ...) (action (primary_action)) (expected (exp1) (exp2) ...) (teardown (actionA) (actionB) ...))
-                            // The 'wait' action should be usable in setup, action, or teardown lists.
-                            // The current structure has (action ...) containing a *list* of actions.
-                            // Let's adjust the parsing to allow multiple actions in the 'action' section, but only the result of the *last* action will be passed to 'expected'.
-                            // This is a slight change from the original intent where 'action' was singular.
-                            // Let's update TestDefinition to have `List<TestAction> action` instead of `TestAction action`.
-                            // And update `runTest` to execute the list and pass the last result.
+                        case "action" -> action = parseActions(sectionContents); // Parse terms *inside* (action ...) - now a list
+                        case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
+                        case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
+                        default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name, sectionList.toKif());
+                    }
+                }
 
-                            // *** Reverting the plan slightly ***
-                            // The original structure `TestAction action` implies a single action whose result is checked.
-                            // The 'wait' action is a *control flow* action, not one that produces a result to be checked by 'expected'.
-                            // The 'wait' action should be allowed in setup, action, and teardown lists.
-                            // The test definition format should be:
-                            // (test "Name" (setup (action1) (action2) ...) (action (primary_action)) (expected (exp1) (exp2) ...) (teardown (actionA) (actionB) ...))
-                            // Where (primary_action) is the *single* action whose result is checked.
-                            // The 'wait' action should be usable *within* the setup, action, or teardown lists.
-                            // Example: (action (retract ...) (wait ...)) - This doesn't fit the current `TestAction action` structure.
-                            // Let's change TestDefinition to have `List<TestAction> actions` and `List<TestExpected> expectations`.
-                            // The `action` section in the KIF will become part of the `setup` list for execution purposes, but we'll still parse it separately to identify the "primary" action if needed for result checking.
-                            // This is getting complicated. Let's simplify:
-                            // Keep TestDefinition as is: setup (List), action (Single), expected (List), teardown (List).
-                            // Allow 'wait' in setup, expected, and teardown lists.
-                            // The 'action' section *must* contain exactly one action whose result is checked.
-                            // The 'Retract Assertion' test needs the wait *after* the retract.
-                            // This means 'wait' must be allowed in the 'expected' section *before* other expectations.
-                            // This contradicts the idea that 'expected' only contains checks.
-                            // Let's reconsider the test definition format. A sequence of steps seems more natural.
-                            // (test "Name" (steps (step1) (step2) ...))
-                            // Where each step can be an action or an expectation check.
-                            // (step (assert KIF))
-                            // (step (action (query Pattern))) ; Action whose result is checked by the *next* step
-                            // (step (expectedResult true)) ; Checks the result of the *previous* action step
-                            // (step (action (retract ...)))
-                            // (step (wait (assertionDoesNotExist ...))) ; Wait is a step
-                            // (step (expectedAssertionDoesNotExist ...)) ; Checks the state after the wait
+                // A test must have an action section, even if it's empty (though typically it has at least one action)
+                // Let's require at least one action in the action section for now.
+                if (action.isEmpty()) {
+                     System.err.println("TestRunnerPlugin: Skipping test '" + name + "' because the 'action' section is missing or empty.");
+                     continue;
+                }
 
-                            // This requires a significant refactor of TestDefinition and parsing.
-                            // Let's stick to the current structure for now and find the least disruptive fix.
-                            // The simplest fix for the Retract test is to allow 'wait' in the 'expected' list, but execute it *before* other expectations in that list.
-                            // This is a bit hacky but fits the current structure.
 
-                            // Back to the current parsing logic:
-                            // `action` section must contain exactly one action.
-                            // The Retract test has `(action (retract ...))`. This is correct for the structure.
-                            // The `wait` action was added to the `expected` list.
-                            // The `checkExpectations` method iterates through the `expected` list and calls `checkSingleExpectation`.
-                            // `checkSingleExpectation` needs to handle the 'wait' type.
+                definitions.add(new TestDefinition(name, setup, action, expected, teardown));
 
-                            // Okay, the previous commit already added 'wait' parsing to `parseAction`.
-                            // The `parseTestDefinitions` method currently expects `action` section to have size 1 and calls `parseAction` on that single term.
-                            // The Retract test definition in the previous commit had `(action (retract ...))` and `(expected (wait ...) (expectedAssertionDoesNotExist ...))`.
-                            // The log shows `Action: Executing retract...` followed by `Checking expectation: expectedAssertionDoesNotExist...`.
-                            // This means the `wait` action *was not* executed as part of the `expected` checks.
-                            // The `checkSingleExpectation` method does *not* execute actions, it only performs checks.
-                            // The `wait` action *must* be executed as an action.
 
-                            // Let's revisit the TestDefinition structure and parsing.
-                            // `TestDefinition` has `List<TestAction> setup`, `TestAction action`, `List<TestExpected> expected`, `List<TestAction> teardown`.
-                            // The `runTest` method executes `setup` actions, then the single `action`, then `expected` checks, then `teardown` actions.
-                            // The `wait` action needs to be executed *between* the `retract` action and the `expectedAssertionDoesNotExist` check.
-                            // This means the `retract` and `wait` should be in the `action` phase, and the `expectedAssertionDoesNotExist` in the `expected` phase.
-                            // But the `action` phase only supports a single action.
+            } else {
+                // Ignore non-(test ...) top-level terms
+                System.out.println("TestRunnerPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+            }
+        }
 
-                            // Alternative: Change `TestDefinition.action` to `List<TestAction>`.
-                            // Change `runTest` to execute the list of actions in the `action` phase, and pass the result of the *last* action to `checkExpectations`.
-                            // This seems the most reasonable approach within the current overall structure.
+        return definitions; // Return definitions list
+    }
 
-                            // Refined Plan (Revised):
-                            // 1. Modify `TestDefinition` record to have `List<TestAction> action` instead of `TestAction action`.
-                            // 2. Modify `parseTestDefinitions` to parse the `action` section as a list of actions.
-                            // 3. Modify `runTest` to execute the list of actions in the `action` phase and pass the result of the *last* action to `checkExpectations`.
-                            // 4. Modify `src/main/java/dumb/cognote/Test.java`:
-                            //    *   Change the `action` section in the "Retract Assertion" test to contain both `retract` and `wait`.
-                            //    *   Change the `expectedBindings` from `(( ))` to `(())` in the "Forward Chaining Rule" test (already done, but confirm parsing fix).
-                            //    *   Change `expectedToolResult` to `expectedToolResultContains` in the "Run GetNoteTextTool" test.
-                            // 5. Modify `src/main/java/dumb/cognote/plugin/TestPlugin.java`:
-                            //    *   Update `TestDefinition` record.
-                            //    *   Update `parseTestDefinitions` to parse `action` section as `List<TestAction>`.
-                            //    *   Update `runTest` to execute `List<TestAction>` for the action phase and get the last result.
-                            //    *   Update `checkSingleExpectation` to correctly handle `expectedBindings (())`.
-                            //    *   Add parsing logic for `expectedToolResultContains` in `parseExpectation`.
-                            //    *   Add checking logic for `expectedToolResultContains` in `checkSingleExpectation`.
+    private List<TestAction> parseActions(List<Term> terms) {
+        List<TestAction> actions = new ArrayList<>();
+        for (var term : terms) {
+            try {
+                actions.add(parseAction(term));
+            } catch (IllegalArgumentException e) {
+                System.err.println("TestRunnerPlugin: Skipping invalid action term: " + term.toKif() + " | Error: " + e.getMessage());
+            }
+        }
+        return actions;
+    }
 
-                            // Let's implement this revised plan.
+    private TestAction parseAction(Term x) {
+        if (!(x instanceof Term.Lst actionList) || actionList.terms.isEmpty()) {
+            throw new IllegalArgumentException("Action must be a non-empty list.");
+        }
+        var opOpt = actionList.op();
+        if (opOpt.isEmpty()) {
+            throw new IllegalArgumentException("Action list must have an operator.");
+        }
+        var op = opOpt.get();
 
-                            // First, update TestDefinition record in TestPlugin.java
-                            // Then update parseTestDefinitions to handle List<TestAction> for action.
-                            // Then update runTest to execute the list.
-                            // Then update checkSingleExpectation for expectedBindings (()) and expectedToolResultContains.
-                            // Finally, update Test.java with the corrected test definitions.
+        switch (op) {
+            case "assert", "addRule", "removeRuleForm" -> {
+                // These actions take a single KIF term (usually a list) as their payload
+                if (actionList.size() != 2) // Expecting exactly one argument after the operator
+                    throw new IllegalArgumentException(op + " action requires exactly one argument (the KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+                Term payload = actionList.get(1); // The payload is the single term after the operator
+                // Optional: Add a check that the payload is a Lst if required by the action
+                if (!(payload instanceof Term.Lst)) {
+                     throw new IllegalArgumentException(op + " action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                return new TestAction(op, payload, new HashMap<>()); // No toolParams for these
+            }
+            case "retract" -> {
+                // Expecting (retract (TYPE TARGET))
+                if (actionList.size() != 2) {
+                    throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+                }
+                Term targetTerm = actionList.get(1);
+                if (!(targetTerm instanceof Term.Lst retractTargetList)) {
+                     throw new IllegalArgumentException("retract action's argument must be a list (TYPE TARGET). Found: " + targetTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                if (retractTargetList.size() != 2) {
+                     throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
+                }
+                Term typeTerm = retractTargetList.get(0);
+                if (!(typeTerm instanceof Term.Atom typeAtom)) {
+                     throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                // If all checks pass, store the inner list as payload
+                return new TestAction(op, retractTargetList, new HashMap<>()); // Retract doesn't use toolParams
+            }
+            case "runTool" -> {
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("runTool action requires at least tool name.");
+                // The tool name is the second term in the action list, not part of the payload
+                Term toolNameTerm = actionList.get(1);
+                if (!(toolNameTerm instanceof Term.Atom))
+                    throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
+                String toolName = ((Term.Atom) toolNameTerm).value();
 
-                            // --- Start implementing changes in TestPlugin.java ---
+                Map<String, Object> toolParams = new HashMap<>();
+                toolParams.put("name", toolName); // Put the extracted tool name here
 
-                            // Update TestDefinition record
-                            // private record TestDefinition(String name, List<TestAction> setup, TestAction action, List<TestExpected> expected, List<TestAction> teardown) { }
-                            // becomes
-                            // private record TestDefinition(String name, List<TestAction> setup, List<TestAction> action, List<TestExpected> expected, List<TestAction> teardown) { }
+                // Parameters are in an optional third term, which must be (params (...))
+                if (actionList.size() > 2) {
+                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                        toolParams.putAll(parseParams(paramsList));
+                    } else {
+                        throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list as the third argument.");
+                    }
+                }
+                return new TestAction(op, null, toolParams); // Payload is null for runTool
+            }
+            case "query" -> {
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
+                Term payload = actionList.get(1); // Payload is the pattern
 
-                            // Update parseTestDefinitions
-                            // case "action" -> { if (sectionContents.size() == 1) { action = parseAction(sectionContents.getFirst()); } else { throw ... } }
-                            // becomes
-                            // case "action" -> action = parseActions(sectionContents); // Parse all actions within (action ...)
+                Map<String, Object> toolParams = new HashMap<>();
+                // Parameters are in an optional third term, which must be (params (...))
+                if (actionList.size() > 2) {
+                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                        toolParams = parseParams(paramsList);
+                    } else {
+                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list as the third argument.");
+                    }
+                }
+                return new TestAction(op, payload, toolParams);
+            }
+            case "wait" -> { // Add the new wait action type execution
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("wait action requires at least one argument (the condition list).");
+                Term payload = actionList.get(1); // Payload is the condition list
 
-                            // Update runTest
-                            // .thenCompose(setupResult -> executeAction(test, testKbId, "Action", test.action))
-                            // .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
-                            // needs to execute the list of actions and get the last result.
+                Map<String, Object> toolParams = new HashMap<>(); // Use toolParams for timeout/interval
+                // Parameters are in an optional third term, which must be (params (...))
+                if (actionList.size() > 2) {
+                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                        toolParams = parseParams(paramsList);
+                    } else {
+                         throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument.");
+                    }
+                }
+                // Validate payload is a list and has an operator
+                if (!(payload instanceof Term.Lst conditionList) || conditionList.terms.isEmpty() || conditionList.op().isEmpty()) {
+                     throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+                }
+                return new TestAction(op, payload, toolParams);
+            }
+            default -> throw new IllegalArgumentException("Unknown action operator: " + op);
+        }
+    }
 
-                            // Let's create a helper method `executeActionList` similar to `executeActions` but returning the last result.
+    private List<TestExpected> parseExpectations(List<Term> terms) {
+        List<TestExpected> expectations = new ArrayList<>();
+        for (var term : terms) {
+            try {
+                expectations.add(parseExpectation(term));
+            } catch (IllegalArgumentException e) {
+                System.err.println("TestRunnerPlugin: Skipping invalid expectation term: " + term.toKif() + " | Error: " + e.getMessage());
+            }
+        }
+        return expectations;
+    }
 
-                            // Update checkSingleExpectation for expectedBindings (())
-                            // The current loop `for (var bindingPairTerm : expectedBindingsListTerm.terms)` will iterate over the single `()` term when the input is `(())`.
-                            // Inside the loop, `bindingPairTerm` will be `()`.
-                            // The check `bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2` will fail because `bindingPair.size()` is 0.
-                            // The `else` block will be hit, printing the error.
-                            // We need to add a specific check *before* the loop for the `(())` case.
+    private TestExpected parseExpectation(Term term) {
+        if (!(term instanceof Term.Lst expectedList) || expectedList.terms.isEmpty()) {
+            throw new IllegalArgumentException("Expectation must be a non-empty list.");
+        }
+        var opOpt = expectedList.op();
+        if (opOpt.isEmpty()) {
+            throw new IllegalArgumentException("Expectation list must have an operator.");
+        }
+        var op = opOpt.get();
 
-                            // Update checkSingleExpectation for expectedToolResultContains
-                            // Add a new case to the switch statement.
+        // The value of the expectation is the term immediately following the operator
+        if (expectedList.size() < 2) {
+             throw new IllegalArgumentException("Expectation '" + op + "' requires at least one argument.");
+        }
+        Term expectedValueTerm = expectedList.get(1);
 
-                            // --- End implementing changes in TestPlugin.java ---
 
-                            // --- Start implementing changes in Test.java ---
-                            // Update the TESTS string as planned.
-                            // --- End implementing changes in Test.java ---
+        return switch (op) {
+            case "expectedResult" -> {
+                // expectedResult expects a boolean atom like "true" or "false"
+                if (!(expectedValueTerm instanceof Term.Atom))
+                    throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
+                String value = ((Term.Atom) expectedValueTerm).value();
 
-                            // Let's proceed with the changes to TestPlugin.java first.
+                if (!value.equals("true") && !value.equals("false"))
+                    throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
+                // Store as Boolean
+                yield new TestExpected(op, Boolean.parseBoolean(value));
+            }
+            case "expectedBindings" -> {
+                // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings (())) or (expectedBindings ())
+                // The value is the list of binding pairs ((?V1 Val1) ...) or (()) or ()
+                if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
+                     throw new IllegalArgumentException("expectedBindings requires a list of binding pairs ((?V1 Val1) ...) or (()) or (). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
+                }
+                // Store as Term.Lst
+                yield new TestExpected(op, expectedBindingsListTerm);
+            }
+            case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
+                // Expecting a KIF list
+                if (!(expectedValueTerm instanceof Term.Lst kif))
+                    throw new IllegalArgumentException(op + " requires a single KIF list.");
+                // Store as Term.Lst
+                yield new TestExpected(op, kif);
+            }
+            case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
+                // Expecting a rule KIF list
+                if (!(expectedValueTerm instanceof Term.Lst ruleForm))
+                    throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+                // Store as Term.Lst
+                yield new TestExpected(op, ruleForm);
+            }
+            case "expectedKbSize" -> {
+                // Expecting an integer atom
+                if (!(expectedValueTerm instanceof Term.Atom))
+                    throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
+                String value = ((Term.Atom) expectedValueTerm).value();
+                try {
+                    // Store as Integer
+                    yield new TestExpected(op, Integer.parseInt(value));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("expectedKbSize value must be an integer.");
+                }
+            }
+            case "expectedToolResult" -> {
+                // The expected value can be any Term. Store it as is.
+                yield new TestExpected(op, expectedValueTerm);
+            }
+             case "expectedToolResultContains" -> { // Add new expectation type
+                // Expecting an Atom containing the substring
+                if (!(expectedValueTerm instanceof Term.Atom))
+                    throw new IllegalArgumentException(op + " requires a single Atom containing the expected substring.");
+                // Store as Term.Atom
+                yield new TestExpected(op, expectedValueTerm);
+            }
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+        };
+    }
+
+    private Map<String, Object> parseParams(Term.Lst paramsList) {
+        Map<String, Object> params = new HashMap<>();
+        if (paramsList.op().filter("params"::equals).isEmpty()) {
+            throw new IllegalArgumentException("Parameter list must start with 'params'.");
+        }
+        for (var paramTerm : paramsList.terms.stream().skip(1).toList()) {
+            // Use traditional instanceof check
+            if (paramTerm instanceof Term.Lst paramPair && paramPair.size() == 2 && paramPair.get(0) instanceof Term.Atom) {
+                // Explicit cast to Term.Atom to get the value
+                String value = ((Term.Atom) paramPair.get(0)).value();
+                // Simple key-value pair: (key value)
+                params.put(value, termToObject(paramPair.get(1)));
+            } else {
+                throw new IllegalArgumentException("Invalid parameter format: " + paramTerm.toKif());
+            }
+        }
+        return params;
+    }
+
+    // Helper to convert Term to Java Object for tool parameters
+    private Object termToObject(Term term) {
+        return switch (term) {
+            case Term.Atom atom -> {
+                // Attempt to parse as number or boolean
+                try {
+                    yield Integer.parseInt(atom.value());
+                } catch (NumberFormatException e1) {
+                    try {
+                        yield Double.parseDouble(atom.value());
+                    } catch (NumberFormatException e2) {
+                        if (atom.value().equalsIgnoreCase("true")) yield true;
+                        if (atom.value().equalsIgnoreCase("false")) yield false;
+                        yield atom.value(); // Default to string
+                    }
+                }
+            }
+            case Term.Lst list -> list; // Keep lists as Terms for now
+            case Term.Var var -> var; // Keep vars as Terms for now
+        };
+    }
+
+    /**
+     * Formats a ParseException to include the line and column context from the source text.
+     * Assumes the ParseException message ends with " at line X col Y".
+     *
+     * @param e The ParseException.
+     * @param sourceText The text that was being parsed.
+     * @return A formatted error message with context.
+     */
+    private String formatParseException(ParseException e, String sourceText) {
+        String message = e.getMessage();
+        Matcher matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
+        int lineNum = -1;
+        int colNum = -1;
+        String baseMessage = message;
+
+        if (matcher.find()) {
+            try {
+                lineNum = Integer.parseInt(matcher.group(1));
+                colNum = Integer.parseInt(matcher.group(2));
+                baseMessage = message.substring(0, matcher.start()); // Get message before " at line..."
+            } catch (NumberFormatException ex) {
+                // Should not happen if regex matches, but handle defensively
+                System.err.println("TestRunnerPlugin: Could not parse line/col from ParseException message: " + message);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(baseMessage);
+
+        if (lineNum > 0 && colNum > 0) {
+            String[] lines = sourceText.split("\\r?\\n");
+            if (lineNum <= lines.length) {
+                String errorLine = lines[lineNum - 1]; // lineNum is 1-based
+                sb.append("\n  --> at line ").append(lineNum).append(" col ").append(colNum).append(":\n");
+                sb.append("  ").append(errorLine).append("\n");
+                // Add pointer below the column
+                sb.append("  ").append(" ".repeat(Math.max(0, colNum - 1))).append("^\n");
+            } else {
+                sb.append("\n  (Could not retrieve line context for line ").append(lineNum).append(")");
+            }
+        } else {
+             sb.append("\n  (No line/column information available)");
+        }
+
+        return sb.toString();
+    }
+
+
+    private String formatTestResults(List<TestResult> results) {
+        var sb = new StringBuilder();
+        sb.append("--- Test Results (").append(java.time.LocalDateTime.now()).append(") ---\n\n");
+        var passedCount = 0;
+        var failedCount = 0;
+
+        for (var result : results) {
+            sb.append(result.passed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
+            // Details are now generated during expectation checking and can be stored in TestResult if needed
+            // For now, just indicate failure
+            if (!result.passed) {
+                sb.append("  Status: FAILED\n");
+                // Optionally add more details from the TestResult object if it stored them
+                // sb.append("  Details: ").append(result.details.replace("\n", "\n    ")).append("\n");
+                failedCount++;
+            } else {
+                sb.append("  Status: PASSED\n");
+                passedCount++;
+            }
+            sb.append("\n");
+        }
+
+        sb.append("--- Summary ---\n");
+        sb.append("Total: ").append(results.size()).append("\n");
+        sb.append("Passed: ").append(passedCount).append("\n");
+        sb.append("Failed: ").append(failedCount).append("\n");
+        sb.append("---------------\n");
+
+        return sb.toString();
+    }
+
+    private void updateTestResults(String resultsText) {
+        cog().note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
+            note.text = resultsText;
+            cog().save(); // Save the updated test results note
+        });
+    }
+
+
+    // Changed 'action' from TestAction to List<TestAction>
+    private record TestDefinition(String name, List<TestAction> setup, List<TestAction> action, List<TestExpected> expected,
+                                  List<TestAction> teardown) {
+    }
+
+    private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {
+        // Payload is used for assert, addRule, retract, removeRuleForm, query (the KIF term or list)
+        // For 'wait', payload is the condition list (e.g., (assertionDoesNotExist <kif>))
+        // ToolParams is used for runTool (name, params), query (query_type), and wait (timeout, interval)
+    }
+
+    private record TestExpected(String type, Object value) {
+        // value type depends on type:
+        // expectedResult: Boolean
+        // expectedBindings: Term.Lst (the list of binding pairs ((?V1 Val1) ...))
+        // expectedAssertionExists/DoesNotExist: Term.Lst (KIF)
+        // expectedRuleExists/DoesNotExist: Term.Lst (Rule Form KIF)
+        // expectedKbSize: Integer
+        // expectedToolResult: Object (raw tool result)
+        // expectedToolResultContains: Term.Atom (substring)
+    }
+
+    private record TestResult(String name, boolean passed, String details) {
+    }
+
+    public record RunTestsEvent() implements CogEvent {
+    }
+}
