@@ -24,7 +24,7 @@ public class Test {
         c.addNote(new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE, TESTS, IDLE));
         c.addNote(new Note(TEST_RESULTS_NOTE_ID, TEST_RESULTS_NOTE_TITLE, "; Test results: pending", IDLE));
 
-        c.setPaused(false); // Unpause
+        c.setPaused(false);
 
         var completion = new CompletableFuture<Void>();
 
@@ -35,14 +35,12 @@ public class Test {
             }
         });
 
-        // trigger the TestRunnerPlugin
         c.events.emit(new TestPlugin.RunTestsEvent());
 
         try {
-            // Wait for the tests to complete (or timeout)
-            completion.get(120, TimeUnit.SECONDS); // Adjust timeout as needed
+            completion.get(120, TimeUnit.SECONDS);
 
-            c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println("\n" + note.text));
+            c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println(note.text));
         } catch (Exception e) {
             System.err.println("Test error: " + e.getMessage());
             e.printStackTrace();
@@ -51,7 +49,6 @@ public class Test {
             c.stop();
         }
     }
-
 
     private static final String TESTS = """
             ; Define tests here using the (test ...) format:
@@ -78,7 +75,6 @@ public class Test {
               (action (query (instance ?X Cat)))
               (expected\s
                 (expectedResult true)
-                ; Note: Order of bindings in expectedBindings list does NOT matter now (compares sets)
                 (expectedBindings ((?X MyCat) (?X YourCat))))
               (teardown\s
                 (retract (BY_KIF (instance MyCat Cat)))
@@ -100,7 +96,6 @@ public class Test {
               (action (query (attribute MyDog Canine)))
               (expected\s
                 (expectedResult true)
-                ; Query for a fact with no variables should return SUCCESS with one empty binding set (())
                 (expectedBindings (()))
                 (expectedAssertionExists (attribute MyDog Canine)))
               (teardown\s
@@ -113,7 +108,6 @@ public class Test {
               (setup (assert (instance TempFact Something)))
               (action
                 (retract (BY_KIF (instance TempFact Something)))
-                ; Wait for the assertion to disappear after the async retract request
                 (wait (assertionDoesNotExist (instance TempFact Something))))
               (expected
                 (expectedAssertionDoesNotExist (instance TempFact Something)))
@@ -148,23 +142,4 @@ public class Test {
               (teardown))
                                             
         """;
-
-    /** TODO use */
-    public static final String queryTests = """
-            ; Example: Test a simple fact query
-            (test "Simple Fact Query" (query (instance MyCat Cat)) (expectedResult true))
-            
-            ; Example: Test a query with bindings
-            ; Note: Order of bindings in expectedBindings list matters for now
-            (test "Query with Bindings" (query (instance ?X Cat)) (expectedBindings ((?X MyCat) (?X YourCat))))
-            
-            ; Example: Test a query that should fail
-            (test "Query Failure" (query (instance MyDog Cat)) (expectedResult false))
-            
-            ; Example: Test a query with no matches
-            (test "Query No Matches" (query (instance ?Y Bird)) (expectedBindings ()))
-
-        """;
-
-
 }
