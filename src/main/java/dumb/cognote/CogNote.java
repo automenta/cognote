@@ -32,7 +32,7 @@ public class CogNote extends Cog {
 
     public static void main(String[] args) {
         String rulesFile = null;
-        boolean runTests = false;
+        boolean runTests = true;
 
         for (var i = 0; i < args.length; i++) {
             try {
