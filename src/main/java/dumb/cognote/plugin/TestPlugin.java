@@ -226,7 +226,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                             throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
                         }
                     }
-                    return new TestAction(action.type, null, toolParams); // Payload is null for runTool
+                    yield new TestAction(action.type, null, toolParams); // Payload is null for runTool
                 }
                 case "query" -> {
                     if (!(action.payload instanceof Term.Lst pattern))
