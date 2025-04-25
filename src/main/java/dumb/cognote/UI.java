@@ -1,6 +1,6 @@
 package dumb.cognote;
 
-import dumb.cognote.plugin.TestPlugin;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
@@ -294,7 +294,7 @@ public class UI extends JFrame {
                 attachmentPanel.filterField, attachmentPanel.queryInputField, attachmentPanel.queryButton,
                 mainControlPanel.addButton, mainControlPanel.pauseResumeButton, mainControlPanel.clearAllButton,
                 mainControlPanel.statusLabel, menuBarHandler.settingsItem, menuBarHandler.viewRulesItem,
-                menuBarHandler.askQueryItem, menuBarHandler.runTestsItem, // Add runTestsItem
+                menuBarHandler.askQueryItem,
                 noteListPanel.analyzeItem, noteListPanel.enhanceItem,
                 noteListPanel.summarizeItem, noteListPanel.conceptsItem, noteListPanel.questionsItem,
                 noteListPanel.removeItem, attachmentPanel.retractItem, attachmentPanel.showSupportItem,
@@ -1630,7 +1630,7 @@ public class UI extends JFrame {
     }
 
     private class MenuBarHandler {
-        final JMenuItem settingsItem = new JMenuItem("Settings..."), viewRulesItem = new JMenuItem("View Rules"), askQueryItem = new JMenuItem("Ask Query..."), runTestsItem = new JMenuItem("Run Tests");
+        final JMenuItem settingsItem = new JMenuItem("Settings..."), viewRulesItem = new JMenuItem("View Rules"), askQueryItem = new JMenuItem("Ask Query...");
         private final JMenuBar menuBar = new JMenuBar();
 
         MenuBarHandler() {
@@ -1649,9 +1649,6 @@ public class UI extends JFrame {
 
             askQueryItem.addActionListener(e -> attachmentPanel.queryInputField.requestFocusInWindow());
             qm.add(askQueryItem);
-
-            runTestsItem.addActionListener(e -> runTestsAction());
-            tm.add(runTestsItem); // Add Run Tests to Tests menu
 
 
             Stream.of(fm, em, vm, qm, tm, hm).forEach(menuBar::add); // Add Tests menu
@@ -1696,14 +1693,5 @@ public class UI extends JFrame {
             JOptionPane.showMessageDialog(UI.this, panel, "Current Rules", JOptionPane.PLAIN_MESSAGE);
         }
 
-        private void runTestsAction() {
-            if (cog == null || !cog.running.get() || cog.isPaused()) {
-                JOptionPane.showMessageDialog(UI.this, "System must be running to run tests.", "System Status", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            // Emit the event to trigger the TestRunnerPlugin
-            cog.events.emit(new TestPlugin.RunTestsEvent());
-            updateStatus("Running tests...");
-        }
     }
 }

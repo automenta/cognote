@@ -2,7 +2,6 @@ package dumb.cognote;
 
 import dumb.cognote.plugin.StatusUpdaterPlugin;
 import dumb.cognote.plugin.TaskDecomposePlugin;
-import dumb.cognote.plugin.TestPlugin;
 import dumb.cognote.plugin.TmsPlugin;
 import dumb.cognote.tool.*;
 import org.java_websocket.WebSocket;
@@ -124,7 +123,7 @@ public class Cog {
         plugins.loadPlugin(new TmsPlugin());
 
         plugins.loadPlugin(new TaskDecomposePlugin());
-        plugins.loadPlugin(new TestPlugin()); // Add the new test runner plugin
+        //plugins.loadPlugin(new TestPlugin()); // Add the new test runner plugin
 
         plugins.loadPlugin(new WebSocketPlugin(new InetSocketAddress(PORT), this));
         plugins.loadPlugin(new StatusUpdaterPlugin());

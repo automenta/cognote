@@ -2,11 +2,12 @@ package dumb.cognote;
 
 import dumb.cognote.Logic.KifParser;
 import dumb.cognote.Logic.KifParser.ParseException;
-import dumb.cognote.plugin.Tool;
+import dumb.cognote.Tool;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.jetbrains.annotations.Nullable;
+import org.opentest4j.AssertionFailedError;
 
 import java.io.StringReader;
 import java.util.*;
@@ -79,7 +80,7 @@ class CognoteTests {
      */
     private List<Term> parseKif(String kifString) {
         try {
-            return KifParser.parseKif(new StringReader(kifString));
+            return KifParser.parseKif(kifString);
         } catch (ParseException e) {
             fail("Failed to parse KIF string:\n" + formatParseException(e, kifString));
             return Collections.emptyList(); // unreachable
@@ -984,6 +985,7 @@ class CognoteTests {
         if (!(testTerm instanceof Term.Lst testList) || testList.terms.isEmpty() || !testList.op().filter("test"::equals).isPresent()) {
             fail("Top-level term is not a valid (test ...) list: " + testTerm.toKif());
         }
+
         if (testList.size() < 2 || !(testList.get(1) instanceof Term.Atom)) {
              fail("Test definition must have a name as the second element. Term: " + testList.toKif());
         }

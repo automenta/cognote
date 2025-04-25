@@ -356,7 +356,7 @@ public class Logic {
         public final String id;
         final int capacity;
         final Events events;
-        final Truths truth;
+        public final Truths truth;
         final Path.PathIndex paths;
         final ConcurrentMap<Term.Atom, Set<String>> universalIndex = new ConcurrentHashMap<>();
         final PriorityBlockingQueue<String> groundEvictionQueue;
