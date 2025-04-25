@@ -58,7 +58,8 @@ public class Test {
             
             ; Test structure: (test "Test Name" (setup ...) (action ...) (expected ...) (teardown ...))
             ; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID "id")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)
-            ; action types: (query Pattern), (runTool (name "tool_name") (params (key1 value1) ...))
+            ; action types: (query Pattern), (runTool (name "tool_name") (params (key1 value1) ...)), (wait (condition) (params (timeout seconds) (interval millis)))
+            ; wait conditions: (assertionExists KIF), (assertionDoesNotExist KIF)
             ; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))
             
             ; Example 1: Simple Fact Query
@@ -77,7 +78,7 @@ public class Test {
               (action (query (instance ?X Cat)))
               (expected\s
                 (expectedResult true)
-                ; Note: Order of bindings in expectedBindings list matters for now
+                ; Note: Order of bindings in expectedBindings list does NOT matter now (compares sets)
                 (expectedBindings ((?X MyCat) (?X YourCat))))
               (teardown\s
                 (retract (BY_KIF (instance MyCat Cat)))
@@ -99,18 +100,22 @@ public class Test {
               (action (query (attribute MyDog Canine)))
               (expected\s
                 (expectedResult true)
-                (expectedBindings ())
+                ; Query for a fact with no variables should return SUCCESS with one empty binding set (( ))
+                (expectedBindings (( )))
                 (expectedAssertionExists (attribute MyDog Canine)))
               (teardown\s
                 (retract (BY_KIF (instance MyDog Dog)))
                 (retract (BY_KIF (attribute MyDog Canine)))
                 (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))
             
-            ; Example 5: Test Retraction
+            ; Example 5: Test Retraction (requires waiting for async completion)
             (test "Retract Assertion"\s
               (setup (assert (instance TempFact Something)))
               (action (retract (BY_KIF (instance TempFact Something))))
-              (expected (expectedAssertionDoesNotExist (instance TempFact Something)))
+              (expected
+                ; Wait for the assertion to disappear after the async retract request
+                (wait (assertionDoesNotExist (instance TempFact Something)))
+                (expectedAssertionDoesNotExist (instance TempFact Something)))
               (teardown))
             
             ; Example 6: Test KB Size
@@ -137,7 +142,7 @@ public class Test {
             ; It runs the tool against the Test Definitions note KB.
             (test "Run GetNoteTextTool"\s
               (setup)
-              (action (runTool get_note_text (params (note_id "?"))))
+              (action (runTool get_note_text (params (note_id "note-test-definitions"))))
               (expected (expectedToolResult "; Define your tests here using the (test ...) format"))
               (teardown))
                                             
