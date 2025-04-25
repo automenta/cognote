@@ -47,7 +47,7 @@ public class Test {
         try {
             // Wait for the TestRunCompleteEvent to be received
             // Increased timeout significantly to 120 seconds to allow for more tests and potential delays
-            completion.get(5, TimeUnit.SECONDS);
+            completion.get(120, TimeUnit.SECONDS); // Increased timeout
             System.out.println("Test.java: Completion future completed."); // Added logging
 
             // Print the stored detailed test results

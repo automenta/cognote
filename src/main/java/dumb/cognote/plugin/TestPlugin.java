@@ -33,14 +33,14 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private void handleRunTests(RunTestsEvent event) {
         cog().status("Running Tests...");
-        System.out.println("TestPlugin: Starting test run..."); // Added logging
+        System.out.println("TestPlugin: Starting test run..."); // Keep this log
 
         var testDefinitionsNote = cog().note(TEST_DEFINITIONS_NOTE_ID);
         if (testDefinitionsNote.isEmpty()) {
             String errorMsg = "Error: Test Definitions note not found.";
             updateTestResults(errorMsg);
             cog().status("Tests Failed");
-            System.err.println("TestPlugin: " + errorMsg); // Added logging
+            System.err.println("TestPlugin: " + errorMsg); // Keep this error log
             // Emit completion event even on parse/setup failure
             cog().events.emit(new TestRunCompleteEvent(errorMsg));
             return;
@@ -50,11 +50,11 @@ public class TestPlugin extends Plugin.BasePlugin {
         List<TestDefinition> tests;
         try {
             tests = parseTestDefinitions(testDefinitionsText);
-            System.out.println("TestPlugin: Parsed " + tests.size() + " tests."); // Added logging
+            // System.out.println("TestPlugin: Parsed " + tests.size() + " tests."); // Remove verbose log
         } catch (ParseException e) {
             String enhancedErrorMessage = formatParseException(e, testDefinitionsText);
             String errorMsg = "Error parsing test definitions:\n" + enhancedErrorMessage;
-            System.err.println("TestPlugin: " + errorMsg);
+            System.err.println("TestPlugin: " + errorMsg); // Keep this error log
             updateTestResults(errorMsg);
             cog().status("Tests Failed");
             // Emit completion event even on parse/setup failure
@@ -66,7 +66,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             String resultsMsg = "No tests found in Test Definitions note.";
             updateTestResults(resultsMsg);
             cog().status("Tests Complete (No Tests)");
-            System.out.println("TestPlugin: " + resultsMsg); // Added logging
+            System.out.println("TestPlugin: " + resultsMsg); // Keep this log
             // Emit completion event
             cog().events.emit(new TestRunCompleteEvent(resultsMsg));
             return;
@@ -81,8 +81,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                     runTest(test)
                             .exceptionally(ex -> {
                                 var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-                                System.err.println("TestPlugin: Error during test '" + test.name + "' execution chain: " + cause.getMessage());
-                                cause.printStackTrace();
+                                System.err.println("TestPlugin: Error during test '" + test.name + "' execution chain: " + cause.getMessage()); // Keep this error log
+                                cause.printStackTrace(); // Keep stack trace for unexpected errors
                                 // If the *entire test's future chain* fails exceptionally *before* producing a TestResult,
                                 // we need to create a failure result here.
                                 List<ActionError> errors = new ArrayList<>();
@@ -98,11 +98,11 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         // This block runs when all individual test futures have completed (either successfully or exceptionally)
         allTestsFuture.whenCompleteAsync((v, ex) -> { // Explicitly on event executor
-            System.out.println("TestPlugin: All test futures completed. Formatting results..."); // Added logging
+            // System.out.println("TestPlugin: All test futures completed. Formatting results..."); // Remove verbose log
             String finalResultsText;
             if (ex != null) {
-                System.err.println("TestPlugin: Unhandled error after all tests futures completed: " + ex.getMessage());
-                ex.printStackTrace();
+                System.err.println("TestPlugin: Unhandled error after all tests futures completed: " + ex.getMessage()); // Keep this error log
+                ex.printStackTrace(); // Keep stack trace for unexpected errors
                 // If the overall chain fails *after* tests have produced results, append the error
                 finalResultsText = "Internal Error after test run: " + ex.getMessage() + "\n" + formatTestResults(results);
                 cog().status("Tests Failed"); // Explicitly set status on error
@@ -114,7 +114,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             }
 
             updateTestResults(finalResultsText);
-            System.out.println("TestPlugin: Status updated and results note updated. Emitting TestRunCompleteEvent."); // Added logging
+            System.out.println("TestPlugin: Test run finished. Status updated and results note updated."); // Keep this log
             // Emit the completion event with the final results text
             cog().events.emit(new TestRunCompleteEvent(finalResultsText));
 
@@ -133,7 +133,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         CompletableFuture<Object> setupFuture = executeActionList(test, testKbId, test.setup, actionErrors, "Setup")
                 .exceptionally(ex -> {
                     // Error is already captured in actionErrors list by executeActionList
-                    System.err.println("TestPlugin: Setup stage failed for test '" + test.name + "'. Skipping Action and Expectations.");
+                    // System.err.println("TestPlugin: Setup stage failed for test '" + test.name + "'. Skipping Action and Expectations."); // Remove verbose log
                     return null; // Allow action/expectations to potentially run or fail gracefully
                 });
 
@@ -144,7 +144,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             return executeActionList(test, testKbId, test.action, actionErrors, "Action")
                     .exceptionally(ex -> {
                         // Error is already captured in actionErrors list by executeActionList
-                        System.err.println("TestPlugin: Action stage failed for test '" + test.name + "'. Skipping Expectations.");
+                        // System.err.println("TestPlugin: Action stage failed for test '" + test.name + "'. Skipping Expectations."); // Remove verbose log
                         return null; // Allow expectations/teardown to potentially run
                     });
         }, cog().events.exe); // Schedule action stage on event executor
@@ -161,8 +161,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                                         .filter(a -> a.kb().equals(testKbId))
                                         .toList());
             } catch (Exception e) {
-                System.err.println("TestPlugin: Error capturing KB state for test '" + test.name + "': " + e.getMessage());
-                e.printStackTrace();
+                System.err.println("TestPlugin: Error capturing KB state for test '" + test.name + "': " + e.getMessage()); // Keep this error log
+                e.printStackTrace(); // Keep stack trace for unexpected errors
                 return Collections.emptyList(); // Return empty list on error
             }
         }, cog().events.exe); // Capture KB state on event executor
@@ -186,7 +186,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 return executeActionList(test, testKbId, test.teardown, actionErrors, "Teardown")
                     .exceptionally(ex -> {
                         // Error is already captured in actionErrors list by executeActionList
-                        System.err.println("TestPlugin: Teardown stage failed for test '" + test.name + "'.");
+                        // System.err.println("TestPlugin: Teardown stage failed for test '" + test.name + "'."); // Remove verbose log
                         return null; // Teardown failure shouldn't fail the test itself, but should be reported
                     })
                     // Pass parsing errors, expectation results, action errors, and KB state to the TestResult
@@ -197,12 +197,10 @@ public class TestPlugin extends Plugin.BasePlugin {
                 context.removeActiveNote(testKbId);
                 // TODO: Decouple from CogNote
                 ((CogNote) cog()).removeNote(testKbId);
-                // Add logging here to confirm teardown/cleanup completes
-                System.out.println("TestPlugin: Test '" + test.name + "' cleanup complete.");
+                // System.out.println("TestPlugin: Test '" + test.name + "' cleanup complete."); // Remove verbose log
             }, cog().events.exe); // Explicitly on event executor
 
-        // Add logging here to confirm runTest future is created
-        System.out.println("TestPlugin: Test '" + test.name + "' run future created.");
+        // System.out.println("TestPlugin: Test '" + test.name + "' run future created."); // Remove verbose log
 
         return c;
     }
@@ -217,8 +215,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                         // Capture error with action type context and the action itself
                         actionErrors.add(new ActionError(action, actionStageType + " failed: " + cause.getMessage()));
-                        System.err.println("TestPlugin: " + actionStageType + " action failed for test '" + test.name + "': " + cause.getMessage());
-                        cause.printStackTrace();
+                        System.err.println("TestPlugin: " + actionStageType + " action failed for test '" + test.name + "': " + cause.getMessage()); // Keep this error log
+                        cause.printStackTrace(); // Keep stack trace for unexpected errors
                         return null; // Return null to allow subsequent actions/stages to potentially run
                     }),
                 cog().events.exe);
@@ -414,7 +412,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                      throw new CompletionException(e); // Wrap parsing/argument errors
                 } catch (Exception e) {
                     // Log other exceptions during condition check but don't fail the wait immediately
-                    System.err.println("TestPlugin: Error checking wait condition: " + e.getMessage());
+                    System.err.println("TestPlugin: Error checking wait condition: " + e.getMessage()); // Keep this error log
                 }
 
                 try {
@@ -464,7 +462,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 if (requiresAnswer) {
                     if (!(actionResult instanceof Cog.Answer queryAnswer)) {
                         String reason = "Requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName());
-                        System.err.println("TestPlugin: Expectation '" + expected.type + "' failed: " + reason);
+                        System.err.println("TestPlugin: Expectation '" + expected.type + "' failed: " + reason); // Keep this error log
                         // Pass the actual result (or lack thereof) to the result object
                         return new ExpectationResult(expected, false, reason, actionResult);
                     }
@@ -488,15 +486,15 @@ public class TestPlugin extends Plugin.BasePlugin {
                     // Pass the actionResult even on success, for potential future reporting needs
                     return new ExpectationResult(expected, true, null, actionResult);
                 } else {
-                    System.err.println("TestPlugin: Expectation '" + expected.type + "' failed: " + failureReason.get());
+                    System.err.println("TestPlugin: Expectation '" + expected.type + "' failed: " + failureReason.get()); // Keep this error log
                     // Pass the actual result to the result object on failure
                     return new ExpectationResult(expected, false, failureReason.get(), actionResult);
                 }
 
             } catch (Exception e) {
                 String reason = "Check failed with error: " + e.getMessage();
-                System.err.println("TestPlugin: Expectation check failed with error: " + e.getMessage());
-                e.printStackTrace();
+                System.err.println("TestPlugin: Expectation check failed with error: " + e.getMessage()); // Keep this error log
+                e.printStackTrace(); // Keep stack trace for unexpected errors
                 // Pass the actual result to the result object on error
                 return new ExpectationResult(expected, false, reason, actionResult);
             }
@@ -528,12 +526,11 @@ public class TestPlugin extends Plugin.BasePlugin {
         if (expectedBindingsList.isEmpty()) {
             boolean passed = actualBindings.isEmpty();
             if (!passed) {
-                // Added logging for debugging empty bindings failure
-                System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got non-empty.");
-                System.err.println("TestPlugin DEBUG: Actual bindings: " + actualBindings);
+                // System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got non-empty."); // Remove verbose log
+                // System.err.println("TestPlugin DEBUG: Actual bindings: " + actualBindings); // Remove verbose log
                 return Optional.of("Expected no bindings, but got " + actualBindings.size() + " bindings.");
             }
-            System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got empty. Passed."); // Added logging
+            // System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got empty. Passed."); // Remove verbose log
             return Optional.empty();
         }
 
@@ -565,13 +562,12 @@ public class TestPlugin extends Plugin.BasePlugin {
         boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
 
         if (!passed) {
-            // Added logging for debugging specific bindings failure
-            System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got different.");
-            System.err.println("TestPlugin DEBUG: Expected binding strings: " + expectedBindingStrings);
-            System.err.println("TestPlugin DEBUG: Actual binding strings: " + actualBindingStrings);
+            // System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got different."); // Remove verbose log
+            // System.err.println("TestPlugin DEBUG: Expected binding strings: " + expectedBindingStrings); // Remove verbose log
+            // System.err.println("TestPlugin DEBUG: Actual binding strings: " + actualBindingStrings); // Remove verbose log
             return Optional.of("Expected bindings " + expectedBindingStrings + ", but got " + actualBindingStrings);
         }
-        System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got match. Passed."); // Added logging
+        // System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got match. Passed."); // Remove verbose log
         return Optional.empty();
     }
 
@@ -670,14 +666,14 @@ public class TestPlugin extends Plugin.BasePlugin {
                     name = ((Term.Atom) nameTerm).value();
                     if (name == null || name.isBlank()) {
                         String error = "Skipping test with invalid name format (empty or blank Atom): " + list.toKif();
-                        System.err.println("TestPlugin: " + error);
+                        System.err.println("TestPlugin: " + error); // Keep this error log
                         // Add a dummy test result to report this parsing error
                         definitions.add(new TestDefinition("Unnamed Test (Parse Error)", Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), List.of(error)));
                         continue;
                     }
                 } else {
                     String error = "Skipping test with invalid name format (not an Atom): " + list.toKif();
-                    System.err.println("TestPlugin: " + error);
+                    System.err.println("TestPlugin: " + error); // Keep this error log
                     // Add a dummy test result to report this parsing error
                     definitions.add(new TestDefinition("Unnamed Test (Parse Error)", Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), List.of(error)));
                     continue;
@@ -693,14 +689,14 @@ public class TestPlugin extends Plugin.BasePlugin {
                     var sectionTerm = list.get(i);
                     if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
                         String error = "Invalid section format: " + sectionTerm.toKif();
-                        System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                        System.err.println("TestPlugin: Test '" + name + "' | " + error); // Keep this error log
                         parsingErrors.add(error);
                         continue;
                     }
                     var sectionOpOpt = sectionList.op();
                     if (sectionOpOpt.isEmpty()) {
                         String error = "Section without operator: " + sectionList.toKif();
-                        System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                        System.err.println("TestPlugin: Test '" + name + "' | " + error); // Keep this error log
                         parsingErrors.add(error);
                         continue;
                     }
@@ -715,27 +711,27 @@ public class TestPlugin extends Plugin.BasePlugin {
                             case "teardown" -> teardown.addAll(parseActions(sectionContents, parsingErrors));
                             default -> {
                                 String error = "Unknown section type '" + sectionOp + "': " + sectionList.toKif();
-                                System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                                System.err.println("TestPlugin: Test '" + name + "' | " + error); // Keep this error log
                                 parsingErrors.add(error);
                             }
                         }
                     } catch (Exception e) {
                          // Catch unexpected errors during section parsing
                          String error = "Unexpected error parsing section '" + sectionOp + "': " + e.getMessage() + " | Term: " + sectionList.toKif();
-                         System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                         System.err.println("TestPlugin: Test '" + name + "' | " + error); // Keep this error log
                          e.printStackTrace(); // Log stack trace for unexpected errors
                          parsingErrors.add(error);
                     }
                 }
 
                 if (action.isEmpty() && parsingErrors.isEmpty()) { // Only skip if no action AND no parsing errors in other sections
-                     System.err.println("TestPlugin: Skipping test '" + name + "' because the 'action' section is missing or empty.");
+                     System.err.println("TestPlugin: Skipping test '" + name + "' because the 'action' section is missing or empty."); // Keep this log
                      continue; // Skip tests with no action section unless there were parsing errors we need to report
                 }
 
                 definitions.add(new TestDefinition(name, setup, action, expected, teardown, parsingErrors));
             } else {
-                System.out.println("TestPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
+                // System.out.println("TestPlugin: Ignoring non-test top-level term in definitions: " + term.toKif()); // Remove verbose log
             }
         }
         return definitions;
@@ -748,12 +744,12 @@ public class TestPlugin extends Plugin.BasePlugin {
                 actions.add(parseAction(term));
             } catch (IllegalArgumentException e) {
                 String error = "Invalid action term: " + term.toKif() + " | Error: " + e.getMessage();
-                System.err.println("TestPlugin: " + error);
+                System.err.println("TestPlugin: " + error); // Keep this error log
                 errors.add(error);
             } catch (Exception e) {
                  // Catch unexpected errors during action parsing
                  String error = "Unexpected error parsing action term: " + e.getMessage() + " | Term: " + term.toKif();
-                 System.err.println("TestPlugin: " + error);
+                 System.err.println("TestPlugin: " + error); // Keep this error log
                  e.printStackTrace(); // Log stack trace for unexpected errors
                  errors.add(error);
             }
@@ -832,7 +828,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         try {
             RetractionType.valueOf(typeAtom.value().toUpperCase());
         } catch (IllegalArgumentException e) {
-             throw new IllegalArgumentException("Invalid retraction type: " + typeAtom.value() + ". Must be BY_KIF or BY_ID. Term: " + actionList.toKif());
+             throw new IllegalArgumentException("Invalid retraction type: " + typeAtom.value() + ". Must be BY_KIF or BY_ID.");
         }
 
         return new TestAction("retract", retractTargetList, new HashMap<>());
@@ -877,7 +873,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             try {
                 QueryType.valueOf(queryTypeStr.toUpperCase());
             } catch (IllegalArgumentException e) {
-                 throw new IllegalArgumentException("Invalid query_type parameter: " + queryTypeStr + ". Must be ASK_BINDINGS or ASK_BOOLEAN. Term: " + actionList.toKif());
+                 throw new IllegalArgumentException("Invalid query_type parameter: " + queryTypeStr + ". Must be ASK_BINDINGS or ASK_BOOLEAN.");
             }
         }
 
@@ -946,12 +942,12 @@ public class TestPlugin extends Plugin.BasePlugin {
                 expectations.add(parseExpectation(term));
             } catch (IllegalArgumentException e) {
                 String error = "Invalid expectation term: " + term.toKif() + " | Error: " + e.getMessage();
-                System.err.println("TestPlugin: " + error);
+                System.err.println("TestPlugin: " + error); // Keep this error log
                 errors.add(error);
             } catch (Exception e) {
                  // Catch unexpected errors during expectation parsing
                  String error = "Unexpected error parsing expectation term: " + e.getMessage() + " | Term: " + term.toKif();
-                 System.err.println("TestPlugin: " + error);
+                 System.err.println("TestPlugin: " + error); // Keep this error log
                  e.printStackTrace(); // Log stack trace for unexpected errors
                  errors.add(error);
             }
@@ -1123,7 +1119,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 colNum = Integer.parseInt(matcher.group(2));
                 baseMessage = message.substring(0, matcher.start());
             } catch (NumberFormatException ex) {
-                System.err.println("TestPlugin: Could not parse line/col from ParseException message: " + message);
+                System.err.println("TestPlugin: Could not parse line/col from ParseException message: " + message); // Keep this error log
             }
         }
 
@@ -1167,11 +1163,13 @@ public class TestPlugin extends Plugin.BasePlugin {
                 // Iterate through ActionError objects
                 result.actionErrors.forEach(error -> {
                     sb.append("    - [").append(error.action().type()).append("] ").append(error.message()).append("\n");
-                    sb.append("      Action: ").append(error.action().payload() != null ? error.action().payload().toKif() : "null");
-                    if (!error.action().toolParams().isEmpty()) {
-                        sb.append(" (Params: ").append(error.action().toolParams()).append(")");
+                    // Only show payload/params if they exist
+                    if (error.action().payload() != null) {
+                         sb.append("      Payload: ").append(error.action().payload().toKif()).append("\n");
                     }
-                    sb.append("\n");
+                    if (!error.action().toolParams().isEmpty()) {
+                        sb.append("      Params: ").append(error.action().toolParams()).append("\n");
+                    }
                 });
             }
 
@@ -1184,6 +1182,9 @@ public class TestPlugin extends Plugin.BasePlugin {
                          // If the expectation failed and it checked an action result, show the actual result
                          if (expResult.actionResult() != null && (expResult.expected().type().equals("expectedResult") || expResult.expected().type().equals("expectedBindings") || expResult.expected().type().equals("expectedToolResult") || expResult.expected().type().equals("expectedToolResultContains"))) {
                              sb.append(" (Actual: ").append(termValueToString(expResult.actionResult())).append(")");
+                         } else if (expResult.actionResult() != null) {
+                             // Optionally show actual result for other failed expectations if it exists, even if not directly compared
+                             // sb.append(" (Action Result: ").append(termValueToString(expResult.actionResult())).append(")");
                          }
                      }
                      sb.append("\n");
