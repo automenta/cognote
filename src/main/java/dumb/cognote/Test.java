@@ -5,6 +5,7 @@ import dumb.cognote.plugin.TestPlugin;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Note.Status.IDLE;
@@ -46,7 +47,7 @@ public class Test {
         try {
             // Wait for the TestRunCompleteEvent to be received
             // Increased timeout significantly to 120 seconds to allow for more tests and potential delays
-            completion.get(120, TimeUnit.SECONDS);
+            completion.get(5, TimeUnit.SECONDS);
             System.out.println("Test.java: Completion future completed."); // Added logging
 
             // Print the stored detailed test results
