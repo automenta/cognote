@@ -101,13 +101,14 @@ public interface Truths {
             justifications.remove(assertionId);
 
             assertion.justificationIds().forEach(supporterId -> ofNullable(dependents.get(supporterId)).ifPresent(deps -> deps.remove(assertionId)));
-            var depsToProcess = new HashSet<>(dependents.remove(assertionId));
+            var depsToProcess = dependents.remove(assertionId);
+            if (depsToProcess!=null) {
+                depsToProcess.forEach(depId -> updateStatus(depId, visited));
+            }
 
             var kb = assertion.kb();
             if (assertion.isActive()) events.emit(new Cog.RetractedEvent(assertion, kb, source));
             else events.emit(new Cog.AssertionStateEvent(assertion.id(), false, kb));
-
-            depsToProcess.forEach(depId -> updateStatus(depId, visited));
         }
 
         private void updateStatus(String assertionId, Set<String> visited) {

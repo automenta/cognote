@@ -1,6 +1,6 @@
 package dumb.cognote;
 
-import dumb.cognote.Logic.*;
+import dumb.cognote.plugin.TestPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
@@ -561,22 +561,18 @@ public class UI extends JFrame {
                 addNoteToList(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
             if (noteListPanel.findNoteById(Cog.CONFIG_NOTE_ID).isEmpty())
                 addNoteToList(cog != null ? CogNote.createDefaultConfigNote() : new Note(Cog.CONFIG_NOTE_ID, Cog.CONFIG_NOTE_TITLE, "{}", Note.Status.IDLE));
-            if (noteListPanel.findNoteById(Cog.TEST_DEFINITIONS_NOTE_ID).isEmpty())
-                addNoteToList(cog != null ? CogNote.createDefaultTestDefinitionsNote() : new Note(Cog.TEST_DEFINITIONS_NOTE_ID, Cog.TEST_DEFINITIONS_NOTE_TITLE, "", Note.Status.IDLE));
-            if (noteListPanel.findNoteById(Cog.TEST_RESULTS_NOTE_ID).isEmpty())
-                addNoteToList(cog != null ? CogNote.createDefaultTestResultsNote() : new Note(Cog.TEST_RESULTS_NOTE_ID, Cog.TEST_RESULTS_NOTE_TITLE, "", Note.Status.IDLE));
 
 
-            if (!noteListPanel.notes.isEmpty()) {
+            var nn = noteListPanel.notes;
+            if (!nn.isEmpty()) {
                 // Select the first non-system note, or global KB if none
-                var firstSelectable = IntStream.range(0, noteListPanel.notes.getSize())
-                        .filter(i -> {
-                            var id = noteListPanel.notes.getElementAt(i).id;
-                            return !id.equals(Cog.CONFIG_NOTE_ID); // Config note not selectable initially
-                        })
+                var firstSelectable = IntStream.range(0, nn.getSize())
+                        .filter(i ->
+                            !nn.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID) // Config note not selectable initially
+                        )
                         .findFirst().orElse(noteListPanel.findNoteIndexById(GLOBAL_KB_NOTE_ID).orElse(0)); // Fallback to Global KB
 
-                if (firstSelectable >= 0 && firstSelectable < noteListPanel.notes.getSize()) {
+                if (firstSelectable >= 0 && firstSelectable < nn.getSize()) {
                     noteListPanel.noteList.setSelectedIndex(firstSelectable);
                 } else {
                     noteListPanel.noteList.clearSelection();
@@ -1706,7 +1702,7 @@ public class UI extends JFrame {
                 return;
             }
             // Emit the event to trigger the TestRunnerPlugin
-            cog.events.emit(new Cog.RunTestsEvent());
+            cog.events.emit(new TestPlugin.RunTestsEvent());
             updateStatus("Running tests...");
         }
     }

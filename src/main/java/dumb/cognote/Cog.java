@@ -2,7 +2,7 @@ package dumb.cognote;
 
 import dumb.cognote.plugin.StatusUpdaterPlugin;
 import dumb.cognote.plugin.TaskDecomposePlugin;
-import dumb.cognote.plugin.TestRunnerPlugin;
+import dumb.cognote.plugin.TestPlugin;
 import dumb.cognote.plugin.TmsPlugin;
 import dumb.cognote.tool.*;
 import org.java_websocket.WebSocket;
@@ -116,29 +116,6 @@ public class Cog {
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE); // Default status
     }
 
-    static Note createDefaultTestDefinitionsNote() {
-        return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
-                """
-                        ; Define your tests here using the (test ...) format
-                        
-                        ; Example: Test a simple fact query
-                        (test "Simple Fact Query" (query (instance MyCat Cat)) (expectedResult true))
-                        
-                        ; Example: Test a query with bindings
-                        ; Note: Order of bindings in expectedBindings list matters for now
-                        (test "Query with Bindings" (query (instance ?X Cat)) (expectedBindings ((?X MyCat) (?X YourCat))))
-                        
-                        ; Example: Test a query that should fail
-                        (test "Query Failure" (query (instance MyDog Cat)) (expectedResult false))
-                        
-                        ; Example: Test a query with no matches
-                        (test "Query No Matches" (query (instance ?Y Bird)) (expectedBindings ()))""",
-                Note.Status.IDLE);
-    }
-
-    static Note createDefaultTestResultsNote() {
-        return new Note(TEST_RESULTS_NOTE_ID, TEST_RESULTS_NOTE_TITLE, "; Test results will appear here after running tests.", Note.Status.IDLE);
-    }
 
 
     private void setupDefaultPlugins() {
@@ -147,7 +124,7 @@ public class Cog {
         plugins.loadPlugin(new TmsPlugin());
 
         plugins.loadPlugin(new TaskDecomposePlugin());
-        plugins.loadPlugin(new TestRunnerPlugin()); // Add the new test runner plugin
+        plugins.loadPlugin(new TestPlugin()); // Add the new test runner plugin
 
         plugins.loadPlugin(new WebSocketPlugin(new InetSocketAddress(PORT), this));
         plugins.loadPlugin(new StatusUpdaterPlugin());
@@ -511,9 +488,6 @@ public class Cog {
     }
 
     public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
-    }
-
-    public record RunTestsEvent() implements CogEvent {
     }
 
 

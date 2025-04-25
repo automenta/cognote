@@ -30,8 +30,6 @@ public class CogNote extends Cog {
         load();
     }
 
-
-
     static List<Note> loadNotesFromFile() {
         var filePath = Paths.get(NOTES_FILE);
         List<Note> notes = new ArrayList<>();
@@ -72,138 +70,36 @@ public class CogNote extends Cog {
         if (notes.stream().noneMatch(n -> n.id.equals(GLOBAL_KB_NOTE_ID))) {
             notes.add(new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
         }
-        if (notes.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
-            notes.add(createDefaultTestDefinitionsNote());
-        }
-        if (notes.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
-            notes.add(createDefaultTestResultsNote());
-        }
 
 
         return notes;
     }
 
     private static synchronized void saveNotesToFile(List<Note> notes) {
-        var filePath = Paths.get(NOTES_FILE);
-        var jsonArray = new JSONArray();
+
         // Filter out system notes that are not persisted (only GLOBAL_KB_NOTE_ID for now)
-        List<Note> notesToSave = notes.stream()
+        var toSave = notes.stream()
                 .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
-                .collect(Collectors.toCollection(ArrayList::new));
+                .toList();
 
         // Ensure config, test defs, and test results notes are included if they weren't in the filtered list (shouldn't happen if loaded correctly)
-        if (notesToSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            notesToSave.add(createDefaultConfigNote());
-        }
-        if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_DEFINITIONS_NOTE_ID))) {
-            notesToSave.add(createDefaultTestDefinitionsNote());
-        }
-        if (notesToSave.stream().noneMatch(n -> n.id.equals(TEST_RESULTS_NOTE_ID))) {
-            notesToSave.add(createDefaultTestResultsNote());
+        if (toSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+            toSave.add(createDefaultConfigNote());
         }
 
-
-        notesToSave.forEach(note -> jsonArray.put(new JSONObject()
-                .put("id", note.id)
-                .put("title", note.title)
-                .put("text", note.text)
-                .put("status", note.status.name()))); // Save status
+        var jsonArray = new JSONArray();
+        toSave.forEach(n -> jsonArray.put(new JSONObject()
+                .put("id", n.id)
+                .put("title", n.title)
+                .put("text", n.text)
+                .put("status", n.status.name()))); // Save status
         try {
-            Files.writeString(filePath, jsonArray.toString(2));
+            Files.writeString(Paths.get(NOTES_FILE), jsonArray.toString(2));
         } catch (IOException e) {
             System.err.println("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
         }
     }
 
-    static Note createDefaultTestDefinitionsNote() {
-        return new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE,
-                "; Define your tests here using the (test ...) format\n\n" +
-                        "; Test structure: (test \"Test Name\" (setup ...) (action ...) (expected ...) (teardown ...))\n" +
-                        "; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID \"id\")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)\n" +
-                        "; action types: (query Pattern), (runTool (name \"tool_name\") (params (key1 value1) ...))\n" +
-                        "; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value))\n\n" +
-
-                        "; Example 1: Simple Fact Query\n" +
-                        "(test \"Simple Fact Query\" \n" +
-                        "  (setup (assert (instance MyCat Cat)))\n" +
-                        "  (action (query (instance ?X Cat)))\n" +
-                        "  (expected (expectedResult true) (expectedBindings ((?X MyCat))))\n" +
-                        "  (teardown (retract (BY_KIF (instance MyCat Cat)))))\n\n" +
-
-                        "; Example 2: Query with Multiple Bindings\n" +
-                        "(test \"Query with Multiple Bindings\" \n" +
-                        "  (setup \n" +
-                        "    (assert (instance MyCat Cat))\n" +
-                        "    (assert (instance YourCat Cat))\n" +
-                        "    (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (instance ?X Cat)))\n" +
-                        "  (expected \n" +
-                        "    (expectedResult true)\n" +
-                        "    ; Note: Order of bindings in expectedBindings list matters for now\n" +
-                        "    (expectedBindings ((?X MyCat) (?X YourCat))))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (instance MyCat Cat)))\n" +
-                        "    (retract (BY_KIF (instance YourCat Cat)))\n" +
-                        "    (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
-
-                        "; Example 3: Query that should fail\n" +
-                        "(test \"Query Failure\" \n" +
-                        "  (setup (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (instance MyDog Cat)))\n" +
-                        "  (expected (expectedResult false) (expectedBindings ())))\n" +
-                        "  (teardown (retract (BY_KIF (instance MyDog Dog))))\n\n" +
-
-                        "; Example 4: Test Forward Chaining Rule\n" +
-                        "(test \"Forward Chaining Rule\" \n" +
-                        "  (setup \n" +
-                        "    (addRule (=> (instance ?X Dog) (attribute ?X Canine)))\n" +
-                        "    (assert (instance MyDog Dog)))\n" +
-                        "  (action (query (attribute MyDog Canine)))\n" +
-                        "  (expected \n" +
-                        "    (expectedResult true)\n" +
-                        "    (expectedBindings ())\n" +
-                        "    (expectedAssertionExists (attribute MyDog Canine)))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (instance MyDog Dog)))\n" +
-                        "    (retract (BY_KIF (attribute MyDog Canine)))\n" +
-                        "    (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))\n\n" +
-
-                        "; Example 5: Test Retraction\n" +
-                        "(test \"Retract Assertion\" \n" +
-                        "  (setup (assert (instance TempFact Something)))\n" +
-                        "  (action (retract (BY_KIF (instance TempFact Something))))\n" +
-                        "  (expected (expectedAssertionDoesNotExist (instance TempFact Something)))\n" +
-                        "  (teardown))\n\n" + // Teardown is empty, cleanup is automatic
-
-                        "; Example 6: Test KB Size\n" +
-                        "(test \"KB Size Check\" \n" +
-                        "  (setup \n" +
-                        "    (assert (fact1 a))\n" +
-                        "    (assert (fact2 b)))\n" +
-                        "  (action (assert (fact3 c)))\n" +
-                        "  (expected (expectedKbSize 3))\n" +
-                        "  (teardown \n" +
-                        "    (retract (BY_KIF (fact1 a)))\n" +
-                        "    (retract (BY_KIF (fact2 b)))\n" +
-                        "    (retract (BY_KIF (fact3 c)))))\n\n" +
-
-                        "; Example 7: Test runTool (LogMessageTool)\n" +
-                        "(test \"Run LogMessageTool\" \n" +
-                        "  (setup)\n" +
-                        "  (action (runTool (name \"log_message\") (params (message \"Hello from test!\"))))\n" +
-                        "  (expected (expectedToolResult \"Message logged.\"))\n" +
-                        "  (teardown))\n\n" +
-
-                        "; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\n" +
-                        "; This test assumes the Test Definitions note itself exists and has text.\n" +
-                        "; It runs the tool against the Test Definitions note KB.\n" +
-                        "(test \"Run GetNoteTextTool\" \n" +
-                        "  (setup)\n" +
-                        "  (action (runTool (name \"get_note_text\") (params (note_id \"" + TEST_DEFINITIONS_NOTE_ID + "\"))))\n" +
-                        "  (expected (expectedToolResult \"; Define your tests here using the (test ...) format\"))\n" + // Corrected expected result
-                        "  (teardown))\n",
-                Note.Status.IDLE);
-    }
 
     @Override
     public Optional<Note> note(String id) {
@@ -322,14 +218,10 @@ public class CogNote extends Cog {
         // Clear internal note map, but keep system notes
         var configNote = notes.get(CONFIG_NOTE_ID);
         var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
-        var testDefsNote = notes.get(TEST_DEFINITIONS_NOTE_ID);
-        var testResultsNote = notes.get(TEST_RESULTS_NOTE_ID);
 
         notes.clear();
         notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
         notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
-        notes.put(TEST_DEFINITIONS_NOTE_ID, testDefsNote != null ? testDefsNote.withStatus(Note.Status.IDLE) : createDefaultTestDefinitionsNote());
-        notes.put(TEST_RESULTS_NOTE_ID, testResultsNote != null ? testResultsNote.withStatus(Note.Status.IDLE) : createDefaultTestResultsNote());
 
 
         // Ensure system notes are marked as active in context (Global KB is always active)
@@ -395,15 +287,6 @@ public class CogNote extends Cog {
         // Ensure Global KB is always active in context
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
 
-        // Ensure Test Definition note exists internally
-        if (!notes.containsKey(TEST_DEFINITIONS_NOTE_ID)) {
-            notes.put(TEST_DEFINITIONS_NOTE_ID, createDefaultTestDefinitionsNote());
-        }
-
-        // Ensure Test Results note exists internally
-        if (!notes.containsKey(TEST_RESULTS_NOTE_ID)) {
-            notes.put(TEST_RESULTS_NOTE_ID, createDefaultTestResultsNote());
-        }
     }
 
     private void parseConfig(String jsonText) {

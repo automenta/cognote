@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
 
-public class TestRunnerPlugin extends Plugin.BasePlugin {
+public class TestPlugin extends Plugin.BasePlugin {
 
     private static final String TEST_KB_PREFIX = "test-kb-";
     private static final long TEST_ACTION_TIMEOUT_SECONDS = 30; // Timeout for individual test actions
@@ -25,10 +25,10 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     @Override
     public void start(Events ev, Logic.Cognition ctx) {
         super.start(ev, ctx);
-        ev.on(Cog.RunTestsEvent.class, this::handleRunTests);
+        ev.on(RunTestsEvent.class, this::handleRunTests);
     }
 
-    private void handleRunTests(Cog.RunTestsEvent event) {
+    private void handleRunTests(RunTestsEvent event) {
         System.out.println("TestRunnerPlugin: Received RunTestsEvent");
         cog().status("Running Tests...");
 
@@ -457,8 +457,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         return actions;
     }
 
-    private TestAction parseAction(Term term) {
-        if (!(term instanceof Term.Lst actionList) || actionList.terms.isEmpty()) {
+    private TestAction parseAction(Term x) {
+        if (!(x instanceof Term.Lst actionList) || actionList.terms.isEmpty()) {
             throw new IllegalArgumentException("Action must be a non-empty list.");
         }
         var opOpt = actionList.op();
@@ -498,7 +498,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 if (actionList.size() < 2)
                     throw new IllegalArgumentException("runTool action requires at least tool name.");
                 if (!(actionList.get(1) instanceof Term.Atom(String value)))
-                    throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator).");
+                    throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + x);
                 Map<String, Object> toolParams = new HashMap<>();
                 toolParams.put("name", value);
                 if (actionList.size() > 2) {
@@ -746,5 +746,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     }
 
     private record TestResult(String name, boolean passed, String details) {
+    }
+
+    public record RunTestsEvent() implements CogEvent {
     }
 }
