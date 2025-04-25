@@ -93,27 +93,39 @@ public class LM {
 
         var conversationHistory = new ArrayList<>(history);
 
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<AiMessage> taskFuture = CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
             cog.updateTaskStatus(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service...");
 
             try {
-
                 var m = llmService.chat(conversationHistory);
-
                 cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + ": Received final response.");
-
                 return m;
-
             } catch (Exception e) {
                 var cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
                 if (cause instanceof InterruptedException) Thread.currentThread().interrupt();
                 System.err.println("LLM Service interaction error (" + interactionType + "): " + cause.getMessage());
                 cause.printStackTrace();
-                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage());
+                // Update status is handled by the whenComplete callback below
                 throw new CompletionException("LLM Service interaction error (" + interactionType + "): " + cause.getMessage(), cause);
             }
         }, cog.events.exe);
+
+        // Centralize task management
+        activeLlmTasks.put(taskId, taskFuture);
+
+        // Remove task from map when complete (success or failure)
+        taskFuture.whenComplete((result, error) -> {
+            activeLlmTasks.remove(taskId);
+            if (error != null) {
+                 var cause = (error instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : error;
+                 cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage());
+            }
+            // Success status is already set inside the supplyAsync block
+        });
+
+
+        return taskFuture;
     }
 
     interface LlmService {
