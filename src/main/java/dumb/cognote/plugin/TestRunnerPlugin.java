@@ -4,14 +4,13 @@ import dumb.cognote.*;
 import dumb.cognote.Logic.KifParser.ParseException;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.StringReader;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
-import java.regex.Pattern;
+import java.util.regex.Pattern;
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
