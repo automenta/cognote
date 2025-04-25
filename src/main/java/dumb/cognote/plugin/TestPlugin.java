@@ -210,17 +210,21 @@ public class TestPlugin extends Plugin.BasePlugin {
                     var toolName = (String) action.toolParams.get("name");
                     if (toolName == null || toolName.isBlank())
                         throw new IllegalArgumentException("runTool requires 'name' parameter.");
-                    var toolParams = new HashMap<>(action.toolParams);
-                    toolParams.remove("name"); // Remove name from params passed to tool
-                    // Add target_kb_id if not present, defaulting to test KB
-                    toolParams.putIfAbsent("target_kb_id", testKbId);
-                    // Add note_id if not present and target_kb_id is the test KB
-                    toolParams.putIfAbsent("note_id", testKbId);
+                    // Fix: Use traditional instanceof check and cast
+                    if (!(actionList.get(1) instanceof Term.Atom))
+                        throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
+                    String value = ((Term.Atom) actionList.get(1)).value();
 
-
-                    var toolOpt = cog().tools.get(toolName);
-                    if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
-                    yield toolOpt.get().execute(toolParams).thenApply(r -> r); // Return the tool's raw result
+                    Map<String, Object> toolParams = new HashMap<>();
+                    toolParams.put("name", value);
+                    if (actionList.size() > 2) {
+                        if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                            toolParams.putAll(parseParams(paramsList));
+                        } else {
+                            throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
+                        }
+                    }
+                    return new TestAction(op, null, toolParams); // Payload is null for runTool
                 }
                 case "query" -> {
                     if (!(action.payload instanceof Term.Lst pattern))
@@ -288,11 +292,14 @@ public class TestPlugin extends Plugin.BasePlugin {
 
                 return switch (expected.type) {
                     case "expectedResult" -> {
-                        if (!(expected.value instanceof Boolean expectedBoolean))
-                            throw new IllegalArgumentException("expectedResult requires a boolean value.");
+                        // Fix: Use traditional instanceof check and cast
+                        if (!(expected.value instanceof Term.Atom))
+                            throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
+                        String value = ((Term.Atom) expected.value).value();
 
-                        // 'answer' is now guaranteed to be a Cog.Answer here due to the check before the switch
-                        yield expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
+                        if (!value.equals("true") && !value.equals("false"))
+                            throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
+                        yield new TestExpected(op, Boolean.parseBoolean(value));
                     }
                     case "expectedBindings" -> {
                         // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings ())
@@ -339,19 +346,19 @@ public class TestPlugin extends Plugin.BasePlugin {
                         yield context.rules().stream().noneMatch(r -> r.form().equals(expectedRuleForm));
                     }
                     case "expectedKbSize" -> {
-                        if (!(expected.value instanceof Integer expectedSize))
-                            throw new IllegalArgumentException("expectedKbSize requires an integer value.");
-                        // Check size of the test KB only
-                        yield kb.getAssertionCount() == expectedSize;
+                        // Fix: Use traditional instanceof check and cast
+                        if (!(expected.value instanceof Term.Atom))
+                            throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
+                        String value = ((Term.Atom) expected.value).value();
+                        try {
+                            yield new TestExpected(op, Integer.parseInt(value));
+                        } catch (NumberFormatException e) {
+                            throw new IllegalArgumentException("expectedKbSize value must be an integer.");
+                        }
                     }
                     case "expectedToolResult" -> {
-                        // Check if the action result matches the expected value
-                        // If both are strings, check if the actual result starts with the expected value
-                        if (actionResult instanceof String actualString && expected.value instanceof String expectedString) {
-                            yield actualString.startsWith(expectedString);
-                        }
-                        // Otherwise, use exact equality check
-                        yield Objects.equals(actionResult, expected.value);
+                        // The expected value can be any Term
+                        yield new TestExpected(op, expectedValueTerm);
                     }
                     default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
                 };
@@ -374,8 +381,9 @@ public class TestPlugin extends Plugin.BasePlugin {
                 var nameTerm = list.get(1);
                 String name;
                 // Check if the name term is an Atom and extract its value
-                if (nameTerm instanceof Term.Atom(String value)) {
-                    name = value;
+                // Fix: Use traditional instanceof check and cast
+                if (nameTerm instanceof Term.Atom) {
+                    name = ((Term.Atom) nameTerm).value();
                     if (name == null || name.isBlank()) {
                         System.err.println("TestRunnerPlugin: Skipping test with invalid name format (empty or blank Atom): " + list.toKif());
                         continue;
@@ -487,8 +495,12 @@ public class TestPlugin extends Plugin.BasePlugin {
             case "runTool" -> {
                 if (actionList.size() < 2)
                     throw new IllegalArgumentException("runTool action requires at least tool name.");
-                if (!(actionList.get(1) instanceof Term.Atom(String value)))
+                // Fix: Use traditional instanceof check
+                if (!(actionList.get(1) instanceof Term.Atom))
                     throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + x);
+                // Fix: Explicit cast to Term.Atom to get the value
+                String value = ((Term.Atom) actionList.get(1)).value();
+
                 Map<String, Object> toolParams = new HashMap<>();
                 toolParams.put("name", value);
                 if (actionList.size() > 2) {
@@ -501,16 +513,17 @@ public class TestPlugin extends Plugin.BasePlugin {
                 return new TestAction(op, null, toolParams); // Payload is null for runTool
             }
             case "query" -> {
-                if (actionList.size() < 2)
-                    throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
-                Term payload = actionList.get(1); // Payload is the pattern
-                Map<String, Object> toolParams = new HashMap<>();
-                if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                    toolParams = parseParams(paramsList);
-                } else if (actionList.size() > 2) {
-                    throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
+                if (!(action.payload instanceof Term.Lst pattern))
+                    throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
+                var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
+                QueryType queryType;
+                try {
+                    queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
                 }
-                return new TestAction(op, payload, toolParams);
+                // Use querySync to get the Answer object directly
+                yield CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams))); // Return the Answer object
             }
             default -> throw new IllegalArgumentException("Unknown action operator: " + op);
         }
@@ -547,8 +560,12 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         return switch (op) {
             case "expectedResult" -> {
-                if (!(expectedValueTerm instanceof Term.Atom(String value)))
+                // Fix: Use traditional instanceof check
+                if (!(expectedValueTerm instanceof Term.Atom))
                     throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
+                // Fix: Explicit cast to Term.Atom to get the value
+                String value = ((Term.Atom) expectedValueTerm).value();
+
                 if (!value.equals("true") && !value.equals("false"))
                     throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
                 yield new TestExpected(op, Boolean.parseBoolean(value));
@@ -573,8 +590,11 @@ public class TestPlugin extends Plugin.BasePlugin {
                 yield new TestExpected(op, ruleForm);
             }
             case "expectedKbSize" -> {
-                if (!(expectedValueTerm instanceof Term.Atom(String value)))
+                // Fix: Use traditional instanceof check
+                if (!(expectedValueTerm instanceof Term.Atom))
                     throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
+                // Fix: Explicit cast to Term.Atom to get the value
+                String value = ((Term.Atom) expectedValueTerm).value();
                 try {
                     yield new TestExpected(op, Integer.parseInt(value));
                 } catch (NumberFormatException e) {
@@ -595,9 +615,10 @@ public class TestPlugin extends Plugin.BasePlugin {
             throw new IllegalArgumentException("Parameter list must start with 'params'.");
         }
         for (var paramTerm : paramsList.terms.stream().skip(1).toList()) {
-            if (paramTerm instanceof Term.Lst paramPair && paramPair.size() == 2 && paramPair.get(0) instanceof Term.Atom(
-                    String value
-            )) {
+            // Fix: Use traditional instanceof check
+            if (paramTerm instanceof Term.Lst paramPair && paramPair.size() == 2 && paramPair.get(0) instanceof Term.Atom) {
+                // Fix: Explicit cast to Term.Atom to get the value
+                String value = ((Term.Atom) paramPair.get(0)).value();
                 // Simple key-value pair: (key value)
                 params.put(value, termToObject(paramPair.get(1)));
             } else {
