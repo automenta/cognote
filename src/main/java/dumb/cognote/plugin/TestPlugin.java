@@ -210,10 +210,11 @@ public class TestPlugin extends Plugin.BasePlugin {
                     var toolName = (String) action.toolParams.get("name");
                     if (toolName == null || toolName.isBlank())
                         throw new IllegalArgumentException("runTool requires 'name' parameter.");
-                    // Fix: Use traditional instanceof check and cast
-                    Term.Lst actionList = (Term.Lst) action.payload;
+                    // Fix: Use traditional instanceof check
+                    Term.Lst actionList = (Term.Lst) action.payload; // Cast payload to Lst as it's expected for actions
                     if (!(actionList.get(1) instanceof Term.Atom))
                         throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
+                    // Fix: Explicit cast to Term.Atom to get the value
                     String value = ((Term.Atom) actionList.get(1)).value();
 
                     Map<String, Object> toolParams = new HashMap<>();
@@ -324,19 +325,13 @@ public class TestPlugin extends Plugin.BasePlugin {
                         // Simple comparison: check if the lists of bindings are equal (order matters for now)
                         yield Objects.equals(expectedBindings, actualBindings);
                     }
-                    case "expectedAssertionExists" -> {
+                    case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
                         if (!(expected.value instanceof Term.Lst expectedKif))
                             throw new IllegalArgumentException("expectedAssertionExists requires a KIF list.");
                         // Check in the test KB first, then global KB
                         yield ctx.findAssertionByKif(expectedKif, testKbId).isPresent() || ctx.findAssertionByKif(expectedKif, globalKb.id).isPresent();
                     }
-                    case "expectedAssertionDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedKif))
-                            throw new IllegalArgumentException("expectedAssertionDoesNotExist requires a KIF list.");
-                        // Check in the test KB first, then global KB
-                        yield ctx.findAssertionByKif(expectedKif, testKbId).isEmpty() && ctx.findAssertionByKif(expectedKif, globalKb.id).isEmpty();
-                    }
-                    case "expectedRuleExists" -> {
+                    case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
                         if (!(expected.value instanceof Term.Lst expectedRuleForm))
                             throw new IllegalArgumentException("expectedRuleExists requires a rule KIF list.");
                         yield context.rules().stream().anyMatch(r -> r.form().equals(expectedRuleForm));
@@ -606,7 +601,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 // The expected value can be any Term
                 yield new TestExpected(op, expectedValueTerm);
             }
-            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+            default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
         };
     }
 
