@@ -276,19 +276,18 @@ public class TestPlugin extends Plugin.BasePlugin {
                         while (System.currentTimeMillis() - startTime < timeoutMillis) {
                             boolean conditionMet = false;
                             try {
-                                var kb = context.kb(testKbId);
-                                var globalKb = context.kbGlobal();
+                                var globalKbId = context.kbGlobal().id;
 
                                 switch (conditionOp) {
                                     case "assertionExists" -> {
                                         if (!(conditionTarget instanceof Term.Lst kif))
                                             throw new IllegalArgumentException("wait assertionExists requires a KIF list.");
-                                        conditionMet = ctx.findAssertionByKif(kif, testKbId).isPresent() || ctx.findAssertionByKif(kif, globalKb.id).isPresent();
+                                        conditionMet = context.findAssertionByKif(kif, testKbId).isPresent() || context.findAssertionByKif(kif, globalKbId).isPresent();
                                     }
                                     case "assertionDoesNotExist" -> {
                                         if (!(conditionTarget instanceof Term.Lst kif))
                                             throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list.");
-                                        conditionMet = ctx.findAssertionByKif(kif, testKbId).isEmpty() && ctx.findAssertionByKif(kif, globalKb.id).isEmpty();
+                                        conditionMet = context.findAssertionByKif(kif, testKbId).isEmpty() && context.findAssertionByKif(kif, globalKbId).isEmpty();
                                     }
                                     // TODO: Add other conditions later if needed (ruleExists, ruleDoesNotExist, kbSize)
                                     default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
