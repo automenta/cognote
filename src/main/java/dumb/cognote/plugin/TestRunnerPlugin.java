@@ -451,7 +451,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 
         return switch (op) {
             case "assert", "addRule", "retract", "removeRuleForm", "query" -> {
-                if (actionList.size() < 2) throw new IllegalArgumentException(op + " action requires at least one argument.");
+                if (actionList.size() < 1) throw new IllegalArgumentException(op + " action requires at least one argument."); // Changed from 2 to 1 because query payload is just the pattern
                 // For query, the payload is the pattern, toolParams might contain query_type
                 // For runTool, the payload is the tool name and params
                 // Let's make payload the main argument(s) and toolParams for extra config like query_type
@@ -459,17 +459,22 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 Map<String, Object> toolParams = new HashMap<>();
 
                 if (op.equals("query")) {
-                    if (actionList.size() != 2) throw new IllegalArgumentException("query action requires exactly one argument (the pattern).");
+                    if (actionList.size() < 2) throw new IllegalArgumentException("query action requires at least one argument (the pattern)."); // Changed from != 2 to < 2
                     payload = actionList.get(1);
                     // Check for optional query_type parameter
                     if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                          toolParams = parseParams(paramsList);
+                    } else if (actionList.size() > 2) {
+                         // Handle potential direct key-value pairs after the pattern?
+                         // Let's stick to (params (...)) for clarity as per runTool
+                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
                     }
                 } else if (op.equals("retract")) {
                      if (actionList.size() != 3 || !(actionList.get(1) instanceof Term.Atom typeAtom)) throw new IllegalArgumentException("retract action requires type and target.");
                      payload = new Term.Lst(typeAtom, actionList.get(2)); // Store type and target as a list payload
                 }
                 else { // assert, addRule, removeRuleForm
+                    if (actionList.size() < 2) throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
                     payload = new Term.Lst(actionList.terms.stream().skip(1).toList()); // Payload is the rest of the list
                 }
 
@@ -529,6 +534,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 if (expectedList.size() < 1) throw new IllegalArgumentException("expectedBindings requires a list of bindings.");
                 // Parse expected bindings: ((?V1 Val1) (?V2 Val2) ...)
                 List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
+                // Skip the operator "expectedBindings"
                 for (var bindingListTerm : expectedList.terms.stream().skip(1).toList()) {
                     if (bindingListTerm instanceof Term.Lst bindingList && bindingList.size() == 2 && bindingList.get(0) instanceof Term.Var var && bindingList.get(1) instanceof Term value) {
                         expectedBindings.add(Map.of(var, value));

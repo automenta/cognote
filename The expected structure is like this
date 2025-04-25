@@ -1,0 +1,18 @@
+(test "Test Name"
+  (setup
+    ; List of setup actions (assert, addRule, runTool, etc.)
+    (assert (instance MyCat Cat))
+  )
+  (action
+    ; A single action (query, runTool, etc.)
+    (query (instance MyCat Cat))
+  )
+  (expected
+    ; List of expectations (expectedResult, expectedBindings, etc.)
+    (expectedResult true)
+  )
+  (teardown
+    ; List of teardown actions (retract, removeRuleForm, etc.)
+    (retract BY_KIF (instance MyCat Cat))
+  )
+)
