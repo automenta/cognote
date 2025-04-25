@@ -166,7 +166,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
 //                        throw new IllegalStateException("Query action should be handled directly in the 'query' case.");
 //                    }
 
-                    // For assert/addRule/retract/removeRuleForm in setup/teardown/action phases (except query action)
+                    // For assert/addRule/removeRuleForm/retract in setup/teardown/action phases (except query action)
                     // We just emit the event and return a completed future.
                     // The success/failure is implicit (no exception thrown here).
                     // The actual state change is verified in checkExpectations.
@@ -184,7 +184,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             yield CompletableFuture.completedFuture(added); // Return boolean success
                         }
                         case "retract" -> {
-                            // Expecting (retract (TYPE TARGET))
+                            // Payload is the (TYPE TARGET) list
                             if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
                                 throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
                             }
@@ -282,11 +282,9 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         yield expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
                     }
                     case "expectedBindings" -> {
-                        // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...))
-                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm) || expectedBindingsListTerm.terms.isEmpty())
+                        // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings ())
+                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm))
                             throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
-                        if (!(actionResult instanceof Cog.Answer answer))
-                            throw new IllegalArgumentException("expectedBindings requires the action to be a query.");
 
                         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
                         // Iterate through the terms *inside* the list of binding pairs
@@ -294,7 +292,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                              if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
                                 expectedBindings.add(Map.of(var, value));
                             } else {
-                                throw new IllegalArgumentException("Invalid expectedBindings format: Each item must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
+                                // This error message is correct if the item *inside* the list is malformed.
+                                throw new IllegalArgumentException("Invalid binding pair format: Each item in the list must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
                             }
                         }
 
@@ -447,31 +446,15 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         }
         var op = opOpt.get();
 
-        return switch (op) {
-            case "assert", "addRule", "removeRuleForm", "query" -> { // Removed "retract" from this case
-                if (actionList.size() < 1)
-                    throw new IllegalArgumentException(op + " action requires at least one argument.");
-                Term payload = null;
-                Map<String, Object> toolParams = new HashMap<>();
-
-                if (op.equals("query")) {
-                    if (actionList.size() < 2)
-                        throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
-                    payload = actionList.get(1);
-                    if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                        toolParams = parseParams(paramsList);
-                    } else if (actionList.size() > 2) {
-                        throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
-                    }
-                } else { // assert, addRule, removeRuleForm
-                    if (actionList.size() < 2)
-                        throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
-                    payload = new Term.Lst(actionList.terms.stream().skip(1).toList()); // Payload is the rest of the list
-                }
-
-                yield new TestAction(op, payload, toolParams);
+        switch (op) {
+            case "assert", "addRule", "removeRuleForm" -> {
+                // These actions take the rest of the list as their payload KIF form
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
+                Term payload = new Term.Lst(actionList.terms.stream().skip(1).toList());
+                return new TestAction(op, payload, new HashMap<>()); // No toolParams for these
             }
-            case "retract" -> { // Handle "retract" in its own case for clearer validation
+            case "retract" -> {
                 // Expecting (retract (TYPE TARGET))
                 if (actionList.size() != 2) {
                     throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
@@ -488,7 +471,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                      throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
                 }
                 // If all checks pass, store the inner list as payload
-                yield new TestAction(op, retractTargetList, new HashMap<>()); // Retract doesn't use toolParams
+                return new TestAction(op, retractTargetList, new HashMap<>()); // Retract doesn't use toolParams
             }
             case "runTool" -> {
                 if (actionList.size() < 2)
@@ -504,10 +487,22 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
                     }
                 }
-                yield new TestAction(op, null, toolParams);
+                return new TestAction(op, null, toolParams); // Payload is null for runTool
+            }
+            case "query" -> {
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
+                Term payload = actionList.get(1); // Payload is the pattern
+                Map<String, Object> toolParams = new HashMap<>();
+                if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                    toolParams = parseParams(paramsList);
+                } else if (actionList.size() > 2) {
+                    throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
+                }
+                return new TestAction(op, payload, toolParams);
             }
             default -> throw new IllegalArgumentException("Unknown action operator: " + op);
-        };
+        }
     }
 
     private List<TestExpected> parseExpectations(List<Term> terms) {
@@ -541,14 +536,14 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 yield new TestExpected(op, Boolean.parseBoolean(value));
             }
             case "expectedBindings" -> {
-                // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...))
-                // The value is the list of binding pairs ((?V1 Val1) ...)
+                // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings ())
+                // The value is the list of binding pairs ((?V1 Val1) ...) or ()
                 if (expectedList.size() != 2) {
                     throw new IllegalArgumentException("expectedBindings requires exactly one argument (the list of binding pairs). Found size: " + expectedList.size() + ". Term: " + expectedList.toKif());
                 }
                 Term bindingsTerm = expectedList.get(1);
                 if (!(bindingsTerm instanceof Term.Lst expectedBindingsListTerm)) {
-                     throw new IllegalArgumentException("expectedBindings argument must be a list of binding pairs ((?V1 Val1) ...). Found: " + bindingsTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
+                     throw new IllegalArgumentException("expectedBindings argument must be a list of binding pairs ((?V1 Val1) ...) or (). Found: " + bindingsTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
                 }
                 // If checks pass, store the inner list as value
                 yield new TestExpected(op, expectedBindingsListTerm);
@@ -714,7 +709,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     }
 
     private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {
-        // Payload is used for assert, addRule, retract, removeRuleForm, query (the KIF term)
+        // Payload is used for assert, addRule, retract, removeRuleForm, query (the KIF term or list)
         // ToolParams is used for runTool (name, params) and query (query_type)
     }
 
