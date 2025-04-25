@@ -318,8 +318,15 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         // Check size of the test KB only
                         yield kb.getAssertionCount() == expectedSize;
                     }
-                    case "expectedToolResult" -> // Check if the action result matches the expected value
-                            Objects.equals(actionResult, expected.value);
+                    case "expectedToolResult" -> {
+                        // Check if the action result matches the expected value
+                        // If both are strings, check if the actual result starts with the expected value
+                        if (actionResult instanceof String actualString && expected.value instanceof String expectedString) {
+                            yield actualString.startsWith(expectedString);
+                        }
+                        // Otherwise, use exact equality check
+                        yield Objects.equals(actionResult, expected.value);
+                    }
                     default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
                 };
             } catch (Exception e) {
@@ -368,9 +375,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         }
                         var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
                         if (sectionOpOpt.isEmpty()) {
-                            System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to section without operator: " + sectionList.toKif());
-                            action = null; // Mark test as invalid
-                            break;
+                            throw new ParseException("Section without operator in test '" + name + "': " + sectionList.toKif());
                         }
                         var sectionOp = sectionOpOpt.get();
                         var sectionContents = sectionList.terms.stream().skip(1).toList(); // These are the terms *inside* the section list
@@ -382,16 +387,12 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                                 if (sectionContents.size() == 1) {
                                     action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
                                 } else {
-                                    System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to invalid action section size (expected 1): " + sectionList.toKif());
-                                    action = null; // Mark test as invalid
+                                    throw new ParseException("Action section must contain exactly one action in test '" + name + "': " + sectionList.toKif());
                                 }
                             }
                             case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
                             case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
-                            default -> {
-                                System.err.println("TestRunnerPlugin: Skipping test '" + name + "' due to unknown section type: " + sectionList.toKif());
-                                action = null; // Mark test as invalid
-                            }
+                            default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name + "': " + sectionList.toKif());
                         }
                     }
 
@@ -561,12 +562,15 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 }
             }
             case "expectedToolResult" -> {
-                if (expectedList.size() != 2)
-                    throw new IllegalArgumentException("expectedToolResult requires a single value argument.");
-                // The expected value can be any Term
-                yield new TestExpected(op, expectedList.get(1));
+                // Check if the action result matches the expected value
+                // If both are strings, check if the actual result starts with the expected value
+                if (actionResult instanceof String actualString && expected.value instanceof String expectedString) {
+                    yield actualString.startsWith(expectedString);
+                }
+                // Otherwise, use exact equality check
+                yield Objects.equals(actionResult, expected.value);
             }
-            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+            default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
         };
     }
 
