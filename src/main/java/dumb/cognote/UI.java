@@ -336,7 +336,7 @@ public class UI extends JFrame {
     private void saveCurrentNote() {
         ofNullable(note).filter(_ -> cog != null).ifPresent(n -> {
             // Only save text/title for non-system notes
-            if (!GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(n.id)) {
+            if (!GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id)) {
                 n.text = editorPanel.edit.getText();
                 n.title = editorPanel.title.getText();
                 cog.save(); // Save all notes if a regular note is edited
@@ -347,10 +347,6 @@ public class UI extends JFrame {
                 } else {
                     // Config update already calls save internally on success
                 }
-            } else if (Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id)) {
-                // Save changes to Test Definitions note text
-                n.text = editorPanel.edit.getText();
-                cog.save();
             }
             // Status changes are saved via CogNote.updateNoteStatus
         });
@@ -360,8 +356,6 @@ public class UI extends JFrame {
         var noteSelected = (note != null);
         var isGlobalSelected = noteSelected && GLOBAL_KB_NOTE_ID.equals(note.id);
         var isConfigSelected = noteSelected && Cog.CONFIG_NOTE_ID.equals(note.id);
-        var isTestDefsSelected = noteSelected && Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id);
-        var isTestResultsSelected = noteSelected && Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
 
 
         editorPanel.updateForSelection(note, isGlobalSelected, isConfigSelected);
@@ -369,9 +363,9 @@ public class UI extends JFrame {
         mainControlPanel.updatePauseResumeButton(); // Update button text based on system state
 
         if (noteSelected) {
-            setTitle("Cognote - " + note.title + (isGlobalSelected || isConfigSelected || isTestDefsSelected || isTestResultsSelected ? "" : " [" + note.id + "]"));
+            setTitle("Cognote - " + note.title + (isGlobalSelected || isConfigSelected ? "" : " [" + note.id + "]"));
             SwingUtilities.invokeLater(() -> {
-                if (!isGlobalSelected && !isConfigSelected && !isTestResultsSelected)
+                if (!isGlobalSelected && !isConfigSelected)
                     editorPanel.edit.requestFocusInWindow(); // Focus editor for editable notes
                 else if (isConfigSelected)
                     editorPanel.edit.requestFocusInWindow(); // Allow editing config/test defs text
@@ -387,8 +381,6 @@ public class UI extends JFrame {
         var noteSelected = (note != null);
         var isGlobalSelected = noteSelected && GLOBAL_KB_NOTE_ID.equals(note.id);
         var isConfigSelected = noteSelected && Cog.CONFIG_NOTE_ID.equals(note.id);
-        var isTestDefsSelected = noteSelected && Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id);
-        var isTestResultsSelected = noteSelected && Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
         var systemReady = (cog != null && cog.running.get() && !cog.paused.get()); // System is running and not explicitly paused
 
         mainControlPanel.setControlsEnabled(enabled);
@@ -398,7 +390,7 @@ public class UI extends JFrame {
     }
 
     private void performNoteAction(String actionName, String confirmTitle, String confirmMsgFormat, int confirmMsgType, Consumer<Note> action) {
-        ofNullable(note).filter(_ -> cog != null).filter(n -> !GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(n.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(n.id))
+        ofNullable(note).filter(_ -> cog != null).filter(n -> !GLOBAL_KB_NOTE_ID.equals(n.id) && !Cog.CONFIG_NOTE_ID.equals(n.id))
                 .filter(note -> JOptionPane.showConfirmDialog(this, String.format(confirmMsgFormat, note.title), confirmTitle, JOptionPane.YES_NO_OPTION, confirmMsgType) == JOptionPane.YES_OPTION)
                 .ifPresent(note -> {
                     updateStatus(String.format("%s '%s'...", actionName, note.title));
@@ -568,7 +560,7 @@ public class UI extends JFrame {
                 // Select the first non-system note, or global KB if none
                 var firstSelectable = IntStream.range(0, nn.getSize())
                         .filter(i ->
-                            !nn.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID) // Config note not selectable initially
+                                !nn.getElementAt(i).id.equals(Cog.CONFIG_NOTE_ID) // Config note not selectable initially
                         )
                         .findFirst().orElse(noteListPanel.findNoteIndexById(GLOBAL_KB_NOTE_ID).orElse(0)); // Fallback to Global KB
 
@@ -668,7 +660,7 @@ public class UI extends JFrame {
                 };
                 l.setText(note.title + statusText);
 
-                if (Cog.CONFIG_NOTE_ID.equals(noteID) || Cog.TEST_DEFINITIONS_NOTE_ID.equals(noteID) || Cog.TEST_RESULTS_NOTE_ID.equals(noteID)) {
+                if (Cog.CONFIG_NOTE_ID.equals(noteID)) {
                     f = f.deriveFont(Font.ITALIC);
                     l.setForeground(Color.GRAY);
                 } else if (GLOBAL_KB_NOTE_ID.equals(noteID)) {
@@ -1049,7 +1041,7 @@ public class UI extends JFrame {
 
         private void updateNoteContextMenuState() {
             var noteSelected = note != null;
-            var isEditableNote = noteSelected && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
+            var isEditableNote = noteSelected && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id);
             var systemRunning = cog != null && cog.running.get() && !cog.isPaused(); // System is running and not paused by user
 
             startNoteItem.setEnabled(isEditableNote && (note.status == Note.Status.IDLE || note.status == Note.Status.PAUSED));
@@ -1131,7 +1123,7 @@ public class UI extends JFrame {
         }
 
         private void executeNoteTool(String toolName, Note note) {
-            if (cog == null || note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id) || Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) || Cog.TEST_RESULTS_NOTE_ID.equals(note.id)) {
+            if (cog == null || note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id)) {
                 System.err.println("Cannot execute tool '" + toolName + "': System not ready or invalid note selected.");
                 return;
             }
@@ -1190,7 +1182,7 @@ public class UI extends JFrame {
         private void setupActionListeners() {
             edit.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
                 // Text changes are saved when focus is lost or window closes
-                if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id)) { // Don't save text changes for Test Results note
+                if (note != null && !GLOBAL_KB_NOTE_ID.equals(note.id)) {
                     note.text = edit.getText();
                     // Don't save immediately on every keystroke, save on focus lost or explicit save
                 }
@@ -1202,7 +1194,7 @@ public class UI extends JFrame {
                 }
             });
             title.getDocument().addDocumentListener((SimpleDocumentListener) e -> {
-                if (!isUpdatingTitleField && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id)) {
+                if (!isUpdatingTitleField && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)) {
                     note.title = title.getText();
                     noteTitleUpdated(note); // Update UI list display and save
                 }
@@ -1211,8 +1203,8 @@ public class UI extends JFrame {
 
         void updateForSelection(Note note, boolean isGlobal, boolean isConfig) {
             var noteSelected = (note != null);
-            var isEditableNoteContent = noteSelected && !isGlobal && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id); // Global KB and Test Results text are not editable
-            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id); // System note titles not editable
+            var isEditableNoteContent = noteSelected && !isGlobal; // Global KB are not editable
+            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig; // System note titles not editable
             isUpdatingTitleField = true; // Prevent document listener from firing during update
             title.setText(noteSelected ? note.title : "");
             title.setEditable(isEditableNoteTitle);
@@ -1226,8 +1218,8 @@ public class UI extends JFrame {
         }
 
         void setControlsEnabled(boolean enabled, boolean noteSelected, boolean isGlobal, boolean isConfig) {
-            var isEditableNoteContent = noteSelected && !isGlobal && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
-            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id);
+            var isEditableNoteContent = noteSelected && !isGlobal;
+            var isEditableNoteTitle = noteSelected && !isGlobal && !isConfig;
 
             title.setEnabled(enabled && noteSelected && !isGlobal);
             title.setEditable(enabled && isEditableNoteTitle);
@@ -1246,7 +1238,7 @@ public class UI extends JFrame {
         }
 
         void highlightAffectedNoteText(Assertion assertion, AttachmentStatus status) {
-            if (cog == null || note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id) || Cog.TEST_RESULTS_NOTE_ID.equals(note.id))
+            if (cog == null || note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id))
                 return; // Don't highlight in system notes or global KB
             // Determine which note this assertion is primarily associated with for UI display
             var displayNoteId = assertion.sourceNoteId();
@@ -1438,8 +1430,8 @@ public class UI extends JFrame {
             showSupportItem.setEnabled(isKif && cog != null); // Need cog to show support
             queryItem.setEnabled(isKif && systemRunning); // Can only query if system is running
             cancelLlmItem.setEnabled(isCancelableLlm && cog != null); // Need cog to cancel LLM task
-            insertSummaryItem.setEnabled(isSummary && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id)); // Can only insert into editable notes
-            answerQuestionItem.setEnabled(isQuestion && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id) && !Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) && !Cog.TEST_RESULTS_NOTE_ID.equals(note.id)); // Can only answer in editable notes
+            insertSummaryItem.setEnabled(isSummary && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only insert into editable notes
+            answerQuestionItem.setEnabled(isQuestion && note != null && !GLOBAL_KB_NOTE_ID.equals(note.id) && !Cog.CONFIG_NOTE_ID.equals(note.id)); // Can only answer in editable notes
             findRelatedConceptsItem.setEnabled(isConcept && cog != null && systemRunning); // Need cog for concept search (NYI) and system running
         }
 
@@ -1488,7 +1480,7 @@ public class UI extends JFrame {
 
         private void insertSummaryAction() {
             getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType == AttachmentType.SUMMARY && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm -> {
-                if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id) || Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) || Cog.TEST_RESULTS_NOTE_ID.equals(note.id))
+                if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id))
                     return; // Should be disabled by menu state, but defensive
                 try {
                     var doc = editorPanel.edit.getDocument();
@@ -1502,7 +1494,7 @@ public class UI extends JFrame {
 
         private void answerQuestionAction() {
             getSelectedAttachmentViewModel().filter(vm -> vm.attachmentType == AttachmentType.QUESTION && vm.status == AttachmentStatus.ACTIVE).ifPresent(vm -> {
-                if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id) || Cog.TEST_DEFINITIONS_NOTE_ID.equals(note.id) || Cog.TEST_RESULTS_NOTE_ID.equals(note.id))
+                if (note == null || GLOBAL_KB_NOTE_ID.equals(note.id) || Cog.CONFIG_NOTE_ID.equals(note.id))
                     return; // Should be disabled by menu state, but defensive
                 var qText = extractContentFromKif(vm.content());
                 var answer = JOptionPane.showInputDialog(UI.this, "Q: " + qText + "\n\nEnter your answer:", "Answer Question", JOptionPane.PLAIN_MESSAGE);

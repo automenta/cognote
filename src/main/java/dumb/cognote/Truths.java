@@ -102,7 +102,7 @@ public interface Truths {
 
             assertion.justificationIds().forEach(supporterId -> ofNullable(dependents.get(supporterId)).ifPresent(deps -> deps.remove(assertionId)));
             var depsToProcess = dependents.remove(assertionId);
-            if (depsToProcess!=null) {
+            if (depsToProcess != null) {
                 depsToProcess.forEach(depId -> updateStatus(depId, visited));
             }
 

@@ -4,17 +4,14 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
-import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -22,7 +19,6 @@ import static java.util.Optional.ofNullable;
 
 public class CogNote extends Cog {
 
-    private static final String TEST_KB_PREFIX = "test-kb-"; // Define the prefix here
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
@@ -113,16 +109,13 @@ public class CogNote extends Cog {
     public void addNote(Note note) {
         if (notes.putIfAbsent(note.id, note) == null) {
             events.emit(new AddedEvent(note));
-            // Don't save temporary test KBs
-            if (!note.id.startsWith(TEST_KB_PREFIX)) {
-                save();
-            }
+            save();
         }
     }
 
     public void removeNote(String noteId) {
         // Prevent removal of system notes (except temporary test KBs)
-        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID) || noteId.equals(TEST_DEFINITIONS_NOTE_ID) || noteId.equals(TEST_RESULTS_NOTE_ID))) { // Allow removing temporary test KBs even if they match system ID pattern
+        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID))) {
             System.err.println("Attempted to remove system note: " + noteId + ". Operation ignored.");
             return;
         }
@@ -133,10 +126,7 @@ public class CogNote extends Cog {
             // Note: The RetractionPlugin handles removing the NoteKb and emitting RemovedEvent
             events.emit(new RemovedEvent(note)); // Emit RemovedEvent with the Note object
             context.removeActiveNote(noteId); // Ensure it's removed from active set
-            // Don't save temporary test KBs
-            if (!note.id.startsWith(TEST_KB_PREFIX)) {
-                save();
-            }
+            save();
         });
     }
 
@@ -152,10 +142,7 @@ public class CogNote extends Cog {
                 }
 
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus)); // Emit event
-                // Don't save temporary test KBs status
-                if (!note.id.startsWith(TEST_KB_PREFIX)) {
-                    save();
-                }
+                save();
             }
         });
     }
@@ -208,7 +195,7 @@ public class CogNote extends Cog {
         setPaused(true);
         // Retract assertions from all notes except config, global, and test notes
         context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID) && !noteId.startsWith(TEST_KB_PREFIX)) // Also exclude temporary test KBs
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID)) // Also exclude temporary test KBs
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
@@ -231,8 +218,6 @@ public class CogNote extends Cog {
         // Re-emit Added events for the system notes so UI can add them back if needed
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
-        events.emit(new AddedEvent(notes.get(TEST_DEFINITIONS_NOTE_ID)));
-        events.emit(new AddedEvent(notes.get(TEST_RESULTS_NOTE_ID)));
 
 
         save(); // Save the cleared state (only system notes remain)

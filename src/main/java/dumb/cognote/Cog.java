@@ -32,10 +32,6 @@ public class Cog {
     public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge";
     public static final String CONFIG_NOTE_ID = "note-config";
     public static final String CONFIG_NOTE_TITLE = "System Configuration";
-    public static final String TEST_DEFINITIONS_NOTE_ID = "note-test-definitions";
-    public static final String TEST_DEFINITIONS_NOTE_TITLE = "Test Definitions";
-    public static final String TEST_RESULTS_NOTE_ID = "note-test-results";
-    public static final String TEST_RESULTS_NOTE_TITLE = "Test Results";
     public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
@@ -114,7 +110,6 @@ public class Cog {
                 .put("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE); // Default status
     }
-
 
 
     private void setupDefaultPlugins() {
@@ -217,7 +212,7 @@ public class Cog {
         setPaused(true);
         // Retract assertions from all notes except config, global, and test notes
         context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID) && !noteId.equals(TEST_DEFINITIONS_NOTE_ID) && !noteId.equals(TEST_RESULTS_NOTE_ID))
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, RetractionType.BY_NOTE, "UI-ClearAll", noteId)));
         // Retract assertions from the global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "UI-ClearAll"));
@@ -595,7 +590,7 @@ public class Cog {
     }
 
     static class RetractionPlugin extends Plugin.BasePlugin {
-        private static final Set<String> SYSTEM_NOTE_IDS = Set.of(GLOBAL_KB_NOTE_ID, CONFIG_NOTE_ID, TEST_DEFINITIONS_NOTE_ID, TEST_RESULTS_NOTE_ID);
+        private static final Set<String> SYSTEM_NOTE_IDS = Set.of(GLOBAL_KB_NOTE_ID, CONFIG_NOTE_ID);
 
         @Override
         public void start(Events e, Cognition ctx) {

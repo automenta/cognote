@@ -354,9 +354,9 @@ public class Logic {
 
     public static class Knowledge {
         public final String id;
+        public final Truths truth;
         final int capacity;
         final Events events;
-        public final Truths truth;
         final Path.PathIndex paths;
         final ConcurrentMap<Term.Atom, Set<String>> universalIndex = new ConcurrentHashMap<>();
         final PriorityBlockingQueue<String> groundEvictionQueue;
@@ -726,14 +726,13 @@ public class Logic {
     }
 
     public static class KifParser {
+        private static final int CONTEXT_BUFFER_SIZE = 50;
         private final Reader reader;
+        private final StringBuilder contextBuffer = new StringBuilder(CONTEXT_BUFFER_SIZE);
         private int currentChar = -2;
         private int line = 1;
         private int col = 0;
         private int charPos = 0;
-
-        private static final int CONTEXT_BUFFER_SIZE = 50;
-        private final StringBuilder contextBuffer = new StringBuilder(CONTEXT_BUFFER_SIZE);
 
 
         public KifParser(Reader reader) {
@@ -924,6 +923,7 @@ public class Logic {
             public ParseException(String message, String context) {
                 this(message, 0, 0, context);
             }
+
             public ParseException(String message, int line, int col, String context) {
                 super(message);
                 this.line = line;
