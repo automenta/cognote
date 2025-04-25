@@ -307,4 +307,7 @@ public class CogNote extends Cog {
     Logic.Cognition cogNoteContext() {
         return context;
     }
+
+    public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
+    }
 }

@@ -22,7 +22,8 @@ public class LM {
     public final Map<String, CompletableFuture<?>> activeLlmTasks = new ConcurrentHashMap<>();
 
     private final Cog cog;
-    volatile String llmApiUrl, llmModel;
+    public volatile String llmApiUrl;
+    public volatile String llmModel;
     private volatile ChatLanguageModel chatModel;
     private volatile LlmService llmService;
 

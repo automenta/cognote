@@ -351,7 +351,7 @@ public class Logic {
         public final Op.Operators operators;
         public final Set<String> activeNoteIds = ConcurrentHashMap.newKeySet();
         public final Events events;
-        final Cog cog;
+        public final Cog cog;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();

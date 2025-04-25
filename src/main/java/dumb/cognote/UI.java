@@ -223,7 +223,7 @@ public class UI extends JFrame {
         ev.on(Cog.RemovedEvent.class, e -> invokeLater(() -> removeNoteFromList(e.note()))); // RemovedEvent now carries Note object
         ev.on(Cog.Answer.AnswerEvent.class, e -> handleUiUpdate("query-result", e.result()));
         ev.on(Cog.Query.QueryEvent.class, e -> handleUiUpdate("query-sent", e.query()));
-        ev.on(Cog.NoteStatusEvent.class, this::handleNoteStatusChange);
+        ev.on(CogNote.NoteStatusEvent.class, this::handleNoteStatusChange);
 
 
         cog.events.on(Cog.SystemStatusEvent.class, statusText ->
@@ -271,7 +271,7 @@ public class UI extends JFrame {
                 .ifPresent(a -> handleUiUpdate(e.isActive() ? "status-active" : "status-inactive", a));
     }
 
-    private void handleNoteStatusChange(Cog.NoteStatusEvent e) {
+    private void handleNoteStatusChange(CogNote.NoteStatusEvent e) {
         invokeLater(() -> {
             // Update the Note object in the UI list model
             noteListPanel.updateNoteDisplay(e.note());
