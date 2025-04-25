@@ -275,15 +275,31 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 var kb = context.kb(testKbId);
                 var globalKb = context.kbGlobal(); // Also check global KB if needed
 
+                // Declare answer variable here, before the switch
+                Cog.Answer answer = null;
+
+                // Check if the expectation type requires actionResult to be a Query Answer
+                boolean requiresAnswer = switch (expected.type) {
+                    case "expectedResult", "expectedBindings" -> true;
+                    default -> false;
+                };
+
+                if (requiresAnswer) {
+                    if (!(actionResult instanceof Cog.Answer queryAnswer)) {
+                        // If an Answer is required but actionResult is not one, the expectation fails immediately
+                        System.err.println("    Expectation '" + expected.type + "' requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
+                        return false; // Return false directly from the lambda
+                    }
+                    answer = queryAnswer; // Assign the casted result to the 'answer' variable
+                }
+
+
                 return switch (expected.type) {
                     case "expectedResult" -> {
                         if (!(expected.value instanceof Boolean expectedBoolean))
                             throw new IllegalArgumentException("expectedResult requires a boolean value.");
 
-                        // Check and cast actionResult here
-                        if (!(actionResult instanceof Cog.Answer answer))
-                            throw new IllegalArgumentException("expectedResult requires the action to be a query.");
-
+                        // 'answer' is now guaranteed to be a Cog.Answer here due to the check before the switch
                         yield expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
                     }
                     case "expectedBindings" -> {
@@ -291,10 +307,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         if (!(expected.value instanceof Term.Lst expectedBindingsListTerm))
                             throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
 
-                        // Check and cast actionResult here
-                        if (!(actionResult instanceof Cog.Answer answer))
-                            throw new IllegalArgumentException("expectedBindings requires the action to be a query.");
-
+                        // 'answer' is now guaranteed to be a Cog.Answer here
                         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
                         // Iterate through the terms *inside* the list of binding pairs
                         for (var bindingPairTerm : expectedBindingsListTerm.terms) {
