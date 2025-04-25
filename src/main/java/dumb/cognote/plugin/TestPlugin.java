@@ -211,22 +211,22 @@ public class TestPlugin extends Plugin.BasePlugin {
                     if (toolName == null || toolName.isBlank())
                         throw new IllegalArgumentException("runTool requires 'name' parameter.");
                     // Fix: Use traditional instanceof check
-                    Term.Lst actionList = (Term.Lst) action.payload; // Cast payload to Lst as it's expected for actions
-                    if (!(actionList.get(1) instanceof Term.Atom))
-                        throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
-                    // Fix: Explicit cast to Term.Atom to get the value
-                    String value = ((Term.Atom) actionList.get(1)).value();
+                    // Term.Lst actionList = (Term.Lst) action.payload; // This cast was incorrect, payload is null for runTool
+                    // The tool name and params are in action.toolParams, not the payload Term.Lst
+                    // The check for actionList.get(1) instanceof Term.Atom was also incorrect here.
 
-                    Map<String, Object> toolParams = new HashMap<>();
-                    toolParams.put("name", value);
-                    if (actionList.size() > 2) {
-                        if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                            toolParams.putAll(parseParams(paramsList));
-                        } else {
-                            throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list.");
-                        }
-                    }
-                    yield new TestAction(action.type, null, toolParams); // Payload is null for runTool
+                    Map<String, Object> toolParams = new HashMap<>(action.toolParams);
+                    toolParams.remove("name"); // Remove name from params passed to tool
+                    // Add target_kb_id if not present, defaulting to test KB
+                    toolParams.putIfAbsent("target_kb_id", testKbId);
+                    // Add note_id if not present and target_kb_id is the test KB
+                    toolParams.putIfAbsent("note_id", testKbId);
+
+
+                    var toolOpt = cog().tools.get(toolName);
+                    if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
+                    // Correctly yield the future from the tool execution
+                    yield toolOpt.get().execute(toolParams).thenApply(r -> r); // Return the tool's raw result
                 }
                 case "query" -> {
                     if (!(action.payload instanceof Term.Lst pattern))
@@ -509,17 +509,16 @@ public class TestPlugin extends Plugin.BasePlugin {
                 return new TestAction(op, null, toolParams); // Payload is null for runTool
             }
             case "query" -> {
-                if (!(action.payload instanceof Term.Lst pattern))
-                    throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
-                var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
-                QueryType queryType;
-                try {
-                    queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
+                if (actionList.size() < 2)
+                    throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
+                Term payload = actionList.get(1); // Payload is the pattern
+                Map<String, Object> toolParams = new HashMap<>();
+                if (actionList.size() > 2 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                    toolParams = parseParams(paramsList);
+                } else if (actionList.size() > 2) {
+                    throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
                 }
-                // Use querySync to get the Answer object directly
-                yield CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams))); // Return the Answer object
+                return new TestAction(op, payload, toolParams);
             }
             default -> throw new IllegalArgumentException("Unknown action operator: " + op);
         }
@@ -586,10 +585,9 @@ public class TestPlugin extends Plugin.BasePlugin {
                 yield new TestExpected(op, ruleForm);
             }
             case "expectedKbSize" -> {
-                // Fix: Use traditional instanceof check
+                // Fix: Use traditional instanceof check and cast
                 if (!(expectedValueTerm instanceof Term.Atom))
                     throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
-                // Fix: Explicit cast to Term.Atom to get the value
                 String value = ((Term.Atom) expectedValueTerm).value();
                 try {
                     yield new TestExpected(op, Integer.parseInt(value));
