@@ -184,27 +184,25 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             yield CompletableFuture.completedFuture(added); // Return boolean success
                         }
                         case "retract" -> {
-                            if (!(action.payload instanceof Term.Lst retractTarget))
-                                throw new IllegalArgumentException("Invalid payload for retract: " + action.payload);
-                            // Assume payload is (BY_ID "id") or (BY_KIF (kif form))
-                            if (retractTarget.size() == 2 && retractTarget.get(0) instanceof Term.Atom(String value)) {
-                                var target = retractTarget.get(1);
-                                var targetStr = switch (target) {
-                                    case Term.Atom(String vv) -> vv;
-                                    case Term.Lst l -> l.toKif();
-                                    case null, default ->
-                                            throw new IllegalArgumentException("Invalid target for retract: " + target);
-                                };
-
-                                // Emit retraction request. Retraction is async.
-                                // We can't return a direct success/failure here based on the request.
-                                // The expectation phase must check if the assertion/rule is gone.
-                                // Return the target string as a result? Or just null? Let's return the target.
-                                context.events.emit(new RetractionRequestEvent(targetStr, RetractionType.valueOf(value.toUpperCase()), "test-runner:" + test.name, testKbId));
-                                yield CompletableFuture.completedFuture(targetStr);
-                            } else {
-                                throw new IllegalArgumentException("Invalid retract payload format: " + retractTarget.toKif());
+                            // Expecting (retract (TYPE TARGET))
+                            if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
+                                throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
                             }
+                            var type = typeAtom.value();
+                            var target = retractTargetList.get(1);
+                            var targetStr = switch (target) {
+                                case Term.Atom(String vv) -> vv;
+                                case Term.Lst l -> l.toKif();
+                                case null, default ->
+                                        throw new IllegalArgumentException("Invalid target for retract: " + target);
+                            };
+
+                            // Emit retraction request. Retraction is async.
+                            // We can't return a direct success/failure here based on the request.
+                            // The expectation phase must check if the assertion/rule is gone.
+                            // Return the target string as a result? Or just null? Let's return the target.
+                            context.events.emit(new RetractionRequestEvent(targetStr, RetractionType.valueOf(type.toUpperCase()), "test-runner:" + test.name, testKbId));
+                            yield CompletableFuture.completedFuture(targetStr);
                         }
                         case "removeRuleForm" -> {
                             if (!(action.payload instanceof Term.Lst ruleForm))
@@ -283,13 +281,22 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         yield expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
                     }
                     case "expectedBindings" -> {
-                        if (!(expected.value instanceof List<?> expectedBindingsList))
-                            throw new IllegalArgumentException("expectedBindings requires a list of bindings.");
+                        // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...))
+                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm) || expectedBindingsListTerm.terms.isEmpty())
+                            throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
                         if (!(actionResult instanceof Cog.Answer answer))
                             throw new IllegalArgumentException("expectedBindings requires the action to be a query.");
 
-                        @SuppressWarnings("unchecked")
-                        List<Map<Term.Var, Term>> expectedBindings = (List<Map<Term.Var, Term>>) expectedBindingsList;
+                        List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
+                        // Iterate through the terms *inside* the list of binding pairs
+                        for (var bindingPairTerm : expectedBindingsListTerm.terms) {
+                             if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
+                                expectedBindings.add(Map.of(var, value));
+                            } else {
+                                throw new IllegalArgumentException("Invalid expectedBindings format: Each item must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
+                            }
+                        }
+
                         List<Map<Term.Var, Term>> actualBindings = answer.bindings();
 
                         // Simple comparison: check if the lists of bindings are equal (order matters for now)
@@ -462,9 +469,11 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list after the pattern.");
                     }
                 } else if (op.equals("retract")) {
-                    if (actionList.size() != 3 || !(actionList.get(1) instanceof Term.Atom typeAtom))
-                        throw new IllegalArgumentException("retract action requires type and target.");
-                    payload = new Term.Lst(typeAtom, actionList.get(2)); // Store type and target as a list payload
+                    // Expecting (retract (TYPE TARGET))
+                    if (actionList.size() != 2 || !(actionList.get(1) instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
+                        throw new IllegalArgumentException("retract action requires a single argument which is a list (TYPE TARGET). Found: " + actionList.toKif());
+                    }
+                    payload = retractTargetList; // Store the inner list (TYPE TARGET) as payload
                 } else { // assert, addRule, removeRuleForm
                     if (actionList.size() < 2)
                         throw new IllegalArgumentException(op + " action requires at least one argument (the KIF form).");
@@ -527,19 +536,14 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 yield new TestExpected(op, Boolean.parseBoolean(value));
             }
             case "expectedBindings" -> {
-                if (expectedList.size() < 1)
-                    throw new IllegalArgumentException("expectedBindings requires a list of bindings.");
-                // Parse expected bindings: ((?V1 Val1) (?V2 Val2) ...)
-                List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
-                // Skip the operator "expectedBindings"
-                for (var bindingListTerm : expectedList.terms.stream().skip(1).toList()) {
-                    if (bindingListTerm instanceof Term.Lst bindingList && bindingList.size() == 2 && bindingList.get(0) instanceof Term.Var var && bindingList.get(1) instanceof Term value) {
-                        expectedBindings.add(Map.of(var, value));
-                    } else {
-                        throw new IllegalArgumentException("Invalid expectedBindings format: " + bindingListTerm.toKif());
-                    }
-                }
-                yield new TestExpected(op, expectedBindings);
+                // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...))
+                // The value is the list of binding pairs ((?V1 Val1) ...)
+                if (expectedList.size() != 2 || !(expectedList.get(1) instanceof Term.Lst expectedBindingsListTerm))
+                     throw new IllegalArgumentException("expectedBindings requires a single argument which is a list of binding pairs ((?V1 Val1) ...). Found: " + expectedList.toKif());
+
+                // We store the Term.Lst representing the list of binding pairs directly as the value.
+                // The checkSingleExpectation method will then iterate through this list.
+                yield new TestExpected(op, expectedBindingsListTerm);
             }
             case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
                 if (expectedList.size() != 2 || !(expectedList.get(1) instanceof Term.Lst kif))
@@ -709,7 +713,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     private record TestExpected(String type, Object value) {
         // value type depends on type:
         // expectedResult: Boolean
-        // expectedBindings: List<Map<Term.Var, Term>>
+        // expectedBindings: Term.Lst (the list of binding pairs ((?V1 Val1) ...))
         // expectedAssertionExists/DoesNotExist: Term.Lst (KIF)
         // expectedRuleExists/DoesNotExist: Term.Lst (Rule Form KIF)
         // expectedKbSize: Integer
