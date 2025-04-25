@@ -255,5 +255,206 @@ public class Test {
                 (retract (BY_KIF (sequence (a b c d))))
                 (retract (BY_KIF (sequence (x y z))))))
 
+            ; --- Tests for Error Conditions ---
+
+            ; Test: Action section is empty or missing (should skip the test)
+            (test "Test with Missing Action Section"
+              (setup (assert (fact A)))
+              (expected (expectedAssertionExists (fact A)))
+              (teardown (retract (BY_KIF (fact A)))))
+
+            ; Test: Action section contains invalid terms (should skip invalid terms, maybe run valid ones)
+            (test "Test with Invalid Action Terms"
+              (setup (assert (fact A)))
+              (action
+                (assert (fact B)) ; Valid
+                (invalidActionType (arg1 arg2)) ; Invalid action type
+                (assert) ; Invalid assert payload size
+                (runTool (params name "log_message")) ; Invalid runTool params format
+              )
+              (expected
+                (expectedAssertionExists (fact A)) ; PASS (from setup)
+                (expectedAssertionExists (fact B)) ; PASS (from valid action)
+                (expectedAssertionDoesNotExist (invalidActionType arg1 arg2)) ; PASS (invalid action skipped)
+                (expectedAssertionDoesNotExist (assert)) ; PASS (invalid action skipped)
+                (expectedAssertionDoesNotExist (runTool params name "log_message")) ; PASS (invalid action skipped)
+              )
+              (teardown
+                (retract (BY_KIF (fact A)))
+                (retract (BY_KIF (fact B)))
+              )
+            )
+
+            ; Test: Expectation section contains invalid terms (should skip invalid terms)
+            (test "Test with Invalid Expectation Terms"
+              (setup (assert (fact A)))
+              (action (assert (fact B)))
+              (expected
+                (expectedAssertionExists (fact A)) ; Valid
+                (invalidExpectationType (arg1 arg2)) ; Invalid expectation type
+                (expectedResult) ; Invalid expectedResult payload size
+                (expectedBindings "not a list") ; Invalid expectedBindings payload type
+              )
+              (teardown
+                (retract (BY_KIF (fact A)))
+                (retract (BY_KIF (fact B)))
+              )
+            )
+
+            ; Test: Action Execution - Invalid Payloads/Params
+            (test "Action Error: Assert Bad Payload"
+              (setup)
+              (action (assert "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: AddRule Bad Payload"
+              (setup)
+              (action (addRule "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: RemoveRuleForm Bad Payload"
+              (setup)
+              (action (removeRuleForm "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Retract Bad Payload"
+              (setup)
+              (action (retract "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Retract Bad Target List Size"
+              (setup)
+              (action (retract (BY_KIF))) ; Invalid target list size
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Retract Bad Type Atom"
+              (setup)
+              (action (retract (123 (fact A)))) ; Invalid type (not atom)
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: RunTool No Name Param"
+              (setup)
+              (action (runTool (params (message "hi")))) ; Missing name param
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: RunTool Nonexistent Tool"
+              (setup)
+              (action (runTool (params (name "nonexistent_tool")))) ; Tool not found
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Query Bad Payload"
+              (setup)
+              (action (query "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Query Bad Params Format"
+              (setup)
+              (action (query (a) (params name))) ; Invalid params format
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Wait Bad Payload"
+              (setup)
+              (action (wait "not a list")) ; Invalid payload type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Wait Bad Condition List Size"
+              (setup)
+              (action (wait (assertionExists))) ; Invalid condition list size
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Wait Bad Condition Type"
+              (setup)
+              (action (wait (unknownCondition (fact A)))) ; Unknown condition type
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            (test "Action Error: Wait Bad Timeout Param"
+              (setup)
+              (action (wait (assertionExists (fact A)) (params (timeout -5)))) ; Invalid timeout value
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+            ; Test: Expectation Check - Wrong Result Type (e.g., expectedBindings on non-query action)
+            (test "Expectation Error: ExpectedBindings on NonQuery"
+              (setup (assert (fact A)))
+              (action (assert (fact B))) ; Not a query
+              (expected
+                (expectedAssertionExists (fact A)) ; PASS
+                (expectedBindings ((?X A))) ; FAIL - actionResult is not a Query Answer
+              )
+              (teardown
+                (retract (BY_KIF (fact A)))
+                (retract (BY_KIF (fact B)))
+              )
+            )
+
+            ; Test: Expectation Check - Wrong Result Type (e.g., expectedToolResult on non-tool action)
+            (test "Expectation Error: ExpectedToolResult on NonTool"
+              (setup (assert (fact A)))
+              (action (query (fact ?X))) ; Not a tool run
+              (expected
+                (expectedAssertionExists (fact A)) ; PASS
+                (expectedToolResult "abc") ; FAIL - actionResult is not a String (it's a Cog.Answer)
+              )
+              (teardown
+                (retract (BY_KIF (fact A)))
+              )
+            )
+
+            ; Test: Expectation Check - Invalid Expected Value Format
+            (test "Expectation Error: ExpectedResult Bad Value"
+              (setup)
+              (action (query (a)))
+              (expected (expectedResult "maybe")) ; Invalid boolean string
+              (teardown))
+
+            (test "Expectation Error: ExpectedBindings Bad Value"
+              (setup)
+              (action (query (a)))
+              (expected (expectedBindings (not a list))) ; Not a list of pairs
+              (teardown))
+
+            (test "Expectation Error: ExpectedBindings Bad Pair Format"
+              (setup)
+              (action (query (a)))
+              (expected (expectedBindings ((?X)))) ; Pair size != 2
+              (teardown))
+
+            (test "Expectation Error: ExpectedAssertion Bad Value"
+              (setup)
+              (action (query (a)))
+              (expected (expectedAssertionExists "not a list")) ; Not a KIF list
+              (teardown))
+
+            (test "Expectation Error: ExpectedRule Bad Value"
+              (setup)
+              (action (query (a)))
+              (expected (expectedRuleExists "not a list")) ; Not a KIF list
+              (teardown))
+
+            (test "Expectation Error: ExpectedKbSize Bad Value"
+              (setup)
+              (action (query (a)))
+              (expected (expectedKbSize "big")) ; Not an integer string
+              (teardown))
+
+            (test "Expectation Error: ExpectedToolResultContains Bad Value"
+              (setup)
+              (action (runTool (params (name "log_message") (message "hi"))))
+              (expected (expectedToolResultContains 123)) ; Not a string
+              (teardown))
+
         """;
 }
