@@ -37,17 +37,9 @@ public class Test {
             if ("Tests Complete".equals(s.statusMessage())) {
                 completion.complete(null);
             } else if ("Tests Failed".equals(s.statusMessage())) {
-                // Note: The plugin now reports "Tests Complete" even if tests failed,
-                // but the results note will show failures. We could change this status
-                // message logic if needed, but for now, rely on the results note.
-                // Let's keep the original logic to fail the future if the status is "Tests Failed"
-                // This requires the plugin to emit "Tests Failed" on parse errors or critical issues,
-                // and "Tests Complete" even if some tests failed but the runner finished.
-                // The current plugin emits "Tests Failed" only on parse errors.
-                // Let's adjust this to complete exceptionally if *any* test failed.
-                // This requires inspecting the results *after* the plugin finishes.
-                // So, we'll complete normally here and check results later.
-                 // completion.completeExceptionally(new RuntimeException("Tests failed.")); // Removed for now
+                // The plugin now reports "Tests Complete" even if tests failed,
+                // but the results note will show failures. We rely on checking
+                // the results note content after completion.
             }
         });
 
@@ -181,6 +173,80 @@ public class Test {
                 (retract (BY_KIF (fact B)))
               )
             )
+
+            ; --- Added tests for basic logic/querying ---
+
+            (test "Query with Variable in Predicate"
+              (setup
+                (assert (isA Dog Animal))
+                (assert (isA Cat Animal)))
+              (action (query (?Rel Dog Animal)))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?Rel isA))))
+              (teardown
+                (retract (BY_KIF (isA Dog Animal)))
+                (retract (BY_KIF (isA Cat Animal)))))
+
+            (test "Query with Multiple Variables"
+              (setup
+                (assert (parent John Jane))
+                (assert (parent Jane Jim))
+                (assert (parent John Jill)))
+              (action (query (parent ?Child ?Parent)))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill))))
+              (teardown
+                (retract (BY_KIF (parent John Jane)))
+                (retract (BY_KIF (parent Jane Jim)))
+                (retract (BY_KIF (parent John Jill)))))
+
+            (test "Query with Nested Structure"
+              (setup
+                (assert (hasProperty (color Red) Apple))
+                (assert (hasProperty (color Green) Apple)))
+              (action (query (hasProperty (color ?C) Apple)))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?C Red)) ((?C Green))))
+              (teardown
+                (retract (BY_KIF (hasProperty (color Red) Apple)))
+                (retract (BY_KIF (hasProperty (color Green) Apple)))))
+
+            (test "Query with List"
+              (setup
+                (assert (items (1 2 3)))
+                (assert (items (A B C))))
+              (action (query (items (?X ?Y ?Z))))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C))))
+              (teardown
+                (retract (BY_KIF (items (1 2 3))))
+                (retract (BY_KIF (items (A B C))))))
+
+            (test "Query with Empty List"
+              (setup
+                (assert (emptyList ())))
+              (action (query (emptyList ?L)))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?L ()))))
+              (teardown
+                (retract (BY_KIF (emptyList ())))))
+
+            (test "Query with Partial List Match"
+              (setup
+                (assert (sequence (a b c d)))
+                (assert (sequence (x y z))))
+              (action (query (sequence (a b ?Rest))))
+              (expected
+                (expectedResult true)
+                (expectedBindings ((?Rest (c d)))))
+              (teardown
+                (retract (BY_KIF (sequence (a b c d))))
+                (retract (BY_KIF (sequence (x y z))))))
 
         """;
 }

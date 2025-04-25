@@ -12,6 +12,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
@@ -98,7 +99,10 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         CompletableFuture<Object> setupFuture = executeActionList(test, testKbId, test.setup)
                 .exceptionally(ex -> {
-                    actionErrors.add("Setup failed: " + ex.getMessage());
+                    var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
+                    actionErrors.add("Setup failed: " + cause.getMessage());
+                    System.err.println("Setup failed for test '" + test.name + "': " + cause.getMessage());
+                    cause.printStackTrace();
                     return null; // Allow action/expectations to potentially run or fail gracefully
                 });
 
@@ -108,7 +112,10 @@ public class TestPlugin extends Plugin.BasePlugin {
             }
             return executeActionList(test, testKbId, test.action)
                     .exceptionally(ex -> {
-                        actionErrors.add("Action failed: " + ex.getMessage());
+                        var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
+                        actionErrors.add("Action failed: " + cause.getMessage());
+                        System.err.println("Action failed for test '" + test.name + "': " + cause.getMessage());
+                        cause.printStackTrace();
                         return null; // Allow expectations/teardown to potentially run
                     });
         });
@@ -135,7 +142,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         CompletableFuture<TestResult> c = expectationsFuture.thenCompose(expectationResults ->
                 executeActionList(test, testKbId, test.teardown)
                         .exceptionally(ex -> {
-                            actionErrors.add("Teardown failed: " + ex.getMessage());
+                            var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
+                            actionErrors.add("Teardown failed: " + cause.getMessage());
+                            System.err.println("Teardown failed for test '" + test.name + "': " + cause.getMessage());
+                            cause.printStackTrace();
                             return null; // Teardown failure shouldn't fail the test itself, but should be reported
                         })
                         .thenApply(teardownResult -> new TestResult(test.name, expectationResults, actionErrors))
@@ -374,7 +384,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     answer = queryAnswer;
                 }
 
-                boolean passed = switch (expected.type) {
+                Optional<String> failureReason = switch (expected.type) {
                     case "expectedResult" -> checkExpectedResult(expected, answer);
                     case "expectedBindings" -> checkExpectedBindings(expected, answer);
                     case "expectedAssertionExists" -> checkExpectedAssertionExists(expected, testKbId);
@@ -384,21 +394,14 @@ public class TestPlugin extends Plugin.BasePlugin {
                     case "expectedKbSize" -> checkExpectedKbSize(expected, kb);
                     case "expectedToolResult" -> checkExpectedToolResult(expected, actionResult);
                     case "expectedToolResultContains" -> checkExpectedToolResultContains(expected, actionResult);
-                    default -> {
-                        String reason = "Unknown expectation type: " + expected.type;
-                        System.err.println("Expectation check failed: " + reason);
-                        yield false; // Should be caught by parseExpectation, but defensive check
-                    }
+                    default -> Optional.of("Unknown expectation type: " + expected.type); // Should be caught by parseExpectation, but defensive check
                 };
 
-                if (passed) {
+                if (failureReason.isEmpty()) {
                     return new ExpectationResult(expected, true, null);
                 } else {
-                    // The check methods already print specific failure reasons to System.err
-                    // We could capture them here, but for now, rely on the check method's output
-                    // and provide a generic failure message in the result object.
-                    // A better approach would be to have check methods return a detailed reason string.
-                    return new ExpectationResult(expected, false, "Check failed (details in System.err)");
+                    System.err.println("Expectation '" + expected.type + "' failed: " + failureReason.get());
+                    return new ExpectationResult(expected, false, failureReason.get());
                 }
 
             } catch (Exception e) {
@@ -410,22 +413,22 @@ public class TestPlugin extends Plugin.BasePlugin {
         }, cog().events.exe); // Run expectation checks on the event executor
     }
 
-    // --- Expectation Check Implementations (Modified to return boolean and print failure reason) ---
+    // --- Expectation Check Implementations (Modified to return Optional<String>) ---
 
-    private boolean checkExpectedResult(TestExpected expected, Cog.Answer answer) {
+    private Optional<String> checkExpectedResult(TestExpected expected, Cog.Answer answer) {
         if (!(expected.value instanceof Boolean expectedBoolean)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         boolean passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
-        return passed;
+        if (!passed) {
+            return Optional.of("Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
+        }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedBindings(TestExpected expected, Cog.Answer answer) {
+    private Optional<String> checkExpectedBindings(TestExpected expected, Cog.Answer answer) {
         if (!(expected.value instanceof Term.Lst expectedBindingsListTerm)) {
-             System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+             return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
 
         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
@@ -439,14 +442,10 @@ public class TestPlugin extends Plugin.BasePlugin {
                  if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
                     expectedBindings.add(Map.of(var, value));
                 } else {
-                    System.err.println("Expectation '" + expected.type + "' failed: Invalid binding pair format in expected value: " + bindingPairTerm.toKif());
-                    parseError = true;
-                    break;
+                    return Optional.of("Invalid binding pair format in expected value: " + bindingPairTerm.toKif());
                 }
             }
         }
-
-        if (parseError) return false;
 
         List<Map<Term.Var, Term>> actualBindings = answer.bindings();
 
@@ -471,80 +470,90 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
 
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected bindings " + expectedBindings + ", but got " + actualBindings);
-        return passed;
+        if (!passed) {
+            return Optional.of("Expected bindings " + expectedBindingStrings + ", but got " + actualBindingStrings);
+        }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedAssertionExists(TestExpected expected, String testKbId) {
+    private Optional<String> checkExpectedAssertionExists(TestExpected expected, String testKbId) {
         if (!(expected.value instanceof Term.Lst expectedKif)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isPresent();
-         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion not found: " + expectedKif.toKif());
-        return passed;
+         if (!passed) {
+             return Optional.of("Assertion not found: " + expectedKif.toKif());
+         }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedAssertionDoesNotExist(TestExpected expected, String testKbId) {
+    private Optional<String> checkExpectedAssertionDoesNotExist(TestExpected expected, String testKbId) {
         if (!(expected.value instanceof Term.Lst expectedKif)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isEmpty();
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
-        return passed;
+        if (!passed) {
+            return Optional.of("Assertion found unexpectedly: " + expectedKif.toKif());
+        }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedRuleExists(TestExpected expected) {
+    private Optional<String> checkExpectedRuleExists(TestExpected expected) {
         if (!(expected.value instanceof Term.Lst ruleForm)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         // TODO: Adjust based on KB-scoped rules. Currently checks global context.
         boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(ruleForm));
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule not found: " + ruleForm.toKif());
-        return passed;
+        if (!passed) {
+            return Optional.of("Rule not found: " + ruleForm.toKif());
+        }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedRuleDoesNotExist(TestExpected expected) {
+    private Optional<String> checkExpectedRuleDoesNotExist(TestExpected expected) {
         if (!(expected.value instanceof Term.Lst ruleForm)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         // TODO: Adjust based on KB-scoped rules. Currently checks global context.
         boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(ruleForm));
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule found unexpectedly: " + ruleForm.toKif());
-        return passed;
-    }
-
-    private boolean checkExpectedKbSize(TestExpected expected, Logic.Knowledge kb) {
-        if (!(expected.value instanceof Integer expectedSize)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not an Integer. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+        if (!passed) {
+            return Optional.of("Rule found unexpectedly: " + ruleForm.toKif());
         }
-        boolean passed = kb.getAssertionCount() == expectedSize;
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected KB size " + expectedSize + ", but got " + kb.getAssertionCount());
-        return passed;
+        return Optional.empty();
     }
 
-    private boolean checkExpectedToolResult(TestExpected expected, @Nullable Object actionResult) {
+    private Optional<String> checkExpectedKbSize(TestExpected expected, Logic.Knowledge kb) {
+        if (!(expected.value instanceof Integer expectedSize)) {
+            return Optional.of("Internal error - expected value is not an Integer. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+        }
+        int actualSize = kb.getAssertionCount();
+        boolean passed = actualSize == expectedSize;
+        if (!passed) {
+            return Optional.of("Expected KB size " + expectedSize + ", but got " + actualSize);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> checkExpectedToolResult(TestExpected expected, @Nullable Object actionResult) {
         boolean passed = Objects.equals(actionResult, expected.value);
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
-        return passed;
+        if (!passed) {
+            return Optional.of("Expected tool result " + expected.value + ", but got " + actionResult);
+        }
+        return Optional.empty();
     }
 
-    private boolean checkExpectedToolResultContains(TestExpected expected, @Nullable Object actionResult) {
+    private Optional<String> checkExpectedToolResultContains(TestExpected expected, @Nullable Object actionResult) {
         if (!(expected.value instanceof String expectedSubstring)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a String. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Internal error - expected value is not a String. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
         if (!(actionResult instanceof String actualResultString)) {
-            System.err.println("Expectation '" + expected.type + "' failed: Action result is not a String. Found: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
-            return false;
+            return Optional.of("Action result is not a String. Found: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
         }
         boolean passed = actualResultString.contains(expectedSubstring);
-        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Tool result '" + actualResultString + "' does not contain '" + expectedSubstring + "'");
-        return passed;
+        if (!passed) {
+            return Optional.of("Tool result '" + actualResultString + "' does not contain '" + expectedSubstring + "'");
+        }
+        return Optional.empty();
     }
 
 
@@ -884,6 +893,13 @@ public class TestPlugin extends Plugin.BasePlugin {
         };
     }
 
+    private String termValueToString(Object value) {
+        if (value instanceof Term term) {
+            return term.toKif();
+        }
+        return String.valueOf(value);
+    }
+
     private String formatParseException(ParseException e, String sourceText) {
         String message = e.getMessage();
         Matcher matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
@@ -939,7 +955,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             if (!result.expectationResults.isEmpty()) {
                  sb.append("  Expectations:\n");
                  for (var expResult : result.expectationResults) {
-                     sb.append("    ").append(expResult.passed ? "PASS" : "FAIL").append(": ").append(expResult.expected.type).append(" ").append(termToObject(expResult.expected.value instanceof Term ? (Term) expResult.expected.value : new Term.Atom(String.valueOf(expResult.expected.value)))); // Attempt to print value
+                     sb.append("    ").append(expResult.passed ? "PASS" : "FAIL").append(": ").append(expResult.expected.type).append(" ").append(termValueToString(expResult.expected.value)); // Use helper for value
                      if (!expResult.passed) {
                          sb.append(" (Reason: ").append(expResult.failureReason).append(")");
                      }
