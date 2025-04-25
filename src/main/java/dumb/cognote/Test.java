@@ -25,7 +25,7 @@ public class Test {
 
         c.start();
 
-        //c.loadRules("/home/me/sumo/Merge.kif"); // Keep commented out for isolated tests
+        //c.loadRules("/home/me/sumo/sumo.kif"); // Keep commented out for isolated tests
 
         c.addNote(new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE, TESTS, IDLE));
         c.addNote(new Note(TEST_RESULTS_NOTE_ID, TEST_RESULTS_NOTE_TITLE, "; Test results: pending", IDLE));
@@ -46,8 +46,8 @@ public class Test {
 
         try {
             // Wait for the TestRunCompleteEvent to be received
-            // Increased timeout significantly to 120 seconds to allow for more tests and potential delays
-            completion.get(120, TimeUnit.SECONDS); // Increased timeout
+            // Reverted timeout to a smaller value as tests are expected to be fast
+            completion.get(30, TimeUnit.SECONDS); // Reverted timeout
             System.out.println("Test.java: Completion future completed."); // Added logging
 
             // Print the stored detailed test results
