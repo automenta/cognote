@@ -17,8 +17,7 @@ public class Test {
         var c = new CogNote() {
             // Override save to do nothing for tests
             @Deprecated @Override public void save() { }
-            // Override load to do nothing for tests
-            @Deprecated @Override public void load() { }
+
         };
 
         c.start();
@@ -47,7 +46,7 @@ public class Test {
 
         try {
             // Wait for the test run to complete (either successfully or with parse errors)
-            completion.get(120, TimeUnit.SECONDS);
+            completion.get(5, TimeUnit.SECONDS);
 
             // Retrieve and print the detailed test results
             c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println(note.text));
