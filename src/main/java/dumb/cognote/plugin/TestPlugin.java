@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors; // Import Collectors
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
@@ -326,10 +327,32 @@ public class TestPlugin extends Plugin.BasePlugin {
 
                         List<Map<Term.Var, Term>> actualBindings = answer.bindings(); // 'answer' is now in scope
 
-                        // Simple comparison: check if the lists of bindings are equal (order matters for now)
-                        boolean passed = Objects.equals(expectedBindings, actualBindings);
+                        // Fix: Compare sets of binding strings for order-insensitivity
+                        Set<String> expectedBindingStrings = expectedBindings.stream()
+                            .map(bindingMap -> {
+                                List<String> entryStrings = new ArrayList<>();
+                                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
+                                Collections.sort(entryStrings); // Sort entries within a single binding map
+                                return String.join(",", entryStrings);
+                            })
+                            .collect(Collectors.toSet());
+
+                        Set<String> actualBindingStrings = actualBindings.stream()
+                            .map(bindingMap -> {
+                                List<String> entryStrings = new ArrayList<>();
+                                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
+                                Collections.sort(entryStrings);
+                                return String.join(",", entryStrings);
+                            })
+                            .collect(Collectors.toSet());
+
+                        boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
+
                         if (!passed) {
                             System.err.println("    Expectation '" + expected.type + "' failed: Expected bindings " + expectedBindings + ", but got " + actualBindings);
+                            // Optional: Print string sets for debugging
+                            // System.err.println("      Expected strings: " + expectedBindingStrings);
+                            // System.err.println("      Actual strings: " + actualBindingStrings);
                         }
                         yield passed; // Yield boolean
                     }
@@ -401,27 +424,23 @@ public class TestPlugin extends Plugin.BasePlugin {
                         // Check if the action result matches the expected value
                         // If both are strings, check if the actual result starts with the expected value
                         boolean passed;
-                        // Fix: Use traditional instanceof check and cast for expected.value
-                        if (actionResult instanceof String actualString && expected.value instanceof Term.Atom) {
-                            String expectedString = ((Term.Atom) expected.value).value();
-                            if (expectedString != null) {
-                                passed = actualString.startsWith(expectedString);
-                                 if (!passed) {
-                                    System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result starting with '" + expectedString + "', but got '" + actualString + "'");
-                                }
-                            } else {
-                                // Expected value is a null atom value, unlikely but handle
-                                passed = actualString == null || actualString.isEmpty(); // Or whatever null atom means for tool result
-                                 if (!passed) {
-                                    System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result starting with null, but got '" + actualString + "'");
-                                }
-                            }
-                        } else {
-                            // Otherwise, use exact equality check (comparing Term to Object)
-                            // This might need refinement depending on how tool results are represented
-                            passed = Objects.equals(actionResult, expected.value);
-                             if (!passed) {
-                                System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
+                        // Fix: Use Objects.equals for general comparison, as the expected value is a Term
+                        passed = Objects.equals(actionResult, expected.value);
+
+                        // Add specific string startsWith check if expected value is a String Atom
+                        if (!passed && actionResult instanceof String actualString && expected.value instanceof Term.Atom) {
+                             String expectedString = ((Term.Atom) expected.value).value();
+                             if (expectedString != null) {
+                                 passed = actualString.startsWith(expectedString);
+                             }
+                        }
+
+
+                         if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
+                            // If it was a string startsWith check that failed, provide more detail
+                            if (actionResult instanceof String actualString && expected.value instanceof Term.Atom && ((Term.Atom) expected.value).value() != null) {
+                                System.err.println("      (String startsWith check failed: Expected '" + ((Term.Atom) expected.value).value() + "', got '" + actualString + "')");
                             }
                         }
                         yield passed;
