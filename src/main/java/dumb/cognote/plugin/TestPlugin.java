@@ -321,7 +321,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         var conditionOp = conditionOpOpt.get();
         if (conditionList.size() < 2) {
              throw new IllegalArgumentException("Invalid wait condition list: Missing target.");
-        }
+         }
         Term conditionTarget = conditionList.get(1);
 
         long timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
@@ -464,8 +464,12 @@ public class TestPlugin extends Plugin.BasePlugin {
         if (expectedBindingsList.isEmpty()) {
             boolean passed = actualBindings.isEmpty();
             if (!passed) {
+                // Added logging for debugging empty bindings failure
+                System.err.println("DEBUG: checkExpectedBindings - Expected empty, got non-empty.");
+                System.err.println("DEBUG: Actual bindings: " + actualBindings);
                 return Optional.of("Expected no bindings, but got " + actualBindings.size() + " bindings.");
             }
+            System.out.println("DEBUG: checkExpectedBindings - Expected empty, got empty. Passed."); // Added logging
             return Optional.empty();
         }
 
@@ -497,8 +501,13 @@ public class TestPlugin extends Plugin.BasePlugin {
         boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
 
         if (!passed) {
+            // Added logging for debugging specific bindings failure
+            System.err.println("DEBUG: checkExpectedBindings - Expected specific, got different.");
+            System.err.println("DEBUG: Expected binding strings: " + expectedBindingStrings);
+            System.err.println("DEBUG: Actual binding strings: " + actualBindingStrings);
             return Optional.of("Expected bindings " + expectedBindingStrings + ", but got " + actualBindingStrings);
         }
+        System.out.println("DEBUG: checkExpectedBindings - Expected specific, got match. Passed."); // Added logging
         return Optional.empty();
     }
 

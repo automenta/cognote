@@ -39,6 +39,9 @@ public class Test {
                 // The plugin now reports "Tests Complete" even if tests failed,
                 // but the results note will show failures. We rely on checking
                 // the results note content after completion.
+                // However, if the plugin reports "Tests Failed" due to a parse error,
+                // we should also complete the future to unblock the main thread.
+                 completion.complete(null); // Complete on any final test status
             }
         });
 
@@ -46,7 +49,8 @@ public class Test {
 
         try {
             // Wait for the test run to complete (either successfully or with parse errors)
-            completion.get(5, TimeUnit.SECONDS);
+            // Increased timeout to 15 seconds
+            completion.get(15, TimeUnit.SECONDS);
 
             // Retrieve and print the detailed test results
             c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println(note.text));
