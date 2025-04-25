@@ -24,7 +24,10 @@ public class Test {
         }
 
         try {
-            var c = new CogNote(); // CogNote loads notes and config in constructor
+            var c = new CogNote() {
+                @Deprecated @Override
+                public void save() { }
+            }; // CogNote loads notes and config in constructor
             c.start(); // Initialize Cog components, but keep paused
 
             if (rulesFile != null) {

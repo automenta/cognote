@@ -151,7 +151,7 @@ public class CogNote extends Cog {
                         "  (setup (assert (instance MyDog Dog)))\n" +
                         "  (action (query (instance MyDog Cat)))\n" +
                         "  (expected (expectedResult false) (expectedBindings ())))\n" +
-                        "  (teardown (retract (BY_KIF (instance MyDog Dog)))))\n\n" +
+                        "  (teardown (retract (BY_KIF (instance MyDog Dog))))\n\n" +
 
                         "; Example 4: Test Forward Chaining Rule\n" +
                         "(test \"Forward Chaining Rule\" \n" +
@@ -172,7 +172,7 @@ public class CogNote extends Cog {
                         "(test \"Retract Assertion\" \n" +
                         "  (setup (assert (instance TempFact Something)))\n" +
                         "  (action (retract (BY_KIF (instance TempFact Something))))\n" +
-                        "  (expected (expectedAssertionDoesNotExist (instance TempFact Something))))\n" +
+                        "  (expected (expectedAssertionDoesNotExist (instance TempFact Something)))\n" +
                         "  (teardown))\n\n" + // Teardown is empty, cleanup is automatic
 
                         "; Example 6: Test KB Size\n" +
@@ -191,7 +191,7 @@ public class CogNote extends Cog {
                         "(test \"Run LogMessageTool\" \n" +
                         "  (setup)\n" +
                         "  (action (runTool (name \"log_message\") (params (message \"Hello from test!\"))))\n" +
-                        "  (expected (expectedToolResult \"Message logged.\")))\n" +
+                        "  (expected (expectedToolResult \"Message logged.\"))\n" +
                         "  (teardown))\n\n" +
 
                         "; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist\n" +
@@ -200,7 +200,7 @@ public class CogNote extends Cog {
                         "(test \"Run GetNoteTextTool\" \n" +
                         "  (setup)\n" +
                         "  (action (runTool (name \"get_note_text\") (params (note_id \"" + TEST_DEFINITIONS_NOTE_ID + "\"))))\n" +
-                        "  (expected (expectedToolResult \"; Define your tests here using the (test ...) format\")))\n" + // Corrected expected result
+                        "  (expected (expectedToolResult \"; Define your tests here using the (test ...) format\"))\n" + // Corrected expected result
                         "  (teardown))\n",
                 Note.Status.IDLE);
     }

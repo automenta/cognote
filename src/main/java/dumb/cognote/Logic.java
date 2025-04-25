@@ -917,6 +917,13 @@ public class Logic {
             private final int col;
             private final String context;
 
+            public ParseException(String message) {
+                this(message, "");
+            }
+
+            public ParseException(String message, String context) {
+                this(message, 0, 0, context);
+            }
             public ParseException(String message, int line, int col, String context) {
                 super(message);
                 this.line = line;

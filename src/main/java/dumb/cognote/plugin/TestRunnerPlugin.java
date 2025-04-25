@@ -380,7 +380,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     }
                     var sectionOpOpt = sectionList.op(); // This should be "setup", "action", "expected", "teardown"
                     if (sectionOpOpt.isEmpty()) {
-                        throw new ParseException("Section without operator in test '" + name + "': " + sectionList.toKif());
+                        throw new ParseException("Section without operator in test '" + name, sectionList.toKif());
                     }
                     var sectionOp = sectionOpOpt.get();
                     var sectionContents = sectionList.terms.stream().skip(1).toList(); // These are the terms *inside* the section list
@@ -392,12 +392,12 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             if (sectionContents.size() == 1) {
                                 action = parseAction(sectionContents.getFirst()); // Parse the single action term inside (action ...)
                             } else {
-                                throw new ParseException("Action section must contain exactly one action in test '" + name + "': " + sectionList.toKif());
+                                throw new ParseException("Action section must contain exactly one action in test '" + name, sectionList.toKif());
                             }
                         }
                         case "expected" -> expected.addAll(parseExpectations(sectionContents)); // Parse terms *inside* (expected ...)
                         case "teardown" -> teardown.addAll(parseActions(sectionContents)); // Parse terms *inside* (teardown ...)
-                        default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name + "': " + sectionList.toKif());
+                        default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name, sectionList.toKif());
                     }
                 }
 
