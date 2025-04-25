@@ -479,7 +479,8 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                 if (actionList.size() < 2)
                     throw new IllegalArgumentException("runTool action requires at least tool name.");
                 if (!(actionList.get(1) instanceof Term.Atom(String value)))
-                    throw new IllegalArgumentException("runTool action requires tool name as the first argument.");
+                    // Corrected error message to refer to the second argument (index 1)
+                    throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator).");
                 Map<String, Object> toolParams = new HashMap<>();
                 toolParams.put("name", value);
                 if (actionList.size() > 2) {
