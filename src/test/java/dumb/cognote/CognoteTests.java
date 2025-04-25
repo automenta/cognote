@@ -362,24 +362,37 @@ class CognoteTests {
     }
 
     private TestExpected parseExpectedBindings(String op, Term expectedValueTerm, Term.Lst fullTerm) {
-        if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
-            throw new IllegalArgumentException(op + " requires a list of binding pairs ((?V1 Val1) ...) or () or (()). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
+        // Expected value term should be a list of solutions, where each solution is a list of binding pairs.
+        // Example: (((?X 1) (?Y 2)) ((?X 3) (?Y 4)))
+        if (!(expectedValueTerm instanceof Term.Lst solutionsListTerm)) {
+            throw new IllegalArgumentException(op + " requires a list of solutions, where each solution is a list of binding pairs ((?V1 Val1) ...). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         }
 
         // Handle empty list case: () or (())
-        if (expectedBindingsListTerm.terms.isEmpty() || (expectedBindingsListTerm.terms.size() == 1 && expectedBindingsListTerm.get(0) instanceof Term.Lst innerList && innerList.terms.isEmpty())) {
-            // Represents expectation of *no* bindings (empty list of solutions)
-            return new TestExpected(op, Collections.emptyList()); // Store as empty list of maps
+        // An empty solutions list means expecting no bindings.
+        if (solutionsListTerm.terms.isEmpty()) {
+             return new TestExpected(op, Collections.emptyList()); // Store as empty list of maps
         }
 
         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
-        for (var bindingPairTerm : expectedBindingsListTerm.terms) {
-            if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
-                expectedBindings.add(Map.of(var, value));
-            } else {
-                throw new IllegalArgumentException("Invalid binding pair format in expected value: " + bindingPairTerm.toKif() + ". Term: " + fullTerm.toKif());
+        // Iterate through the list of solutions
+        for (var solutionTerm : solutionsListTerm.terms) {
+            if (!(solutionTerm instanceof Term.Lst bindingPairsList)) {
+                 throw new IllegalArgumentException("Each element in the expected bindings list must be a list of binding pairs. Found: " + solutionTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
             }
+
+            Map<Term.Var, Term> solutionMap = new HashMap<>();
+            // Iterate through the binding pairs within a solution
+            for (var bindingPairTerm : bindingPairsList.terms) {
+                if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
+                    solutionMap.put(var, value);
+                } else {
+                    throw new IllegalArgumentException("Invalid binding pair format in a solution: " + bindingPairTerm.toKif() + ". Expected (?Var Value). Term: " + fullTerm.toKif());
+                }
+            }
+            expectedBindings.add(solutionMap);
         }
+
         return new TestExpected(op, expectedBindings); // Store as list of maps
     }
 
@@ -854,11 +867,11 @@ class CognoteTests {
 
         // Case 2: Expecting specific bindings
         // Ensure the list contains maps (check first element if not empty)
-        if (!(expectedBindingsList.get(0) instanceof Map)) {
-            return Optional.of("Internal error - expected value list does not contain Maps.");
+        if (!expectedBindingsList.isEmpty() && !(expectedBindingsList.get(0) instanceof Map)) {
+             return Optional.of("Internal error - expected value list does not contain Maps.");
         }
 
-        // Convert expected and actual bindings to a comparable format (sets of sorted strings)
+        // Convert expected and actual bindings (List<Map<Var, Term>>) to a comparable format (sets of sorted strings)
         Set<String> expectedBindingStrings = ((List<Map<Term.Var, Term>>) expectedBindingsList).stream()
             .map(bindingMap -> {
                 List<String> entryStrings = new ArrayList<>();
@@ -961,7 +974,7 @@ class CognoteTests {
         boolean passed = actualResultString.contains(expectedSubstring);
         if (!passed) {
             return Optional.of("Tool result '" + actualResultString + "' does not contain '" + expectedSubstring + "'");
-        }
+            }
         return Optional.empty();
     }
 
@@ -1078,7 +1091,7 @@ class CognoteTests {
             (test "Simple Fact Query"
               (setup (assert (instance MyCat Cat)))
               (action (query (instance ?X Cat)))
-              (expected (expectedResult true) (expectedBindings ((?X MyCat))))
+              (expected (expectedResult true) (expectedBindings (((?X MyCat))))) ; Corrected KIF for expectedBindings
               (teardown (retract (BY_KIF (instance MyCat Cat)))))
             """);
     }
@@ -1094,7 +1107,7 @@ class CognoteTests {
               (action (query (instance ?X Cat)))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?X MyCat) (?X YourCat)))) ; Note: Order of bindings in result list is not guaranteed, but the set of bindings should match.
+                (expectedBindings (((?X MyCat)) ((?X YourCat))))) ; Corrected KIF for expectedBindings (two solutions)
               (teardown
                 (retract (BY_KIF (instance MyCat Cat)))
                 (retract (BY_KIF (instance YourCat Cat)))
@@ -1108,7 +1121,7 @@ class CognoteTests {
             (test "Query Failure"
               (setup (assert (instance MyDog Dog)))
               (action (query (instance MyDog Cat)))
-              (expected (expectedResult false) (expectedBindings ()))) ; Expected empty bindings list
+              (expected (expectedResult false) (expectedBindings ())) ; Expected empty bindings list (no solutions)
               (teardown (retract (BY_KIF (instance MyDog Dog))))
             """);
     }
@@ -1293,10 +1306,10 @@ class CognoteTests {
               (action (query (?Rel Dog Animal)))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?Rel isA))))
+                (expectedBindings (((?Rel isA))))) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (isA Dog Animal)))
-                (retract (isA Cat Animal)))))
+                (retract (BY_KIF (isA Cat Animal)))) ; Corrected KIF syntax
             """);
     }
 
@@ -1311,7 +1324,7 @@ class CognoteTests {
               (action (query (parent ?Child ?Parent)))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill))))
+                (expectedBindings (((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill))))) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (parent John Jane)))
                 (retract (BY_KIF (parent Jane Jim)))
@@ -1329,7 +1342,7 @@ class CognoteTests {
               (action (query (hasProperty (color ?C) Apple)))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?C Red)) ((?C Green))))
+                (expectedBindings (((?C Red)) ((?C Green))))) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (hasProperty (color Red) Apple)))
                 (retract (BY_KIF (hasProperty (color Green) Apple)))))
@@ -1346,7 +1359,7 @@ class CognoteTests {
               (action (query (items (?X ?Y ?Z))))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C))))
+                (expectedBindings (((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C))))) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (items (1 2 3))))
                 (retract (BY_KIF (items (A B C))))))
@@ -1362,7 +1375,7 @@ class CognoteTests {
               (action (query (emptyList ?L)))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?L ()))))
+                (expectedBindings (((?L ())))) ) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (emptyList ())))))
             """);
@@ -1378,7 +1391,7 @@ class CognoteTests {
               (action (query (sequence (a b ?Rest))))
               (expected
                 (expectedResult true)
-                (expectedBindings ((?Rest (c d)))))
+                (expectedBindings (((?Rest (c d))))) ) ; Corrected KIF for expectedBindings
               (teardown
                 (retract (BY_KIF (sequence (a b c d))))
                 (retract (BY_KIF (sequence (x y z))))))
@@ -1519,7 +1532,7 @@ class CognoteTests {
                   (action (assert (fact B))) ; Not a query
                   (expected
                     (expectedAssertionExists (fact A)) ; PASS
-                    (expectedBindings ((?X A))) ; FAIL - actionResult is not a Query Answer
+                    (expectedBindings (((?X A)))) ; FAIL - actionResult is not a Query Answer
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
