@@ -72,29 +72,30 @@ public class TestPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        List<TestResult> results = Collections.synchronizedList(new ArrayList<>()); // Use synchronized list for concurrent adds
+        List<TestResult> results = new ArrayList<>(); // Use regular list, populated sequentially
         CompletableFuture<Void> allTestsFuture = CompletableFuture.completedFuture(null);
 
         for (var test : tests) {
-            allTestsFuture = allTestsFuture.thenCompose(v ->
+            // Chain tests sequentially, ensuring each test runs on the event executor
+            allTestsFuture = allTestsFuture.thenComposeAsync(v ->
                     runTest(test)
                             .exceptionally(ex -> {
                                 var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                                 System.err.println("TestPlugin: Error during test '" + test.name + "' execution chain: " + cause.getMessage());
                                 cause.printStackTrace();
                                 // If the *entire test's future chain* fails exceptionally *before* producing a TestResult,
-                                // we need to create a failure result here. This catches errors not caught by
-                                // the specific .exceptionally blocks in runTest (less likely now, but defensive).
+                                // we need to create a failure result here.
                                 List<ActionError> errors = new ArrayList<>();
                                 errors.add(new ActionError("Execution Chain", "Unhandled error: " + cause.getMessage()));
                                 return new TestResult(test.name, Collections.emptyList(), errors);
                             })
-                            .thenAccept(results::add) // Add result to the list
+                            .thenAccept(results::add), // Add result to the list (runs on the executor that completed runTest)
+                    cog().events.exe // Ensure the next test starts on the event executor
             );
         }
 
         // This block runs when all individual test futures have completed (either successfully or exceptionally)
-        allTestsFuture.whenCompleteAsync((v, ex) -> {
+        allTestsFuture.whenCompleteAsync((v, ex) -> { // Explicitly on event executor
             System.out.println("TestPlugin: All test futures completed. Formatting results..."); // Added logging
             String finalResultsText;
             if (ex != null) {
@@ -119,8 +120,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private CompletableFuture<TestResult> runTest(TestDefinition test) {
         var testKbId = Cog.id(TEST_KB_PREFIX);
-        List<ActionError> actionErrors = Collections.synchronizedList(new ArrayList<>()); // Use synchronized list
-        Object actionResult = null; // To hold the result of the main action block
+        List<ActionError> actionErrors = new ArrayList<>(); // Use regular list, populated sequentially
 
         var testNote = new Note(testKbId, "Test KB: " + test.name, "", Note.Status.IDLE);
         // TODO: Decouple from CogNote - need a generic way to manage temporary KBs/Notes
@@ -137,7 +137,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     return null; // Allow action/expectations to potentially run or fail gracefully
                 });
 
-        CompletableFuture<Object> actionFuture = setupFuture.thenCompose(setupResult -> {
+        CompletableFuture<Object> actionFuture = setupFuture.thenComposeAsync(setupResult -> { // Ensure action stage starts on event executor
             if (!actionErrors.isEmpty()) {
                 return CompletableFuture.completedFuture(null); // Skip action if setup failed
             }
@@ -150,46 +150,37 @@ public class TestPlugin extends Plugin.BasePlugin {
                         cause.printStackTrace();
                         return null; // Allow expectations/teardown to potentially run
                     });
-        });
+        }, cog().events.exe); // Schedule action stage on event executor
 
-        CompletableFuture<List<ExpectationResult>> expectationsFuture = actionFuture.thenCompose(result -> {
-            // Capture the action result for expectation checks
-            // Note: This assumes the *last* action in the action list provides the result for expectations like query/runTool
-            // A more robust system might pass results explicitly or allow expectations to target specific action results
-            // For now, we'll just pass the result of the actionFuture chain.
-            // If actionFuture completed exceptionally, result will be null here.
-            Object finalActionResult = result; // Capture the result before checking errors
+        CompletableFuture<List<ExpectationResult>> expectationsFuture = actionFuture.thenComposeAsync(result -> { // Ensure expectations stage starts on event executor
+            Object finalActionResult = result;
             if (!actionErrors.isEmpty()) {
-                 // If action failed, expectations might not be meaningful, but we still run them
-                 // to report what *would* have happened or if they check for absence.
-                 // However, for simplicity in this refactor, we'll just pass null as actionResult
-                 // if there were action errors. A more complex approach could try to run expectations
-                 // even with action errors, but it adds complexity. Let's pass null.
-                 finalActionResult = null;
+                 finalActionResult = null; // Pass null result if action failed
             }
             return checkExpectations(test.expected, testKbId, finalActionResult);
-        });
+        }, cog().events.exe); // Schedule expectations stage on event executor
 
 
-        CompletableFuture<TestResult> c = expectationsFuture.thenCompose(expectationResults ->
-                executeActionList(test, testKbId, test.teardown)
-                        .exceptionally(ex -> {
-                            var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-                            // Capture error with action type context
-                            actionErrors.add(new ActionError("Teardown", "Teardown failed: " + cause.getMessage()));
-                            System.err.println("TestPlugin: Teardown failed for test '" + test.name + "': " + cause.getMessage());
-                            cause.printStackTrace();
-                            return null; // Teardown failure shouldn't fail the test itself, but should be reported
-                        })
-                        .thenApply(teardownResult -> new TestResult(test.name, expectationResults, actionErrors)) // Pass actionErrors
-        ).whenComplete((result, ex) -> {
+        CompletableFuture<TestResult> c = expectationsFuture.thenComposeAsync(expectationResults -> // Ensure teardown stage starts on event executor
+            executeActionList(test, testKbId, test.teardown)
+                    .exceptionally(ex -> {
+                        var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
+                        // Capture error with action type context
+                        actionErrors.add(new ActionError("Teardown", "Teardown failed: " + cause.getMessage()));
+                        System.err.println("TestPlugin: Teardown failed for test '" + test.name + "': " + cause.getMessage());
+                        cause.printStackTrace();
+                        return null; // Teardown failure shouldn't fail the test itself, but should be reported
+                    })
+                    .thenApply(teardownResult -> new TestResult(test.name, expectationResults, actionErrors)), // Pass actionErrors
+            cog().events.exe // Schedule teardown stage on event executor
+        ).whenCompleteAsync((result, ex) -> { // Keep whenCompleteAsync on event executor for cleanup
             // Clean up the temporary KB/Note regardless of test outcome
             context.removeActiveNote(testKbId);
             // TODO: Decouple from CogNote
             ((CogNote) cog()).removeNote(testKbId);
             // Add logging here to confirm teardown/cleanup completes
             System.out.println("TestPlugin: Test '" + test.name + "' cleanup complete.");
-        });
+        }, cog().events.exe); // Explicitly on event executor
 
         // Add logging here to confirm runTest future is created
         System.out.println("TestPlugin: Test '" + test.name + "' run future created.");
@@ -200,14 +191,21 @@ public class TestPlugin extends Plugin.BasePlugin {
     private CompletableFuture<Object> executeActionList(TestDefinition test, String testKbId, List<TestAction> actions) {
         CompletableFuture<Object> future = CompletableFuture.completedFuture(null);
         for (var action : actions) {
-            // Chain actions sequentially, passing the result of the previous to the next (though not currently used)
-            future = future.thenCompose(v -> executeSingleAction(test, testKbId, action));
+            // Chain actions sequentially, ensuring each runs on the event executor
+            future = future.thenComposeAsync(v -> executeSingleAction(test, testKbId, action), cog().events.exe);
         }
         return future;
     }
 
     private CompletableFuture<Object> executeSingleAction(TestDefinition test, String testKbId, TestAction action) {
-        return executeActionLogic(test, testKbId, action).orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        // Execute the action logic. If it returns a completed future, the next stage
+        // will be scheduled on the executor provided to thenComposeAsync in executeActionList.
+        // If it returns an async future (like from supplyAsync or a tool), the continuation
+        // will run on the executor that completes that future (which we try to ensure is cog().events.exe).
+        CompletableFuture<Object> actionFuture = executeActionLogic(test, testKbId, action);
+
+        // Apply timeout and exception handling, ensuring continuations are on the event executor
+        return actionFuture.orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                     if (cause instanceof TimeoutException) {
@@ -217,18 +215,19 @@ public class TestPlugin extends Plugin.BasePlugin {
                     // Wrap other exceptions with action type context
                     throw new CompletionException(new RuntimeException("Action '" + action.type + "' failed: " + cause.getMessage(), cause));
                 });
+                // Note: No explicit thenApplyAsync here, as the executor is handled by the chaining in executeActionList
     }
 
     private CompletableFuture<Object> executeActionLogic(TestDefinition test, String testKbId, TestAction action) {
         try {
             return switch (action.type) {
-                case "assert" -> executeAssertAction(test, testKbId, action);
-                case "addRule" -> executeAddRuleAction(test, testKbId, action);
-                case "removeRuleForm" -> executeRemoveRuleFormAction(test, testKbId, action);
-                case "retract" -> executeRetractAction(test, testKbId, action);
-                case "runTool" -> executeRunToolAction(test, testKbId, action);
-                case "query" -> executeQueryAction(test, testKbId, action);
-                case "wait" -> executeWaitAction(test, testKbId, action);
+                case "assert" -> CompletableFuture.completedFuture(executeAssertAction(test, testKbId, action));
+                case "addRule" -> CompletableFuture.completedFuture(executeAddRuleAction(test, testKbId, action));
+                case "removeRuleForm" -> CompletableFuture.completedFuture(executeRemoveRuleFormAction(test, testKbId, action));
+                case "retract" -> CompletableFuture.completedFuture(executeRetractAction(test, testKbId, action));
+                case "runTool" -> executeRunToolAction(test, testKbId, action); // This might return an async future
+                case "query" -> CompletableFuture.completedFuture(executeQueryAction(test, testKbId, action));
+                case "wait" -> executeWaitAction(test, testKbId, action); // This uses supplyAsync
                 default -> CompletableFuture.failedFuture(new IllegalArgumentException("Unknown action type: " + action.type));
             };
         } catch (Exception e) {
@@ -237,7 +236,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private CompletableFuture<Object> executeAssertAction(TestDefinition test, String testKbId, TestAction action) {
+    private Object executeAssertAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst list))
             throw new IllegalArgumentException("Invalid payload for assert: " + action.payload);
         var isNeg = list.op().filter(KIF_OP_NOT::equals).isPresent();
@@ -250,27 +249,27 @@ public class TestPlugin extends Plugin.BasePlugin {
         var pa = new Assertion.PotentialAssertion(list, pri, Set.of(), testKbId, isEq, isNeg, isOriented, testKbId, type, List.of(), 0);
 
         var committed = context.tryCommit(pa, "test-runner:" + test.name);
-        return CompletableFuture.completedFuture(committed != null ? committed.id() : null);
+        return committed != null ? committed.id() : null;
     }
 
-    private CompletableFuture<Object> executeAddRuleAction(TestDefinition test, String testKbId, TestAction action) {
+    private Object executeAddRuleAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
             throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
         // TODO: Implement KB-scoped rules. Currently adds to global context.
         var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId); // Rule is tagged with testKbId, but context.addRule is global
         var added = context.addRule(r);
-        return CompletableFuture.completedFuture(added);
+        return added;
     }
 
-    private CompletableFuture<Object> executeRemoveRuleFormAction(TestDefinition test, String testKbId, TestAction action) {
+    private Object executeRemoveRuleFormAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
             throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
         // TODO: Implement KB-scoped rules. Currently removes from global context.
         var removed = context.removeRule(ruleForm);
-        return CompletableFuture.completedFuture(removed);
+        return removed;
     }
 
-    private CompletableFuture<Object> executeRetractAction(TestDefinition test, String testKbId, TestAction action) {
+    private Object executeRetractAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
             throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
         }
@@ -293,7 +292,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         }
 
         context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + test.name, testKbId));
-        return CompletableFuture.completedFuture(targetStr);
+        return targetStr;
     }
 
     private CompletableFuture<Object> executeRunToolAction(TestDefinition test, String testKbId, TestAction action) {
@@ -308,10 +307,12 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         var toolOpt = cog().tools.get(toolName);
         if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
+        // Tool execution might be async, let it run on its own executor if it has one,
+        // but the continuation in executeSingleAction will be scheduled on cog().events.exe
         return toolOpt.get().execute(toolParams).thenApply(r -> r);
     }
 
-    private CompletableFuture<Object> executeQueryAction(TestDefinition test, String testKbId, TestAction action) {
+    private Object executeQueryAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst pattern))
             throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
         var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
@@ -321,7 +322,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
         }
-        return CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams)));
+        // querySync is synchronous, runs on the calling thread (which should be cog().events.exe)
+        return cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams));
     }
 
     private CompletableFuture<Object> executeWaitAction(TestDefinition test, String testKbId, TestAction action) {
@@ -345,7 +347,7 @@ public class TestPlugin extends Plugin.BasePlugin {
              throw new IllegalArgumentException("Wait timeout and interval must be positive.");
         }
 
-        // TODO: Implement event-driven wait instead of polling
+        // Use supplyAsync to run the polling loop on the event executor without blocking the chain setup
         return CompletableFuture.supplyAsync(() -> {
             long startTime = System.currentTimeMillis();
             while (System.currentTimeMillis() - startTime < timeoutMillis) {
@@ -383,7 +385,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             }
             // Timeout occurred
             throw new CompletionException(new TimeoutException("Wait condition not met within " + timeoutSeconds + " seconds: " + conditionList.toKif()));
-        }, cog().events.exe); // Run on the event executor
+        }, cog().events.exe); // Run the polling loop on the event executor
     }
 
 
@@ -393,18 +395,21 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
     private CompletableFuture<List<ExpectationResult>> checkExpectations(List<TestExpected> expectations, String testKbId, @Nullable Object actionResult) {
-        List<CompletableFuture<ExpectationResult>> futures = new ArrayList<>();
+        List<ExpectationResult> results = new ArrayList<>(); // Use regular list, populated sequentially
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         for (var expected : expectations) {
-            futures.add(checkSingleExpectation(expected, testKbId, actionResult));
+            // Chain expectation checks sequentially on the event executor
+            future = future.thenComposeAsync(v ->
+                checkSingleExpectation(expected, testKbId, actionResult)
+                    .thenAccept(results::add), // Add result to the list (runs on the executor that completed checkSingleExpectation)
+                cog().events.exe // Ensure the next expectation check starts on the event executor
+            );
         }
-        // Combine all futures and collect results
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(v -> futures.stream()
-                        .map(CompletableFuture::join) // Join each completed future to get its result
-                        .collect(Collectors.toList()));
+        return future.thenApply(v -> results); // Return the list of results
     }
 
     private CompletableFuture<ExpectationResult> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
+        // Use supplyAsync to run the check logic on the event executor
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var kb = context.kb(testKbId);
