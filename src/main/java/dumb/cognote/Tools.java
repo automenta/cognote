@@ -28,16 +28,16 @@ public class Tools {
 
     public Stream<Tool> getLlmCallableTools() {
         return tools.values().stream().filter(tool -> {
-                try {
-                    for (var method : tool.getClass().getDeclaredMethods()) {
-                        if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class))
-                            return true;
-                    }
-                    return false;
-                } catch (Exception e) {
-                    System.err.println("Error reflecting on tool class " + tool.getClass().getName() + " for @Tool annotation: " + e.getMessage());
-                    return false;
+            try {
+                for (var method : tool.getClass().getDeclaredMethods()) {
+                    if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class))
+                        return true;
                 }
-            });
+                return false;
+            } catch (Exception e) {
+                System.err.println("Error reflecting on tool class " + tool.getClass().getName() + " for @Tool annotation: " + e.getMessage());
+                return false;
+            }
+        });
     }
 }

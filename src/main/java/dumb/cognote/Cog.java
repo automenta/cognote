@@ -723,10 +723,10 @@ public class Cog {
         private void onExternalInput(ExternalInputEvent event) {
             // Only broadcast if it's a list term (potential assertion/rule/goal)
             if (event.term() instanceof Term.Lst list) {
-                 sendEvent("external_input", new JSONObject()
-                         .put("sourceId", event.sourceId())
-                         .put("noteId", requireNonNullElse(event.noteId(), JSONObject.NULL))
-                         .put("kif", list.toKif()));
+                sendEvent("external_input", new JSONObject()
+                        .put("sourceId", event.sourceId())
+                        .put("noteId", requireNonNullElse(event.noteId(), JSONObject.NULL))
+                        .put("kif", list.toKif()));
             }
         }
 
@@ -773,9 +773,9 @@ public class Cog {
                     .put("timestamp", assertion.timestamp())
                     .put("sourceNoteId", requireNonNullElse(assertion.sourceNoteId(), JSONObject.NULL))
                     .put("type", assertion.type().name())
-                    .put("isEqual", assertion.isEqual())
-                    .put("isNegative", assertion.isNegative())
-                    .put("isOriented", assertion.isOriented())
+                    .put("isEqual", assertion.isEquality())
+                    .put("isNegative", assertion.negated())
+                    .put("isOriented", assertion.isOrientedEquality())
                     .put("derivationDepth", assertion.derivationDepth())
                     .put("isActive", assertion.isActive())
                     .put("kbId", kbId);
@@ -784,8 +784,8 @@ public class Cog {
         private JSONObject ruleToJson(Rule rule) {
             return new JSONObject()
                     .put("id", rule.id())
-                    .put("kif", rule.toKifString())
-                    .put("priority", rule.priority())
+                    .put("kif", rule.form().toKif())
+                    .put("priority", rule.pri())
                     .put("sourceNoteId", requireNonNullElse(rule.sourceNoteId(), JSONObject.NULL));
         }
 
@@ -920,24 +920,23 @@ public class Cog {
                         resultPayload.put("queryId", answer.query());
                         resultPayload.put("status", answer.status().name());
                         if (answer.explanation() != null) {
-                            resultPayload.put("explanation", answer.explanation().message());
+                            resultPayload.put("explanation", answer.explanation().details());
                         }
 
-                        if (answer.bindings() != null && !answer.bindings().isEmpty()) {
+                        var b = answer.bindings();
+                        if (b != null && !b.isEmpty()) {
                             var bindingsArray = new org.json.JSONArray();
-                            for (Map<Term.Var, Term> bindingSet : answer.bindings()) {
+                            for (Map<Term.Var, Term> bindingSet : b) {
                                 var bindingJson = new JSONObject();
                                 bindingSet.forEach((var, term) -> bindingJson.put(var.name(), term.toKif()));
                                 bindingsArray.put(bindingJson);
                             }
                             resultPayload.put("bindings", bindingsArray);
                         } else {
-                             resultPayload.put("bindings", new org.json.JSONArray()); // Ensure bindings is always an array
+                            resultPayload.put("bindings", new org.json.JSONArray()); // Ensure bindings is always an array
                         }
 
-
                         return resultPayload;
-
                     } catch (JSONException e) {
                         throw new IllegalArgumentException("Invalid payload for 'query' command: Missing 'kif_pattern' or invalid format.", e);
                     } catch (KifParser.ParseException e) {
@@ -945,8 +944,8 @@ public class Cog {
                     } catch (IllegalArgumentException e) {
                         throw e; // Re-throw specific validation errors
                     } catch (RuntimeException e) {
-                         // querySync can throw RuntimeException (Timeout, ExecutionException)
-                         throw e;
+                        // querySync can throw RuntimeException (Timeout, ExecutionException)
+                        throw e;
                     } catch (Exception e) {
                         throw new RuntimeException("Internal error processing 'query' command: " + e.getMessage(), e);
                     }
@@ -963,10 +962,10 @@ public class Cog {
 
             @Override
             public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-                 return CompletableFuture.supplyAsync(() -> {
-                     cog.setPaused(true);
-                     return new JSONObject().put("status", "success").put("message", "System paused.");
-                 }, cog.mainExecutor);
+                return CompletableFuture.supplyAsync(() -> {
+                    cog.setPaused(true);
+                    return new JSONObject().put("status", "success").put("message", "System paused.");
+                }, cog.mainExecutor);
             }
         }
 
@@ -1044,16 +1043,18 @@ public class Cog {
                         if (payload.has("llmApiUrl")) cog.lm.llmApiUrl = payload.getString("llmApiUrl");
                         if (payload.has("llmModel")) cog.lm.llmModel = payload.getString("llmModel");
                         if (payload.has("globalKbCapacity")) cog.globalKbCapacity = payload.getInt("globalKbCapacity");
-                        if (payload.has("reasoningDepthLimit")) cog.reasoningDepthLimit = payload.getInt("reasoningDepthLimit");
+                        if (payload.has("reasoningDepthLimit"))
+                            cog.reasoningDepthLimit = payload.getInt("reasoningDepthLimit");
                         if (payload.has("broadcastInputAssertions")) {
                             boolean broadcast = payload.getBoolean("broadcastInputAssertions");
                             if (cog.broadcastInputAssertions != broadcast) {
                                 cog.broadcastInputAssertions = broadcast;
                                 // Re-register/unregister the listener based on the new value
+                                Consumer<ExternalInputEvent> i = WebSocketPlugin.this::onExternalInput;
                                 if (broadcast) {
-                                    cog.events.on(ExternalInputEvent.class, WebSocketPlugin.this::onExternalInput);
+                                    cog.events.on(ExternalInputEvent.class, i);
                                 } else {
-                                    cog.events.off(ExternalInputEvent.class, WebSocketPlugin.this::onExternalInput);
+                                    cog.events.off(ExternalInputEvent.class, i);
                                 }
                             }
                         }
@@ -1140,10 +1141,12 @@ public class Cog {
                     }
 
                     // Execute handler asynchronously and send response when complete
+                    String COMMAND = command;
+                    String REQUEST_ID = requestId;
                     handler.handle(payload, conn)
                             .whenComplete((resultPayload, ex) -> {
                                 if (ex == null) {
-                                    sendResponse(conn, command, requestId, resultPayload, null);
+                                    sendResponse(conn, COMMAND, REQUEST_ID, resultPayload, null);
                                 } else {
                                     // Unwrap common exception types
                                     Throwable cause = ex;
@@ -1159,16 +1162,16 @@ public class Cog {
                                         errorCode = "TIMEOUT";
                                         errorMessage = "Command execution timed out.";
                                     } else if (cause instanceof Tool.ToolExecutionException) {
-                                         errorCode = "TOOL_EXECUTION_ERROR";
+                                        errorCode = "TOOL_EXECUTION_ERROR";
                                     }
                                     // Add more specific error code mappings if needed
 
-                                    System.err.println("Error handling command '" + command + "' from " + conn.getRemoteSocketAddress() + ": " + errorMessage);
+                                    System.err.println("Error handling command '" + COMMAND + "' from " + conn.getRemoteSocketAddress() + ": " + errorMessage);
                                     if (!(cause instanceof IllegalArgumentException || cause instanceof Tool.ToolExecutionException)) { // Don't print stack trace for expected validation errors
-                                         cause.printStackTrace();
+                                        cause.printStackTrace();
                                     }
 
-                                    sendResponse(conn, command, requestId, null, new JSONObject().put("message", errorMessage).put("code", errorCode));
+                                    sendResponse(conn, COMMAND, REQUEST_ID, null, new JSONObject().put("message", errorMessage).put("code", errorCode));
                                 }
                             });
 

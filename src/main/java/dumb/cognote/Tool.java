@@ -31,4 +31,10 @@ public interface Tool {
      * The type of the result depends on the tool (e.g., String, List, Void).
      */
     CompletableFuture<?> execute(Map<String, Object> parameters);
+
+    class ToolExecutionException extends RuntimeException {
+        public ToolExecutionException(String msg) {
+            super(msg);
+        }
+    }
 }

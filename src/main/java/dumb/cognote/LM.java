@@ -118,8 +118,8 @@ public class LM {
         taskFuture.whenComplete((result, error) -> {
             activeLlmTasks.remove(taskId);
             if (error != null) {
-                 var cause = (error instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : error;
-                 cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage());
+                var cause = (error instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : error;
+                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage());
             }
             // Success status is already set inside the supplyAsync block
         });

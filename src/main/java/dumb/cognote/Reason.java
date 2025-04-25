@@ -616,7 +616,7 @@ public class Reason {
             var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
             var renamedForm = (Term.Lst) Unifier.subst(rule.form(),
                     rule.form().vars().stream().collect(
-                        Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix))));
+                            Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix))));
             try {
                 return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId()); // Pass sourceNoteId
             } catch (IllegalArgumentException e) {

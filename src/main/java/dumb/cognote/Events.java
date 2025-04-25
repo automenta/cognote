@@ -45,6 +45,10 @@ public class Events {
         listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
     }
 
+    public <T extends Cog.CogEvent> boolean off(Class<T> eventType, Consumer<T> listener) {
+        return listeners.remove(eventType, listener);
+    }
+
     public void on(Term pattern, BiConsumer<Cog.CogEvent, Map<Term.Var, Term>> listener) {
         patternListeners.computeIfAbsent(pattern, k -> new CopyOnWriteArrayList<>()).add(listener);
     }
@@ -78,4 +82,5 @@ public class Events {
         listeners.clear();
         patternListeners.clear();
     }
+
 }

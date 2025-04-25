@@ -1,12 +1,5 @@
-----
-
 • Structured Error Handling: Implement a more robust error handling mechanism beyond printing to System.err and
 returning strings.
-
-• Refine LLM Integration: The pattern of blocking the @Tool method to call the async execute and join() seems necessary
-for LangChain4j but could
-be wrapped or abstracted further if possible. The boilerplate for managing activeLlmTasks could potentially be
-centralized.
 
 # Semantic Matching
 
@@ -86,18 +79,8 @@ implementations.
 • Handling of Anonymous Variables (_): The current KifVar requires names starting with ?. Prolog's _ is special; each
 instance is unique   
 and doesn't bind to other variables or terms. The parser and unifier would need to handle
-this.                                          
-2 Negation as Failure (
-NAF):                                                                                                                     
-• Current State: The system handles explicit negation ((not ...)) as a term within KIF, and the TMS can detect
-contradictions between P and   
-(not
-P).                                                                                                                                    
-• Needed for Powerful Prolog: NAF is the mechanism where not(Goal) succeeds if Goal fails to be proven. This requires
-implementing a          
-failure-driven loop mechanism within the backward chainer. This is distinct from handling explicit (not ...) terms as
-facts or rule         
-components.                                                                                                                                 
+this.
+
 3 Comprehensive Set of Built-in
 Predicates:                                                                                                      
 • Current State: A few basic arithmetic and comparison operators (+, -, *, /, <, >, <=, >=) are implemented via
@@ -239,7 +222,7 @@ KIF/rules into a lower-level instruction set (like WAM) would be necessary for h
       changes (thoughts_delta, rules_delta) to connected clients.
     • Cognote: Has a basic MyWebSocketServer that primarily accepts raw KIF input and a few simple commands (retract, query). Broadcasting is
       limited to basic assertion/LLM events as simple strings.
-    • Applicability: Adopting a more structured API design in Cognote, similar to FlowMind's, would greatly improve its usability for external
+    • Applicability: Adopting a more structured API design would greatly improve its usability for external
       clients (like the provided REPL client or a potential web UI). Using JSON messages with command/response/event types and broadcasting state
       deltas would make building interactive clients much easier.
 
@@ -567,6 +550,7 @@ Here are some concrete ideas and steps to evolve Cognote into an awesome self-pr
    For instance, you can refactor the LLM interaction with a self-reflective module:
 
    ```java name=LLMReflector.java
+
 package dumb.cognote;
 
 import java.util.List;
@@ -588,7 +572,9 @@ public class LLMReflector {
         return lm.llmAsync(taskId, history, "Self-Reflection", "")
                 .thenApply(aiMessage -> "LLM Suggestion: " + aiMessage.getContent());
     }
+
 }
+
 ```
 
 5. Strengthen Security and Reliability  

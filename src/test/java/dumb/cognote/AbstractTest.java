@@ -1,7 +1,7 @@
 package dumb.cognote;
 
-import dumb.cognote.Logic.AssertionType;
 import dumb.cognote.KifParser.ParseException;
+import dumb.cognote.Logic.AssertionType;
 import dumb.cognote.Logic.RetractionType;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -11,13 +11,11 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.KIF_OP_NOT;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
@@ -27,9 +25,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 abstract class AbstractTest {
 
     // Timeout for individual actions within a test
-    private static final long TEST_ACTION_TIMEOUT_SECONDS = 30;
+    private static final long TEST_ACTION_TIMEOUT_SECONDS = 5;
     // Default timeouts for the 'wait' action
-    private static final long TEST_WAIT_DEFAULT_TIMEOUT_SECONDS = 30;
+    private static final long TEST_WAIT_DEFAULT_TIMEOUT_SECONDS = 5;
     private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100;
     // Pattern to extract line/column from KIF ParseException messages (for reporting)
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
