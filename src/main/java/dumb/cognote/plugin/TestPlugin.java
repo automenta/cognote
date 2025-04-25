@@ -17,24 +17,39 @@ import java.util.stream.Stream;
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.*;
 
+/**
+ * Plugin for defining and running tests written in a KIF-like format.
+ * Tests are defined in a specific note (TEST_DEFINITIONS_NOTE_ID).
+ * Results are written to another note (TEST_RESULTS_NOTE_ID).
+ * Each test runs in an isolated, temporary Knowledge Base.
+ */
 public class TestPlugin extends Plugin.BasePlugin {
 
     private static final String TEST_KB_PREFIX = "test-kb-";
+    // Timeout for individual actions within a test
     private static final long TEST_ACTION_TIMEOUT_SECONDS = 30;
+    // Default timeouts for the 'wait' action
     private static final long TEST_WAIT_DEFAULT_TIMEOUT_SECONDS = 30;
     private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100;
+    // Pattern to extract line/column from KIF ParseException messages
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
 
     @Override
     public void start(Events ev, Logic.Cognition ctx) {
         super.start(ev, ctx);
+        // Register handler for the event that triggers a test run
         ev.on(RunTestsEvent.class, this::handleRunTests);
     }
 
+    /**
+     * Handles the RunTestsEvent, orchestrating the entire test execution process.
+     * This is the entry point for starting a test run.
+     */
     private void handleRunTests(RunTestsEvent event) {
         cog().status("Running Tests...");
         System.out.println("TestPlugin: Starting test run..."); // Keep this log
 
+        // 1. Load test definitions from the designated note
         var testDefinitionsNote = cog().note(TEST_DEFINITIONS_NOTE_ID);
         if (testDefinitionsNote.isEmpty()) {
             String errorMsg = "Error: Test Definitions note not found.";
@@ -49,9 +64,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         var testDefinitionsText = testDefinitionsNote.get().text;
         List<TestDefinition> tests;
         try {
+            // 2. Parse the test definitions text into a list of TestDefinition objects
             tests = parseTestDefinitions(testDefinitionsText);
-            // System.out.println("TestPlugin: Parsed " + tests.size() + " tests."); // Remove verbose log
         } catch (ParseException e) {
+            // Handle fatal parsing errors in the overall test definitions structure
             String enhancedErrorMessage = formatParseException(e, testDefinitionsText);
             String errorMsg = "Error parsing test definitions:\n" + enhancedErrorMessage;
             System.err.println("TestPlugin: " + errorMsg); // Keep this error log
@@ -72,7 +88,8 @@ public class TestPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        List<TestResult> results = new ArrayList<>(); // Use regular list, populated sequentially
+        // 3. Run each test sequentially using CompletableFuture chaining
+        List<TestResult> results = new ArrayList<>();
         CompletableFuture<Void> allTestsFuture = CompletableFuture.completedFuture(null);
 
         for (var test : tests) {
@@ -80,6 +97,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             allTestsFuture = allTestsFuture.thenComposeAsync(v ->
                     runTest(test)
                             .exceptionally(ex -> {
+                                // Catch unexpected errors that might occur *during* the test's future chain
                                 var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                                 System.err.println("TestPlugin: Error during test '" + test.name + "' execution chain: " + cause.getMessage()); // Keep this error log
                                 cause.printStackTrace(); // Keep stack trace for unexpected errors
@@ -96,11 +114,11 @@ public class TestPlugin extends Plugin.BasePlugin {
             );
         }
 
-        // This block runs when all individual test futures have completed (either successfully or exceptionally)
+        // 4. When all tests are complete, format and update the results note
         allTestsFuture.whenCompleteAsync((v, ex) -> { // Explicitly on event executor
-            // System.out.println("TestPlugin: All test futures completed. Formatting results..."); // Remove verbose log
             String finalResultsText;
             if (ex != null) {
+                // Handle errors that occur *after* all individual test futures have completed
                 System.err.println("TestPlugin: Unhandled error after all tests futures completed: " + ex.getMessage()); // Keep this error log
                 ex.printStackTrace(); // Keep stack trace for unexpected errors
                 // If the overall chain fails *after* tests have produced results, append the error
@@ -121,22 +139,30 @@ public class TestPlugin extends Plugin.BasePlugin {
         }, cog().events.exe); // Run on the event executor
     }
 
+    /**
+     * Runs a single test definition.
+     * Creates a temporary KB, executes setup, action, expected, and teardown stages.
+     * Captures KB state after the action stage for reporting.
+     * Cleans up the temporary KB afterwards.
+     */
     private CompletableFuture<TestResult> runTest(TestDefinition test) {
         var testKbId = Cog.id(TEST_KB_PREFIX);
-        List<ActionError> actionErrors = new ArrayList<>(); // Use regular list, populated sequentially
+        List<ActionError> actionErrors = new ArrayList<>(); // Collect action execution errors for this test
 
+        // Create and activate a temporary KB for this test
         var testNote = new Note(testKbId, "Test KB: " + test.name, "", Note.Status.IDLE);
         // TODO: Decouple from CogNote - need a generic way to manage temporary KBs/Notes
         ((CogNote) cog()).addNote(testNote);
         context.addActiveNote(testKbId);
 
+        // 1. Execute Setup actions
         CompletableFuture<Object> setupFuture = executeActionList(test, testKbId, test.setup, actionErrors, "Setup")
                 .exceptionally(ex -> {
                     // Error is already captured in actionErrors list by executeActionList
-                    // System.err.println("TestPlugin: Setup stage failed for test '" + test.name + "'. Skipping Action and Expectations."); // Remove verbose log
                     return null; // Allow action/expectations to potentially run or fail gracefully
                 });
 
+        // 2. Execute Action actions (depends on Setup completing)
         CompletableFuture<Object> actionFuture = setupFuture.thenComposeAsync(setupResult -> { // Ensure action stage starts on event executor
             if (!actionErrors.isEmpty()) {
                 return CompletableFuture.completedFuture(null); // Skip action if setup failed
@@ -144,12 +170,11 @@ public class TestPlugin extends Plugin.BasePlugin {
             return executeActionList(test, testKbId, test.action, actionErrors, "Action")
                     .exceptionally(ex -> {
                         // Error is already captured in actionErrors list by executeActionList
-                        // System.err.println("TestPlugin: Action stage failed for test '" + test.name + "'. Skipping Expectations."); // Remove verbose log
                         return null; // Allow expectations/teardown to potentially run
                     });
         }, cog().events.exe); // Schedule action stage on event executor
 
-        // Capture KB state *after* action phase completes, but before expectations/teardown
+        // 3. Capture KB state *after* action phase completes, but before expectations/teardown
         CompletableFuture<List<Assertion>> kbStateFuture = actionFuture.thenApplyAsync(result -> {
             if (!actionErrors.isEmpty()) {
                 return Collections.emptyList(); // Don't capture state if action failed
@@ -168,6 +193,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         }, cog().events.exe); // Capture KB state on event executor
 
 
+        // 4. Check Expectations (depends on Action completing and KB state being captured)
         CompletableFuture<List<ExpectationResult>> expectationsFuture = CompletableFuture.allOf(actionFuture, kbStateFuture)
             .thenComposeAsync(v -> { // Ensure expectations stage starts on event executor after action and state capture
                 Object finalActionResult = actionFuture.join(); // Get result from actionFuture
@@ -178,6 +204,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             }, cog().events.exe); // Schedule expectations stage on event executor
 
 
+        // 5. Execute Teardown actions (depends on Expectations completing)
         CompletableFuture<TestResult> c = CompletableFuture.allOf(expectationsFuture, kbStateFuture)
             .thenComposeAsync(v -> { // Ensure teardown stage starts on event executor after expectations and state capture
                 List<ExpectationResult> expectationResults = expectationsFuture.join(); // Get results from expectationsFuture
@@ -186,7 +213,6 @@ public class TestPlugin extends Plugin.BasePlugin {
                 return executeActionList(test, testKbId, test.teardown, actionErrors, "Teardown")
                     .exceptionally(ex -> {
                         // Error is already captured in actionErrors list by executeActionList
-                        // System.err.println("TestPlugin: Teardown stage failed for test '" + test.name + "'."); // Remove verbose log
                         return null; // Teardown failure shouldn't fail the test itself, but should be reported
                     })
                     // Pass parsing errors, expectation results, action errors, and KB state to the TestResult
@@ -197,21 +223,22 @@ public class TestPlugin extends Plugin.BasePlugin {
                 context.removeActiveNote(testKbId);
                 // TODO: Decouple from CogNote
                 ((CogNote) cog()).removeNote(testKbId);
-                // System.out.println("TestPlugin: Test '" + test.name + "' cleanup complete."); // Remove verbose log
             }, cog().events.exe); // Explicitly on event executor
-
-        // System.out.println("TestPlugin: Test '" + test.name + "' run future created."); // Remove verbose log
 
         return c;
     }
 
-    // Modified to accept actionErrors list and actionType context
+    /**
+     * Executes a list of actions sequentially.
+     * Catches exceptions from individual actions and adds them to the actionErrors list.
+     */
     private CompletableFuture<Object> executeActionList(TestDefinition test, String testKbId, List<TestAction> actions, List<ActionError> actionErrors, String actionStageType) {
         CompletableFuture<Object> future = CompletableFuture.completedFuture(null);
         for (var action : actions) {
             // Chain actions sequentially, ensuring each runs on the event executor
             future = future.thenComposeAsync(v -> executeSingleAction(test, testKbId, action)
                     .exceptionally(ex -> {
+                        // Catch exceptions from executeSingleAction (including timeouts)
                         var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                         // Capture error with action type context and the action itself
                         actionErrors.add(new ActionError(action, actionStageType + " failed: " + cause.getMessage()));
@@ -224,29 +251,29 @@ public class TestPlugin extends Plugin.BasePlugin {
         return future;
     }
 
+    /**
+     * Executes a single action with a timeout.
+     */
     private CompletableFuture<Object> executeSingleAction(TestDefinition test, String testKbId, TestAction action) {
-        // Execute the action logic. If it returns a completed future, the next stage
-        // will be scheduled on the executor provided to thenComposeAsync in executeActionList.
-        // If it returns an async future (like from supplyAsync or a tool), the continuation
-        // will run on the executor that completes that future (which we try to ensure is cog().events.exe).
+        // Execute the action logic. This might return a completed or an asynchronous future.
         CompletableFuture<Object> actionFuture = executeActionLogic(test, testKbId, action);
 
-        // Apply timeout and exception handling. Note: The exception handling is now primarily
-        // done in executeActionList's exceptionally block to capture the specific action.
-        // This block primarily handles the timeout wrapping.
+        // Apply timeout. Exceptions (including TimeoutException) are caught in executeActionList.
         return actionFuture.orTimeout(TEST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                     if (cause instanceof TimeoutException) {
-                        // Include action type in timeout message
+                        // Wrap timeout exception with action type context
                         throw new CompletionException(new TimeoutException("Action '" + action.type + "' timed out after " + TEST_ACTION_TIMEOUT_SECONDS + " seconds."));
                     }
                     // Re-throw other exceptions to be caught by the executeActionList exceptionally block
                     throw new CompletionException(cause);
                 });
-                // Note: No explicit thenApplyAsync here, as the executor is handled by the chaining in executeActionList
     }
 
+    /**
+     * Dispatches action execution to the appropriate handler based on action type.
+     */
     private CompletableFuture<Object> executeActionLogic(TestDefinition test, String testKbId, TestAction action) {
         try {
             return switch (action.type) {
@@ -256,14 +283,16 @@ public class TestPlugin extends Plugin.BasePlugin {
                 case "retract" -> CompletableFuture.completedFuture(executeRetractAction(test, testKbId, action));
                 case "runTool" -> executeRunToolAction(test, testKbId, action); // This might return an async future
                 case "query" -> CompletableFuture.completedFuture(executeQueryAction(test, testKbId, action));
-                case "wait" -> executeWaitAction(test, testKbId, action); // This uses supplyAsync
+                case "wait" -> executeWaitAction(test, testKbId, action); // This uses supplyAsync for polling
                 default -> CompletableFuture.failedFuture(new IllegalArgumentException("Unknown action type: " + action.type));
             };
         } catch (Exception e) {
-            // Wrap immediate exceptions from action logic setup
+            // Wrap immediate exceptions from action logic setup (e.g., invalid arguments before async execution starts)
             return CompletableFuture.failedFuture(new RuntimeException("Action '" + action.type + "' setup failed: " + e.getMessage(), e));
         }
     }
+
+    // --- Specific Action Execution Implementations ---
 
     private Object executeAssertAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst list))
@@ -365,6 +394,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         return cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams));
     }
 
+    /**
+     * Executes the 'wait' action, polling for a condition to be met in the KB.
+     * Runs asynchronously using supplyAsync to avoid blocking the event loop during polling.
+     */
     private CompletableFuture<Object> executeWaitAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst conditionList)) {
             throw new IllegalArgumentException("Invalid payload for wait: Expected condition list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
@@ -428,11 +461,18 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
 
+    /**
+     * Checks if an assertion exists in the test KB or the global KB.
+     */
     private Optional<Assertion> findAssertionInTestOrGlobalKb(Term.Lst kif, String testKbId) {
         // TODO: Adjust based on KB-scoped rules/assertions
         return context.findAssertionByKif(kif, testKbId).or(() -> context.findAssertionByKif(kif, context.kbGlobal().id));
     }
 
+    /**
+     * Checks a list of expectations against the test KB state or the action result.
+     * Runs sequentially on the event executor.
+     */
     private CompletableFuture<List<ExpectationResult>> checkExpectations(List<TestExpected> expectations, String testKbId, @Nullable Object actionResult) {
         List<ExpectationResult> results = new ArrayList<>(); // Use regular list, populated sequentially
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
@@ -447,6 +487,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         return future.thenApply(v -> results); // Return the list of results
     }
 
+    /**
+     * Checks a single expectation.
+     * Runs on the event executor.
+     */
     private CompletableFuture<ExpectationResult> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
         // Use supplyAsync to run the check logic on the event executor
         return CompletableFuture.supplyAsync(() -> {
@@ -459,6 +503,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     default -> false;
                 };
 
+                // If the expectation requires checking the action result (like query results or tool output)
                 if (requiresAnswer) {
                     if (!(actionResult instanceof Cog.Answer queryAnswer)) {
                         String reason = "Requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName());
@@ -469,6 +514,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     answer = queryAnswer;
                 }
 
+                // Perform the specific expectation check
                 Optional<String> failureReason = switch (expected.type) {
                     case "expectedResult" -> checkExpectedResult(expected, answer);
                     case "expectedBindings" -> checkExpectedBindings(expected, answer);
@@ -502,6 +548,7 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
     // --- Expectation Check Implementations (Modified to return Optional<String>) ---
+    // These methods implement the specific logic for each expectation type.
 
     private Optional<String> checkExpectedResult(TestExpected expected, Cog.Answer answer) {
         if (!(expected.value instanceof Boolean expectedBoolean)) {
@@ -526,11 +573,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         if (expectedBindingsList.isEmpty()) {
             boolean passed = actualBindings.isEmpty();
             if (!passed) {
-                // System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got non-empty."); // Remove verbose log
-                // System.err.println("TestPlugin DEBUG: Actual bindings: " + actualBindings); // Remove verbose log
                 return Optional.of("Expected no bindings, but got " + actualBindings.size() + " bindings.");
             }
-            // System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected empty, got empty. Passed."); // Remove verbose log
             return Optional.empty();
         }
 
@@ -562,12 +606,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
 
         if (!passed) {
-            // System.err.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got different."); // Remove verbose log
-            // System.err.println("TestPlugin DEBUG: Expected binding strings: " + expectedBindingStrings); // Remove verbose log
-            // System.err.println("TestPlugin DEBUG: Actual binding strings: " + actualBindingStrings); // Remove verbose log
             return Optional.of("Expected bindings " + expectedBindingStrings + ", but got " + actualBindingStrings);
         }
-        // System.out.println("TestPlugin DEBUG: checkExpectedBindings - Expected specific, got match. Passed."); // Remove verbose log
         return Optional.empty();
     }
 
@@ -652,13 +692,21 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
 
-    // --- Parsing Logic (Modified to collect errors) ---
+    // --- Parsing Logic ---
+    // These methods parse the KIF structure of the test definitions note.
+    // They include validation and collect parsing errors per test.
 
+    /**
+     * Parses the entire test definitions text.
+     * Collects top-level terms and attempts to parse 'test' lists.
+     * Skips malformed top-level terms but reports errors for malformed 'test' lists.
+     */
     private List<TestDefinition> parseTestDefinitions(String text) throws ParseException {
         List<TestDefinition> definitions = new ArrayList<>();
         if (text == null || text.isBlank()) return definitions;
 
         for (var term : Logic.KifParser.parseKif(text)) {
+            // Look for top-level lists starting with 'test'
             if (term instanceof Term.Lst list && list.size() >= 2 && list.op().filter("test"::equals).isPresent()) {
                 var nameTerm = list.get(1);
                 String name;
@@ -683,8 +731,9 @@ public class TestPlugin extends Plugin.BasePlugin {
                 List<TestAction> action = new ArrayList<>();
                 List<TestExpected> expected = new ArrayList<>();
                 List<TestAction> teardown = new ArrayList<>();
-                List<String> parsingErrors = new ArrayList<>(); // Collect errors for this test
+                List<String> parsingErrors = new ArrayList<>(); // Collect errors specific to this test definition
 
+                // Parse sections within the test definition
                 for (var i = 2; i < list.size(); i++) {
                     var sectionTerm = list.get(i);
                     if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
@@ -724,19 +773,25 @@ public class TestPlugin extends Plugin.BasePlugin {
                     }
                 }
 
-                if (action.isEmpty() && parsingErrors.isEmpty()) { // Only skip if no action AND no parsing errors in other sections
+                // A test must have an action section to be runnable, unless there were parsing errors we need to report.
+                if (action.isEmpty() && parsingErrors.isEmpty()) {
                      System.err.println("TestPlugin: Skipping test '" + name + "' because the 'action' section is missing or empty."); // Keep this log
                      continue; // Skip tests with no action section unless there were parsing errors we need to report
                 }
 
                 definitions.add(new TestDefinition(name, setup, action, expected, teardown, parsingErrors));
             } else {
+                // Ignore non-test top-level terms gracefully
                 // System.out.println("TestPlugin: Ignoring non-test top-level term in definitions: " + term.toKif()); // Remove verbose log
             }
         }
         return definitions;
     }
 
+    /**
+     * Parses a list of terms expected to be actions.
+     * Collects parsing errors for individual action terms.
+     */
     private List<TestAction> parseActions(List<Term> terms, List<String> errors) {
         List<TestAction> actions = new ArrayList<>();
         for (var term : terms) {
@@ -757,6 +812,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         return actions;
     }
 
+    /**
+     * Parses a single term expected to be an action.
+     * Dispatches to specific action parsing methods.
+     */
     private TestAction parseAction(Term x) {
         if (!(x instanceof Term.Lst actionList) || actionList.terms.isEmpty()) {
             throw new IllegalArgumentException("Action must be a non-empty list.");
@@ -778,6 +837,9 @@ public class TestPlugin extends Plugin.BasePlugin {
             default -> throw new IllegalArgumentException("Unknown action operator: " + op + ". Term: " + actionList.toKif());
         };
     }
+
+    // --- Specific Action Parsing Implementations ---
+    // These methods validate the structure and arguments for each specific action type.
 
     private TestAction parseAssertAction(Term.Lst actionList) {
         if (actionList.size() != 2)
@@ -935,6 +997,10 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
 
+    /**
+     * Parses a list of terms expected to be expectations.
+     * Collects parsing errors for individual expectation terms.
+     */
     private List<TestExpected> parseExpectations(List<Term> terms, List<String> errors) {
         List<TestExpected> expectations = new ArrayList<>();
         for (var term : terms) {
@@ -955,6 +1021,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         return expectations;
     }
 
+    /**
+     * Parses a single term expected to be an expectation.
+     * Dispatches to specific expectation parsing methods.
+     */
     private TestExpected parseExpectation(Term term) {
         if (!(term instanceof Term.Lst expectedList) || expectedList.terms.isEmpty()) {
             throw new IllegalArgumentException("Expectation must be a non-empty list. Term: " + term.toKif());
@@ -983,6 +1053,9 @@ public class TestPlugin extends Plugin.BasePlugin {
             default -> throw new IllegalArgumentException("Unknown expectation operator: " + op + ". Term: " + expectedList.toKif());
         };
     }
+
+    // --- Specific Expectation Parsing Implementations ---
+    // These methods validate the structure and arguments for each specific expectation type.
 
     private TestExpected parseExpectedResult(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom))
@@ -1062,7 +1135,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         return new TestExpected(op, termToObject(expectedValueTerm));
     }
 
-
+    /**
+     * Parses a parameter list of the form (params (key1 value1) (key2 value2) ...).
+     */
     private Map<String, Object> parseParams(Term.Lst paramsList) {
         Map<String, Object> params = new HashMap<>();
         if (paramsList.op().filter("params"::equals).isEmpty()) {
@@ -1079,6 +1154,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         return params;
     }
 
+    /**
+     * Converts a KIF Term to a corresponding Java Object (String, Integer, Double, Boolean, Term.Lst, Term.Var).
+     */
     private Object termToObject(Term term) {
         return switch (term) {
             case Term.Atom atom -> {
@@ -1099,6 +1177,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         };
     }
 
+    /**
+     * Converts a value (potentially a Term) to a String representation for reporting.
+     */
     private String termValueToString(Object value) {
         if (value instanceof Term term) {
             return term.toKif();
@@ -1106,6 +1187,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         return String.valueOf(value);
     }
 
+    /**
+     * Formats a KIF ParseException to include line and column context.
+     */
     private String formatParseException(ParseException e, String sourceText) {
         String message = e.getMessage();
         Matcher matcher = PARSE_ERROR_LOCATION_PATTERN.matcher(message);
@@ -1143,6 +1227,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         return sb.toString();
     }
 
+    /**
+     * Formats the list of test results into a human-readable string for the results note.
+     */
     private String formatTestResults(List<TestResult> results) {
         var sb = new StringBuilder();
         sb.append("--- Test Results (").append(java.time.LocalDateTime.now()).append(") ---\n\n");
@@ -1153,17 +1240,18 @@ public class TestPlugin extends Plugin.BasePlugin {
             boolean overallPassed = result.isOverallPassed(); // Use the helper method
             sb.append(overallPassed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
 
-            if (!result.parsingErrors().isEmpty()) { // Report parsing errors first
+            // Report parsing errors if any occurred for this test definition
+            if (!result.parsingErrors().isEmpty()) {
                 sb.append("  Parsing Errors:\n");
                 result.parsingErrors().forEach(error -> sb.append("    - ").append(error).append("\n"));
             }
 
+            // Report action execution errors if any occurred
             if (!result.actionErrors.isEmpty()) {
                 sb.append("  Action Errors:\n");
-                // Iterate through ActionError objects
                 result.actionErrors.forEach(error -> {
                     sb.append("    - [").append(error.action().type()).append("] ").append(error.message()).append("\n");
-                    // Only show payload/params if they exist
+                    // Show the action details that caused the error
                     if (error.action().payload() != null) {
                          sb.append("      Payload: ").append(error.action().payload().toKif()).append("\n");
                     }
@@ -1173,27 +1261,26 @@ public class TestPlugin extends Plugin.BasePlugin {
                 });
             }
 
+            // Report expectation results
             if (!result.expectationResults.isEmpty()) {
                  sb.append("  Expectations:\n");
                  for (var expResult : result.expectationResults) {
                      sb.append("    ").append(expResult.passed ? "PASS" : "FAIL").append(": ").append(expResult.expected.type()).append(" ").append(termValueToString(expResult.expected().value())); // Use helper for value
-                     if (!expResult.passed()) { // Use getter
-                         sb.append(" (Reason: ").append(expResult.failureReason()).append(")"); // Use getter
+                     if (!expResult.passed()) { // If expectation failed
+                         sb.append(" (Reason: ").append(expResult.failureReason()).append(")"); // Show failure reason
                          // If the expectation failed and it checked an action result, show the actual result
                          if (expResult.actionResult() != null && (expResult.expected().type().equals("expectedResult") || expResult.expected().type().equals("expectedBindings") || expResult.expected().type().equals("expectedToolResult") || expResult.expected().type().equals("expectedToolResultContains"))) {
                              sb.append(" (Actual: ").append(termValueToString(expResult.actionResult())).append(")");
-                         } else if (expResult.actionResult() != null) {
-                             // Optionally show actual result for other failed expectations if it exists, even if not directly compared
-                             // sb.append(" (Action Result: ").append(termValueToString(expResult.actionResult())).append(")");
                          }
                      }
                      sb.append("\n");
                  }
             } else if (result.parsingErrors().isEmpty() && result.actionErrors.isEmpty()) {
+                 // Only report missing expectations if there were no parsing or action errors
                  sb.append("  No expectations defined.\n");
             }
 
-            // Report final KB state for failed tests
+            // Report final KB state for failed tests to aid debugging
             if (!overallPassed && !result.finalKbState().isEmpty()) {
                 sb.append("  Final Test KB State:\n");
                 result.finalKbState().forEach(assertion -> sb.append("    - ").append(assertion.kif().toKif()).append("\n"));
@@ -1217,6 +1304,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         return sb.toString();
     }
 
+    /**
+     * Updates the content of the test results note.
+     */
     private void updateTestResults(String resultsText) {
         cog().note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
             note.text = resultsText;
@@ -1226,37 +1316,45 @@ public class TestPlugin extends Plugin.BasePlugin {
         });
     }
 
-    // Modified record to include parsing errors
+    // --- Data Records ---
+    // These records hold the structured data for tests and results.
+
+    /** Represents a single test definition parsed from the note. */
     private record TestDefinition(String name, List<TestAction> setup, List<TestAction> action, List<TestExpected> expected,
                                   List<TestAction> teardown, List<String> parsingErrors) {
     }
 
+    /** Represents a single action within a test section. */
     private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {
     }
 
+    /** Represents a single expectation within the 'expected' section. */
     private record TestExpected(String type, Object value) {
     }
 
-    // Modified record for detailed expectation results to include actionResult
+    /** Represents the result of checking a single expectation. */
     private record ExpectationResult(TestExpected expected, boolean passed, @Nullable String failureReason, @Nullable Object actionResult) {
     }
 
-    // Modified record for action errors to include the action itself
+    /** Represents an error that occurred during action execution. */
     private record ActionError(TestAction action, String message) {}
 
 
-    // Modified record for overall test result to include finalKbState
+    /** Represents the overall result of running a single test. */
     private record TestResult(String name, List<String> parsingErrors, List<ExpectationResult> expectationResults, List<ActionError> actionErrors, List<Assertion> finalKbState) { // Added finalKbState
-        // Helper to determine overall pass/fail status
+        /** Determines if the test passed overall (no parsing errors, no action errors, all expectations passed). */
         public boolean isOverallPassed() {
             return parsingErrors.isEmpty() && expectationResults.stream().allMatch(ExpectationResult::passed) && actionErrors.isEmpty();
         }
     }
 
+    // --- Events ---
+
+    /** Event to trigger a test run. */
     public record RunTestsEvent() implements CogEvent {
     }
 
-    // New event to signal test run completion with results
+    /** Event signaling the completion of a test run, containing the formatted results. */
     public record TestRunCompleteEvent(String resultsText) implements CogEvent {
     }
 }
