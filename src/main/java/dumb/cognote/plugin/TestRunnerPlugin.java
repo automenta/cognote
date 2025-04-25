@@ -268,6 +268,24 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
     private CompletableFuture<Boolean> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
         System.out.println("    Checking expectation: " + expected.type + "...");
         var ctx = cog().context;
+
+        // Check if the expectation type requires actionResult to be a Query Answer
+        boolean requiresAnswer = switch (expected.type) {
+            case "expectedResult", "expectedBindings" -> true;
+            default -> false;
+        };
+
+        Cog.Answer answer = null;
+        if (requiresAnswer) {
+            if (!(actionResult instanceof Cog.Answer queryAnswer)) {
+                // If an Answer is required but actionResult is not one, the expectation fails immediately
+                System.err.println("    Expectation '" + expected.type + "' requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
+                return CompletableFuture.completedFuture(false);
+            }
+            answer = queryAnswer; // Assign the casted result to the 'answer' variable
+        }
+
+
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var kb = context.kb(testKbId);
@@ -277,8 +295,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                     case "expectedResult" -> {
                         if (!(expected.value instanceof Boolean expectedBoolean))
                             throw new IllegalArgumentException("expectedResult requires a boolean value.");
-                        if (!(actionResult instanceof Cog.Answer answer))
-                            throw new IllegalArgumentException("expectedResult requires the action to be a query.");
+                        // 'answer' is now guaranteed to be a Cog.Answer here due to the check before the switch
                         yield expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
                     }
                     case "expectedBindings" -> {
@@ -286,11 +303,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                         if (!(expected.value instanceof Term.Lst expectedBindingsListTerm))
                             throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
 
-                        // Ensure the action result is a Query Answer
-                        if (!(actionResult instanceof Cog.Answer answer))
-                            throw new IllegalArgumentException("expectedBindings requires the action to be a query.");
-
-
+                        // 'answer' is now guaranteed to be a Cog.Answer here
                         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
                         // Iterate through the terms *inside* the list of binding pairs
                         for (var bindingPairTerm : expectedBindingsListTerm.terms) {
@@ -302,7 +315,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             }
                         }
 
-                        List<Map<Term.Var, Term>> actualBindings = answer.bindings();
+                        List<Map<Term.Var, Term>> actualBindings = answer.bindings(); // 'answer' is now in scope
 
                         // Simple comparison: check if the lists of bindings are equal (order matters for now)
                         yield Objects.equals(expectedBindings, actualBindings);
@@ -532,63 +545,55 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
         }
         var op = opOpt.get();
 
+        // The value of the expectation is the term immediately following the operator
+        if (expectedList.size() < 2) {
+             throw new IllegalArgumentException("Expectation '" + op + "' requires at least one argument.");
+        }
+        Term expectedValueTerm = expectedList.get(1);
+
+
         return switch (op) {
             case "expectedResult" -> {
-                if (!(expectedList.value instanceof Boolean expectedBoolean))
-                    throw new IllegalArgumentException("expectedResult requires a boolean value.");
-                if (!(actionResult instanceof Cog.Answer answer))
-                    throw new IllegalArgumentException("expectedResult requires the action to be a query.");
-                yield new TestExpected(op, expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS));
+                if (!(expectedValueTerm instanceof Term.Atom(String value)))
+                    throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
+                if (!value.equals("true") && !value.equals("false"))
+                    throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
+                yield new TestExpected(op, Boolean.parseBoolean(value));
             }
             case "expectedBindings" -> {
                 // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings ())
-                if (!(expectedList.value instanceof Term.Lst expectedBindingsListTerm))
-                    throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
-
-                // Ensure the action result is a Query Answer
-                if (!(actionResult instanceof Cog.Answer answer))
-                    throw new IllegalArgumentException("expectedBindings requires the action to be a query.");
-
-
-                List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
-                // Iterate through the terms *inside* the list of binding pairs
-                for (var bindingPairTerm : expectedBindingsListTerm.terms) {
-                     if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
-                                expectedBindings.add(Map.of(var, value));
-                            } else {
-                                // This error message is correct if the item *inside* the list is malformed.
-                                throw new IllegalArgumentException("Invalid binding pair format: Each item in the list must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
-                            }
-                        }
-
-                        List<Map<Term.Var, Term>> actualBindings = answer.bindings();
-
-                        // Simple comparison: check if the lists of bindings are equal (order matters for now)
-                        yield new TestExpected(op, Objects.equals(expectedBindings, actualBindings));
-                    }
-                    case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
-                        if (!(expectedList.value instanceof Term.Lst expectedKif))
-                            throw new IllegalArgumentException(op + " requires a KIF list.");
-                        yield new TestExpected(op, expectedKif);
-                    }
-                    case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
-                        if (!(expectedList.value instanceof Term.Lst expectedRuleForm))
-                            throw new IllegalArgumentException(op + " requires a rule KIF list.");
-                        yield new TestExpected(op, expectedRuleForm);
-                    }
-                    case "expectedKbSize" -> {
-                        if (!(expectedList.value instanceof Integer expectedSize))
-                            throw new IllegalArgumentException("expectedKbSize requires an integer value.");
-                        yield new TestExpected(op, expectedSize);
-                    }
-                    case "expectedToolResult" -> {
-                        if (expectedList.size() != 2)
-                            throw new IllegalArgumentException("expectedToolResult requires a single value argument.");
-                        // The expected value can be any Term
-                        yield new TestExpected(op, expectedList.get(1));
-                    }
-                    default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
-                };
+                // The value is the list of binding pairs ((?V1 Val1) ...) or ()
+                if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
+                     throw new IllegalArgumentException("expectedBindings requires a list of binding pairs ((?V1 Val1) ...) or (). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
+                }
+                // If checks pass, store the inner list as value
+                yield new TestExpected(op, expectedBindingsListTerm);
+            }
+            case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
+                if (!(expectedValueTerm instanceof Term.Lst kif))
+                    throw new IllegalArgumentException(op + " requires a single KIF list.");
+                yield new TestExpected(op, kif);
+            }
+            case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
+                if (!(expectedValueTerm instanceof Term.Lst ruleForm))
+                    throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+                yield new TestExpected(op, ruleForm);
+            }
+            case "expectedKbSize" -> {
+                if (!(expectedValueTerm instanceof Term.Atom(String value)))
+                    throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
+                try {
+                    yield new TestExpected(op, Integer.parseInt(value));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("expectedKbSize value must be an integer.");
+                }
+            }
+            case "expectedToolResult" -> {
+                // The expected value can be any Term
+                yield new TestExpected(op, expectedValueTerm);
+            }
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+        };
     }
 
     private Map<String, Object> parseParams(Term.Lst paramsList) {
