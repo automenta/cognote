@@ -122,149 +122,164 @@ public class TestPlugin extends Plugin.BasePlugin {
     private CompletableFuture<Object> executeActionLogic(TestDefinition test, String testKbId, TestAction action) {
         try {
             return switch (action.type) {
-                case "assert" -> {
-                    if (!(action.payload instanceof Term.Lst list))
-                        throw new IllegalArgumentException("Invalid payload for assert: " + action.payload);
-                    var isNeg = list.op().filter(KIF_OP_NOT::equals).isPresent();
-                    var s = list.size();
-                    if (isNeg && s != 2) throw new IllegalArgumentException("Invalid 'not' format for assert.");
-                    var isEq = !isNeg && list.op().filter(Logic.KIF_OP_EQUAL::equals).isPresent();
-                    var isOriented = isEq && s == 3 && list.get(1).weight() > list.get(2).weight();
-                    var type = list.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-                    var pri = INPUT_ASSERTION_BASE_PRIORITY / (1.0 + list.weight());
-                    var pa = new Assertion.PotentialAssertion(list, pri, Set.of(), testKbId, isEq, isNeg, isOriented, testKbId, type, List.of(), 0);
-
-                    var committed = context.tryCommit(pa, "test-runner:" + test.name);
-                    yield CompletableFuture.completedFuture(committed != null ? committed.id() : null);
-                }
-                case "addRule" -> {
-                    if (!(action.payload instanceof Term.Lst ruleForm))
-                        throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
-                    var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId);
-                    var added = context.addRule(r);
-                    yield CompletableFuture.completedFuture(added);
-                }
-                case "removeRuleForm" -> {
-                    if (!(action.payload instanceof Term.Lst ruleForm))
-                        throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
-                    var removed = context.removeRule(ruleForm);
-                    yield CompletableFuture.completedFuture(removed);
-                }
-                case "retract" -> {
-                    if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
-                        throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
-                    }
-                    var rtype = typeAtom.value();
-                    var target = retractTargetList.get(1);
-                    String targetStr;
-                    if (target instanceof Term.Atom atom) {
-                         targetStr = atom.value();
-                    } else if (target instanceof Term.Lst list) {
-                         targetStr = list.toKif();
-                    } else {
-                         throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
-                    }
-
-                    RetractionType retractionType;
-                    try {
-                        retractionType = RetractionType.valueOf(rtype.toUpperCase());
-                    } catch (IllegalArgumentException e) {
-                         throw new IllegalArgumentException("Invalid retraction type: " + rtype);
-                    }
-
-                    context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + test.name, testKbId));
-                    yield CompletableFuture.completedFuture(targetStr);
-                }
-                case "runTool" -> {
-                    var toolName = (String) action.toolParams.get("name");
-                    if (toolName == null || toolName.isBlank())
-                        throw new IllegalArgumentException("runTool requires 'name' parameter.");
-
-                    Map<String, Object> toolParams = new HashMap<>(action.toolParams);
-                    toolParams.remove("name");
-                    toolParams.putIfAbsent("target_kb_id", testKbId);
-                    toolParams.putIfAbsent("note_id", testKbId);
-
-                    var toolOpt = cog().tools.get(toolName);
-                    if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
-                    yield toolOpt.get().execute(toolParams).thenApply(r -> r);
-                }
-                case "query" -> {
-                    if (!(action.payload instanceof Term.Lst pattern))
-                        throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
-                    var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
-                    QueryType queryType;
-                    try {
-                        queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
-                    } catch (IllegalArgumentException e) {
-                        throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
-                    }
-                    yield CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams)));
-                }
-                case "wait" -> {
-                    if (!(action.payload instanceof Term.Lst conditionList)) {
-                        throw new IllegalArgumentException("Invalid payload for wait: Expected condition list.");
-                    }
-                    var conditionOpOpt = conditionList.op();
-                     if (conditionOpOpt.isEmpty()) {
-                         throw new IllegalArgumentException("Invalid wait condition list: Missing operator.");
-                     }
-                    var conditionOp = conditionOpOpt.get();
-                    if (conditionList.size() < 2) {
-                         throw new IllegalArgumentException("Invalid wait condition list: Missing target.");
-                    }
-                    Term conditionTarget = conditionList.get(1);
-
-                    long timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
-                    long timeoutMillis = timeoutSeconds * 1000;
-                    long intervalMillis = ((Number) action.toolParams.getOrDefault("interval", TEST_WAIT_DEFAULT_INTERVAL_MILLIS)).longValue();
-                    if (timeoutMillis <= 0 || intervalMillis <= 0) {
-                         throw new IllegalArgumentException("Wait timeout and interval must be positive.");
-                    }
-
-                    yield CompletableFuture.supplyAsync(() -> {
-                        long startTime = System.currentTimeMillis();
-                        while (System.currentTimeMillis() - startTime < timeoutMillis) {
-                            boolean conditionMet = false;
-                            try {
-                                switch (conditionOp) {
-                                    case "assertionExists" -> {
-                                        if (!(conditionTarget instanceof Term.Lst kif))
-                                            throw new IllegalArgumentException("wait assertionExists requires a KIF list.");
-                                        conditionMet = findAssertionInTestOrGlobalKb(kif, testKbId).isPresent();
-                                    }
-                                    case "assertionDoesNotExist" -> {
-                                        if (!(conditionTarget instanceof Term.Lst kif))
-                                            throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list.");
-                                        conditionMet = findAssertionInTestOrGlobalKb(kif, testKbId).isEmpty();
-                                    }
-                                    default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
-                                }
-
-                                if (conditionMet) return null;
-
-                            } catch (IllegalArgumentException e) {
-                                 throw new CompletionException(e);
-                            } catch (Exception e) {
-                                System.err.println("Error checking wait condition: " + e.getMessage());
-                            }
-
-                            try {
-                                Thread.sleep(intervalMillis);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                throw new CompletionException(new InterruptedException("Wait interrupted"));
-                            }
-                        }
-                        throw new CompletionException(new TimeoutException("Wait condition not met within " + timeoutSeconds + " seconds: " + conditionList.toKif()));
-                    }, cog().events.exe);
-                }
-                default -> throw new IllegalArgumentException("Unknown action type: " + action.type);
+                case "assert" -> executeAssertAction(test, testKbId, action);
+                case "addRule" -> executeAddRuleAction(test, testKbId, action);
+                case "removeRuleForm" -> executeRemoveRuleFormAction(test, testKbId, action);
+                case "retract" -> executeRetractAction(test, testKbId, action);
+                case "runTool" -> executeRunToolAction(test, testKbId, action);
+                case "query" -> executeQueryAction(test, testKbId, action);
+                case "wait" -> executeWaitAction(test, testKbId, action);
+                default -> CompletableFuture.failedFuture(new IllegalArgumentException("Unknown action type: " + action.type));
             };
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
         }
     }
+
+    private CompletableFuture<Object> executeAssertAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst list))
+            throw new IllegalArgumentException("Invalid payload for assert: " + action.payload);
+        var isNeg = list.op().filter(KIF_OP_NOT::equals).isPresent();
+        var s = list.size();
+        if (isNeg && s != 2) throw new IllegalArgumentException("Invalid 'not' format for assert.");
+        var isEq = !isNeg && list.op().filter(Logic.KIF_OP_EQUAL::equals).isPresent();
+        var isOriented = isEq && s == 3 && list.get(1).weight() > list.get(2).weight();
+        var type = list.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
+        var pri = INPUT_ASSERTION_BASE_PRIORITY / (1.0 + list.weight());
+        var pa = new Assertion.PotentialAssertion(list, pri, Set.of(), testKbId, isEq, isNeg, isOriented, testKbId, type, List.of(), 0);
+
+        var committed = context.tryCommit(pa, "test-runner:" + test.name);
+        return CompletableFuture.completedFuture(committed != null ? committed.id() : null);
+    }
+
+    private CompletableFuture<Object> executeAddRuleAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst ruleForm))
+            throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
+        var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId);
+        var added = context.addRule(r);
+        return CompletableFuture.completedFuture(added);
+    }
+
+    private CompletableFuture<Object> executeRemoveRuleFormAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst ruleForm))
+            throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
+        var removed = context.removeRule(ruleForm);
+        return CompletableFuture.completedFuture(removed);
+    }
+
+    private CompletableFuture<Object> executeRetractAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
+            throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
+        }
+        var rtype = typeAtom.value();
+        var target = retractTargetList.get(1);
+        String targetStr;
+        if (target instanceof Term.Atom atom) {
+             targetStr = atom.value();
+        } else if (target instanceof Term.Lst list) {
+             targetStr = list.toKif();
+        } else {
+             throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
+        }
+
+        RetractionType retractionType;
+        try {
+            retractionType = RetractionType.valueOf(rtype.toUpperCase());
+        } catch (IllegalArgumentException e) {
+             throw new IllegalArgumentException("Invalid retraction type: " + rtype);
+        }
+
+        context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + test.name, testKbId));
+        return CompletableFuture.completedFuture(targetStr);
+    }
+
+    private CompletableFuture<Object> executeRunToolAction(TestDefinition test, String testKbId, TestAction action) {
+        var toolName = (String) action.toolParams.get("name");
+        if (toolName == null || toolName.isBlank())
+            throw new IllegalArgumentException("runTool requires 'name' parameter.");
+
+        Map<String, Object> toolParams = new HashMap<>(action.toolParams);
+        toolParams.remove("name");
+        toolParams.putIfAbsent("target_kb_id", testKbId);
+        toolParams.putIfAbsent("note_id", testKbId);
+
+        var toolOpt = cog().tools.get(toolName);
+        if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
+        return toolOpt.get().execute(toolParams).thenApply(r -> r);
+    }
+
+    private CompletableFuture<Object> executeQueryAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst pattern))
+            throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
+        var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
+        QueryType queryType;
+        try {
+            queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
+        }
+        return CompletableFuture.completedFuture(cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams)));
+    }
+
+    private CompletableFuture<Object> executeWaitAction(TestDefinition test, String testKbId, TestAction action) {
+        if (!(action.payload instanceof Term.Lst conditionList)) {
+            throw new IllegalArgumentException("Invalid payload for wait: Expected condition list.");
+        }
+        var conditionOpOpt = conditionList.op();
+         if (conditionOpOpt.isEmpty()) {
+             throw new IllegalArgumentException("Invalid wait condition list: Missing operator.");
+         }
+        var conditionOp = conditionOpOpt.get();
+        if (conditionList.size() < 2) {
+             throw new IllegalArgumentException("Invalid wait condition list: Missing target.");
+        }
+        Term conditionTarget = conditionList.get(1);
+
+        long timeoutSeconds = ((Number) action.toolParams.getOrDefault("timeout", TEST_WAIT_DEFAULT_TIMEOUT_SECONDS)).longValue();
+        long timeoutMillis = timeoutSeconds * 1000;
+        long intervalMillis = ((Number) action.toolParams.getOrDefault("interval", TEST_WAIT_DEFAULT_INTERVAL_MILLIS)).longValue();
+        if (timeoutMillis <= 0 || intervalMillis <= 0) {
+             throw new IllegalArgumentException("Wait timeout and interval must be positive.");
+        }
+
+        return CompletableFuture.supplyAsync(() -> {
+            long startTime = System.currentTimeMillis();
+            while (System.currentTimeMillis() - startTime < timeoutMillis) {
+                boolean conditionMet = false;
+                try {
+                    conditionMet = switch (conditionOp) {
+                        case "assertionExists" -> {
+                            if (!(conditionTarget instanceof Term.Lst kif))
+                                throw new IllegalArgumentException("wait assertionExists requires a KIF list.");
+                            yield findAssertionInTestOrGlobalKb(kif, testKbId).isPresent();
+                        }
+                        case "assertionDoesNotExist" -> {
+                            if (!(conditionTarget instanceof Term.Lst kif))
+                                throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list.");
+                            yield findAssertionInTestOrGlobalKb(kif, testKbId).isEmpty();
+                        }
+                        default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
+                    };
+
+                    if (conditionMet) return null;
+
+                } catch (IllegalArgumentException e) {
+                     throw new CompletionException(e);
+                } catch (Exception e) {
+                    System.err.println("Error checking wait condition: " + e.getMessage());
+                }
+
+                try {
+                    Thread.sleep(intervalMillis);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CompletionException(new InterruptedException("Wait interrupted"));
+                }
+            }
+            throw new CompletionException(new TimeoutException("Wait condition not met within " + timeoutSeconds + " seconds: " + conditionList.toKif()));
+        }, cog().events.exe);
+    }
+
 
     private Optional<Assertion> findAssertionInTestOrGlobalKb(Term.Lst kif, String testKbId) {
         return context.findAssertionByKif(kif, testKbId).or(() -> context.findAssertionByKif(kif, context.kbGlobal().id));
@@ -299,109 +314,15 @@ public class TestPlugin extends Plugin.BasePlugin {
                 }
 
                 return switch (expected.type) {
-                    case "expectedResult" -> {
-                        if (!(expected.value instanceof Boolean expectedBoolean)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
-                        yield passed;
-                    }
-                    case "expectedBindings" -> {
-                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-
-                        List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
-                        boolean parseError = false;
-
-                        if (expectedBindingsListTerm.terms.size() == 1 && expectedBindingsListTerm.get(0) instanceof Term.Lst innerList && innerList.terms.isEmpty()) {
-                             expectedBindings.add(Collections.emptyMap());
-                        } else {
-                            for (var bindingPairTerm : expectedBindingsListTerm.terms) {
-                                 if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
-                                    expectedBindings.add(Map.of(var, value));
-                                } else {
-                                    System.err.println("Expectation '" + expected.type + "' failed: Invalid binding pair format in expected value: " + bindingPairTerm.toKif());
-                                    parseError = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (parseError) yield false;
-
-                        List<Map<Term.Var, Term>> actualBindings = answer.bindings();
-
-                        Set<String> expectedBindingStrings = expectedBindings.stream()
-                            .map(bindingMap -> {
-                                List<String> entryStrings = new ArrayList<>();
-                                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
-                                Collections.sort(entryStrings);
-                                return String.join(",", entryStrings);
-                            })
-                            .collect(Collectors.toSet());
-
-                        Set<String> actualBindingStrings = actualBindings.stream()
-                            .map(bindingMap -> {
-                                List<String> entryStrings = new ArrayList<>();
-                                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
-                                Collections.sort(entryStrings);
-                                return String.join(",", entryStrings);
-                            })
-                            .collect(Collectors.toSet());
-
-                        boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
-
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected bindings " + expectedBindings + ", but got " + actualBindings);
-                        yield passed;
-                    }
-                    case "expectedAssertionExists" -> {
-                        if (!(expected.value instanceof Term.Lst expectedKif)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isPresent();
-                         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion not found: " + expectedKif.toKif());
-                        yield passed;
-                    }
-                    case "expectedAssertionDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedKif)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isEmpty();
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
-                        yield passed;
-                    }
-                    case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst ruleForm)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(expectedRuleForm));
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule not found: " + expectedRuleForm.toKif());
-                        yield passed;
-                    }
-                    case "expectedKbSize" -> {
-                        if (!(expected.value instanceof Integer expectedSize)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not an Integer. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = kb.getAssertionCount() == expectedSize;
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected KB size " + expectedSize + ", but got " + kb.getAssertionCount());
-                        yield passed;
-                    }
-                    case "expectedToolResult" -> yield new TestExpected(op, termToObject(expectedValueTerm));
-                     case "expectedToolResultContains" -> {
-                        if (!(expectedValueTerm instanceof Term.Atom)) {
-                            System.err.println("Expectation '" + op + "' requires a single Atom containing the expected substring.");
-                            yield false;
-                        }
-                        yield new TestExpected(op, termToObject(expectedValueTerm));
-                    }
+                    case "expectedResult" -> checkExpectedResult(expected, answer);
+                    case "expectedBindings" -> checkExpectedBindings(expected, answer);
+                    case "expectedAssertionExists" -> checkExpectedAssertionExists(expected, testKbId);
+                    case "expectedAssertionDoesNotExist" -> checkExpectedAssertionDoesNotExist(expected, testKbId);
+                    case "expectedRuleExists" -> checkExpectedRuleExists(expected);
+                    case "expectedRuleDoesNotExist" -> checkExpectedRuleDoesNotExist(expected);
+                    case "expectedKbSize" -> checkExpectedKbSize(expected, kb);
+                    case "expectedToolResult" -> checkExpectedToolResult(expected, actionResult);
+                    case "expectedToolResultContains" -> checkExpectedToolResultContains(expected, actionResult);
                     default -> {
                         System.err.println("Expectation check failed: Unknown expectation type: " + expected.type);
                         yield false;
@@ -414,6 +335,138 @@ public class TestPlugin extends Plugin.BasePlugin {
             }
         }, cog().events.exe);
     }
+
+    private boolean checkExpectedResult(TestExpected expected, Cog.Answer answer) {
+        if (!(expected.value instanceof Boolean expectedBoolean)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
+        return passed;
+    }
+
+    private boolean checkExpectedBindings(TestExpected expected, Cog.Answer answer) {
+        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm)) {
+             System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+
+        List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
+        boolean parseError = false;
+
+        if (expectedBindingsListTerm.terms.size() == 1 && expectedBindingsListTerm.get(0) instanceof Term.Lst innerList && innerList.terms.isEmpty()) {
+             expectedBindings.add(Collections.emptyMap());
+        } else {
+            for (var bindingPairTerm : expectedBindingsListTerm.terms) {
+                 if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
+                    expectedBindings.add(Map.of(var, value));
+                } else {
+                    System.err.println("Expectation '" + expected.type + "' failed: Invalid binding pair format in expected value: " + bindingPairTerm.toKif());
+                    parseError = true;
+                    break;
+                }
+            }
+        }
+
+        if (parseError) return false;
+
+        List<Map<Term.Var, Term>> actualBindings = answer.bindings();
+
+        Set<String> expectedBindingStrings = expectedBindings.stream()
+            .map(bindingMap -> {
+                List<String> entryStrings = new ArrayList<>();
+                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
+                Collections.sort(entryStrings);
+                return String.join(",", entryStrings);
+            })
+            .collect(Collectors.toSet());
+
+        Set<String> actualBindingStrings = actualBindings.stream()
+            .map(bindingMap -> {
+                List<String> entryStrings = new ArrayList<>();
+                bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
+                Collections.sort(entryStrings);
+                return String.join(",", entryStrings);
+            })
+            .collect(Collectors.toSet());
+
+        boolean passed = Objects.equals(expectedBindingStrings, actualBindingStrings);
+
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected bindings " + expectedBindings + ", but got " + actualBindings);
+        return passed;
+    }
+
+    private boolean checkExpectedAssertionExists(TestExpected expected, String testKbId) {
+        if (!(expected.value instanceof Term.Lst expectedKif)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isPresent();
+         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion not found: " + expectedKif.toKif());
+        return passed;
+    }
+
+    private boolean checkExpectedAssertionDoesNotExist(TestExpected expected, String testKbId) {
+        if (!(expected.value instanceof Term.Lst expectedKif)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = findAssertionInTestOrGlobalKb(expectedKif, testKbId).isEmpty();
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
+        return passed;
+    }
+
+    private boolean checkExpectedRuleExists(TestExpected expected) {
+        if (!(expected.value instanceof Term.Lst ruleForm)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(ruleForm));
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule not found: " + ruleForm.toKif());
+        return passed;
+    }
+
+    private boolean checkExpectedRuleDoesNotExist(TestExpected expected) {
+        if (!(expected.value instanceof Term.Lst ruleForm)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(ruleForm));
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule found unexpectedly: " + ruleForm.toKif());
+        return passed;
+    }
+
+    private boolean checkExpectedKbSize(TestExpected expected, Logic.Knowledge kb) {
+        if (!(expected.value instanceof Integer expectedSize)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not an Integer. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = kb.getAssertionCount() == expectedSize;
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected KB size " + expectedSize + ", but got " + kb.getAssertionCount());
+        return passed;
+    }
+
+    private boolean checkExpectedToolResult(TestExpected expected, @Nullable Object actionResult) {
+        boolean passed = Objects.equals(actionResult, expected.value);
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
+        return passed;
+    }
+
+    private boolean checkExpectedToolResultContains(TestExpected expected, @Nullable Object actionResult) {
+        if (!(expected.value instanceof String expectedSubstring)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a String. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+            return false;
+        }
+        if (!(actionResult instanceof String actualResultString)) {
+            System.err.println("Expectation '" + expected.type + "' failed: Action result is not a String. Found: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
+            return false;
+        }
+        boolean passed = actualResultString.contains(expectedSubstring);
+        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Tool result '" + actualResultString + "' does not contain '" + expectedSubstring + "'");
+        return passed;
+    }
+
 
     private List<TestDefinition> parseTestDefinitions(String text) throws ParseException {
         List<TestDefinition> definitions = new ArrayList<>();
@@ -497,82 +550,116 @@ public class TestPlugin extends Plugin.BasePlugin {
         var op = opOpt.get();
 
         return switch (op) {
-            case "assert", "addRule", "removeRuleForm" -> {
-                if (actionList.size() != 2)
-                    throw new IllegalArgumentException(op + " action requires exactly one argument (the KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
-                Term payload = actionList.get(1);
-                if (!(payload instanceof Term.Lst)) {
-                     throw new IllegalArgumentException(op + " action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
-                }
-                yield new TestAction(op, payload, new HashMap<>());
-            }
-            case "retract" -> {
-                if (actionList.size() != 2) {
-                    throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
-                }
-                Term targetTerm = actionList.get(1);
-                if (!(targetTerm instanceof Term.Lst retractTargetList)) {
-                     throw new IllegalArgumentException("retract action's argument must be a list (TYPE TARGET). Found: " + targetTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
-                }
-                if (retractTargetList.size() != 2) {
-                     throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
-                }
-                Term typeTerm = retractTargetList.get(0);
-                if (!(typeTerm instanceof Term.Atom typeAtom)) {
-                     throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
-                }
-                yield new TestAction(op, retractTargetList, new HashMap<>());
-            }
-            case "runTool" -> {
-                var toolName = (String) action.toolParams.get("name");
-                if (toolName == null || toolName.isBlank())
-                    throw new IllegalArgumentException("runTool requires 'name' parameter.");
-
-                Map<String, Object> toolParams = new HashMap<>(action.toolParams);
-                toolParams.remove("name");
-                toolParams.putIfAbsent("target_kb_id", testKbId);
-                toolParams.putIfAbsent("note_id", testKbId);
-
-                var toolOpt = cog().tools.get(toolName);
-                if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
-                yield toolOpt.get().execute(toolParams).thenApply(r -> r);
-            }
-            case "query" -> {
-                if (actionList.size() < 2)
-                    throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
-                Term payload = actionList.get(1);
-
-                Map<String, Object> toolParams = new HashMap<>();
-                if (actionList.size() > 2) {
-                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                        toolParams = parseParams(paramsList);
-                    } else {
-                         throw new IllegalArgumentException("query action parameters must be in a (params (...)) list as the third argument.");
-                    }
-                }
-                yield new TestAction(op, payload, toolParams);
-            }
-            case "wait" -> {
-                if (actionList.size() < 2)
-                    throw new IllegalArgumentException("wait action requires at least one argument (the condition list).");
-                Term payload = actionList.get(1);
-
-                Map<String, Object> toolParams = new HashMap<>();
-                if (actionList.size() > 2) {
-                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                        toolParams = parseParams(paramsList);
-                    } else {
-                         throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument.");
-                    }
-                }
-                if (!(payload instanceof Term.Lst conditionList) || conditionList.terms.isEmpty() || conditionList.op().isEmpty()) {
-                     throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
-                }
-                yield new TestAction(op, payload, toolParams);
-            }
+            case "assert" -> parseAssertAction(actionList);
+            case "addRule" -> parseAddRuleAction(actionList);
+            case "removeRuleForm" -> parseRemoveRuleFormAction(actionList);
+            case "retract" -> parseRetractAction(actionList);
+            case "runTool" -> parseRunToolAction(actionList);
+            case "query" -> parseQueryAction(actionList);
+            case "wait" -> parseWaitAction(actionList);
             default -> throw new IllegalArgumentException("Unknown action operator: " + op);
         };
     }
+
+    private TestAction parseAssertAction(Term.Lst actionList) {
+        if (actionList.size() != 2)
+            throw new IllegalArgumentException("assert action requires exactly one argument (the KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+        Term payload = actionList.get(1);
+        if (!(payload instanceof Term.Lst)) {
+             throw new IllegalArgumentException("assert action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        return new TestAction("assert", payload, new HashMap<>());
+    }
+
+    private TestAction parseAddRuleAction(Term.Lst actionList) {
+        if (actionList.size() != 2)
+            throw new IllegalArgumentException("addRule action requires exactly one argument (the Rule KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+        Term payload = actionList.get(1);
+        if (!(payload instanceof Term.Lst)) {
+             throw new IllegalArgumentException("addRule action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        return new TestAction("addRule", payload, new HashMap<>());
+    }
+
+    private TestAction parseRemoveRuleFormAction(Term.Lst actionList) {
+        if (actionList.size() != 2)
+            throw new IllegalArgumentException("removeRuleForm action requires exactly one argument (the Rule KIF form). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+        Term payload = actionList.get(1);
+        if (!(payload instanceof Term.Lst)) {
+             throw new IllegalArgumentException("removeRuleForm action requires a KIF list as its argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        return new TestAction("removeRuleForm", payload, new HashMap<>());
+    }
+
+    private TestAction parseRetractAction(Term.Lst actionList) {
+        if (actionList.size() != 2) {
+            throw new IllegalArgumentException("retract action requires exactly one argument (the target list). Found size: " + actionList.size() + ". Term: " + actionList.toKif());
+        }
+        Term targetTerm = actionList.get(1);
+        if (!(targetTerm instanceof Term.Lst retractTargetList)) {
+             throw new IllegalArgumentException("retract action's argument must be a list (TYPE TARGET). Found: " + targetTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        if (retractTargetList.size() != 2) {
+             throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
+        }
+        Term typeTerm = retractTargetList.get(0);
+        if (!(typeTerm instanceof Term.Atom typeAtom)) {
+             throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        return new TestAction("retract", retractTargetList, new HashMap<>());
+    }
+
+    private TestAction parseRunToolAction(Term.Lst actionList) {
+        Map<String, Object> toolParams = new HashMap<>();
+        if (actionList.size() > 1) {
+             if (actionList.size() == 2 && actionList.get(1) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                toolParams = parseParams(paramsList);
+            } else {
+                 throw new IllegalArgumentException("runTool action parameters must be in a (params (...)) list as the second argument.");
+            }
+        }
+        var toolName = (String) toolParams.get("name");
+        if (toolName == null || toolName.isBlank())
+            throw new IllegalArgumentException("runTool requires 'name' parameter within params.");
+
+        return new TestAction("runTool", null, toolParams);
+    }
+
+    private TestAction parseQueryAction(Term.Lst actionList) {
+        if (actionList.size() < 2)
+            throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
+        Term payload = actionList.get(1);
+
+        Map<String, Object> toolParams = new HashMap<>();
+        if (actionList.size() > 2) {
+            if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                toolParams = parseParams(paramsList);
+            } else {
+                 throw new IllegalArgumentException("query action parameters must be in a (params (...)) list as the third argument.");
+            }
+        }
+        return new TestAction("query", payload, toolParams);
+    }
+
+    private TestAction parseWaitAction(Term.Lst actionList) {
+        if (actionList.size() < 2)
+            throw new IllegalArgumentException("wait action requires at least one argument (the condition list).");
+        Term payload = actionList.get(1);
+
+        Map<String, Object> toolParams = new HashMap<>();
+        if (actionList.size() > 2) {
+            if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+                toolParams = parseParams(paramsList);
+            } else {
+                 throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument.");
+            }
+        }
+        if (!(payload instanceof Term.Lst conditionList) || conditionList.terms.isEmpty() || conditionList.op().isEmpty()) {
+             throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+        return new TestAction("wait", payload, toolParams);
+    }
+
 
     private List<TestExpected> parseExpectations(List<Term> terms) {
         List<TestExpected> expectations = new ArrayList<>();
@@ -602,55 +689,82 @@ public class TestPlugin extends Plugin.BasePlugin {
         Term expectedValueTerm = expectedList.get(1);
 
         return switch (op) {
-            case "expectedResult" -> {
-                if (!(expectedValueTerm instanceof Term.Atom))
-                    throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
-                String value = ((Term.Atom) expectedValueTerm).value();
-
-                if (!value.equals("true") && !value.equals("false"))
-                    throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
-                yield new TestExpected(op, Boolean.parseBoolean(value));
-            }
-            case "expectedBindings" -> {
-                if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
-                     throw new IllegalArgumentException("expectedBindings requires a list of binding pairs ((?V1 Val1) ...) or (()) or (). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + expectedList.toKif());
-                }
-                yield new TestExpected(op, expectedBindingsListTerm);
-            }
-            case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
-                if (!(expectedValueTerm instanceof Term.Lst kif))
-                    throw new IllegalArgumentException(op + " requires a single KIF list.");
-                yield new TestExpected(op, kif);
-            }
-            case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
-                if (!(expectedValueTerm instanceof Term.Lst ruleForm))
-                    throw new IllegalArgumentException(op + " requires a single rule KIF list.");
-                yield new TestExpected(op, ruleForm);
-            }
-            case "expectedKbSize" -> {
-                if (!(expectedValueTerm instanceof Term.Atom))
-                    throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
-                String value = ((Term.Atom) expectedValueTerm).value();
-                try {
-                    yield new TestExpected(op, Integer.parseInt(value));
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("expectedKbSize value must be an integer.");
-                }
-            }
-            case "expectedToolResult" -> yield new TestExpected(op, termToObject(expectedValueTerm));
-             case "expectedToolResultContains" -> {
-                if (!(expectedValueTerm instanceof Term.Atom)) {
-                    System.err.println("Expectation '" + op + "' requires a single Atom containing the expected substring.");
-                    yield false;
-                }
-                yield new TestExpected(op, termToObject(expectedValueTerm));
-            }
-            default -> {
-                System.err.println("Expectation check failed: Unknown expectation type: " + expected.type);
-                yield false;
-            }
+            case "expectedResult" -> parseExpectedResult(op, expectedValueTerm);
+            case "expectedBindings" -> parseExpectedBindings(op, expectedValueTerm);
+            case "expectedAssertionExists" -> parseExpectedAssertionExists(op, expectedValueTerm);
+            case "expectedAssertionDoesNotExist" -> parseExpectedAssertionDoesNotExist(op, expectedValueTerm);
+            case "expectedRuleExists" -> parseExpectedRuleExists(op, expectedValueTerm);
+            case "expectedRuleDoesNotExist" -> parseExpectedRuleDoesNotExist(op, expectedValueTerm);
+            case "expectedKbSize" -> parseExpectedKbSize(op, expectedValueTerm);
+            case "expectedToolResult" -> parseExpectedToolResult(op, expectedValueTerm);
+            case "expectedToolResultContains" -> parseExpectedToolResultContains(op, expectedValueTerm);
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
         };
     }
+
+    private TestExpected parseExpectedResult(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Atom))
+            throw new IllegalArgumentException(op + " requires a single boolean atom (true/false).");
+        String value = ((Term.Atom) expectedValueTerm).value();
+
+        if (!value.equals("true") && !value.equals("false"))
+            throw new IllegalArgumentException(op + " value must be 'true' or 'false'.");
+        return new TestExpected(op, Boolean.parseBoolean(value));
+    }
+
+    private TestExpected parseExpectedBindings(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
+             throw new IllegalArgumentException(op + " requires a list of binding pairs ((?V1 Val1) ...) or (()) or (). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + expectedValueTerm.toKif());
+        }
+        return new TestExpected(op, expectedBindingsListTerm);
+    }
+
+    private TestExpected parseExpectedAssertionExists(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Lst kif))
+            throw new IllegalArgumentException(op + " requires a single KIF list.");
+        return new TestExpected(op, kif);
+    }
+
+    private TestExpected parseExpectedAssertionDoesNotExist(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Lst kif))
+            throw new IllegalArgumentException(op + " requires a single KIF list.");
+        return new TestExpected(op, kif);
+    }
+
+    private TestExpected parseExpectedRuleExists(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Lst ruleForm))
+            throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+        return new TestExpected(op, ruleForm);
+    }
+
+    private TestExpected parseExpectedRuleDoesNotExist(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Lst ruleForm))
+            throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+        return new TestExpected(op, ruleForm);
+    }
+
+    private TestExpected parseExpectedKbSize(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Atom))
+            throw new IllegalArgumentException(op + " requires a single integer atom.");
+        String value = ((Term.Atom) expectedValueTerm).value();
+        try {
+            return new TestExpected(op, Integer.parseInt(value));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(op + " value must be an integer.");
+        }
+    }
+
+    private TestExpected parseExpectedToolResult(String op, Term expectedValueTerm) {
+        return new TestExpected(op, termToObject(expectedValueTerm));
+    }
+
+    private TestExpected parseExpectedToolResultContains(String op, Term expectedValueTerm) {
+        if (!(expectedValueTerm instanceof Term.Atom)) {
+            throw new IllegalArgumentException(op + " requires a single Atom containing the expected substring.");
+        }
+        return new TestExpected(op, termToObject(expectedValueTerm));
+    }
+
 
     private Map<String, Object> parseParams(Term.Lst paramsList) {
         Map<String, Object> params = new HashMap<>();

@@ -7,8 +7,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static dumb.cognote.Cog.*;
-import static dumb.cognote.Cog.TEST_RESULTS_NOTE_ID;
-import static dumb.cognote.Cog.TEST_RESULTS_NOTE_TITLE;
 import static dumb.cognote.Note.Status.IDLE;
 
 public class Test {
@@ -51,22 +49,12 @@ public class Test {
     }
 
     private static final String TESTS = """
-            ; Define tests here using the (test ...) format:
-            
-            ; Test structure: (test "Test Name" (setup ...) (action ...) (expected ...) (teardown ...))
-            ; setup/teardown actions: (assert KIF), (addRule RuleKIF), (retract (BY_ID "id")), (retract (BY_KIF KIF)), (removeRuleForm RuleKIF)
-            ; action types: (query Pattern), (runTool (name "tool_name") (params (key1 value1) ...)), (wait (condition) (params (timeout seconds) (interval millis)))
-            ; wait conditions: (assertionExists KIF), (assertionDoesNotExist KIF)
-            ; expected types: (expectedResult boolean), (expectedBindings ((?V1 Val1) ...)), (expectedAssertionExists KIF), (expectedAssertionDoesNotExist KIF), (expectedRuleExists RuleKIF), (expectedRuleDoesNotExist RuleKIF), (expectedKbSize integer), (expectedToolResult value), (expectedToolResultContains substring))
-            
-            ; Example 1: Simple Fact Query
             (test "Simple Fact Query"\s
               (setup (assert (instance MyCat Cat)))
               (action (query (instance ?X Cat)))
               (expected (expectedResult true) (expectedBindings ((?X MyCat))))
               (teardown (retract (BY_KIF (instance MyCat Cat)))))
             
-            ; Example 2: Query with Multiple Bindings
             (test "Query with Multiple Bindings"\s
               (setup\s
                 (assert (instance MyCat Cat))
@@ -81,14 +69,12 @@ public class Test {
                 (retract (BY_KIF (instance YourCat Cat)))
                 (retract (BY_KIF (instance MyDog Dog)))))
             
-            ; Example 3: Query that should fail
             (test "Query Failure"\s
               (setup (assert (instance MyDog Dog)))
               (action (query (instance MyDog Cat)))
               (expected (expectedResult false) (expectedBindings ())))
               (teardown (retract (BY_KIF (instance MyDog Dog))))
             
-            ; Example 4: Test Forward Chaining Rule
             (test "Forward Chaining Rule"\s
               (setup\s
                 (addRule (=> (instance ?X Dog) (attribute ?X Canine)))
@@ -103,7 +89,6 @@ public class Test {
                 (retract (BY_KIF (attribute MyDog Canine)))
                 (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))
             
-            ; Example 5: Test Retraction (requires waiting for async completion)
             (test "Retract Assertion"\s
               (setup (assert (instance TempFact Something)))
               (action
@@ -113,7 +98,6 @@ public class Test {
                 (expectedAssertionDoesNotExist (instance TempFact Something)))
               (teardown))
             
-            ; Example 6: Test KB Size
             (test "KB Size Check"\s
               (setup\s
                 (assert (fact1 a))
@@ -123,21 +107,17 @@ public class Test {
               (teardown\s
                 (retract (BY_KIF (fact1 a)))
                 (retract (BY_KIF (fact2 b)))
-                (retract (BY_KIF (fact3 c)))))
+                (retract (fact3 c)))))
             
-            ; Example 7: Test runTool (LogMessageTool)
             (test "Run LogMessageTool"\s
               (setup)
-              (action (runTool log_message (params (message "Hello from test!"))))
+              (action (runTool (params (name "log_message") (message "Hello from test!"))))
               (expected (expectedToolResult "Message logged."))
               (teardown))
             
-            ; Example 8: Test runTool (GetNoteTextTool) - requires a note to exist
-            ; This test assumes the Test Definitions note itself exists and has text.
-            ; It runs the tool against the Test Definitions note KB.
             (test "Run GetNoteTextTool"\s
               (setup)
-              (action (runTool get_note_text (params (note_id "note-test-definitions"))))
+              (action (runTool (params (name "get_note_text") (note_id "note-test-definitions"))))
               (expected (expectedToolResultContains "; Define your tests here using the (test ...) format"))
               (teardown))
                                             
