@@ -45,8 +45,8 @@ public class Test {
 
         try {
             // Wait for the TestRunCompleteEvent to be received
-            // Increased timeout significantly to 60 seconds
-            completion.get(60, TimeUnit.SECONDS);
+            // Increased timeout significantly to 120 seconds to allow for more tests and potential delays
+            completion.get(120, TimeUnit.SECONDS);
             System.out.println("Test.java: Completion future completed."); // Added logging
 
             // Print the stored detailed test results
@@ -56,6 +56,7 @@ public class Test {
 
 
             // Check the results text content to determine overall success/failure
+            // Look for the summary line "Failed: X" where X is greater than 0
             if (finalResultsText.contains("\nFailed: ") && !finalResultsText.contains("\nFailed: 0\n")) {
                 throw new RuntimeException("Some tests failed.");
             }
@@ -86,6 +87,8 @@ public class Test {
             ; Each test should have a unique name (an Atom).
             ; Sections: (setup ...), (action ...), (expected ...), (teardown ...)
             ; Only (action ...) is mandatory.
+
+            ; --- Fundamental Logic/Querying Tests ---
 
             (test "Simple Fact Query"\s
               (setup (assert (instance MyCat Cat)))
@@ -125,7 +128,7 @@ public class Test {
                 (retract (BY_KIF (attribute MyDog Canine)))
                 (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))
 
-            (test "Retract Assertion"
+            (test "Retract Assertion BY_KIF"
               (setup (assert (instance TempFact Something)))
               (action
                 (retract (BY_KIF (instance TempFact Something)))
@@ -164,6 +167,16 @@ public class Test {
               (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1)))) ; Wait for 1 second
               (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail
               (teardown))
+
+            (test "Wait Success"
+              (setup)
+              (action
+                (assert (tempFact ToBeWaitedFor))
+                (wait (assertionExists (tempFact ToBeWaitedFor)) (params (timeout 5))) ; Wait for 5 seconds max
+              )
+              (expected (expectedAssertionExists (tempFact ToBeWaitedFor))) ; Expect it to exist after waiting
+              (teardown (retract (BY_KIF (tempFact ToBeWaitedFor))))
+            )
 
             (test "Multiple Expectation Failures"
               (setup (assert (fact A)))
@@ -255,29 +268,38 @@ public class Test {
                 (retract (BY_KIF (sequence (a b c d))))
                 (retract (BY_KIF (sequence (x y z))))))
 
-            ; --- Tests for Error Conditions ---
+            ; --- Tests for Test Framework Error Conditions ---
 
-            ; Test: Action section is empty or missing (should skip the test)
+            ; Test: Action section is empty or missing (should skip the test unless parsing errors exist)
             (test "Test with Missing Action Section"
               (setup (assert (fact A)))
               (expected (expectedAssertionExists (fact A)))
-              (teardown (retract (BY_KIF (fact A)))))
+              (teardown (retract (BY_KIF (fact A))))) ; This test should be skipped and not appear in results
 
-            ; Test: Action section contains invalid terms (should skip invalid terms, maybe run valid ones)
+            ; Test: Test definition has invalid structure (should be skipped by top-level parser)
+            (test "Test with Invalid Top-Level Structure"
+              (this is not a test definition)
+              (test "Another Valid Test" (action (query (a)))) ; This one should run
+              (expected (expectedResult false))
+              (teardown)
+            ) ; The first term should cause a parse error reported by handleRunTests, the second should run.
+
+            ; Test: Action section contains invalid terms (should skip invalid terms, report parsing errors)
             (test "Test with Invalid Action Terms"
               (setup (assert (fact A)))
               (action
                 (assert (fact B)) ; Valid
-                (invalidActionType (arg1 arg2)) ; Invalid action type
-                (assert) ; Invalid assert payload size
-                (runTool (params name "log_message")) ; Invalid runTool params format
+                (invalidActionType (arg1 arg2)) ; Invalid action type - Parsing Error
+                (assert) ; Invalid assert payload size - Parsing Error
+                (runTool (params name "log_message")) ; Invalid runTool params format - Parsing Error
+                (query "not a list") ; Invalid query payload type - Parsing Error
               )
               (expected
                 (expectedAssertionExists (fact A)) ; PASS (from setup)
                 (expectedAssertionExists (fact B)) ; PASS (from valid action)
-                (expectedAssertionDoesNotExist (invalidActionType arg1 arg2)) ; PASS (invalid action skipped)
-                (expectedAssertionDoesNotExist (assert)) ; PASS (invalid action skipped)
-                (expectedAssertionDoesNotExist (runTool params name "log_message")) ; PASS (invalid action skipped)
+                ; The invalid actions should result in parsing errors reported for this test,
+                ; but not necessarily action execution errors if they were skipped during parsing.
+                ; We expect this test to FAIL due to parsing errors.
               )
               (teardown
                 (retract (BY_KIF (fact A)))
@@ -285,15 +307,16 @@ public class Test {
               )
             )
 
-            ; Test: Expectation section contains invalid terms (should skip invalid terms)
+            ; Test: Expectation section contains invalid terms (should skip invalid terms, report parsing errors)
             (test "Test with Invalid Expectation Terms"
               (setup (assert (fact A)))
               (action (assert (fact B)))
               (expected
                 (expectedAssertionExists (fact A)) ; Valid
-                (invalidExpectationType (arg1 arg2)) ; Invalid expectation type
-                (expectedResult) ; Invalid expectedResult payload size
-                (expectedBindings "not a list") ; Invalid expectedBindings payload type
+                (invalidExpectationType (arg1 arg2)) ; Invalid expectation type - Parsing Error
+                (expectedResult) ; Invalid expectedResult payload size - Parsing Error
+                (expectedBindings "not a list") ; Invalid expectedBindings payload type - Parsing Error
+                (expectedKbSize (not an integer)) ; Invalid expectedKbSize value - Parsing Error
               )
               (teardown
                 (retract (BY_KIF (fact A)))
@@ -301,89 +324,114 @@ public class Test {
               )
             )
 
-            ; Test: Action Execution - Invalid Payloads/Params
-            (test "Action Error: Assert Bad Payload"
+            ; Test: Action Execution - Invalid Payloads/Params leading to Execution Error
+            (test "Action Error: Assert Bad Payload Type"
               (setup)
-              (action (assert "not a list")) ; Invalid payload type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (assert "not a list")) ; Invalid payload type - Parsing Error
+              (expected (expectedResult false)) ; This expectation won't be checked if parsing fails. Test fails due to parsing error.
               (teardown))
 
-            (test "Action Error: AddRule Bad Payload"
+            (test "Action Error: AddRule Bad Payload Type"
               (setup)
-              (action (addRule "not a list")) ; Invalid payload type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (addRule "not a list")) ; Invalid payload type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
-            (test "Action Error: RemoveRuleForm Bad Payload"
+            (test "Action Error: RemoveRuleForm Bad Payload Type"
               (setup)
-              (action (removeRuleForm "not a list")) ; Invalid payload type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (removeRuleForm "not a list")) ; Invalid payload type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
-            (test "Action Error: Retract Bad Payload"
+            (test "Action Error: Retract Bad Payload Type"
               (setup)
-              (action (retract "not a list")) ; Invalid payload type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (retract "not a list")) ; Invalid payload type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             (test "Action Error: Retract Bad Target List Size"
               (setup)
-              (action (retract (BY_KIF))) ; Invalid target list size
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (retract (BY_KIF))) ; Invalid target list size - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             (test "Action Error: Retract Bad Type Atom"
               (setup)
-              (action (retract (123 (fact A)))) ; Invalid type (not atom)
+              (action (retract (123 (fact A)))) ; Invalid type (not atom) - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
+              (teardown))
+
+            (test "Action Error: Retract Invalid Type Value"
+              (setup)
+              (action (retract (UNKNOWN_TYPE (fact A)))) ; Invalid type value - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
+              (teardown))
+
+            (test "Action Error: Retract BY_KIF Bad Target Type"
+              (setup)
+              (action (retract (BY_KIF AtomValue))) ; Invalid target type for BY_KIF - Execution Error
               (expected (expectedResult false)) ; Expect the action chain to fail
               (teardown))
 
+             (test "Action Error: Retract BY_ID Bad Target Type"
+              (setup)
+              (action (retract (BY_ID (fact A)))) ; Invalid target type for BY_ID - Execution Error
+              (expected (expectedResult false)) ; Expect the action chain to fail
+              (teardown))
+
+
             (test "Action Error: RunTool No Name Param"
               (setup)
-              (action (runTool (params (message "hi")))) ; Missing name param
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (runTool (params (message "hi")))) ; Missing name param - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             (test "Action Error: RunTool Nonexistent Tool"
               (setup)
-              (action (runTool (params (name "nonexistent_tool")))) ; Tool not found
-              (expected (expectedResult false)) ; Expect the action chain to fail
-              (teardown))
-
-            (test "Action Error: Query Bad Payload"
-              (setup)
-              (action (query "not a list")) ; Invalid payload type
+              (action (runTool (params (name "nonexistent_tool")))) ; Tool not found - Execution Error
               (expected (expectedResult false)) ; Expect the action chain to fail
               (teardown))
 
             (test "Action Error: Query Bad Params Format"
               (setup)
-              (action (query (a) (params name))) ; Invalid params format
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (query (a) (params name))) ; Invalid params format - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
-            (test "Action Error: Wait Bad Payload"
+            (test "Action Error: Query Invalid query_type Param"
               (setup)
-              (action (wait "not a list")) ; Invalid payload type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (query (a) (params (query_type "BAD_TYPE")))) ; Invalid query_type value - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
+              (teardown))
+
+            (test "Action Error: Wait Bad Payload Type"
+              (setup)
+              (action (wait "not a list")) ; Invalid payload type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             (test "Action Error: Wait Bad Condition List Size"
               (setup)
-              (action (wait (assertionExists))) ; Invalid condition list size
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (wait (assertionExists))) ; Invalid condition list size - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             (test "Action Error: Wait Bad Condition Type"
               (setup)
-              (action (wait (unknownCondition (fact A)))) ; Unknown condition type
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (wait (unknownCondition (fact A)))) ; Unknown condition type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
-            (test "Action Error: Wait Bad Timeout Param"
+            (test "Action Error: Wait Bad Timeout Param Value"
               (setup)
-              (action (wait (assertionExists (fact A)) (params (timeout -5)))) ; Invalid timeout value
-              (expected (expectedResult false)) ; Expect the action chain to fail
+              (action (wait (assertionExists (fact A)) (params (timeout -5)))) ; Invalid timeout value - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
+              (teardown))
+
+            (test "Action Error: Wait Bad Timeout Param Type"
+              (setup)
+              (action (wait (assertionExists (fact A)) (params (timeout "abc")))) ; Invalid timeout type - Parsing Error
+              (expected (expectedResult false)) ; Test fails due to parsing error.
               (teardown))
 
             ; Test: Expectation Check - Wrong Result Type (e.g., expectedBindings on non-query action)
@@ -414,46 +462,46 @@ public class Test {
             )
 
             ; Test: Expectation Check - Invalid Expected Value Format
-            (test "Expectation Error: ExpectedResult Bad Value"
+            (test "Expectation Error: ExpectedResult Bad Value Type"
               (setup)
               (action (query (a)))
-              (expected (expectedResult "maybe")) ; Invalid boolean string
+              (expected (expectedResult "maybe")) ; Invalid boolean string - Parsing Error
               (teardown))
 
-            (test "Expectation Error: ExpectedBindings Bad Value"
+            (test "Expectation Error: ExpectedBindings Bad Value Type"
               (setup)
               (action (query (a)))
-              (expected (expectedBindings (not a list))) ; Not a list of pairs
+              (expected (expectedBindings "not a list")) ; Not a list - Parsing Error
               (teardown))
 
             (test "Expectation Error: ExpectedBindings Bad Pair Format"
               (setup)
               (action (query (a)))
-              (expected (expectedBindings ((?X)))) ; Pair size != 2
+              (expected (expectedBindings ((?X)))) ; Pair size != 2 - Parsing Error
               (teardown))
 
-            (test "Expectation Error: ExpectedAssertion Bad Value"
+            (test "Expectation Error: ExpectedAssertion Bad Value Type"
               (setup)
               (action (query (a)))
-              (expected (expectedAssertionExists "not a list")) ; Not a KIF list
+              (expected (expectedAssertionExists "not a list")) ; Not a KIF list - Parsing Error
               (teardown))
 
-            (test "Expectation Error: ExpectedRule Bad Value"
+            (test "Expectation Error: ExpectedRule Bad Value Type"
               (setup)
               (action (query (a)))
-              (expected (expectedRuleExists "not a list")) ; Not a KIF list
+              (expected (expectedRuleExists "not a list")) ; Not a KIF list - Parsing Error
               (teardown))
 
-            (test "Expectation Error: ExpectedKbSize Bad Value"
+            (test "Expectation Error: ExpectedKbSize Bad Value Type"
               (setup)
               (action (query (a)))
-              (expected (expectedKbSize "big")) ; Not an integer string
+              (expected (expectedKbSize "big")) ; Not an integer string - Parsing Error
               (teardown))
 
-            (test "Expectation Error: ExpectedToolResultContains Bad Value"
+            (test "Expectation Error: ExpectedToolResultContains Bad Value Type"
               (setup)
               (action (runTool (params (name "log_message") (message "hi"))))
-              (expected (expectedToolResultContains 123)) ; Not a string
+              (expected (expectedToolResultContains 123)) ; Not a string - Parsing Error
               (teardown))
 
         """;

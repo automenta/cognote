@@ -87,7 +87,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                                 // we need to create a failure result here.
                                 List<ActionError> errors = new ArrayList<>();
                                 errors.add(new ActionError("Execution Chain", "Unhandled error: " + cause.getMessage()));
-                                return new TestResult(test.name, Collections.emptyList(), errors);
+                                // Create a TestResult with the parsing errors already collected for this test
+                                return new TestResult(test.name, test.parsingErrors(), Collections.emptyList(), errors);
                             })
                             .thenAccept(results::add), // Add result to the list (runs on the executor that completed runTest)
                     cog().events.exe // Ensure the next test starts on the event executor
@@ -101,6 +102,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             if (ex != null) {
                 System.err.println("TestPlugin: Unhandled error after all tests futures completed: " + ex.getMessage());
                 ex.printStackTrace();
+                // If the overall chain fails *after* tests have produced results, append the error
                 finalResultsText = "Internal Error after test run: " + ex.getMessage() + "\n" + formatTestResults(results);
                 cog().status("Tests Failed"); // Explicitly set status on error
             } else {
@@ -171,7 +173,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                         cause.printStackTrace();
                         return null; // Teardown failure shouldn't fail the test itself, but should be reported
                     })
-                    .thenApply(teardownResult -> new TestResult(test.name, expectationResults, actionErrors)), // Pass actionErrors
+                    // Pass parsing errors, expectation results, and action errors to the TestResult
+                    .thenApply(teardownResult -> new TestResult(test.name, test.parsingErrors(), expectationResults, actionErrors)),
             cog().events.exe // Schedule teardown stage on event executor
         ).whenCompleteAsync((result, ex) -> { // Keep whenCompleteAsync on event executor for cleanup
             // Clean up the temporary KB/Note regardless of test outcome
@@ -238,7 +241,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private Object executeAssertAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst list))
-            throw new IllegalArgumentException("Invalid payload for assert: " + action.payload);
+            throw new IllegalArgumentException("Invalid payload for assert: Expected KIF list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         var isNeg = list.op().filter(KIF_OP_NOT::equals).isPresent();
         var s = list.size();
         if (isNeg && s != 2) throw new IllegalArgumentException("Invalid 'not' format for assert.");
@@ -254,7 +257,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private Object executeAddRuleAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
-            throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
+            throw new IllegalArgumentException("Invalid payload for addRule: Expected Rule KIF list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         // TODO: Implement KB-scoped rules. Currently adds to global context.
         var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId); // Rule is tagged with testKbId, but context.addRule is global
         var added = context.addRule(r);
@@ -263,7 +266,7 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private Object executeRemoveRuleFormAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
-            throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
+            throw new IllegalArgumentException("Invalid payload for removeRuleForm: Expected Rule KIF list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         // TODO: Implement KB-scoped rules. Currently removes from global context.
         var removed = context.removeRule(ruleForm);
         return removed;
@@ -271,25 +274,35 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private Object executeRetractAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
-            throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
+            throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET). Found: " + (action.payload == null ? "null" : action.payload.toKif()));
         }
         var rtype = typeAtom.value();
         var target = retractTargetList.get(1);
         String targetStr;
-        if (target instanceof Term.Atom atom) {
-             targetStr = atom.value();
-        } else if (target instanceof Term.Lst list) {
-             targetStr = list.toKif();
-        } else {
-             throw new IllegalArgumentException("Invalid target type for retract: " + target.getClass().getSimpleName());
-        }
-
         RetractionType retractionType;
+
         try {
             retractionType = RetractionType.valueOf(rtype.toUpperCase());
         } catch (IllegalArgumentException e) {
-             throw new IllegalArgumentException("Invalid retraction type: " + rtype);
+             throw new IllegalArgumentException("Invalid retraction type: " + rtype + ". Must be BY_KIF or BY_ID.");
         }
+
+        // Currently only BY_KIF is fully supported by the parsing logic below
+        if (retractionType == RetractionType.BY_KIF) {
+             if (!(target instanceof Term.Lst list)) {
+                 throw new IllegalArgumentException("Invalid target for retract BY_KIF: Expected KIF list. Found: " + target.getClass().getSimpleName() + ". Term: " + target.toKif());
+             }
+             targetStr = list.toKif();
+        } else if (retractionType == RetractionType.BY_ID) {
+             if (!(target instanceof Term.Atom atom)) {
+                 throw new IllegalArgumentException("Invalid target for retract BY_ID: Expected Atom (ID). Found: " + target.getClass().getSimpleName() + ". Term: " + target.toKif());
+             }
+             targetStr = atom.value();
+        } else {
+             // Should not happen due to valueOf check above, but defensive
+             throw new IllegalArgumentException("Unsupported retraction type: " + rtype);
+        }
+
 
         context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + test.name, testKbId));
         return targetStr;
@@ -314,13 +327,13 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private Object executeQueryAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst pattern))
-            throw new IllegalArgumentException("Invalid payload for query: " + action.payload);
+            throw new IllegalArgumentException("Invalid payload for query: Expected KIF list pattern. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
         QueryType queryType;
         try {
             queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr);
+            throw new IllegalArgumentException("Invalid query_type for query action: " + queryTypeStr + ". Must be ASK_BINDINGS or ASK_BOOLEAN.");
         }
         // querySync is synchronous, runs on the calling thread (which should be cog().events.exe)
         return cog().querySync(new Query(Cog.id(ID_PREFIX_QUERY + "test_"), queryType, pattern, testKbId, action.toolParams));
@@ -328,15 +341,15 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private CompletableFuture<Object> executeWaitAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst conditionList)) {
-            throw new IllegalArgumentException("Invalid payload for wait: Expected condition list.");
+            throw new IllegalArgumentException("Invalid payload for wait: Expected condition list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         }
         var conditionOpOpt = conditionList.op();
          if (conditionOpOpt.isEmpty()) {
-             throw new IllegalArgumentException("Invalid wait condition list: Missing operator.");
+             throw new IllegalArgumentException("Invalid wait condition list: Missing operator. Term: " + conditionList.toKif());
          }
         var conditionOp = conditionOpOpt.get();
         if (conditionList.size() < 2) {
-             throw new IllegalArgumentException("Invalid wait condition list: Missing target.");
+             throw new IllegalArgumentException("Invalid wait condition list: Missing target. Term: " + conditionList.toKif());
          }
         Term conditionTarget = conditionList.get(1);
 
@@ -356,12 +369,12 @@ public class TestPlugin extends Plugin.BasePlugin {
                     conditionMet = switch (conditionOp) {
                         case "assertionExists" -> {
                             if (!(conditionTarget instanceof Term.Lst kif))
-                                throw new IllegalArgumentException("wait assertionExists requires a KIF list.");
+                                throw new IllegalArgumentException("wait assertionExists requires a KIF list. Found: " + conditionTarget.getClass().getSimpleName() + ". Term: " + conditionTarget.toKif());
                             yield findAssertionInTestOrGlobalKb(kif, testKbId).isPresent();
                         }
                         case "assertionDoesNotExist" -> {
                             if (!(conditionTarget instanceof Term.Lst kif))
-                                throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list.");
+                                throw new IllegalArgumentException("wait assertionDoesNotExist requires a KIF list. Found: " + conditionTarget.getClass().getSimpleName() + ". Term: " + conditionTarget.toKif());
                             yield findAssertionInTestOrGlobalKb(kif, testKbId).isEmpty();
                         }
                         default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
@@ -439,7 +452,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                     case "expectedKbSize" -> checkExpectedKbSize(expected, kb);
                     case "expectedToolResult" -> checkExpectedToolResult(expected, actionResult);
                     case "expectedToolResultContains" -> checkExpectedToolResultContains(expected, actionResult);
-                    default -> Optional.of("Unknown expectation type: " + expected.type); // Should be caught by parseExpectation, but defensive check
+                    default -> Optional.of("Internal error: Unknown expectation type '" + expected.type + "' passed to checkSingleExpectation."); // Should be caught by parseExpectation
                 };
 
                 if (failureReason.isEmpty()) {
@@ -611,7 +624,7 @@ public class TestPlugin extends Plugin.BasePlugin {
     }
 
 
-    // --- Parsing Logic (No changes needed for reporting) ---
+    // --- Parsing Logic (Modified to collect errors) ---
 
     private List<TestDefinition> parseTestDefinitions(String text) throws ParseException {
         List<TestDefinition> definitions = new ArrayList<>();
@@ -636,35 +649,53 @@ public class TestPlugin extends Plugin.BasePlugin {
                 List<TestAction> action = new ArrayList<>();
                 List<TestExpected> expected = new ArrayList<>();
                 List<TestAction> teardown = new ArrayList<>();
+                List<String> parsingErrors = new ArrayList<>(); // Collect errors for this test
 
                 for (var i = 2; i < list.size(); i++) {
                     var sectionTerm = list.get(i);
                     if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
-                        System.err.println("TestPlugin: Skipping test '" + name + "' due to invalid section format: " + sectionTerm.toKif());
+                        String error = "Invalid section format: " + sectionTerm.toKif();
+                        System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                        parsingErrors.add(error);
                         continue;
                     }
                     var sectionOpOpt = sectionList.op();
                     if (sectionOpOpt.isEmpty()) {
-                        throw new ParseException("Section without operator in test '" + name, sectionList.toKif());
+                        String error = "Section without operator: " + sectionList.toKif();
+                        System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                        parsingErrors.add(error);
+                        continue;
                     }
                     var sectionOp = sectionOpOpt.get();
                     var sectionContents = sectionList.terms.stream().skip(1).toList();
 
-                    switch (sectionOp) {
-                        case "setup" -> setup.addAll(parseActions(sectionContents));
-                        case "action" -> action = parseActions(sectionContents);
-                        case "expected" -> expected.addAll(parseExpectations(sectionContents));
-                        case "teardown" -> teardown.addAll(parseActions(sectionContents));
-                        default -> throw new ParseException("Unknown section type '" + sectionOp + "' in test '" + name, sectionList.toKif());
+                    try {
+                        switch (sectionOp) {
+                            case "setup" -> setup.addAll(parseActions(sectionContents, parsingErrors));
+                            case "action" -> action = parseActions(sectionContents, parsingErrors);
+                            case "expected" -> expected.addAll(parseExpectations(sectionContents, parsingErrors));
+                            case "teardown" -> teardown.addAll(parseActions(sectionContents, parsingErrors));
+                            default -> {
+                                String error = "Unknown section type '" + sectionOp + "': " + sectionList.toKif();
+                                System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                                parsingErrors.add(error);
+                            }
+                        }
+                    } catch (Exception e) {
+                         // Catch unexpected errors during section parsing
+                         String error = "Unexpected error parsing section '" + sectionOp + "': " + e.getMessage() + " | Term: " + sectionList.toKif();
+                         System.err.println("TestPlugin: Test '" + name + "' | " + error);
+                         e.printStackTrace(); // Log stack trace for unexpected errors
+                         parsingErrors.add(error);
                     }
                 }
 
-                if (action.isEmpty()) {
+                if (action.isEmpty() && parsingErrors.isEmpty()) { // Only skip if no action AND no parsing errors in other sections
                      System.err.println("TestPlugin: Skipping test '" + name + "' because the 'action' section is missing or empty.");
-                     continue;
+                     continue; // Skip tests with no action section unless there were parsing errors we need to report
                 }
 
-                definitions.add(new TestDefinition(name, setup, action, expected, teardown));
+                definitions.add(new TestDefinition(name, setup, action, expected, teardown, parsingErrors));
             } else {
                 System.out.println("TestPlugin: Ignoring non-test top-level term in definitions: " + term.toKif());
             }
@@ -672,13 +703,21 @@ public class TestPlugin extends Plugin.BasePlugin {
         return definitions;
     }
 
-    private List<TestAction> parseActions(List<Term> terms) {
+    private List<TestAction> parseActions(List<Term> terms, List<String> errors) {
         List<TestAction> actions = new ArrayList<>();
         for (var term : terms) {
             try {
                 actions.add(parseAction(term));
             } catch (IllegalArgumentException e) {
-                System.err.println("TestPlugin: Skipping invalid action term: " + term.toKif() + " | Error: " + e.getMessage());
+                String error = "Invalid action term: " + term.toKif() + " | Error: " + e.getMessage();
+                System.err.println("TestPlugin: " + error);
+                errors.add(error);
+            } catch (Exception e) {
+                 // Catch unexpected errors during action parsing
+                 String error = "Unexpected error parsing action term: " + e.getMessage() + " | Term: " + term.toKif();
+                 System.err.println("TestPlugin: " + error);
+                 e.printStackTrace(); // Log stack trace for unexpected errors
+                 errors.add(error);
             }
         }
         return actions;
@@ -690,7 +729,7 @@ public class TestPlugin extends Plugin.BasePlugin {
         }
         var opOpt = actionList.op();
         if (opOpt.isEmpty()) {
-            throw new IllegalArgumentException("Action list must have an operator.");
+            throw new IllegalArgumentException("Action list must have an operator. Term: " + actionList.toKif());
         }
         var op = opOpt.get();
 
@@ -702,7 +741,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             case "runTool" -> parseRunToolAction(actionList);
             case "query" -> parseQueryAction(actionList);
             case "wait" -> parseWaitAction(actionList);
-            default -> throw new IllegalArgumentException("Unknown action operator: " + op);
+            default -> throw new IllegalArgumentException("Unknown action operator: " + op + ". Term: " + actionList.toKif());
         };
     }
 
@@ -751,6 +790,13 @@ public class TestPlugin extends Plugin.BasePlugin {
         if (!(typeTerm instanceof Term.Atom typeAtom)) {
              throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
+        // Validate type atom value early
+        try {
+            RetractionType.valueOf(typeAtom.value().toUpperCase());
+        } catch (IllegalArgumentException e) {
+             throw new IllegalArgumentException("Invalid retraction type: " + typeAtom.value() + ". Must be BY_KIF or BY_ID. Term: " + actionList.toKif());
+        }
+
         return new TestAction("retract", retractTargetList, new HashMap<>());
     }
 
@@ -760,35 +806,49 @@ public class TestPlugin extends Plugin.BasePlugin {
              if (actionList.size() == 2 && actionList.get(1) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                 toolParams = parseParams(paramsList);
             } else {
-                 throw new IllegalArgumentException("runTool action parameters must be in a (params (...)) list as the second argument.");
+                 throw new IllegalArgumentException("runTool action parameters must be in a (params (...)) list as the second argument. Term: " + actionList.toKif());
             }
         }
         var toolName = (String) toolParams.get("name");
         if (toolName == null || toolName.isBlank())
-            throw new IllegalArgumentException("runTool requires 'name' parameter within params.");
+            throw new IllegalArgumentException("runTool requires 'name' parameter within params. Term: " + actionList.toKif());
 
         return new TestAction("runTool", null, toolParams);
     }
 
     private TestAction parseQueryAction(Term.Lst actionList) {
         if (actionList.size() < 2)
-            throw new IllegalArgumentException("query action requires at least one argument (the pattern).");
+            throw new IllegalArgumentException("query action requires at least one argument (the pattern). Term: " + actionList.toKif());
         Term payload = actionList.get(1);
+        if (!(payload instanceof Term.Lst)) {
+             throw new IllegalArgumentException("query action requires a KIF list pattern as its first argument. Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+
 
         Map<String, Object> toolParams = new HashMap<>();
         if (actionList.size() > 2) {
             if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                 toolParams = parseParams(paramsList);
             } else {
-                 throw new IllegalArgumentException("query action parameters must be in a (params (...)) list as the third argument.");
+                 throw new IllegalArgumentException("query action parameters must be in a (params (...)) list as the third argument. Term: " + actionList.toKif());
             }
         }
+        // Validate query_type param early
+        if (toolParams.containsKey("query_type")) {
+            var queryTypeStr = (String) toolParams.get("query_type");
+            try {
+                QueryType.valueOf(queryTypeStr.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                 throw new IllegalArgumentException("Invalid query_type parameter: " + queryTypeStr + ". Must be ASK_BINDINGS or ASK_BOOLEAN. Term: " + actionList.toKif());
+            }
+        }
+
         return new TestAction("query", payload, toolParams);
     }
 
     private TestAction parseWaitAction(Term.Lst actionList) {
         if (actionList.size() < 2)
-            throw new IllegalArgumentException("wait action requires at least one argument (the condition list).");
+            throw new IllegalArgumentException("wait action requires at least one argument (the condition list). Term: " + actionList.toKif());
         Term payload = actionList.get(1);
 
         Map<String, Object> toolParams = new HashMap<>();
@@ -796,23 +856,66 @@ public class TestPlugin extends Plugin.BasePlugin {
             if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
                 toolParams = parseParams(paramsList);
             } else {
-                 throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument.");
+                 throw new IllegalArgumentException("wait action parameters must be in a (params (...)) list as the third argument. Term: " + actionList.toKif());
             }
         }
         if (!(payload instanceof Term.Lst conditionList) || conditionList.terms.isEmpty() || conditionList.op().isEmpty()) {
-             throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + payload.getClass().getSimpleName() + ". Term: " + actionList.toKif());
+             throw new IllegalArgumentException("wait action requires a non-empty list with an operator as its argument (the condition list). Found: " + (payload == null ? "null" : payload.getClass().getSimpleName()) + ". Term: " + actionList.toKif());
         }
+        // Validate condition type early
+        var conditionOpOpt = conditionList.op();
+        if (conditionOpOpt.isEmpty()) {
+             throw new IllegalArgumentException("wait condition list must have an operator. Term: " + conditionList.toKif());
+        }
+        var conditionOp = conditionOpOpt.get();
+        if (!Set.of("assertionExists", "assertionDoesNotExist").contains(conditionOp)) {
+             throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp + ". Must be assertionExists or assertionDoesNotExist. Term: " + actionList.toKif());
+        }
+        if (conditionList.size() != 2) {
+             throw new IllegalArgumentException("wait condition list must have exactly one argument (the target KIF list). Found size: " + conditionList.size() + ". Term: " + actionList.toKif());
+        }
+        if (!(conditionList.get(1) instanceof Term.Lst)) {
+             throw new IllegalArgumentException("wait condition target must be a KIF list. Found: " + conditionList.get(1).getClass().getSimpleName() + ". Term: " + actionList.toKif());
+        }
+
+        // Validate timeout/interval params early
+        if (toolParams.containsKey("timeout")) {
+            try {
+                long timeout = ((Number) toolParams.get("timeout")).longValue();
+                if (timeout <= 0) throw new NumberFormatException();
+            } catch (ClassCastException | NumberFormatException e) {
+                 throw new IllegalArgumentException("Invalid 'timeout' parameter for wait: Must be a positive number. Term: " + actionList.toKif());
+            }
+        }
+         if (toolParams.containsKey("interval")) {
+            try {
+                long interval = ((Number) toolParams.get("interval")).longValue();
+                if (interval <= 0) throw new NumberFormatException();
+            } catch (ClassCastException | NumberFormatException e) {
+                 throw new IllegalArgumentException("Invalid 'interval' parameter for wait: Must be a positive number. Term: " + actionList.toKif());
+            }
+        }
+
+
         return new TestAction("wait", payload, toolParams);
     }
 
 
-    private List<TestExpected> parseExpectations(List<Term> terms) {
+    private List<TestExpected> parseExpectations(List<Term> terms, List<String> errors) {
         List<TestExpected> expectations = new ArrayList<>();
         for (var term : terms) {
             try {
                 expectations.add(parseExpectation(term));
             } catch (IllegalArgumentException e) {
-                System.err.println("TestPlugin: Skipping invalid expectation term: " + term.toKif() + " | Error: " + e.getMessage());
+                String error = "Invalid expectation term: " + term.toKif() + " | Error: " + e.getMessage();
+                System.err.println("TestPlugin: " + error);
+                errors.add(error);
+            } catch (Exception e) {
+                 // Catch unexpected errors during expectation parsing
+                 String error = "Unexpected error parsing expectation term: " + e.getMessage() + " | Term: " + term.toKif();
+                 System.err.println("TestPlugin: " + error);
+                 e.printStackTrace(); // Log stack trace for unexpected errors
+                 errors.add(error);
             }
         }
         return expectations;
@@ -820,46 +923,46 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private TestExpected parseExpectation(Term term) {
         if (!(term instanceof Term.Lst expectedList) || expectedList.terms.isEmpty()) {
-            throw new IllegalArgumentException("Expectation must be a non-empty list.");
+            throw new IllegalArgumentException("Expectation must be a non-empty list. Term: " + term.toKif());
         }
         var opOpt = expectedList.op();
         if (opOpt.isEmpty()) {
-            throw new IllegalArgumentException("Expectation list must have an operator.");
+            throw new IllegalArgumentException("Expectation list must have an operator. Term: " + expectedList.toKif());
         }
         var op = opOpt.get();
 
         if (expectedList.size() < 2) {
-             throw new IllegalArgumentException("Expectation '" + op + "' requires at least one argument.");
+             throw new IllegalArgumentException("Expectation '" + op + "' requires at least one argument. Term: " + expectedList.toKif());
         }
         Term expectedValueTerm = expectedList.get(1);
 
         return switch (op) {
-            case "expectedResult" -> parseExpectedResult(op, expectedValueTerm);
-            case "expectedBindings" -> parseExpectedBindings(op, expectedValueTerm);
-            case "expectedAssertionExists" -> parseExpectedAssertionExists(op, expectedValueTerm);
-            case "expectedAssertionDoesNotExist" -> parseExpectedAssertionDoesNotExist(op, expectedValueTerm);
-            case "expectedRuleExists" -> parseExpectedRuleExists(op, expectedValueTerm);
-            case "expectedRuleDoesNotExist" -> parseExpectedRuleDoesNotExist(op, expectedValueTerm);
-            case "expectedKbSize" -> parseExpectedKbSize(op, expectedValueTerm);
-            case "expectedToolResult" -> parseExpectedToolResult(op, expectedValueTerm);
-            case "expectedToolResultContains" -> parseExpectedToolResultContains(op, expectedValueTerm);
-            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+            case "expectedResult" -> parseExpectedResult(op, expectedValueTerm, expectedList);
+            case "expectedBindings" -> parseExpectedBindings(op, expectedValueTerm, expectedList);
+            case "expectedAssertionExists" -> parseExpectedAssertionExists(op, expectedValueTerm, expectedList);
+            case "expectedAssertionDoesNotExist" -> parseExpectedAssertionDoesNotExist(op, expectedValueTerm, expectedList);
+            case "expectedRuleExists" -> parseExpectedRuleExists(op, expectedValueTerm, expectedList);
+            case "expectedRuleDoesNotExist" -> parseExpectedRuleDoesNotExist(op, expectedValueTerm, expectedList);
+            case "expectedKbSize" -> parseExpectedKbSize(op, expectedValueTerm, expectedList);
+            case "expectedToolResult" -> parseExpectedToolResult(op, expectedValueTerm, expectedList);
+            case "expectedToolResultContains" -> parseExpectedToolResultContains(op, expectedValueTerm, expectedList);
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op + ". Term: " + expectedList.toKif());
         };
     }
 
-    private TestExpected parseExpectedResult(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedResult(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom))
-            throw new IllegalArgumentException(op + " requires a single boolean atom (true/false).");
+            throw new IllegalArgumentException(op + " requires a single boolean atom (true/false). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         String value = ((Term.Atom) expectedValueTerm).value();
 
         if (!value.equals("true") && !value.equals("false"))
-            throw new IllegalArgumentException(op + " value must be 'true' or 'false'.");
+            throw new IllegalArgumentException(op + " value must be 'true' or 'false'. Found: '" + value + "'. Term: " + fullTerm.toKif());
         return new TestExpected(op, Boolean.parseBoolean(value));
     }
 
-    private TestExpected parseExpectedBindings(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedBindings(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Lst expectedBindingsListTerm)) {
-             throw new IllegalArgumentException(op + " requires a list of binding pairs ((?V1 Val1) ...) or () or (()). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + expectedValueTerm.toKif());
+             throw new IllegalArgumentException(op + " requires a list of binding pairs ((?V1 Val1) ...) or () or (()). Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         }
 
         // Handle empty list case: () or (())
@@ -873,54 +976,54 @@ public class TestPlugin extends Plugin.BasePlugin {
              if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
                 expectedBindings.add(Map.of(var, value));
             } else {
-                throw new IllegalArgumentException("Invalid binding pair format in expected value: " + bindingPairTerm.toKif());
+                throw new IllegalArgumentException("Invalid binding pair format in expected value: " + bindingPairTerm.toKif() + ". Term: " + fullTerm.toKif());
             }
         }
         return new TestExpected(op, expectedBindings); // Store as list of maps
     }
 
-    private TestExpected parseExpectedAssertionExists(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedAssertionExists(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Lst kif))
-            throw new IllegalArgumentException(op + " requires a single KIF list.");
+            throw new IllegalArgumentException(op + " requires a single KIF list. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         return new TestExpected(op, kif);
     }
 
-    private TestExpected parseExpectedAssertionDoesNotExist(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedAssertionDoesNotExist(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Lst kif))
-            throw new IllegalArgumentException(op + " requires a single KIF list.");
+            throw new IllegalArgumentException(op + " requires a single KIF list. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         return new TestExpected(op, kif);
     }
 
-    private TestExpected parseExpectedRuleExists(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedRuleExists(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Lst ruleForm))
-            throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+            throw new IllegalArgumentException(op + " requires a single rule KIF list. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         return new TestExpected(op, ruleForm);
     }
 
-    private TestExpected parseExpectedRuleDoesNotExist(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedRuleDoesNotExist(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Lst ruleForm))
-            throw new IllegalArgumentException(op + " requires a single rule KIF list.");
+            throw new IllegalArgumentException(op + " requires a single rule KIF list. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         return new TestExpected(op, ruleForm);
     }
 
-    private TestExpected parseExpectedKbSize(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedKbSize(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom))
-            throw new IllegalArgumentException(op + " requires a single integer atom.");
+            throw new IllegalArgumentException(op + " requires a single integer atom. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         String value = ((Term.Atom) expectedValueTerm).value();
         try {
             return new TestExpected(op, Integer.parseInt(value));
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(op + " value must be an integer.");
+            throw new IllegalArgumentException(op + " value must be an integer. Found: '" + value + "'. Term: " + fullTerm.toKif());
         }
     }
 
-    private TestExpected parseExpectedToolResult(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedToolResult(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         return new TestExpected(op, termToObject(expectedValueTerm));
     }
 
-    private TestExpected parseExpectedToolResultContains(String op, Term expectedValueTerm) {
+    private TestExpected parseExpectedToolResultContains(String op, Term expectedValueTerm, Term.Lst fullTerm) {
         if (!(expectedValueTerm instanceof Term.Atom)) {
-            throw new IllegalArgumentException(op + " requires a single Atom containing the expected substring.");
+            throw new IllegalArgumentException(op + " requires a single Atom containing the expected substring. Found: " + expectedValueTerm.getClass().getSimpleName() + ". Term: " + fullTerm.toKif());
         }
         return new TestExpected(op, termToObject(expectedValueTerm));
     }
@@ -929,14 +1032,14 @@ public class TestPlugin extends Plugin.BasePlugin {
     private Map<String, Object> parseParams(Term.Lst paramsList) {
         Map<String, Object> params = new HashMap<>();
         if (paramsList.op().filter("params"::equals).isEmpty()) {
-            throw new IllegalArgumentException("Parameter list must start with 'params'.");
+            throw new IllegalArgumentException("Parameter list must start with 'params'. Term: " + paramsList.toKif());
         }
         for (var paramTerm : paramsList.terms.stream().skip(1).toList()) {
             if (paramTerm instanceof Term.Lst paramPair && paramPair.size() == 2 && paramPair.get(0) instanceof Term.Atom) {
                 String value = ((Term.Atom) paramPair.get(0)).value();
                 params.put(value, termToObject(paramPair.get(1)));
             } else {
-                throw new IllegalArgumentException("Invalid parameter format: " + paramTerm.toKif());
+                throw new IllegalArgumentException("Invalid parameter format: " + paramTerm.toKif() + ". Expected (key value). Term: " + paramsList.toKif());
             }
         }
         return params;
@@ -1013,8 +1116,13 @@ public class TestPlugin extends Plugin.BasePlugin {
         var failedCount = 0;
 
         for (var result : results) {
-            boolean overallPassed = result.expectationResults.stream().allMatch(ExpectationResult::passed) && result.actionErrors.isEmpty();
+            boolean overallPassed = result.isOverallPassed(); // Use the helper method
             sb.append(overallPassed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
+
+            if (!result.parsingErrors().isEmpty()) { // Report parsing errors first
+                sb.append("  Parsing Errors:\n");
+                result.parsingErrors().forEach(error -> sb.append("    - ").append(error).append("\n"));
+            }
 
             if (!result.actionErrors.isEmpty()) {
                 sb.append("  Action Errors:\n");
@@ -1031,7 +1139,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                      }
                      sb.append("\n");
                  }
-            } else if (result.actionErrors.isEmpty()) {
+            } else if (result.parsingErrors().isEmpty() && result.actionErrors.isEmpty()) {
                  sb.append("  No expectations defined.\n");
             }
 
@@ -1062,8 +1170,9 @@ public class TestPlugin extends Plugin.BasePlugin {
         });
     }
 
+    // Modified record to include parsing errors
     private record TestDefinition(String name, List<TestAction> setup, List<TestAction> action, List<TestExpected> expected,
-                                  List<TestAction> teardown) {
+                                  List<TestAction> teardown, List<String> parsingErrors) {
     }
 
     private record TestAction(String type, @Nullable Term payload, Map<String, Object> toolParams) {
@@ -1081,10 +1190,10 @@ public class TestPlugin extends Plugin.BasePlugin {
 
 
     // Modified record for overall test result
-    private record TestResult(String name, List<ExpectationResult> expectationResults, List<ActionError> actionErrors) { // Changed actionErrors type
+    private record TestResult(String name, List<String> parsingErrors, List<ExpectationResult> expectationResults, List<ActionError> actionErrors) { // Added parsingErrors
         // Helper to determine overall pass/fail status
         public boolean isOverallPassed() {
-            return expectationResults.stream().allMatch(ExpectationResult::passed) && actionErrors.isEmpty();
+            return parsingErrors.isEmpty() && expectationResults.stream().allMatch(ExpectationResult::passed) && actionErrors.isEmpty();
         }
     }
 
