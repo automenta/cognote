@@ -291,77 +291,155 @@ public class TestPlugin extends Plugin.BasePlugin {
                     answer = queryAnswer; // Assign the casted result to the 'answer' variable
                 }
 
-
+                // Fix: Use expected.type in the switch statement
                 return switch (expected.type) {
                     case "expectedResult" -> {
                         // Fix: Use traditional instanceof check and cast
-                        if (!(expected.value instanceof Term.Atom))
-                            throw new IllegalArgumentException("expectedResult requires a single boolean atom (true/false).");
+                        if (!(expected.value instanceof Term.Atom)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a single boolean atom (true/false). Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
                         String value = ((Term.Atom) expected.value).value();
 
-                        if (!value.equals("true") && !value.equals("false"))
-                            throw new IllegalArgumentException("expectedResult value must be 'true' or 'false'.");
-                        yield new TestExpected(op, Boolean.parseBoolean(value));
+                        if (!value.equals("true") && !value.equals("false")) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: value must be 'true' or 'false'. Found: '" + value + "'");
+                            yield false;
+                        }
+                        boolean expectedBoolean = Boolean.parseBoolean(value);
+
+                        // 'answer' is now guaranteed to be a Cog.Answer here due to the check before the switch
+                        boolean passed = expectedBoolean == (answer.status() == Cog.QueryStatus.SUCCESS);
+                        if (!passed) {
+                             System.err.println("    Expectation '" + expected.type + "' failed: Expected status " + (expectedBoolean ? "SUCCESS" : "FAILURE") + ", but got " + answer.status());
+                        }
+                        yield passed; // Yield boolean
                     }
                     case "expectedBindings" -> {
                         // Expecting (expectedBindings ((?V1 Val1) (?V2 Val2) ...)) or (expectedBindings ())
-                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm))
-                            throw new IllegalArgumentException("expectedBindings requires a list of binding pairs.");
+                        if (!(expected.value instanceof Term.Lst expectedBindingsListTerm)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a list of binding pairs ((?V1 Val1) ...) or (). Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
 
                         // 'answer' is now guaranteed to be a Cog.Answer here
                         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
                         // Iterate through the terms *inside* the list of binding pairs
+                        boolean parseError = false;
                         for (var bindingPairTerm : expectedBindingsListTerm.terms) {
                              if (bindingPairTerm instanceof Term.Lst bindingPair && bindingPair.size() == 2 && bindingPair.get(0) instanceof Term.Var var && bindingPair.get(1) instanceof Term value) {
                                 expectedBindings.add(Map.of(var, value));
                             } else {
-                                // This error message is correct if the item *inside* the list is malformed.
-                                throw new IllegalArgumentException("Invalid binding pair format: Each item in the list must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
+                                System.err.println("    Expectation '" + expected.type + "' failed: Invalid binding pair format: Each item in the list must be a list of size 2 like (?Var Value). Found: " + bindingPairTerm.toKif());
+                                parseError = true;
+                                break; // Stop parsing on first error
                             }
                         }
+                        if (parseError) yield false; // Fail if parsing failed
 
                         List<Map<Term.Var, Term>> actualBindings = answer.bindings(); // 'answer' is now in scope
 
                         // Simple comparison: check if the lists of bindings are equal (order matters for now)
-                        yield Objects.equals(expectedBindings, actualBindings);
+                        boolean passed = Objects.equals(expectedBindings, actualBindings);
+                        if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Expected bindings " + expectedBindings + ", but got " + actualBindings);
+                        }
+                        yield passed; // Yield boolean
                     }
-                    case "expectedAssertionExists", "expectedAssertionDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedKif))
-                            throw new IllegalArgumentException("expectedAssertionExists requires a KIF list.");
+                    case "expectedAssertionExists" -> {
+                        if (!(expected.value instanceof Term.Lst expectedKif)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a KIF list. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
                         // Check in the test KB first, then global KB
-                        yield ctx.findAssertionByKif(expectedKif, testKbId).isPresent() || ctx.findAssertionByKif(expectedKif, globalKb.id).isPresent();
+                        boolean passed = ctx.findAssertionByKif(expectedKif, testKbId).isPresent() || ctx.findAssertionByKif(expectedKif, globalKb.id).isPresent();
+                         if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Assertion not found: " + expectedKif.toKif());
+                        }
+                        yield passed;
                     }
-                    case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedRuleForm))
-                            throw new IllegalArgumentException("expectedRuleExists requires a rule KIF list.");
-                        yield context.rules().stream().anyMatch(r -> r.form().equals(expectedRuleForm));
+                    case "expectedAssertionDoesNotExist" -> {
+                        if (!(expected.value instanceof Term.Lst expectedKif)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a KIF list. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
+                        // Check in the test KB first, then global KB
+                        boolean passed = ctx.findAssertionByKif(expectedKif, testKbId).isEmpty() && ctx.findAssertionByKif(expectedKif, globalKb.id).isEmpty();
+                        if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
+                        }
+                        yield passed;
+                    }
+                    case "expectedRuleExists" -> {
+                        if (!(expected.value instanceof Term.Lst expectedRuleForm)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a rule KIF list. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
+                        boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(expectedRuleForm));
+                        if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Rule not found: " + expectedRuleForm.toKif());
+                        }
+                        yield passed;
                     }
                     case "expectedRuleDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedRuleForm))
-                            throw new IllegalArgumentException("expectedRuleDoesNotExist requires a rule KIF list.");
-                        yield context.rules().stream().noneMatch(r -> r.form().equals(expectedRuleForm));
+                        if (!(expected.value instanceof Term.Lst expectedRuleForm)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a rule KIF list. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
+                        boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(expectedRuleForm));
+                         if (!passed) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: Rule found unexpectedly: " + expectedRuleForm.toKif());
+                        }
+                        yield passed;
                     }
                     case "expectedKbSize" -> {
                         // Fix: Use traditional instanceof check and cast
-                        if (!(expected.value instanceof Term.Atom))
-                            throw new IllegalArgumentException("expectedKbSize requires a single integer atom.");
+                        if (!(expected.value instanceof Term.Atom)) {
+                            System.err.println("    Expectation '" + expected.type + "' failed: requires a single integer atom. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
+                            yield false;
+                        }
                         String value = ((Term.Atom) expected.value).value();
                         try {
-                            yield new TestExpected(op, Integer.parseInt(value));
+                            int expectedSize = Integer.parseInt(value);
+                            boolean passed = kb.getAssertionCount() == expectedSize;
+                            if (!passed) {
+                                System.err.println("    Expectation '" + expected.type + "' failed: Expected KB size " + expectedSize + ", but got " + kb.getAssertionCount());
+                            }
+                            yield passed;
                         } catch (NumberFormatException e) {
-                            throw new IllegalArgumentException("expectedKbSize value must be an integer.");
+                            System.err.println("    Expectation '" + expected.type + "' failed: value must be an integer. Found: '" + value + "'");
+                            yield false;
                         }
                     }
                     case "expectedToolResult" -> {
                         // The expected value can be any Term
-                        yield new TestExpected(op, expectedValueTerm);
+                        // Check if the action result matches the expected value
+                        // If both are strings, check if the actual result starts with the expected value
+                        boolean passed;
+                        if (actionResult instanceof String actualString && expected.value instanceof Term.Atom expectedAtom && expectedAtom.value() != null) {
+                            String expectedString = expectedAtom.value();
+                            passed = actualString.startsWith(expectedString);
+                             if (!passed) {
+                                System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result starting with '" + expectedString + "', but got '" + actualString + "'");
+                            }
+                        } else {
+                            // Otherwise, use exact equality check (comparing Term to Object)
+                            // This might need refinement depending on how tool results are represented
+                            passed = Objects.equals(actionResult, expected.value);
+                             if (!passed) {
+                                System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
+                            }
+                        }
+                        yield passed;
                     }
-                    default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
+                    default -> {
+                        System.err.println("    Expectation check failed: Unknown expectation type: " + expected.type);
+                        yield false; // Unknown type means failure
+                    }
                 };
             } catch (Exception e) {
                 System.err.println("    Expectation check failed with error: " + e.getMessage());
                 e.printStackTrace();
-                return false; // Expectation check itself failed
+                return false; // Exception means failure
             }
         }, cog().events.exe); // Run expectation checks on the event executor
     }
@@ -599,7 +677,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 // The expected value can be any Term
                 yield new TestExpected(op, expectedValueTerm);
             }
-            default -> throw new IllegalArgumentException("Unknown expectation type: " + expected.type);
+            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
         };
     }
 
@@ -614,6 +692,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                 // Fix: Explicit cast to Term.Atom to get the value
                 String value = ((Term.Atom) paramPair.get(0)).value();
                 // Simple key-value pair: (key value)
+                // Fix: Move this line inside the if block
                 params.put(value, termToObject(paramPair.get(1)));
             } else {
                 throw new IllegalArgumentException("Invalid parameter format: " + paramTerm.toKif());
