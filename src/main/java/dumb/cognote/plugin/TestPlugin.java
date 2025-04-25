@@ -98,10 +98,10 @@ public class TestPlugin extends Plugin.BasePlugin {
         context.addActiveNote(testKbId);
 
         // Use CompletableFuture to chain setup, action, expected, and teardown
-        CompletableFuture<TestResult> c = executeActions(test, testKbId, "Setup", test.setup)
+        CompletableFuture<TestResult> c = executeActionList(test, testKbId, "Setup", test.setup)
                 .thenCompose(setupResult -> executeActionList(test, testKbId, "Action", test.action)) // Execute list of actions
                 .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
-                .thenCompose(expectedResult -> executeActions(test, testKbId, "Teardown", test.teardown)
+                .thenCompose(expectedResult -> executeActionList(test, testKbId, "Teardown", test.teardown)
                         .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting"))) // Result determined by expectations
                 .whenComplete((result, ex) -> {
                     // Cleanup the temporary KB regardless of success or failure
@@ -528,7 +528,7 @@ public class TestPlugin extends Plugin.BasePlugin {
                          if (!passed) {
                             System.err.println("    Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
                             // If it was a string startsWith check that failed, provide more detail
-                            if (actionResult instanceof String actualString && expected.value instanceof Term.Atom && ((Term.Atom) expected.value).value() != null) {
+                            if (actionResult instanceof String actualResultString && expected.value instanceof Term.Atom && ((Term.Atom) expected.value).value() != null) {
                                 System.err.println("      (String startsWith check failed: Expected '" + ((Term.Atom) expected.value).value() + "', got '" + actualResultString + "')");
                             }
                         }
