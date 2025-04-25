@@ -17,7 +17,7 @@ public class Test {
 
         c.start();
 
-        c.loadRules("/home/me/sumo/Merge.kif");
+        //c.loadRules("/home/me/sumo/Merge.kif");
 
         c.addNote(new Note(TEST_DEFINITIONS_NOTE_ID, TEST_DEFINITIONS_NOTE_TITLE, TESTS, IDLE));
         c.addNote(new Note(TEST_RESULTS_NOTE_ID, TEST_RESULTS_NOTE_TITLE, "; Test results: pending", IDLE));
@@ -54,42 +54,42 @@ public class Test {
               (action (query (instance ?X Cat)))
               (expected (expectedResult true) (expectedBindings ((?X MyCat))))
               (teardown (retract (BY_KIF (instance MyCat Cat)))))
-            
-            (test "Query with Multiple Bindings"\s
-              (setup\s
+
+            (test "Query with Multiple Bindings"
+              (setup
                 (assert (instance MyCat Cat))
                 (assert (instance YourCat Cat))
                 (assert (instance MyDog Dog)))
               (action (query (instance ?X Cat)))
-              (expected\s
+              (expected
                 (expectedResult true)
                 (expectedBindings ((?X MyCat) (?X YourCat))))
-              (teardown\s
+              (teardown
                 (retract (BY_KIF (instance MyCat Cat)))
                 (retract (BY_KIF (instance YourCat Cat)))
                 (retract (BY_KIF (instance MyDog Dog)))))
             
-            (test "Query Failure"\s
+            (test "Query Failure"
               (setup (assert (instance MyDog Dog)))
               (action (query (instance MyDog Cat)))
               (expected (expectedResult false) (expectedBindings ())))
               (teardown (retract (BY_KIF (instance MyDog Dog))))
             
-            (test "Forward Chaining Rule"\s
+            (test "Forward Chaining Rule"
               (setup\s
                 (addRule (=> (instance ?X Dog) (attribute ?X Canine)))
                 (assert (instance MyDog Dog)))
               (action (query (attribute MyDog Canine)))
-              (expected\s
+              (expected
                 (expectedResult true)
                 (expectedBindings (()))
                 (expectedAssertionExists (attribute MyDog Canine)))
-              (teardown\s
+              (teardown
                 (retract (BY_KIF (instance MyDog Dog)))
                 (retract (BY_KIF (attribute MyDog Canine)))
                 (removeRuleForm (=> (instance ?X Dog) (attribute ?X Canine)))))
             
-            (test "Retract Assertion"\s
+            (test "Retract Assertion"
               (setup (assert (instance TempFact Something)))
               (action
                 (retract (BY_KIF (instance TempFact Something)))
@@ -98,24 +98,27 @@ public class Test {
                 (expectedAssertionDoesNotExist (instance TempFact Something)))
               (teardown))
             
-            (test "KB Size Check"\s
-              (setup\s
+            (test "KB Size Check"
+              (setup
                 (assert (fact1 a))
-                (assert (fact2 b)))
+                (assert (fact2 b))
+              )
               (action (assert (fact3 c)))
               (expected (expectedKbSize 3))
-              (teardown\s
+              (teardown
                 (retract (BY_KIF (fact1 a)))
                 (retract (BY_KIF (fact2 b)))
-                (retract (fact3 c)))))
+                (retract (fact3 c)))
+              )
+            )
             
-            (test "Run LogMessageTool"\s
+            (test "Run LogMessageTool"
               (setup)
               (action (runTool (params (name "log_message") (message "Hello from test!"))))
               (expected (expectedToolResult "Message logged."))
               (teardown))
             
-            (test "Run GetNoteTextTool"\s
+            (test "Run GetNoteTextTool"
               (setup)
               (action (runTool (params (name "get_note_text") (note_id "note-test-definitions"))))
               (expected (expectedToolResultContains "; Define your tests here using the (test ...) format"))
