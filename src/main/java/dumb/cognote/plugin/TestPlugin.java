@@ -376,22 +376,13 @@ public class TestPlugin extends Plugin.BasePlugin {
                         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
                         yield passed;
                     }
-                    case "expectedRuleExists" -> {
-                        if (!(expected.value instanceof Term.Lst expectedRuleForm)) {
+                    case "expectedRuleExists", "expectedRuleDoesNotExist" -> {
+                        if (!(expected.value instanceof Term.Lst ruleForm)) {
                             System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
                             yield false;
                         }
                         boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(expectedRuleForm));
                         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule not found: " + expectedRuleForm.toKif());
-                        yield passed;
-                    }
-                    case "expectedRuleDoesNotExist" -> {
-                        if (!(expected.value instanceof Term.Lst expectedRuleForm)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
-                            yield false;
-                        }
-                        boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(expectedRuleForm));
-                         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule found unexpectedly: " + expectedRuleForm.toKif());
                         yield passed;
                     }
                     case "expectedKbSize" -> {
@@ -403,37 +394,13 @@ public class TestPlugin extends Plugin.BasePlugin {
                         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected KB size " + expectedSize + ", but got " + kb.getAssertionCount());
                         yield passed;
                     }
-                    case "expectedToolResult" -> {
-                        boolean passed = Objects.equals(actionResult, expected.value);
-                        if (!passed && actionResult instanceof String actualString && expected.value instanceof Term.Atom) {
-                             String expectedString = ((Term.Atom) expected.value).value();
-                             if (expectedString != null) passed = actualString.startsWith(expectedString);
-                        }
-                         if (!passed) {
-                            System.err.println("Expectation '" + expected.type + "' failed: Expected tool result " + expected.value + ", but got " + actionResult);
-                            if (actionResult instanceof String actualResultString && expected.value instanceof Term.Atom && ((Term.Atom) expected.value).value() != null) {
-                                System.err.println("(String startsWith check failed: Expected '" + ((Term.Atom) expected.value).value() + "', got '" + actualResultString + "')");
-                            }
-                        }
-                        yield passed;
-                    }
+                    case "expectedToolResult" -> yield new TestExpected(op, termToObject(expectedValueTerm));
                      case "expectedToolResultContains" -> {
-                        if (!(expected.value instanceof Term.Atom expectedAtom)) {
-                            System.err.println("Expectation '" + expected.type + "' failed: requires a single Atom containing the expected substring.");
+                        if (!(expectedValueTerm instanceof Term.Atom)) {
+                            System.err.println("Expectation '" + op + "' requires a single Atom containing the expected substring.");
                             yield false;
                         }
-                        String expectedSubstring = expectedAtom.value();
-                        if (expectedSubstring == null) {
-                             System.err.println("Expectation '" + expected.type + "' failed: expected substring Atom has null value.");
-                             yield false;
-                        }
-
-                        String actualResultString = actionResult != null ? actionResult.toString() : "null";
-                        String trimmedExpectedSubstring = expectedSubstring.trim();
-                        boolean passed = actualResultString.contains(trimmedExpectedSubstring);
-
-                        if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Expected tool result to contain '" + trimmedExpectedSubstring + "', but got '" + actualResultString + "'");
-                        yield passed;
+                        yield new TestExpected(op, termToObject(expectedValueTerm));
                     }
                     default -> {
                         System.err.println("Expectation check failed: Unknown expectation type: " + expected.type);
@@ -557,24 +524,18 @@ public class TestPlugin extends Plugin.BasePlugin {
                 yield new TestAction(op, retractTargetList, new HashMap<>());
             }
             case "runTool" -> {
-                if (actionList.size() < 2)
-                    throw new IllegalArgumentException("runTool action requires at least tool name.");
-                Term toolNameTerm = actionList.get(1);
-                if (!(toolNameTerm instanceof Term.Atom))
-                    throw new IllegalArgumentException("runTool action requires tool name as the second argument (after the operator): " + actionList.toKif());
-                String toolName = ((Term.Atom) toolNameTerm).value();
+                var toolName = (String) action.toolParams.get("name");
+                if (toolName == null || toolName.isBlank())
+                    throw new IllegalArgumentException("runTool requires 'name' parameter.");
 
-                Map<String, Object> toolParams = new HashMap<>();
-                toolParams.put("name", toolName);
+                Map<String, Object> toolParams = new HashMap<>(action.toolParams);
+                toolParams.remove("name");
+                toolParams.putIfAbsent("target_kb_id", testKbId);
+                toolParams.putIfAbsent("note_id", testKbId);
 
-                if (actionList.size() > 2) {
-                    if (actionList.size() == 3 && actionList.get(2) instanceof Term.Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
-                        toolParams.putAll(parseParams(paramsList));
-                    } else {
-                        throw new IllegalArgumentException("runTool action requires parameters in a (params (...)) list as the third argument.");
-                    }
-                }
-                yield new TestAction(op, null, toolParams);
+                var toolOpt = cog().tools.get(toolName);
+                if (toolOpt.isEmpty()) throw new IllegalArgumentException("Tool not found: " + toolName);
+                yield toolOpt.get().execute(toolParams).thenApply(r -> r);
             }
             case "query" -> {
                 if (actionList.size() < 2)
@@ -676,13 +637,18 @@ public class TestPlugin extends Plugin.BasePlugin {
                     throw new IllegalArgumentException("expectedKbSize value must be an integer.");
                 }
             }
-            case "expectedToolResult" -> yield new TestExpected(op, expectedValueTerm);
+            case "expectedToolResult" -> yield new TestExpected(op, termToObject(expectedValueTerm));
              case "expectedToolResultContains" -> {
-                if (!(expectedValueTerm instanceof Term.Atom))
-                    throw new IllegalArgumentException(op + " requires a single Atom containing the expected substring.");
-                yield new TestExpected(op, expectedValueTerm);
+                if (!(expectedValueTerm instanceof Term.Atom)) {
+                    System.err.println("Expectation '" + op + "' requires a single Atom containing the expected substring.");
+                    yield false;
+                }
+                yield new TestExpected(op, termToObject(expectedValueTerm));
             }
-            default -> throw new IllegalArgumentException("Unknown expectation operator: " + op);
+            default -> {
+                System.err.println("Expectation check failed: Unknown expectation type: " + expected.type);
+                yield false;
+            }
         };
     }
 
