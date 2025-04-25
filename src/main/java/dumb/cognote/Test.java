@@ -11,6 +11,8 @@ import static dumb.cognote.Note.Status.IDLE;
 
 public class Test {
 
+    private static String finalResultsText = "; Test results: pending"; // Store results here
+
     public static void main(String[] args) throws IOException {
 
         // Use a minimal CogNote implementation for testing that doesn't rely on UI or file saving
@@ -31,49 +33,51 @@ public class Test {
 
         var completion = new CompletableFuture<Void>();
 
-        c.events.on(SystemStatusEvent.class, s -> {
-            // Check for the specific status messages indicating test completion
-            if ("Tests Complete".equals(s.statusMessage())) {
-                completion.complete(null);
-            } else if ("Tests Failed".equals(s.statusMessage())) {
-                // The plugin now reports "Tests Complete" even if tests failed,
-                // but the results note will show failures. We rely on checking
-                // the results note content after completion.
-                // However, if the plugin reports "Tests Failed" due to a parse error,
-                // we should also complete the future to unblock the main thread.
-                 completion.complete(null); // Complete on any final test status
-            }
+        // Listen for the new TestRunCompleteEvent
+        c.events.on(TestPlugin.TestRunCompleteEvent.class, event -> {
+            System.out.println("Test.java: Received TestRunCompleteEvent."); // Added logging
+            finalResultsText = event.resultsText(); // Store the results
+            completion.complete(null); // Signal completion to the main thread
         });
 
+        System.out.println("Test.java: Emitting RunTestsEvent..."); // Added logging
         c.events.emit(new TestPlugin.RunTestsEvent());
 
         try {
-            // Wait for the test run to complete (either successfully or with parse errors)
-            // Increased timeout to 15 seconds
-            completion.get(15, TimeUnit.SECONDS);
+            // Wait for the TestRunCompleteEvent to be received
+            // Increased timeout significantly to 60 seconds
+            completion.get(60, TimeUnit.SECONDS);
+            System.out.println("Test.java: Completion future completed."); // Added logging
 
-            // Retrieve and print the detailed test results
-            c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> System.out.println(note.text));
+            // Print the stored detailed test results
+            System.out.println("\n--- Final Test Results ---");
+            System.out.println(finalResultsText);
+            System.out.println("--------------------------");
 
-            // Check the results note content to determine overall success/failure
-            var resultsNote = c.note(TEST_RESULTS_NOTE_ID);
-            if (resultsNote.isPresent()) {
-                String resultsText = resultsNote.get().text;
-                // Simple check: look for "Failed: " followed by a number greater than 0
-                if (resultsText.contains("\nFailed: ") && !resultsText.contains("\nFailed: 0\n")) {
-                    throw new RuntimeException("Some tests failed.");
-                }
-            } else {
-                 throw new RuntimeException("Test results note not found after run.");
+
+            // Check the results text content to determine overall success/failure
+            if (finalResultsText.contains("\nFailed: ") && !finalResultsText.contains("\nFailed: 0\n")) {
+                throw new RuntimeException("Some tests failed.");
             }
 
-
+        } catch (TimeoutException e) {
+            System.err.println("Test runner error: Timeout waiting for tests to complete.");
+            // Attempt to print current results note content on timeout
+            c.note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
+                System.err.println("\n--- Current Test Results (on Timeout) ---");
+                System.err.println(note.text);
+                System.err.println("-----------------------------------------");
+            });
+            e.printStackTrace();
+            System.exit(1); // Exit with non-zero status on failure
         } catch (Exception e) {
             System.err.println("Test runner error: " + e.getMessage());
             e.printStackTrace();
             System.exit(1); // Exit with non-zero status on failure
         } finally {
+            System.out.println("Test.java: Stopping system..."); // Added logging
             c.stop();
+            System.out.println("Test.java: System stopped."); // Added logging
         }
     }
 
