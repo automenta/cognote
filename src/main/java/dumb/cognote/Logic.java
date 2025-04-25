@@ -732,6 +732,10 @@ public class Logic {
         private int col = 0;
         private int charPos = 0;
 
+        private static final int CONTEXT_BUFFER_SIZE = 50;
+        private final StringBuilder contextBuffer = new StringBuilder(CONTEXT_BUFFER_SIZE);
+
+
         public KifParser(Reader reader) {
             this.reader = reader;
         }
@@ -741,7 +745,8 @@ public class Logic {
             try (var sr = new StringReader(input.trim())) {
                 return new KifParser(sr).parseTopLevel();
             } catch (IOException e) {
-                throw new ParseException("Internal Read error: " + e.getMessage());
+                // This should ideally not happen with StringReader, but handle defensively
+                throw new ParseException("Internal Read error: " + e.getMessage(), 0, 0, "");
             }
         }
 
@@ -866,6 +871,11 @@ public class Logic {
                 } else {
                     col++;
                 }
+                // Add to buffer and trim if necessary
+                contextBuffer.append((char) c);
+                if (contextBuffer.length() > CONTEXT_BUFFER_SIZE) {
+                    contextBuffer.delete(0, contextBuffer.length() - CONTEXT_BUFFER_SIZE);
+                }
             }
             return c;
         }
@@ -894,17 +904,29 @@ public class Logic {
         }
 
         private ParseException createParseException(String message) {
-            return new ParseException(message + " at line " + line + " col " + col);
+            return new ParseException(message, line, col, contextBuffer.toString());
         }
 
         private ParseException createParseException(String message, @Nullable String foundToken) {
             var foundInfo = foundToken != null ? " found " + foundToken : "";
-            return new ParseException(message + foundInfo + " at line " + line + " col " + col);
+            return new ParseException(message + foundInfo, line, col, contextBuffer.toString());
         }
 
         public static class ParseException extends Exception {
-            public ParseException(String message) {
+            private final int line;
+            private final int col;
+            private final String context;
+
+            public ParseException(String message, int line, int col, String context) {
                 super(message);
+                this.line = line;
+                this.col = col;
+                this.context = context;
+            }
+
+            @Override
+            public String getMessage() {
+                return super.getMessage() + " at line " + line + " col " + col + ". Context: \"" + context + "\"";
             }
         }
     }
