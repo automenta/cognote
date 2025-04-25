@@ -380,6 +380,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                         if (!passed) {
                             System.err.println("    Expectation '" + expected.type + "' failed: Assertion found unexpectedly: " + expectedKif.toKif());
                         }
+                        // NOTE: This check may fail if the retraction is still pending due to its asynchronous nature.
+                        // A more robust test would require waiting for a retraction completion event.
                         yield passed;
                     }
                     case "expectedRuleExists" -> {
