@@ -188,7 +188,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
                                 throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET)");
                             }
-                            var type = typeAtom.value();
+                            var rtype = typeAtom.value();
                             var target = retractTargetList.get(1);
                             var targetStr = switch (target) {
                                 case Term.Atom(String vv) -> vv;
@@ -202,7 +202,7 @@ public class TestRunnerPlugin extends Plugin.BasePlugin {
                             // We can't return a direct success/failure here based on the request.
                             // The expectation phase must check if the assertion/rule is gone.
                             // Return the target string as a result? Or just null? Let's return the target.
-                            context.events.emit(new RetractionRequestEvent(targetStr, RetractionType.valueOf(type.toUpperCase()), "test-runner:" + test.name, testKbId));
+                            context.events.emit(new RetractionRequestEvent(targetStr, RetractionType.valueOf(rtype.toUpperCase()), "test-runner:" + test.name, testKbId));
                             yield CompletableFuture.completedFuture(targetStr);
                         }
                         case "removeRuleForm" -> {
