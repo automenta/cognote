@@ -268,10 +268,10 @@ class CognoteTests {
         }
         var conditionOp = conditionOpOpt.get();
         if (!Set.of("assertionExists", "assertionDoesNotExist").contains(conditionOp)) {
-            throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp + ". Must be assertionExists or assertionDoesNotExist. Term: " + actionList.toKif());
+            throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp + ". Must be assertionExists or assertionDoesNotExist. Term: " + conditionList.toKif());
         }
         if (conditionList.size() != 2) {
-            throw new IllegalArgumentException("wait condition list must have exactly one argument (the target KIF list). Found size: " + conditionList.size() + ". Term: " + actionList.toKif());
+            throw new IllegalArgumentException("wait condition list must have exactly one argument (the target KIF list). Found size: " + conditionList.size() + ". Term: " + conditionList.toKif());
         }
         if (!(conditionList.get(1) instanceof Term.Lst)) {
             throw new IllegalArgumentException("wait condition target must be a KIF list. Found: " + conditionList.get(1).getClass().getSimpleName() + ". Term: " + actionList.toKif());
@@ -982,12 +982,17 @@ class CognoteTests {
     // Helper method to run a test defined by KIF sections
     private void runKifTest(String testKif) {
         Term testTerm = parseSingleTerm(testKif);
+
+        // Check if the top-level term is a valid (test ...) list
         if (!(testTerm instanceof Term.Lst testList) || testList.terms.isEmpty() || !testList.op().filter("test"::equals).isPresent()) {
             fail("Top-level term is not a valid (test ...) list: " + testTerm.toKif());
+            return; // Exit if parsing fails
         }
 
+        // Check for test name
         if (testList.size() < 2 || !(testList.get(1) instanceof Term.Atom)) {
              fail("Test definition must have a name as the second element. Term: " + testList.toKif());
+             return; // Exit if parsing fails
         }
         String testName = ((Term.Atom) testList.get(1)).value();
 
@@ -999,12 +1004,16 @@ class CognoteTests {
         // Parse sections within the test definition
         for (var i = 2; i < testList.size(); i++) {
             var sectionTerm = testList.get(i);
+            // Check if the section term is a valid list
             if (!(sectionTerm instanceof Term.Lst sectionList) || sectionList.terms.isEmpty()) {
                 fail("Invalid section format in test '" + testName + "': " + sectionTerm.toKif());
+                continue; // Skip this invalid section and try the next
             }
+
             var sectionOpOpt = sectionList.op();
             if (sectionOpOpt.isEmpty()) {
                 fail("Section without operator in test '" + testName + "': " + sectionList.toKif());
+                continue; // Skip this invalid section
             }
             var sectionOp = sectionOpOpt.get();
             var sectionContents = sectionList.terms.stream().skip(1).toList();
@@ -1027,6 +1036,7 @@ class CognoteTests {
             // This case was skipped in the old plugin unless there were parsing errors.
             // In JUnit, we can either skip or fail. Let's fail as it indicates an incomplete test definition.
             fail("Test '" + testName + "' is missing the mandatory 'action' section.");
+            return; // Exit after failure
         }
 
         // --- Execute Test Stages ---
@@ -1266,7 +1276,7 @@ class CognoteTests {
                 (expectedBindings ((?Rel isA))))
               (teardown
                 (retract (BY_KIF (isA Dog Animal)))
-                (retract (BY_KIF (isA Cat Animal)))))
+                (retract (isA Cat Animal)))))
             """);
     }
 
