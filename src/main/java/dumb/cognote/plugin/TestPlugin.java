@@ -68,13 +68,19 @@ public class TestPlugin extends Plugin.BasePlugin {
                                 var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
                                 System.err.println("Error during test '" + test.name + "': " + cause.getMessage());
                                 cause.printStackTrace();
-                                return new TestResult(test.name, false, "Execution Error: " + cause.getMessage());
+                                // Create a TestResult indicating failure due to execution error
+                                List<String> errors = new ArrayList<>();
+                                errors.add("Execution Error: " + cause.getMessage());
+                                return new TestResult(test.name, Collections.emptyList(), errors);
                             })
                             .thenAccept(results::add)
             );
         }
 
         allTestsFuture.whenCompleteAsync((v, ex) -> {
+            // Note: ex here would catch errors from the thenAccept or the final completion,
+            // not individual test errors which are handled in the exceptionally block above.
+            // We rely on the results list containing the outcomes.
             updateTestResults(formatTestResults(results));
             cog().status("Tests Complete");
         }, cog().events.exe);
@@ -82,27 +88,71 @@ public class TestPlugin extends Plugin.BasePlugin {
 
     private CompletableFuture<TestResult> runTest(TestDefinition test) {
         var testKbId = Cog.id(TEST_KB_PREFIX);
+        List<String> actionErrors = new ArrayList<>();
+        Object actionResult = null; // To hold the result of the main action block
 
         var testNote = new Note(testKbId, "Test KB: " + test.name, "", Note.Status.IDLE);
+        // TODO: Decouple from CogNote - need a generic way to manage temporary KBs/Notes
         ((CogNote) cog()).addNote(testNote);
-
         context.addActiveNote(testKbId);
 
-        CompletableFuture<TestResult> c = executeActionList(test, testKbId, test.setup)
-                .thenCompose(setupResult -> executeActionList(test, testKbId, test.action))
-                .thenCompose(actionResult -> checkExpectations(test.expected, testKbId, actionResult))
-                .thenCompose(expectedResult -> executeActionList(test, testKbId, test.teardown)
-                        .thenApply(teardownResult -> new TestResult(test.name, expectedResult, "Details handled in formatting")))
-                .whenComplete((result, ex) -> {
-                    context.removeActiveNote(testKbId);
-                    ((CogNote) cog()).removeNote(testKbId);
+        CompletableFuture<Object> setupFuture = executeActionList(test, testKbId, test.setup)
+                .exceptionally(ex -> {
+                    actionErrors.add("Setup failed: " + ex.getMessage());
+                    return null; // Allow action/expectations to potentially run or fail gracefully
                 });
+
+        CompletableFuture<Object> actionFuture = setupFuture.thenCompose(setupResult -> {
+            if (!actionErrors.isEmpty()) {
+                return CompletableFuture.completedFuture(null); // Skip action if setup failed
+            }
+            return executeActionList(test, testKbId, test.action)
+                    .exceptionally(ex -> {
+                        actionErrors.add("Action failed: " + ex.getMessage());
+                        return null; // Allow expectations/teardown to potentially run
+                    });
+        });
+
+        CompletableFuture<List<ExpectationResult>> expectationsFuture = actionFuture.thenCompose(result -> {
+            // Capture the action result for expectation checks
+            // Note: This assumes the *last* action in the action list provides the result for expectations like query/runTool
+            // A more robust system might pass results explicitly or allow expectations to target specific action results
+            // For now, we'll just pass the result of the actionFuture chain.
+            // If actionFuture completed exceptionally, result will be null here.
+            Object finalActionResult = result; // Capture the result before checking errors
+            if (!actionErrors.isEmpty()) {
+                 // If action failed, expectations might not be meaningful, but we still run them
+                 // to report what *would* have happened or if they check for absence.
+                 // However, for simplicity in this refactor, we'll just pass null as actionResult
+                 // if there were action errors. A more complex approach could try to run expectations
+                 // even with action errors, but it adds complexity. Let's pass null.
+                 finalActionResult = null;
+            }
+            return checkExpectations(test.expected, testKbId, finalActionResult);
+        });
+
+
+        CompletableFuture<TestResult> c = expectationsFuture.thenCompose(expectationResults ->
+                executeActionList(test, testKbId, test.teardown)
+                        .exceptionally(ex -> {
+                            actionErrors.add("Teardown failed: " + ex.getMessage());
+                            return null; // Teardown failure shouldn't fail the test itself, but should be reported
+                        })
+                        .thenApply(teardownResult -> new TestResult(test.name, expectationResults, actionErrors))
+        ).whenComplete((result, ex) -> {
+            // Clean up the temporary KB/Note regardless of test outcome
+            context.removeActiveNote(testKbId);
+            // TODO: Decouple from CogNote
+            ((CogNote) cog()).removeNote(testKbId);
+        });
+
         return c;
     }
 
     private CompletableFuture<Object> executeActionList(TestDefinition test, String testKbId, List<TestAction> actions) {
         CompletableFuture<Object> future = CompletableFuture.completedFuture(null);
         for (var action : actions) {
+            // Chain actions sequentially, passing the result of the previous to the next (though not currently used)
             future = future.thenCompose(v -> executeSingleAction(test, testKbId, action));
         }
         return future;
@@ -115,7 +165,8 @@ public class TestPlugin extends Plugin.BasePlugin {
                     if (cause instanceof TimeoutException) {
                         throw new CompletionException(new TimeoutException("Action timed out after " + TEST_ACTION_TIMEOUT_SECONDS + " seconds: " + action.type));
                     }
-                    throw new CompletionException(new RuntimeException("Action failed: " + action.type + " - " + cause.getMessage(), cause));
+                    // Wrap other exceptions in CompletionException for consistent handling
+                    throw new CompletionException(new RuntimeException("Action '" + action.type + "' failed: " + cause.getMessage(), cause));
                 });
     }
 
@@ -155,7 +206,8 @@ public class TestPlugin extends Plugin.BasePlugin {
     private CompletableFuture<Object> executeAddRuleAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
             throw new IllegalArgumentException("Invalid payload for addRule: " + action.payload);
-        var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId);
+        // TODO: Implement KB-scoped rules. Currently adds to global context.
+        var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId); // Rule is tagged with testKbId, but context.addRule is global
         var added = context.addRule(r);
         return CompletableFuture.completedFuture(added);
     }
@@ -163,6 +215,7 @@ public class TestPlugin extends Plugin.BasePlugin {
     private CompletableFuture<Object> executeRemoveRuleFormAction(TestDefinition test, String testKbId, TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
             throw new IllegalArgumentException("Invalid payload for removeRuleForm: " + action.payload);
+        // TODO: Implement KB-scoped rules. Currently removes from global context.
         var removed = context.removeRule(ruleForm);
         return CompletableFuture.completedFuture(removed);
     }
@@ -199,7 +252,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             throw new IllegalArgumentException("runTool requires 'name' parameter.");
 
         Map<String, Object> toolParams = new HashMap<>(action.toolParams);
-        toolParams.remove("name");
+        // TODO: Remove hardcoded KB/Note ID injection. Test should specify if needed.
         toolParams.putIfAbsent("target_kb_id", testKbId);
         toolParams.putIfAbsent("note_id", testKbId);
 
@@ -242,6 +295,7 @@ public class TestPlugin extends Plugin.BasePlugin {
              throw new IllegalArgumentException("Wait timeout and interval must be positive.");
         }
 
+        // TODO: Implement event-driven wait instead of polling
         return CompletableFuture.supplyAsync(() -> {
             long startTime = System.currentTimeMillis();
             while (System.currentTimeMillis() - startTime < timeoutMillis) {
@@ -261,11 +315,12 @@ public class TestPlugin extends Plugin.BasePlugin {
                         default -> throw new IllegalArgumentException("Unknown wait condition type: " + conditionOp);
                     };
 
-                    if (conditionMet) return null;
+                    if (conditionMet) return null; // Condition met, complete successfully
 
                 } catch (IllegalArgumentException e) {
-                     throw new CompletionException(e);
+                     throw new CompletionException(e); // Wrap parsing/argument errors
                 } catch (Exception e) {
+                    // Log other exceptions during condition check but don't fail the wait immediately
                     System.err.println("Error checking wait condition: " + e.getMessage());
                 }
 
@@ -276,25 +331,30 @@ public class TestPlugin extends Plugin.BasePlugin {
                     throw new CompletionException(new InterruptedException("Wait interrupted"));
                 }
             }
+            // Timeout occurred
             throw new CompletionException(new TimeoutException("Wait condition not met within " + timeoutSeconds + " seconds: " + conditionList.toKif()));
-        }, cog().events.exe);
+        }, cog().events.exe); // Run on the event executor
     }
 
 
     private Optional<Assertion> findAssertionInTestOrGlobalKb(Term.Lst kif, String testKbId) {
+        // TODO: Adjust based on KB-scoped rules/assertions
         return context.findAssertionByKif(kif, testKbId).or(() -> context.findAssertionByKif(kif, context.kbGlobal().id));
     }
 
-    private CompletableFuture<Boolean> checkExpectations(List<TestExpected> expectations, String testKbId, @Nullable Object actionResult) {
-        CompletableFuture<Boolean> future = CompletableFuture.completedFuture(true);
-
+    private CompletableFuture<List<ExpectationResult>> checkExpectations(List<TestExpected> expectations, String testKbId, @Nullable Object actionResult) {
+        List<CompletableFuture<ExpectationResult>> futures = new ArrayList<>();
         for (var expected : expectations) {
-            future = future.thenCompose(currentOverallResult -> currentOverallResult ? checkSingleExpectation(expected, testKbId, actionResult) : CompletableFuture.completedFuture(false));
+            futures.add(checkSingleExpectation(expected, testKbId, actionResult));
         }
-        return future;
+        // Combine all futures and collect results
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> futures.stream()
+                        .map(CompletableFuture::join) // Join each completed future to get its result
+                        .collect(Collectors.toList()));
     }
 
-    private CompletableFuture<Boolean> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
+    private CompletableFuture<ExpectationResult> checkSingleExpectation(TestExpected expected, String testKbId, @Nullable Object actionResult) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var kb = context.kb(testKbId);
@@ -307,13 +367,14 @@ public class TestPlugin extends Plugin.BasePlugin {
 
                 if (requiresAnswer) {
                     if (!(actionResult instanceof Cog.Answer queryAnswer)) {
-                        System.err.println("Expectation '" + expected.type + "' failed: requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()));
-                        return false;
+                        String reason = "Requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName());
+                        System.err.println("Expectation '" + expected.type + "' failed: " + reason);
+                        return new ExpectationResult(expected, false, reason);
                     }
                     answer = queryAnswer;
                 }
 
-                return switch (expected.type) {
+                boolean passed = switch (expected.type) {
                     case "expectedResult" -> checkExpectedResult(expected, answer);
                     case "expectedBindings" -> checkExpectedBindings(expected, answer);
                     case "expectedAssertionExists" -> checkExpectedAssertionExists(expected, testKbId);
@@ -324,17 +385,32 @@ public class TestPlugin extends Plugin.BasePlugin {
                     case "expectedToolResult" -> checkExpectedToolResult(expected, actionResult);
                     case "expectedToolResultContains" -> checkExpectedToolResultContains(expected, actionResult);
                     default -> {
-                        System.err.println("Expectation check failed: Unknown expectation type: " + expected.type);
-                        yield false;
+                        String reason = "Unknown expectation type: " + expected.type;
+                        System.err.println("Expectation check failed: " + reason);
+                        yield false; // Should be caught by parseExpectation, but defensive check
                     }
                 };
+
+                if (passed) {
+                    return new ExpectationResult(expected, true, null);
+                } else {
+                    // The check methods already print specific failure reasons to System.err
+                    // We could capture them here, but for now, rely on the check method's output
+                    // and provide a generic failure message in the result object.
+                    // A better approach would be to have check methods return a detailed reason string.
+                    return new ExpectationResult(expected, false, "Check failed (details in System.err)");
+                }
+
             } catch (Exception e) {
+                String reason = "Check failed with error: " + e.getMessage();
                 System.err.println("Expectation check failed with error: " + e.getMessage());
                 e.printStackTrace();
-                return false;
+                return new ExpectationResult(expected, false, reason);
             }
-        }, cog().events.exe);
+        }, cog().events.exe); // Run expectation checks on the event executor
     }
+
+    // --- Expectation Check Implementations (Modified to return boolean and print failure reason) ---
 
     private boolean checkExpectedResult(TestExpected expected, Cog.Answer answer) {
         if (!(expected.value instanceof Boolean expectedBoolean)) {
@@ -355,7 +431,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         List<Map<Term.Var, Term>> expectedBindings = new ArrayList<>();
         boolean parseError = false;
 
-        if (expectedBindingsListTerm.terms.size() == 1 && expectedBindingsListTerm.get(0) instanceof Term.Lst innerList && innerList.terms.isEmpty()) {
+        // Handle empty bindings case: () or (())
+        if (expectedBindingsListTerm.terms.isEmpty() || (expectedBindingsListTerm.terms.size() == 1 && expectedBindingsListTerm.get(0) instanceof Term.Lst innerList && innerList.terms.isEmpty())) {
              expectedBindings.add(Collections.emptyMap());
         } else {
             for (var bindingPairTerm : expectedBindingsListTerm.terms) {
@@ -373,11 +450,12 @@ public class TestPlugin extends Plugin.BasePlugin {
 
         List<Map<Term.Var, Term>> actualBindings = answer.bindings();
 
+        // Convert bindings to a comparable format (sorted strings)
         Set<String> expectedBindingStrings = expectedBindings.stream()
             .map(bindingMap -> {
                 List<String> entryStrings = new ArrayList<>();
                 bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
-                Collections.sort(entryStrings);
+                Collections.sort(entryStrings); // Sort entries within a binding
                 return String.join(",", entryStrings);
             })
             .collect(Collectors.toSet());
@@ -386,7 +464,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             .map(bindingMap -> {
                 List<String> entryStrings = new ArrayList<>();
                 bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
-                Collections.sort(entryStrings);
+                Collections.sort(entryStrings); // Sort entries within a binding
                 return String.join(",", entryStrings);
             })
             .collect(Collectors.toSet());
@@ -422,6 +500,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
             return false;
         }
+        // TODO: Adjust based on KB-scoped rules. Currently checks global context.
         boolean passed = context.rules().stream().anyMatch(r -> r.form().equals(ruleForm));
         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule not found: " + ruleForm.toKif());
         return passed;
@@ -432,6 +511,7 @@ public class TestPlugin extends Plugin.BasePlugin {
             System.err.println("Expectation '" + expected.type + "' failed: Internal error - expected value is not a Term.Lst. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
             return false;
         }
+        // TODO: Adjust based on KB-scoped rules. Currently checks global context.
         boolean passed = context.rules().stream().noneMatch(r -> r.form().equals(ruleForm));
         if (!passed) System.err.println("Expectation '" + expected.type + "' failed: Rule found unexpectedly: " + ruleForm.toKif());
         return passed;
@@ -467,6 +547,8 @@ public class TestPlugin extends Plugin.BasePlugin {
         return passed;
     }
 
+
+    // --- Parsing Logic (No changes needed for reporting) ---
 
     private List<TestDefinition> parseTestDefinitions(String text) throws ParseException {
         List<TestDefinition> definitions = new ArrayList<>();
@@ -846,12 +928,31 @@ public class TestPlugin extends Plugin.BasePlugin {
         var failedCount = 0;
 
         for (var result : results) {
-            sb.append(result.passed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
-            if (!result.passed) {
-                sb.append("  Status: FAILED\n");
+            boolean overallPassed = result.expectationResults.stream().allMatch(ExpectationResult::passed) && result.actionErrors.isEmpty();
+            sb.append(overallPassed ? "PASS" : "FAIL").append(": ").append(result.name).append("\n");
+
+            if (!result.actionErrors.isEmpty()) {
+                sb.append("  Action Errors:\n");
+                result.actionErrors.forEach(error -> sb.append("    - ").append(error).append("\n"));
+            }
+
+            if (!result.expectationResults.isEmpty()) {
+                 sb.append("  Expectations:\n");
+                 for (var expResult : result.expectationResults) {
+                     sb.append("    ").append(expResult.passed ? "PASS" : "FAIL").append(": ").append(expResult.expected.type).append(" ").append(termToObject(expResult.expected.value instanceof Term ? (Term) expResult.expected.value : new Term.Atom(String.valueOf(expResult.expected.value)))); // Attempt to print value
+                     if (!expResult.passed) {
+                         sb.append(" (Reason: ").append(expResult.failureReason).append(")");
+                     }
+                     sb.append("\n");
+                 }
+            } else if (result.actionErrors.isEmpty()) {
+                 sb.append("  No expectations defined.\n");
+            }
+
+
+            if (!overallPassed) {
                 failedCount++;
             } else {
-                sb.append("  Status: PASSED\n");
                 passedCount++;
             }
             sb.append("\n");
@@ -869,7 +970,9 @@ public class TestPlugin extends Plugin.BasePlugin {
     private void updateTestResults(String resultsText) {
         cog().note(TEST_RESULTS_NOTE_ID).ifPresent(note -> {
             note.text = resultsText;
-            cog().save();
+            // TODO: Need a generic way to save notes, not tied to UI or specific Cog implementation
+            // cog().save(); // This calls UI.save() in CogNote, which might not be desired or available
+            // For now, we just update the note object in memory. A real system needs a persistence layer.
         });
     }
 
@@ -883,7 +986,16 @@ public class TestPlugin extends Plugin.BasePlugin {
     private record TestExpected(String type, Object value) {
     }
 
-    private record TestResult(String name, boolean passed, String details) {
+    // New record for detailed expectation results
+    private record ExpectationResult(TestExpected expected, boolean passed, @Nullable String failureReason) {
+    }
+
+    // Modified record for overall test result
+    private record TestResult(String name, List<ExpectationResult> expectationResults, List<String> actionErrors) {
+        // Helper to determine overall pass/fail status
+        public boolean isOverallPassed() {
+            return expectationResults.stream().allMatch(ExpectationResult::passed) && actionErrors.isEmpty();
+        }
     }
 
     public record RunTestsEvent() implements CogEvent {
