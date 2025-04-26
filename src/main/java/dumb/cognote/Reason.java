@@ -630,16 +630,111 @@ public class Reason {
             }
         }
 
+        private Stream<Map<Term.Var, Term>> prove(Term goal, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack) {
+            if (depth <= 0) return Stream.empty();
+
+            var currentGoal = Unifier.substFully(goal, bindings);
+
+            if (!proofStack.add(currentGoal)) {
+                return Stream.empty();
+            }
+
+            Stream<Map<Term.Var, Term>> resultStream = Stream.empty();
+
+            if (currentGoal instanceof Term.Lst goalList) {
+                var opOpt = goalList.op();
+                if (opOpt.isPresent()) {
+                    var op = opOpt.get();
+                    switch (op) {
+                        case KIF_OP_AND -> {
+                            if (goalList.size() > 1) {
+                                resultStream = proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack);
+                            } else {
+                                resultStream = Stream.of(bindings);
+                            }
+                        }
+                        case KIF_OP_OR -> {
+                            if (goalList.size() > 1) {
+                                resultStream = goalList.terms.stream().skip(1)
+                                        .flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack)));
+                            } else {
+                                resultStream = Stream.empty();
+                            }
+                        }
+                        case KIF_OP_NOT -> {
+                            if (goalList.size() == 2) {
+                                var negatedGoal = goalList.get(1);
+                                var negatedResults = prove(negatedGoal, kbId, bindings, depth, new HashSet<>(proofStack)).toList();
+                                if (negatedResults.isEmpty()) {
+                                    resultStream = Stream.of(bindings);
+                                } else {
+                                    resultStream = Stream.empty();
+                                }
+                            } else {
+                                error("Warning: Invalid 'not' format in query: " + goalList.toKif());
+                                resultStream = Stream.empty();
+                            }
+                        }
+                        default -> {
+                            resultStream = context.operators().get(Term.Atom.of(op))
+                                    .flatMap(opInstance -> executeOperator(opInstance, goalList, bindings, currentGoal))
+                                    .stream();
+                        }
+                    }
+                } else {
+                    error("Warning: List term without operator in query: " + goalList.toKif());
+                    resultStream = Stream.empty();
+                }
+            }
+
+
+            var hasOperatorResult = resultStream.findAny().isPresent();
+            if (!hasOperatorResult) {
+                resultStream = Stream.empty();
+
+                Stream<Assertion>[] factStream = new Stream[]{getKb(kbId).findUnifiableAssertions(currentGoal)};
+
+                context.getActiveNoteIds().stream()
+                        .filter(id -> !id.equals(kbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
+                        .map(this::getKb)
+                        .forEach(kb -> factStream[0] = Stream.concat(factStream[0], kb.findUnifiableAssertions(currentGoal)));
+
+                if (kbId == null || !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
+                    factStream[0] = Stream.concat(factStream[0], context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
+                }
+
+                var factBindingsStream = factStream[0]
+                        .distinct()
+                        .filter(Assertion::isActive)
+                        .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
+                        .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
+
+                var ruleStream = context.rules().stream()
+                        .filter(rule -> isActiveContext(rule.sourceNoteId()))
+                        .flatMap(rule -> {
+                            var renamedRule = renameRuleVariables(rule, depth);
+                            return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
+                                    .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack)))
+                                    .orElse(Stream.empty());
+                        });
+                resultStream = Stream.concat(Stream.concat(resultStream, factBindingsStream), ruleStream);
+            }
+
+
+            proofStack.remove(currentGoal);
+            return resultStream.distinct();
+        }
+
         private Optional<Map<Term.Var, Term>> executeOperator(Op.Operator op, Term.Lst goalList, Map<Term.Var, Term> bindings, Term currentGoal) {
             try {
                 var opResult = op.exe(goalList, context).join();
 
                 if (opResult == null) return Optional.empty();
 
-                if (opResult instanceof Term.Atom(var value)) {
-                    if ("true".equals(value)) {
+                if (opResult instanceof Term.Atom value) { // Corrected pattern matching syntax
+                    if ("true".equals(value.value())) {
                         return Optional.of(bindings);
-                    } else if ("false".equals(value)) {
+                    } else if ("false".equals(value.value())) {
                         return Optional.empty();
                     }
                 }
