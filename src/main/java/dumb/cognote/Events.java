@@ -1,7 +1,9 @@
 package dumb.cognote;
 
+import org.jetbrains.annotations.Nullable;
+import org.json.JSONObject;
+
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -9,7 +11,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static java.util.Objects.requireNonNull;
-import static java.util.Optional.ofNullable;
 
 public class Events {
     public final ExecutorService exe;
@@ -24,29 +25,13 @@ public class Events {
         try {
             listener.accept(event);
         } catch (Exception e) {
-            logExeError(e, type, event.getClass().getSimpleName());
+            Log.error("Error processing " + type + " event listener for " + event.getClass().getSimpleName() + ": " + e.getMessage());
+            e.printStackTrace();
         }
-    }
-
-    private static void exeSafe(BiConsumer<Cog.CogEvent, Map<Term.Var, Term>> listener, Cog.CogEvent event, Map<Term.Var, Term> bindings, String type) {
-        try {
-            listener.accept(event, bindings);
-        } catch (Exception e) {
-            logExeError(e, type, event.getClass().getSimpleName() + " (Pattern Match)");
-        }
-    }
-
-    private static void logExeError(Exception e, String type, String eventName) {
-        System.err.printf("Error in %s for %s: %s%n", type, eventName, e.getMessage());
-        e.printStackTrace();
     }
 
     public <T extends Cog.CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
         listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
-    }
-
-    public <T extends Cog.CogEvent> boolean off(Class<T> eventType, Consumer<T> listener) {
-        return listeners.remove(eventType, listener);
     }
 
     public void on(Term pattern, BiConsumer<Cog.CogEvent, Map<Term.Var, Term>> listener) {
@@ -55,32 +40,68 @@ public class Events {
 
     public void emit(Cog.CogEvent event) {
         if (exe.isShutdown()) {
-            System.err.println("Warning: Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
+            Log.warning("Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
             return;
         }
         exe.submit(() -> {
-            listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "Direct Listener"));
+            listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "class"));
             switch (event) {
-                case Cog.AssertedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), event);
-                case Cog.TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), event);
-                case Cog.ExternalInputEvent eiEvent ->
-                        handlePatternMatching(eiEvent.term(), event); // Also match patterns on external input
+                case Cog.AssertedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), aaEvent);
+                case Cog.TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), taEvent);
                 default -> {
                 }
             }
         });
     }
 
-    private void handlePatternMatching(Term eventTerm, Cog.CogEvent event) {
-        patternListeners.forEach((pattern, listeners) ->
-                ofNullable(Logic.Unifier.match(pattern, eventTerm, Map.of()))
-                        .ifPresent(bindings -> listeners.forEach(listener -> exeSafe(listener, event, bindings, "Pattern Listener")))
-        );
+    private void handlePatternMatching(Term term, Cog.CogEvent event) {
+        patternListeners.forEach((pattern, listeners) -> {
+            if (term instanceof Term.Lst termList) {
+                Logic.Unifier.match(pattern, termList, Map.of()).ifPresent(bindings ->
+                        listeners.forEach(listener -> exeSafe(e -> listener.accept(e, bindings), event, "pattern")));
+            }
+        });
     }
 
     public void shutdown() {
-        listeners.clear();
-        patternListeners.clear();
+        exe.shutdown();
     }
 
+    public record LogMessageEvent(String message, Log.LogLevel level) implements Cog.CogEvent {
+        public LogMessageEvent {
+            requireNonNull(message);
+            requireNonNull(level);
+        }
+
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "event")
+                    .put("eventType", "LogMessageEvent")
+                    .put("eventData", new JSONObject()
+                            .put("message", message)
+                            .put("level", level.name()));
+        }
+    }
+
+    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options, JSONObject context) implements Cog.CogEvent {
+        public DialogueRequestEvent {
+            requireNonNull(dialogueId);
+            requireNonNull(requestType);
+            requireNonNull(prompt);
+            requireNonNull(options);
+            requireNonNull(context);
+        }
+
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "event")
+                    .put("eventType", "DialogueRequestEvent")
+                    .put("eventData", new JSONObject()
+                            .put("dialogueId", dialogueId)
+                            .put("requestType", requestType)
+                            .put("prompt", prompt)
+                            .put("options", options)
+                            .put("context", context));
+        }
+    }
 }

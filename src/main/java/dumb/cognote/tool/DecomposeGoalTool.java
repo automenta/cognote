@@ -1,18 +1,21 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.Tool;
-import dumb.cognote.UI;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 
-import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
-import static java.util.Objects.requireNonNullElse;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
 
 public class DecomposeGoalTool implements Tool {
 
@@ -29,78 +32,55 @@ public class DecomposeGoalTool implements Tool {
 
     @Override
     public String description() {
-        return "Decomposes a high-level goal into smaller, actionable steps or sub-goals using the LLM. Input is a JSON object with 'goal_description' (string) and optional 'target_note_id' (string, defaults to global KB). The LLM should use the 'assert_kif' tool to add the generated steps.";
+        return "Decomposes a high-level goal into a sequence of smaller, actionable steps or sub-goals, expressed as a KIF list.";
+    }
+
+    @Tool("Decomposes a high-level goal into a sequence of smaller, actionable steps or sub-goals, expressed as a KIF list.")
+    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("goal") String goal, @dev.langchain4j.agent.tool.P("context") String context, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
+        var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
+        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Decomposing goal: " + goal));
+
+        var systemMessage = SystemMessage.from("""
+                You are a goal decomposition expert. Your task is to break down a given high-level goal into a sequence of smaller, concrete, actionable steps or sub-goals.
+                The output MUST be a single KIF list representing the sequence of steps. Each step should be a KIF term.
+                Example: (and (step "Research topic") (step "Write outline") (step "Draft content"))
+                Consider the provided context when decomposing the goal.
+                Output ONLY the KIF list, nothing else.
+                """);
+
+        var userMessage = UserMessage.from(String.format("Goal: %s\nContext: %s", goal, context));
+
+        List<ChatMessage> history = new ArrayList<>();
+        history.add(systemMessage);
+        history.add(userMessage);
+
+        return cog.lm.llmAsync(taskId, history, "Goal Decomposition", noteId)
+                .thenApply(AiMessage::text)
+                .thenApply(kifString -> {
+                    if (kifString == null || !kifString.trim().startsWith("(") || !kifString.trim().endsWith(")")) {
+                        error("LLM returned non-KIF for goal decomposition: " + kifString);
+                        throw new ToolExecutionException("LLM failed to return valid KIF list.");
+                    }
+                    message("Goal decomposition result for '" + goal + "': " + kifString);
+                    return kifString;
+                })
+                .exceptionally(ex -> {
+                    error("Goal decomposition failed for '" + goal + "': " + ex.getMessage());
+                    throw new ToolExecutionException("Goal decomposition failed: " + ex.getMessage());
+                });
     }
 
     @Override
-    public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        var goalDescription = (String) parameters.get("goal_description");
-        var targetNoteId = (String) parameters.get("target_note_id");
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
+        var goal = (String) parameters.get("goal");
+        var context = (String) parameters.get("context");
+        var noteId = (String) parameters.get("note_id");
 
-        if (goalDescription == null || goalDescription.isBlank()) {
-            return CompletableFuture.completedFuture("Error: Missing required parameter 'goal_description'.");
+        if (goal == null || goal.isBlank()) {
+            error("DecomposeGoalTool requires a 'goal' parameter.");
+            return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'goal' parameter."));
         }
 
-        var finalTargetKbId = requireNonNullElse(targetNoteId, Cog.GLOBAL_KB_NOTE_ID);
-
-        var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "decompose_");
-        var interactionType = "Task Decomposition";
-
-        // Add a UI placeholder for the LLM task
-        // cog.ui.addLlmUiPlaceholder(finalTargetKbId, interactionType + ": " + goalDescription); // Use target KB ID for UI
-        cog.events.emit(new Cog.LlmInfoEvent(UI.AttachmentViewModel.forLlm(
-                taskId,
-                finalTargetKbId, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
-                System.currentTimeMillis(), finalTargetKbId, Cog.TaskStatus.SENDING
-        )));
-
-
-        var promptText = """
-                You are a task decomposition agent. Your goal is to break down a high-level goal into smaller, actionable steps or sub-goals.
-                Express each step as a concise KIF assertion representing the step itself (e.g., a goal, action, or query).
-                For each step you identify, use the `assert_kif` tool with the note ID "%s".
-                Do NOT output the KIF assertions directly in your response. Only use the tool.
-                
-                Examples of KIF assertions for steps:
-                - (goal (findInformation about Cats))
-                - (action (createNote "Summary of Cats"))
-                - (query (instance ?X Cat))
-                - (action (summarizeNote "%s")) ; Assuming a tool or process exists for this
-                
-                Break down the following goal:
-                "%s"
-                
-                Generate KIF assertions for the steps and add them using the tool:""".formatted(finalTargetKbId, finalTargetKbId, goalDescription); // Use finalTargetKbId consistently
-
-        var history = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
-        history.add(UserMessage.from(promptText));
-
-        var llmFuture = cog.lm.llmAsync(taskId, history, interactionType, finalTargetKbId); // Use target KB ID for LLM context/logging
-
-        cog.lm.activeLlmTasks.put(taskId, llmFuture);
-
-        return llmFuture.handleAsync((chatResponse, ex) -> {
-            cog.lm.activeLlmTasks.remove(taskId);
-            if (ex != null) {
-                var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-                if (!(cause instanceof CancellationException)) {
-                    System.err.println(interactionType + " failed for goal '" + goalDescription + "': " + cause.getMessage());
-                    cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
-                    return "Error decomposing goal: " + cause.getMessage();
-                } else {
-                    System.out.println(interactionType + " cancelled for goal '" + goalDescription + "'.");
-                    cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
-                    return "Goal decomposition cancelled.";
-                }
-            } else {
-                System.out.println(interactionType + " completed for goal '" + goalDescription + "'. Sub-tasks should have been added by tool calls.");
-                cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
-                var text = chatResponse.text();
-                if (text != null && !text.isBlank()) {
-                    System.out.println("LLM final message for decomposition: " + text);
-                }
-                return "Goal decomposition completed. Check attachments for added assertions.";
-            }
-        }, cog.events.exe);
+        return execute(goal, context, noteId);
     }
 }

@@ -1,5 +1,8 @@
 package dumb.cognote;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -8,6 +11,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.id;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
 import static java.util.Optional.ofNullable;
 
 public interface Truths {
@@ -32,7 +37,18 @@ public interface Truths {
     record SupportTicket(String ticketId, String assertionId) {
     }
 
-    record Contradiction(Set<String> conflictingAssertionIds) {
+    record Contradiction(Set<String> conflictingAssertionIds, String kbId) {
+        public Contradiction {
+            requireNonNull(conflictingAssertionIds);
+            requireNonNull(kbId);
+        }
+
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "contradiction")
+                    .put("conflictingAssertionIds", new JSONArray(conflictingAssertionIds))
+                    .put("kbId", kbId);
+        }
     }
 
     class BasicTMS implements Truths {
@@ -54,7 +70,7 @@ public interface Truths {
                 var assertionToAdd = assertion.withStatus(true);
                 var supportingAssertions = justificationIds.stream().map(assertions::get).filter(Objects::nonNull).toList();
                 if (!justificationIds.isEmpty() && supportingAssertions.size() != justificationIds.size()) {
-                    System.err.printf("TMS Warning: Justification missing for %s. Supporters: %s, Found: %s%n", assertion.id(), justificationIds, supportingAssertions.stream().map(Assertion::id).toList());
+                    error(String.format("TMS Warning: Justification missing for %s. Supporters: %s, Found: %s", assertion.id(), justificationIds, supportingAssertions.stream().map(Assertion::id).toList()));
                     return null;
                 }
                 if (!justificationIds.isEmpty() && supportingAssertions.stream().noneMatch(Assertion::isActive))
@@ -173,7 +189,7 @@ public interface Truths {
             if (!(oppositeForm instanceof Term.Lst)) return;
             findMatchingAssertion((Term.Lst) oppositeForm, newlyActive.kb(), !newlyActive.negated())
                     .ifPresent(match -> {
-                        System.err.printf("TMS Contradiction Detected in KB %s: %s and %s%n", newlyActive.kb(), newlyActive.id(), match.id());
+                        error(String.format("TMS Contradiction Detected in KB %s: %s and %s", newlyActive.kb(), newlyActive.id(), match.id()));
                         events.emit(new ContradictionDetectedEvent(Set.of(newlyActive.id(), match.id()), newlyActive.kb()));
                     });
         }
@@ -195,10 +211,10 @@ public interface Truths {
             lock.writeLock().lock();
             try {
                 var conflictingIds = contradiction.conflictingAssertionIds();
-                System.err.printf("TMS Contradiction Resolution (Strategy: %s) for IDs: %s%n", strategy, conflictingIds);
+                error(String.format("TMS Contradiction Resolution (Strategy: %s) for IDs: %s", strategy, conflictingIds));
 
                 switch (strategy) {
-                    case LOG_ONLY -> System.err.println("Strategy LOG_ONLY: No assertions retracted.");
+                    case LOG_ONLY -> message("Strategy LOG_ONLY: No assertions retracted.");
                     case RETRACT_WEAKEST -> {
                         var activeConflicts = conflictingIds.stream()
                                 .map(assertions::get)
@@ -207,7 +223,7 @@ public interface Truths {
                                 .toList();
 
                         if (activeConflicts.isEmpty()) {
-                            System.err.println("Strategy RETRACT_WEAKEST: No active conflicting assertions found.");
+                            message("Strategy RETRACT_WEAKEST: No active conflicting assertions found.");
                             return;
                         }
 
@@ -218,10 +234,10 @@ public interface Truths {
                         if (weakestAssertions.size() > 1) {
                             var maxTimestamp = weakestAssertions.stream().mapToLong(Assertion::timestamp).max().orElseThrow();
                             weakestAssertions.stream().filter(a -> a.timestamp() == maxTimestamp).map(Assertion::id).forEach(idsToRetract::add);
-                            System.err.printf("Strategy RETRACT_WEAKEST: Tie in priority (%.3f), retracting %d oldest assertions.%n", minPri, idsToRetract.size());
+                            message(String.format("Strategy RETRACT_WEAKEST: Tie in priority (%.3f), retracting %d oldest assertions.", minPri, idsToRetract.size()));
                         } else {
                             idsToRetract.add(weakestAssertions.getFirst().id());
-                            System.err.printf("Strategy RETRACT_WEAKEST: Retracting weakest assertion with priority %.3f.%n", minPri);
+                            message(String.format("Strategy RETRACT_WEAKEST: Retracting weakest assertion with priority %.3f.", minPri));
                         }
                         idsToRetract.forEach(id -> _remove(id, "ContradictionResolution", new HashSet<>()));
                     }
@@ -238,5 +254,21 @@ public interface Truths {
     }
 
     record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds, String kbId) implements Cog.CogEvent {
+        public ContradictionDetectedEvent {
+            requireNonNull(contradictoryAssertionIds);
+            requireNonNull(kbId);
+        }
+
+        @Override
+        public String assocNote() {
+            return kbId;
+        }
+
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "event")
+                    .put("eventType", "ContradictionDetectedEvent")
+                    .put("eventData", new Contradiction(contradictoryAssertionIds, kbId).toJson());
+        }
     }
 }

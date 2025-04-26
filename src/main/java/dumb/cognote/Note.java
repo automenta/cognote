@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import org.json.JSONObject;
+
 import static java.util.Objects.requireNonNull;
 
 public class Note {
@@ -21,6 +23,15 @@ public class Note {
 
     public Note withStatus(Status newStatus) {
         return new Note(this.id, this.title, this.text, newStatus);
+    }
+
+    public JSONObject toJson() {
+        return new JSONObject()
+                .put("type", "note")
+                .put("id", id)
+                .put("title", title)
+                .put("text", text)
+                .put("status", status.name());
     }
 
     @Override

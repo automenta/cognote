@@ -13,6 +13,9 @@ import java.util.stream.Stream;
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.AssertionType.GROUND;
 import static dumb.cognote.Logic.AssertionType.SKOLEMIZED;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
+import static dumb.cognote.Log.warning;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
@@ -68,7 +71,7 @@ public class Knowledge {
 
             enforceKbCapacityInternal(source);
             if (getAssertionCount() >= capacity) {
-                System.err.printf("Warning: KB '%s' full (%d/%d) after eviction attempt. Cannot add: %s%n", id, getAssertionCount(), capacity, k.toKif());
+                error(String.format("Warning: KB '%s' full (%d/%d) after eviction attempt. Cannot add: %s", id, getAssertionCount(), capacity, k.toKif()));
                 return null;
             }
 
@@ -157,9 +160,9 @@ public class Knowledge {
         var warnT = capacity * KB_SIZE_THRESHOLD_WARN_PERCENT / 100;
         var haltT = capacity * KB_SIZE_THRESHOLD_HALT_PERCENT / 100;
         if (currentSize >= haltT)
-            System.err.printf("KB CRITICAL (KB: %s): Size %d/%d (%.1f%%)%n", id, currentSize, capacity, 100.0 * currentSize / capacity);
+            error(String.format("KB CRITICAL (KB: %s): Size %d/%d (%.1f%%)", id, currentSize, capacity, 100.0 * currentSize / capacity));
         else if (currentSize >= warnT)
-            System.out.printf("KB WARNING (KB: %s): Size %d/%d (%.1f%%)%n", id, currentSize, capacity, 100.0 * currentSize / capacity);
+            warning(String.format("KB WARNING (KB: %s): Size %d/%d (%.1f%%)", id, currentSize, capacity, 100.0 * currentSize / capacity));
     }
 
     void retractExternal(Assertion a) {

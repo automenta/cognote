@@ -1,17 +1,22 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dumb.cognote.*;
+import dumb.cognote.Cog;
+import dumb.cognote.Tool;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.function.Predicate;
 
-import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
-import static dumb.cognote.Logic.PRED_NOTE_QUESTION;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
 
 public class GenerateQuestionsTool implements Tool {
 
@@ -28,7 +33,60 @@ public class GenerateQuestionsTool implements Tool {
 
     @Override
     public String description() {
-        return "Generates insightful questions based on a note using the LLM. Input is a JSON object with 'note_id' (string). Adds questions as KIF assertions to the note's KB.";
+        return "Generates a list of questions based on the content of a note. Returns a JSON array of question strings.";
+    }
+
+    @Tool("Generates a list of questions based on the content of a note. Returns a JSON array of question strings.")
+    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+        var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
+        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
+
+        return CompletableFuture.supplyAsync(() -> {
+            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+
+            var systemMessage = SystemMessage.from("""
+                    You are a question generation assistant. Your task is to read the provided text and generate a list of insightful questions that could be answered based on the text, or that the text prompts you to ask.
+                    The output MUST be a JSON array of strings, where each string is a question.
+                    Example: ["What is the main topic?", "How does X relate to Y?", "What are the implications of Z?"]
+                    Output ONLY the JSON array, nothing else.
+                    """);
+
+            var userMessage = UserMessage.from("Text:\n" + note.text);
+
+            List<ChatMessage> history = new ArrayList<>();
+            history.add(systemMessage);
+            history.add(userMessage);
+
+            return cog.lm.llmAsync(taskId, history, "Question Generation", noteId).join();
+
+        }, cog.events.exe)
+                .thenApply(AiMessage::text)
+                .thenApply(jsonString -> {
+                    try {
+                        var jsonArray = new JSONArray(jsonString);
+                        for (var i = 0; i < jsonArray.length(); i++) {
+                            if (!(jsonArray.get(i) instanceof String)) {
+                                throw new ToolExecutionException("LLM returned JSON array containing non-string elements.");
+                            }
+                        }
+                        message("Question generation result for note '" + noteId + "': " + jsonString);
+
+                        jsonArray.toList().stream()
+                                .filter(String.class::isInstance)
+                                .map(String.class::cast)
+                                .map(q -> new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_QUESTION), dumb.cognote.Term.Atom.of(q)))
+                                .forEach(kif -> cog.events.emit(new Cog.ExternalInputEvent(kif, "tool:generate_questions", noteId)));
+
+                        return jsonString;
+                    } catch (org.json.JSONException e) {
+                        error("LLM returned invalid JSON for question generation: " + jsonString + " Error: " + e.getMessage());
+                        throw new ToolExecutionException("LLM failed to return valid JSON array: " + e.getMessage());
+                    }
+                })
+                .exceptionally(ex -> {
+                    error("Question generation failed for note '" + noteId + "': " + ex.getMessage());
+                    throw new ToolExecutionException("Question generation failed: " + ex.getMessage());
+                });
     }
 
     @Override
@@ -36,84 +94,10 @@ public class GenerateQuestionsTool implements Tool {
         var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {
-            return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
+            error("GenerateQuestionsTool requires a 'note_id' parameter.");
+            return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return cog.note(noteId).map(note -> {
-                    var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "questions_");
-                    var interactionType = "Question Generation";
-
-                    // Add a UI placeholder for the LLM task
-                    // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                    var vm = UI.AttachmentViewModel.forLlm(
-                            taskId,
-                            note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
-                            System.currentTimeMillis(), note.id, Cog.TaskStatus.SENDING
-                    );
-                    cog.events.emit(new Cog.LlmInfoEvent(vm));
-
-
-                    var promptText = """
-                            Based on the following note, generate 1-3 insightful questions that could lead to further exploration or clarification. Output ONLY the questions, each on a new line starting with '- '.
-                            
-                            Note:
-                            "%s"
-                            
-                            Questions:""".formatted(note.text);
-                    var history = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
-                    history.add(UserMessage.from(promptText));
-
-                    var llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
-
-                    cog.lm.activeLlmTasks.put(taskId, llmFuture);
-
-                    return llmFuture.handleAsync((chatResponse, ex) -> {
-                        cog.lm.activeLlmTasks.remove(taskId);
-                        if (ex != null) {
-                            var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-                            if (!(cause instanceof CancellationException)) {
-                                System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
-                                return "Error generating questions: " + cause.getMessage();
-                            } else {
-                                System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
-                                return "Question generation cancelled.";
-                            }
-                        } else {
-                            System.out.println(interactionType + " completed for note '" + note.id + "'.");
-                            cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
-
-                            var questionsText = chatResponse.text();
-                            if (questionsText != null && !questionsText.isBlank()) {
-                                // Add each question as a KIF assertion to the note's KB
-                                questionsText.lines()
-                                        .map(String::trim)
-                                        .filter(Predicate.not(String::isEmpty))
-                                        .filter(q -> q.startsWith("- ")) // Filter for expected format
-                                        .map(q -> q.substring(2).trim()) // Remove "- " prefix
-                                        .filter(Predicate.not(String::isEmpty))
-                                        .forEach(question -> {
-                                            var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_QUESTION, note.id, question.replace("\"", "\\\""));
-                                            try {
-                                                var terms = KifParser.parseKif(kif);
-                                                if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
-                                                    cog.events.emit(new Cog.ExternalInputEvent(list, "llm-question-tool:" + note.id, note.id));
-                                                } else {
-                                                    System.err.println("Generated question KIF was not a single list: " + kif);
-                                                }
-                                            } catch (KifParser.ParseException e) {
-                                                System.err.println("Error parsing generated question KIF: " + e.getMessage() + " | KIF: " + kif);
-                                            }
-                                        });
-                                return "Questions generated and added as assertions.";
-                            } else {
-                                System.out.println("LLM question generation for note " + note.id + " returned empty content.");
-                                return "LLM returned empty question list.";
-                            }
-                        }
-                    }, cog.events.exe);
-                })
-                .orElse(CompletableFuture.completedFuture("Error: Note with ID '" + noteId + "' not found."));
+        return execute(noteId);
     }
 }

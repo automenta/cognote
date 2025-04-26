@@ -1,17 +1,22 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dumb.cognote.*;
+import dumb.cognote.Cog;
+import dumb.cognote.Tool;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.function.Predicate;
 
-import static dumb.cognote.Cog.ID_PREFIX_LLM_ITEM;
-import static dumb.cognote.Logic.PRED_NOTE_CONCEPT;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
 
 public class IdentifyConceptsTool implements Tool {
 
@@ -28,7 +33,60 @@ public class IdentifyConceptsTool implements Tool {
 
     @Override
     public String description() {
-        return "Identifies key concepts in a note using the LLM. Input is a JSON object with 'note_id' (string). Adds concepts as KIF assertions to the note's KB.";
+        return "Identifies key concepts, entities, or topics mentioned in the content of a note. Returns a JSON array of concept strings.";
+    }
+
+    @Tool("Identifies key concepts, entities, or topics mentioned in the content of a note. Returns a JSON array of concept strings.")
+    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+        var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
+        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
+
+        return CompletableFuture.supplyAsync(() -> {
+            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+
+            var systemMessage = SystemMessage.from("""
+                    You are a concept extraction assistant. Your task is to read the provided text and identify the most important concepts, entities, or topics mentioned.
+                    The output MUST be a JSON array of strings, where each string is a key concept or entity.
+                    Example: ["Artificial Intelligence", "Machine Learning", "Neural Networks", "Deep Learning"]
+                    Output ONLY the JSON array, nothing else.
+                    """);
+
+            var userMessage = UserMessage.from("Text:\n" + note.text);
+
+            List<ChatMessage> history = new ArrayList<>();
+            history.add(systemMessage);
+            history.add(userMessage);
+
+            return cog.lm.llmAsync(taskId, history, "Concept Identification", noteId).join();
+
+        }, cog.events.exe)
+                .thenApply(AiMessage::text)
+                .thenApply(jsonString -> {
+                    try {
+                        var jsonArray = new JSONArray(jsonString);
+                        for (var i = 0; i < jsonArray.length(); i++) {
+                            if (!(jsonArray.get(i) instanceof String)) {
+                                throw new ToolExecutionException("LLM returned JSON array containing non-string elements.");
+                            }
+                        }
+                        message("Concept identification result for note '" + noteId + "': " + jsonString);
+
+                        jsonArray.toList().stream()
+                                .filter(String.class::isInstance)
+                                .map(String.class::cast)
+                                .map(c -> new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_CONCEPT), dumb.cognote.Term.Atom.of(c)))
+                                .forEach(kif -> cog.events.emit(new Cog.ExternalInputEvent(kif, "tool:identify_concepts", noteId)));
+
+                        return jsonString;
+                    } catch (org.json.JSONException e) {
+                        error("LLM returned invalid JSON for concept identification: " + jsonString + " Error: " + e.getMessage());
+                        throw new ToolExecutionException("LLM failed to return valid JSON array: " + e.getMessage());
+                    }
+                })
+                .exceptionally(ex -> {
+                    error("Concept identification failed for note '" + noteId + "': " + ex.getMessage());
+                    throw new ToolExecutionException("Concept identification failed: " + ex.getMessage());
+                });
     }
 
     @Override
@@ -36,79 +94,10 @@ public class IdentifyConceptsTool implements Tool {
         var noteId = (String) parameters.get("note_id");
 
         if (noteId == null || noteId.isBlank()) {
-            return CompletableFuture.completedFuture("Error: Missing required parameter 'note_id'.");
+            error("IdentifyConceptsTool requires a 'note_id' parameter.");
+            return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return cog.note(noteId).map(note -> {
-                    var taskId = Cog.id(ID_PREFIX_LLM_ITEM + "concepts_");
-                    var interactionType = "Key Concept Identification";
-
-                    // Add a UI placeholder for the LLM task
-                    // cog.ui.addLlmUiPlaceholder(note.id, interactionType + ": " + note.title);
-                    cog.events.emit(new Cog.LlmInfoEvent(UI.AttachmentViewModel.forLlm(
-                            taskId,
-                            note.id, interactionType + ": Starting...", UI.AttachmentType.LLM_INFO,
-                            System.currentTimeMillis(), note.id, Cog.TaskStatus.SENDING
-                    )));
-
-                    var promptText = """
-                            Identify the key concepts or entities mentioned in the following note. List them separated by newlines. Output ONLY the newline-separated list.
-                            
-                            Note:
-                            "%s"
-                            
-                            Key Concepts:""".formatted(note.text);
-                    var history = new ArrayList<dev.langchain4j.data.message.ChatMessage>();
-                    history.add(UserMessage.from(promptText));
-
-                    var llmFuture = cog.lm.llmAsync(taskId, history, interactionType, note.id);
-
-                    cog.lm.activeLlmTasks.put(taskId, llmFuture);
-
-                    return llmFuture.handleAsync((chatResponse, ex) -> {
-                        cog.lm.activeLlmTasks.remove(taskId);
-                        if (ex != null) {
-                            var cause = (ex instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : ex;
-                            if (!(cause instanceof CancellationException)) {
-                                System.err.println(interactionType + " failed for note '" + note.id + "': " + cause.getMessage());
-                                cog.updateTaskStatus(taskId, Cog.TaskStatus.ERROR, interactionType + " failed: " + cause.getMessage());
-                                return "Error identifying concepts: " + cause.getMessage();
-                            } else {
-                                System.out.println(interactionType + " cancelled for note '" + note.id + "'.");
-                                cog.updateTaskStatus(taskId, Cog.TaskStatus.CANCELLED, interactionType + " cancelled.");
-                                return "Concept identification cancelled.";
-                            }
-                        } else {
-                            System.out.println(interactionType + " completed for note '" + note.id + "'.");
-                            cog.updateTaskStatus(taskId, Cog.TaskStatus.DONE, interactionType + " completed.");
-
-                            var conceptsText = chatResponse.text();
-                            if (conceptsText != null && !conceptsText.isBlank()) {
-                                // Add each concept as a KIF assertion to the note's KB
-                                conceptsText.lines()
-                                        .map(String::trim)
-                                        .filter(Predicate.not(String::isEmpty))
-                                        .forEach(concept -> {
-                                            var kif = String.format("(%s \"%s\" \"%s\")", PRED_NOTE_CONCEPT, note.id, concept.replace("\"", "\\\""));
-                                            try {
-                                                var terms = KifParser.parseKif(kif);
-                                                if (terms.size() == 1 && terms.getFirst() instanceof Term.Lst list) {
-                                                    cog.events.emit(new Cog.ExternalInputEvent(list, "llm-concept-tool:" + note.id, note.id));
-                                                } else {
-                                                    System.err.println("Generated concept KIF was not a single list: " + kif);
-                                                }
-                                            } catch (KifParser.ParseException e) {
-                                                System.err.println("Error parsing generated concept KIF: " + e.getMessage() + " | KIF: " + kif);
-                                            }
-                                        });
-                                return "Concepts identified and added as assertions.";
-                            } else {
-                                System.out.println("LLM concept identification for note " + note.id + " returned empty content.");
-                                return "LLM returned empty concept list.";
-                            }
-                        }
-                    }, cog.events.exe);
-                })
-                .orElse(CompletableFuture.completedFuture("Error: Note with ID '" + noteId + "' not found."));
+        return execute(noteId);
     }
 }

@@ -1,11 +1,14 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
 import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+
+import static dumb.cognote.Log.error;
 
 public class RetractTool implements Tool {
 
@@ -22,43 +25,29 @@ public class RetractTool implements Tool {
 
     @Override
     public String description() {
-        return "Retracts an assertion or rule from the knowledge base. Input is a JSON object with 'target' (string, the ID or KIF form) and 'type' (string, 'BY_ID', 'BY_RULE_FORM', or 'BY_KIF'). Optional 'target_note_id' (string) for BY_ID type.";
+        return "Retracts an assertion from the knowledge base by its ID.";
+    }
+
+    @Tool("Retracts an assertion from the knowledge base by its ID.")
+    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("assertion_id") String assertionId) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (assertionId == null || assertionId.isBlank()) {
+                throw new ToolExecutionException("Assertion ID is required.");
+            }
+            cog.events.emit(new Cog.RetractionRequestEvent(assertionId, Logic.RetractionType.BY_ID, "tool:retract_assertion", null));
+            return "Retraction requested for assertion ID: " + assertionId;
+        }, cog.events.exe);
     }
 
     @Override
-    public CompletableFuture<Object> execute(Map<String, Object> parameters) {
-        var target = (String) parameters.get("target");
-        var typeStr = (String) parameters.get("type");
-        var targetNoteId = (String) parameters.get("target_note_id"); // Optional
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
+        var assertionId = (String) parameters.get("assertion_id");
 
-        return CompletableFuture.supplyAsync(() -> {
-            if (cog == null) {
-                return "Error: System not available.";
-            }
-            if (target == null || target.isBlank() || typeStr == null || typeStr.isBlank()) {
-                return "Error: Missing required parameters 'target' or 'type'.";
-            }
+        if (assertionId == null || assertionId.isBlank()) {
+            error("RetractTool requires an 'assertion_id' parameter.");
+            return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'assertion_id' parameter."));
+        }
 
-            Logic.RetractionType type;
-            try {
-                type = Logic.RetractionType.valueOf(typeStr.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                return "Error: Invalid retraction type '" + typeStr + "'. Must be BY_ID, BY_RULE_FORM, or BY_KIF.";
-            }
-
-            // Note: BY_NOTE retraction is handled by the UI directly when removing a note.
-            // This tool focuses on ID, Rule form, or KIF form retraction.
-            if (type == Logic.RetractionType.BY_NOTE) {
-                return "Error: Retraction type BY_NOTE is not supported by this tool. Use the UI to remove notes.";
-            }
-
-            var sourceId = "tool:retract_assertion";
-            cog.events.emit(new Cog.RetractionRequestEvent(target, type, sourceId, targetNoteId));
-
-            // Retraction is asynchronous via event. We can't confirm success immediately.
-            // Return a message indicating the request was sent.
-            return "Retraction request sent for target '" + target + "' (type: " + type + ").";
-
-        }, cog.events.exe);
+        return execute(assertionId);
     }
 }

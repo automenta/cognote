@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
+
 public class Plugins {
     private final Events events;
     private final Logic.Cognition context;
@@ -17,42 +20,42 @@ public class Plugins {
 
     public void loadPlugin(Plugin plugin) {
         if (initialized.get()) {
-            System.err.println("Cannot load plugin " + plugin.id() + " after initialization.");
+            error("Cannot load plugin " + plugin.id() + " after initialization.");
             return;
         }
         plugins.add(plugin);
-        System.out.println("Plugin loaded: " + plugin.id());
+        message("Plugin loaded: " + plugin.id());
     }
 
     public void initializeAll() {
         if (!initialized.compareAndSet(false, true)) return;
-        System.out.println("Initializing " + plugins.size() + " general plugins...");
+        message("Initializing " + plugins.size() + " general plugins...");
         plugins.forEach(plugin -> {
             try {
                 plugin.start(events, context);
-                System.out.println("Initialized plugin: " + plugin.id());
+                message("Initialized plugin: " + plugin.id());
             } catch (Exception e) {
-                System.err.println("Failed to initialize plugin " + plugin.id() + ": " + e.getMessage());
+                error("Failed to initialize plugin " + plugin.id() + ": " + e.getMessage());
                 e.printStackTrace();
-                plugins.remove(plugin); // Remove failed plugin
+                plugins.remove(plugin);
             }
         });
-        System.out.println("General plugin initialization complete.");
+        message("General plugin initialization complete.");
     }
 
     public void shutdownAll() {
-        System.out.println("Shutting down " + plugins.size() + " general plugins...");
+        message("Shutting down " + plugins.size() + " general plugins...");
         plugins.forEach(plugin -> {
             try {
                 plugin.stop();
-                System.out.println("Shutdown plugin: " + plugin.id());
+                message("Shutdown plugin: " + plugin.id());
             } catch (Exception e) {
-                System.err.println("Error shutting down plugin " + plugin.id() + ": " + e.getMessage());
+                error("Error shutting down plugin " + plugin.id() + ": " + e.getMessage());
                 e.printStackTrace();
             }
         });
         plugins.clear();
-        System.out.println("General plugin shutdown complete.");
+        message("General plugin shutdown complete.");
     }
 
 }

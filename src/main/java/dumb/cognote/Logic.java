@@ -10,6 +10,8 @@ import java.util.stream.Stream;
 import static dumb.cognote.Cog.*;
 import static dumb.cognote.Logic.AssertionType.GROUND;
 import static dumb.cognote.Logic.AssertionType.SKOLEMIZED;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.warning;
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
@@ -179,6 +181,10 @@ public class Logic {
     }
 
     public record Explanation(String details) {
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("details", details);
+        }
     }
 
     static class Skolemizer {
@@ -363,7 +369,7 @@ public class Logic {
             this.truth = requireNonNull(truth);
             this.operators = requireNonNull(operators);
             this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, events, truth);
-            activeNoteIds.add(GLOBAL_KB_NOTE_ID); // Global KB is always active
+            activeNoteIds.add(GLOBAL_KB_NOTE_ID);
         }
 
         public static Term.Lst performSkolemization(Term.Lst body, Collection<Term.Var> existentialVars, Map<Term.Var, Term> contextBindings) {
@@ -379,7 +385,7 @@ public class Logic {
                 current = next;
             }
             if (!term.equals(current))
-                System.err.println("Warning: Simplification depth limit reached for: " + term.toKif());
+                error("Warning: Simplification depth limit reached for: " + term.toKif());
             return current;
         }
 
@@ -453,27 +459,24 @@ public class Logic {
             noteKbs.clear();
             rules.clear();
             activeNoteIds.clear();
-            activeNoteIds.add(GLOBAL_KB_NOTE_ID); // Global KB is always active
+            activeNoteIds.add(GLOBAL_KB_NOTE_ID);
         }
 
         public Optional<Assertion> findAssertionByIdAcrossKbs(String assertionId) {
             return truth.get(assertionId);
         }
 
-        // Method to find an assertion by its KIF form in a specific KB or across all active KBs
         public Optional<Assertion> findAssertionByKif(Term.Lst kif, @Nullable String kbId) {
             Stream<Knowledge> kbsToSearch;
             if (kbId == null || GLOBAL_KB_NOTE_ID.equals(kbId)) {
-                // Search global KB and all active note KBs
                 kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream().filter(kb -> activeNoteIds.contains(kb.id)));
             } else {
-                // Search only the specified KB if it exists and is active
                 kbsToSearch = ofNullable(noteKbs.get(kbId)).filter(kb -> activeNoteIds.contains(kb.id)).stream();
             }
 
             return kbsToSearch
-                    .flatMap(kb -> kb.findInstancesOf(kif)) // Use findInstancesOf which does a match check
-                    .filter(a -> kif.equals(a.kif())) // Ensure exact KIF match
+                    .flatMap(kb -> kb.findInstancesOf(kif))
+                    .filter(a -> kif.equals(a.kif()))
                     .findFirst();
         }
 

@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import org.json.JSONObject;
+
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -8,6 +10,7 @@ import java.util.function.BiFunction;
 import java.util.function.DoubleBinaryOperator;
 import java.util.function.Function;
 
+import static dumb.cognote.Log.message;
 import static java.util.Optional.ofNullable;
 
 public class Op {
@@ -18,6 +21,8 @@ public class Op {
         Term.Atom pred();
 
         CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context);
+
+        JSONObject toJson();
     }
 
     public static class Operators {
@@ -25,7 +30,7 @@ public class Op {
 
         void add(Operator operator) {
             ops.put(operator.pred(), operator);
-            System.out.println("Registered operator: " + operator.pred().toKif());
+            message("Registered operator: " + operator.pred().toKif());
         }
 
         Optional<Operator> get(Term.Atom predicate) {
@@ -91,6 +96,14 @@ public class Op {
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
             return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
+        }
+
+        @Override
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "operator")
+                    .put("id", id)
+                    .put("predicate", pred.toJson());
         }
     }
 }

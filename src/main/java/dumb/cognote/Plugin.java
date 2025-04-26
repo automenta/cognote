@@ -58,5 +58,17 @@ public interface Plugin {
         protected Cog cog() {
             return context.cog;
         }
+
+        protected void log(String message) {
+            Log.message(message);
+        }
+
+        protected void logError(String message) {
+            Log.error(message);
+        }
+
+        protected void logWarning(String message) {
+            Log.warning(message);
+        }
     }
 }

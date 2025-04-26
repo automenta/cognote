@@ -1,5 +1,8 @@
 package dumb.cognote;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,7 +20,7 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
             case Lst l ->
                     l.terms.stream().filter(Var.class::isInstance).map(Var.class::cast).collect(Collectors.toUnmodifiableSet());
             default -> {
-                System.err.println("Warning: Invalid variable specification in quantifier: " + varsTerm.toKif());
+                Log.warning("Invalid variable specification in quantifier: " + varsTerm.toKif());
                 yield Set.of();
             }
         };
@@ -39,6 +42,8 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
             case Var _ -> false;
         };
     }
+
+    JSONObject toJson();
 
     record Var(String name) implements Term {
         private static final Map<String, Var> internCache = new ConcurrentHashMap<>(256);
@@ -76,6 +81,14 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         @Override
         public String toString() {
             return "KifVar[" + name + ']';
+        }
+
+        @Override
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "var")
+                    .put("name", name)
+                    .put("kifString", toKif());
         }
     }
 
@@ -158,6 +171,16 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         public String toString() {
             return "KifList" + terms;
         }
+
+        @Override
+        public JSONObject toJson() {
+            var jsonTerms = new JSONArray();
+            terms.forEach(term -> jsonTerms.put(term.toJson()));
+            return new JSONObject()
+                    .put("type", "list")
+                    .put("terms", jsonTerms)
+                    .put("kifString", toKif());
+        }
     }
 
     record Atom(String value) implements Term {
@@ -196,6 +219,14 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         @Override
         public String toString() {
             return "KifAtom[" + value + ']';
+        }
+
+        @Override
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "atom")
+                    .put("value", value)
+                    .put("kifString", toKif());
         }
     }
 }

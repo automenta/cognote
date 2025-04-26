@@ -1,6 +1,7 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
+import org.json.JSONObject;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -55,7 +56,7 @@ public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, d
         unbound.removeAll(antecedent.vars());
         unbound.removeAll(getQuantifierBoundVariables(consequent));
         if (!unbound.isEmpty() && ruleForm.op().filter(Logic.KIF_OP_IMPLIES::equals).isPresent())
-            System.err.println("Warning: Rule consequent has variables not bound by antecedent or local quantifier: " + unbound.stream().map(Term.Var::name).collect(Collectors.joining(", ")) + " in " + ruleForm.toKif());
+            Log.warning("Rule consequent has variables not bound by antecedent or local quantifier: " + unbound.stream().map(Term.Var::name).collect(Collectors.joining(", ")) + " in " + ruleForm.toKif());
     }
 
     private static Set<Term.Var> getQuantifierBoundVariables(Term term) {
@@ -74,6 +75,17 @@ public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, d
             default -> {
             }
         }
+    }
+
+    public JSONObject toJson() {
+        var json = new JSONObject()
+                .put("type", "rule")
+                .put("id", id)
+                .put("formJson", form.toJson())
+                .put("formString", form.toKif())
+                .put("pri", pri);
+        if (sourceNoteId != null) json.put("sourceNoteId", sourceNoteId);
+        return json;
     }
 
     @Override

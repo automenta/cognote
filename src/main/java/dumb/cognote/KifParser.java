@@ -6,8 +6,9 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+
+import static dumb.cognote.Log.error;
 
 public class KifParser {
     private static final int CONTEXT_BUFFER_SIZE = 50;
@@ -19,126 +20,34 @@ public class KifParser {
     private int charPos = 0;
 
 
-    public KifParser(Reader reader) {
+    private KifParser(Reader reader) {
         this.reader = reader;
     }
 
-    public static List<Term> parseKif(String input) throws ParseException {
-        if (input == null || input.isBlank()) return List.of();
-        try (var sr = new StringReader(input.trim())) {
-            return new KifParser(sr).parseTopLevel();
+    public static List<Term> parseKif(String kif) throws ParseException {
+        try (var reader = new StringReader(kif)) {
+            var parser = new KifParser(reader);
+            var terms = new ArrayList<Term>();
+            parser.skipWhitespaceAndComments();
+            while (parser.peek() != -1) {
+                terms.add(parser.parseTerm());
+                parser.skipWhitespaceAndComments();
+            }
+            return terms;
         } catch (IOException e) {
-            // This should ideally not happen with StringReader, but handle defensively
-            throw new ParseException("Internal Read error: " + e.getMessage(), 0, 0, "");
-        }
-    }
-
-    private static boolean isValidAtomChar(int c) {
-        return c != -1 && !Character.isWhitespace(c) && "()\";?".indexOf(c) == -1 && c != ';';
-    }
-
-    private List<Term> parseTopLevel() throws IOException, ParseException {
-        List<Term> terms = new ArrayList<>();
-        consumeWhitespaceAndComments();
-        while (peek() != -1) {
-            terms.add(parseTerm());
-            consumeWhitespaceAndComments();
-        }
-        return Collections.unmodifiableList(terms);
-    }
-
-    private Term parseTerm() throws IOException, ParseException {
-        consumeWhitespaceAndComments();
-        var next = peek();
-        return switch (next) {
-            case -1 -> throw createParseException("Unexpected EOF while looking for term", "EOF");
-            case '(' -> parseList();
-            case '"' -> parseQuotedString();
-            case '?' -> parseVariable();
-            default -> {
-                if (isValidAtomChar(next)) {
-                    yield parseAtom();
-                } else {
-                    throw createParseException("Invalid character at start of term", "'" + (char) next + "'");
-                }
-            }
-        };
-    }
-
-    private Term.Lst parseList() throws IOException, ParseException {
-        consumeChar('(');
-        List<Term> terms = new ArrayList<>();
-        while (true) {
-            consumeWhitespaceAndComments();
-            var next = peek();
-            if (next == ')') {
-                consumeChar(')');
-                return new Term.Lst(terms);
-            }
-            if (next == -1) throw createParseException("Unmatched parenthesis", "EOF");
-
-            if (next != '(' && next != '"' && next != '?' && !isValidAtomChar(next)) {
-                throw createParseException("Invalid character inside list", "'" + (char) next + "'");
-            }
-
-            terms.add(parseTerm());
-        }
-    }
-
-    private Term.Var parseVariable() throws IOException, ParseException {
-        consumeChar('?');
-        var sb = new StringBuilder("?");
-        var next = peek();
-        if (!isValidAtomChar(next)) {
-            throw createParseException("Variable name character expected after '?'", (next == -1) ? "EOF" : "'" + (char) next + "'");
-        }
-        while (isValidAtomChar(peek())) {
-            sb.append((char) consumeChar());
-        }
-        if (sb.length() < 2) {
-            throw createParseException("Empty variable name after '?'", null);
-        }
-        return Term.Var.of(sb.toString());
-    }
-
-    private Term.Atom parseAtom() throws IOException, ParseException {
-        var sb = new StringBuilder();
-        var next = peek();
-        if (!isValidAtomChar(next)) {
-            throw createParseException("Invalid character at start of atom", "'" + (char) next + "'");
-        }
-        while (isValidAtomChar(peek())) {
-            sb.append((char) consumeChar());
-        }
-        return Term.Atom.of(sb.toString());
-    }
-
-    private Term.Atom parseQuotedString() throws IOException, ParseException {
-        consumeChar('"');
-        var sb = new StringBuilder();
-        while (true) {
-            var c = consumeChar();
-            if (c == '"') return Term.Atom.of(sb.toString());
-            if (c == -1) throw createParseException("Unmatched quote in string literal", "EOF");
-            if (c == '\\') {
-                var next = consumeChar();
-                if (next == -1) throw createParseException("EOF after escape character in string literal", "EOF");
-                sb.append((char) switch (next) {
-                    case 'n' -> '\n';
-                    case 't' -> '\t';
-                    case 'r' -> '\r';
-                    case '"' -> '"';
-                    case '\\' -> '\\';
-                    default ->
-                            throw createParseException("Invalid escape sequence in string literal", "'\\" + (char) next + "'");
-                });
-            } else sb.append((char) c);
+            throw new ParseException("IO Error: " + e.getMessage());
         }
     }
 
     private int peek() throws IOException {
         if (currentChar == -2) {
             currentChar = reader.read();
+            if (contextBuffer.length() >= CONTEXT_BUFFER_SIZE) {
+                contextBuffer.deleteCharAt(0);
+            }
+            if (currentChar != -1) {
+                contextBuffer.append((char) currentChar);
+            }
         }
         return currentChar;
     }
@@ -154,12 +63,6 @@ public class KifParser {
             } else {
                 col++;
             }
-            // Add to buffer and trim if necessary
-            contextBuffer.append((char) c);
-            var cl = contextBuffer.length();
-            if (cl > CONTEXT_BUFFER_SIZE) {
-                contextBuffer.delete(0, cl - CONTEXT_BUFFER_SIZE);
-            }
         }
         return c;
     }
@@ -171,21 +74,97 @@ public class KifParser {
         }
     }
 
-    private void consumeWhitespaceAndComments() throws IOException {
+    private void skipWhitespaceAndComments() throws IOException {
         while (true) {
             var c = peek();
-            if (c == -1) break;
+            if (c == -1) return;
             if (Character.isWhitespace(c)) {
                 consumeChar();
             } else if (c == ';') {
-                do {
+                consumeChar();
+                while (peek() != '\n' && peek() != -1) {
                     consumeChar();
-                } while (peek() != '\n' && peek() != '\r' && peek() != -1);
+                }
             } else {
-                break;
+                return;
             }
         }
     }
+
+    private Term parseTerm() throws IOException, ParseException {
+        skipWhitespaceAndComments();
+        var c = peek();
+        if (c == -1) throw createParseException("Unexpected EOF while parsing term");
+        return switch (c) {
+            case '(' -> parseList();
+            case '"' -> parseStringAtom();
+            case '?' -> parseVariable();
+            default -> parseSymbolAtom();
+        };
+    }
+
+    private Term.Lst parseList() throws IOException, ParseException {
+        consumeChar('(');
+        var terms = new ArrayList<Term>();
+        skipWhitespaceAndComments();
+        while (peek() != ')') {
+            if (peek() == -1) throw createParseException("Unexpected EOF inside list");
+            terms.add(parseTerm());
+            skipWhitespaceAndComments();
+        }
+        consumeChar(')');
+        return new Term.Lst(terms);
+    }
+
+    private Term.Atom parseStringAtom() throws IOException, ParseException {
+        consumeChar('"');
+        var sb = new StringBuilder();
+        while (peek() != '"') {
+            if (peek() == -1) throw createParseException("Unexpected EOF inside string literal");
+            if (peek() == '\\') {
+                consumeChar('\\');
+                var escaped = consumeChar();
+                switch (escaped) {
+                    case '"' -> sb.append('"');
+                    case '\\' -> sb.append('\\');
+                    case 'n' -> sb.append('\n');
+                    case 't' -> sb.append('\t');
+                    case 'r' -> sb.append('\r');
+                    default -> throw createParseException("Invalid escape sequence '\\" + (char) escaped + "'");
+                }
+            } else {
+                sb.append((char) consumeChar());
+            }
+        }
+        consumeChar('"');
+        return Term.Atom.of(sb.toString());
+    }
+
+    private Term.Var parseVariable() throws IOException, ParseException {
+        var sb = new StringBuilder();
+        sb.append((char) consumeChar());
+        var c = peek();
+        if (c == -1 || !Character.isLetterOrDigit(c) && c != '_' && c != '-')
+            throw createParseException("Variable name must start with '?' followed by letter, digit, '_' or '-'");
+        while (peek() != -1 && !Character.isWhitespace(peek()) && peek() != '(' && peek() != ')' && peek() != '"' && peek() != ';') {
+            sb.append((char) consumeChar());
+        }
+        return Term.Var.of(sb.toString());
+    }
+
+    private Term.Atom parseSymbolAtom() throws IOException, ParseException {
+        var sb = new StringBuilder();
+        var c = peek();
+        if (c == -1 || Character.isWhitespace(c) || c == '(' || c == ')' || c == '"' || c == ';' || c == '?')
+            throw createParseException("Unexpected character while parsing symbol atom: '" + (char) c + "'");
+        while (peek() != -1 && !Character.isWhitespace(peek()) && peek() != '(' && peek() != ')' && peek() != '"' && peek() != ';') {
+            sb.append((char) consumeChar());
+        }
+        var value = sb.toString();
+        if (value.isEmpty()) throw createParseException("Empty symbol atom");
+        return Term.Atom.of(value);
+    }
+
 
     private ParseException createParseException(String message) {
         return new ParseException(message, line, col, contextBuffer.toString());
@@ -206,7 +185,7 @@ public class KifParser {
         }
 
         public ParseException(String message, String context) {
-            this(message, 0, 0, context);
+            this(message, -1, -1, context);
         }
 
         public ParseException(String message, int line, int col, String context) {
@@ -218,7 +197,9 @@ public class KifParser {
 
         @Override
         public String getMessage() {
-            return super.getMessage() + " at line " + line + " col " + col + ". Context: \"" + context + "\"";
+            var location = (line != -1 && col != -1) ? " at line " + line + ", col " + col : "";
+            var contextSnippet = context != null && !context.isEmpty() ? " near '" + context + "'" : "";
+            return super.getMessage() + location + contextSnippet;
         }
     }
 }

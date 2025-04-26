@@ -1,11 +1,14 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static dumb.cognote.Logic.AssertionType.UNIVERSAL;
 import static java.util.Objects.requireNonNull;
@@ -72,6 +75,28 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
 
     Assertion withStatus(boolean newActiveStatus) {
         return new Assertion(id, kif, pri, timestamp, sourceNoteId, justificationIds, type, isEquality, isOrientedEquality, negated, quantifiedVars, derivationDepth, newActiveStatus, kb);
+    }
+
+    public JSONObject toJson() {
+        var json = new JSONObject()
+                .put("type", "assertion")
+                .put("id", id)
+                .put("kifJson", kif.toJson())
+                .put("kifString", kif.toKif())
+                .put("pri", pri)
+                .put("timestamp", timestamp)
+                .put("assertionType", type.name())
+                .put("isEquality", isEquality)
+                .put("negated", negated)
+                .put("derivationDepth", derivationDepth)
+                .put("isActive", isActive)
+                .put("kbId", kb);
+
+        if (sourceNoteId != null) json.put("sourceNoteId", sourceNoteId);
+        if (!justificationIds.isEmpty()) json.put("justificationIds", new JSONArray(justificationIds));
+        if (!quantifiedVars.isEmpty()) json.put("quantifiedVars", new JSONArray(quantifiedVars.stream().map(Term.Var::toJson).collect(Collectors.toList())));
+
+        return json;
     }
 
     public record PotentialAssertion(Term.Lst kif, double pri, Set<String> support, String sourceId, boolean isEquality,

@@ -1,12 +1,16 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.Tool;
+import dumb.cognote.Log;
 import dumb.cognote.Tool;
+import org.json.JSONObject;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class LogMessageTool implements Tool {
+import static dumb.cognote.Log.error;
 
+public class LogMessageTool implements Tool {
     @Override
     public String name() {
         return "log_message";
@@ -14,20 +18,23 @@ public class LogMessageTool implements Tool {
 
     @Override
     public String description() {
-        return "Logs a message to the system console. Input is a JSON object with 'message' (string).";
+        return "Logs a message to the system console/log. Use this for internal thoughts or debugging.";
+    }
+
+    @Tool("Logs a message to the system console/log. Use this for internal thoughts or debugging.")
+    public CompletableFuture<Void> execute(@dev.langchain4j.agent.tool.P("message") String message) {
+        Log.message("LLM Tool Log: " + message);
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
-    public CompletableFuture<Object> execute(Map<String, Object> parameters) {
+    public CompletableFuture<?> execute(Map<String, Object> parameters) {
         var message = (String) parameters.get("message");
-        return CompletableFuture.supplyAsync(() -> {
-            if (message != null) {
-                System.out.println("TOOL LOG: " + message);
-                return "Message logged.";
-            } else {
-                System.err.println("TOOL LOG: Received empty message parameter.");
-                return "Error: Missing 'message' parameter.";
-            }
-        }); // Can run on a common pool or event executor
+        if (message == null) {
+            error("LogMessageTool requires a 'message' parameter.");
+            return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'message' parameter."));
+        }
+
+        return execute(message);
     }
 }

@@ -4,519 +4,558 @@ import dumb.cognote.*;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
-import org.jetbrains.annotations.Nullable;
-import org.json.JSONException;
+import org.json.JSONArray;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.ConcurrentModificationException;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
-import java.util.function.Consumer;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
-import static java.util.Objects.requireNonNullElse;
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
+import static dumb.cognote.ProtocolConstants.*;
 import static java.util.Optional.ofNullable;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
-    private final MyWebSocketServer websocket;
-    private final Map<String, CommandHandler> commandHandlers = new HashMap<>();
 
-    public WebSocketPlugin(InetSocketAddress addr, Cog cog) {
-        this.websocket = new MyWebSocketServer(addr, cog);
+    private final InetSocketAddress address;
+    private WebSocketServer server;
+    private final Set<WebSocket> clients = new CopyOnWriteArraySet<>();
+    private final Map<String, BiConsumer<WebSocket, JSONObject>> commandHandlers = new ConcurrentHashMap<>();
+    private final Map<String, BiConsumer<WebSocket, JSONObject>> feedbackHandlers = new ConcurrentHashMap<>();
+
+    public WebSocketPlugin(InetSocketAddress address, Cog cog) {
+        this.address = address;
+        this.cog = cog;
+        setupCommandHandlers();
+        setupFeedbackHandlers();
+    }
+
+    private void setupCommandHandlers() {
+        commandHandlers.put(COMMAND_ADD_NOTE, this::handleAddNoteCommand);
+        commandHandlers.put(COMMAND_REMOVE_NOTE, this::handleRemoveNoteCommand);
+        commandHandlers.put(COMMAND_START_NOTE, this::handleStartNoteCommand);
+        commandHandlers.put(COMMAND_PAUSE_NOTE, this::handlePauseNoteCommand);
+        commandHandlers.put(COMMAND_COMPLETE_NOTE, this::handleCompleteNoteCommand);
+        commandHandlers.put(COMMAND_RUN_TOOL, this::handleRunToolCommand);
+        commandHandlers.put(COMMAND_RUN_QUERY, this::handleRunQueryCommand);
+        commandHandlers.put(COMMAND_CLEAR_ALL, this::handleClearAllCommand);
+        commandHandlers.put(COMMAND_SET_CONFIG, this::handleSetConfigCommand);
+        commandHandlers.put(COMMAND_GET_INITIAL_STATE, this::handleGetInitialStateCommand);
+        commandHandlers.put(COMMAND_SAVE_NOTES, this::handleSaveNotesCommand);
+    }
+
+    private void setupFeedbackHandlers() {
+        feedbackHandlers.put(FEEDBACK_USER_ASSERTED_KIF, this::handleUserAssertedKifFeedback);
+        feedbackHandlers.put(FEEDBACK_USER_EDITED_NOTE_TEXT, this::handleUserEditedNoteTextFeedback);
+        feedbackHandlers.put(FEEDBACK_USER_EDITED_NOTE_TITLE, this::handleUserEditedNoteTitleFeedback);
+        feedbackHandlers.put(FEEDBACK_USER_CLICKED, this::handleUserClickedFeedback);
     }
 
     @Override
-    public void start(Events ev, Logic.Cognition ctx) {
-        super.start(ev, ctx);
+    public void start(Events e, Logic.Cognition ctx) {
+        super.start(e, ctx);
+        server = new WebSocketServer(address) {
+            @Override
+            public void onOpen(WebSocket conn, ClientHandshake handshake) {
+                clients.add(conn);
+                message("WebSocket client connected: " + conn.getRemoteSocketAddress());
+                sendInitialState(conn);
+            }
 
-        // Register Command Handlers
-        var c = ctx.cog;
-        registerCommandHandler("add", new AddKifHandler(c));
-        registerCommandHandler("retract", new RetractHandler(c));
-        registerCommandHandler("query", new QueryHandler(c));
-        registerCommandHandler("pause", new PauseHandler(c));
-        registerCommandHandler("unpause", new UnpauseHandler(c));
-        registerCommandHandler("get_status", new GetStatusHandler(c));
-        registerCommandHandler("clear", new ClearHandler(c));
-        registerCommandHandler("get_config", new GetConfigHandler(c));
-        registerCommandHandler("set_config", new SetConfigHandler(c));
-        // Add more handlers for other tools/commands as needed
+            @Override
+            public void onClose(WebSocket conn, int code, String reason, boolean remote) {
+                clients.remove(conn);
+                message("WebSocket client disconnected: " + conn.getRemoteSocketAddress() + " code: " + code + " reason: " + reason);
+            }
 
-        // Register Event Listeners for Broadcasting
-        ev.on(Cog.AssertedEvent.class, e -> sendEvent("assertion_added", assertionToJson(e.assertion(), e.kbId())));
-        ev.on(Cog.RetractedEvent.class, e -> sendEvent("assertion_removed", assertionToJson(e.assertion(), e.kbId()).put("reason", e.reason())));
-        ev.on(Cog.AssertionEvictedEvent.class, e -> sendEvent("assertion_evicted", assertionToJson(e.assertion(), e.kbId())));
-        ev.on(Cog.AssertionStateEvent.class, e -> sendEvent("assertion_state_changed", new JSONObject().put("id", e.assertionId()).put("isActive", e.isActive()).put("kbId", e.kbId())));
-        ev.on(Cog.RuleAddedEvent.class, e -> sendEvent("rule_added", ruleToJson(e.rule())));
-        ev.on(Cog.RuleRemovedEvent.class, e -> sendEvent("rule_removed", ruleToJson(e.rule())));
-        ev.on(Cog.TaskUpdateEvent.class, e -> sendEvent("task_update", taskUpdateToJson(e)));
-        ev.on(Cog.SystemStatusEvent.class, e -> sendEvent("system_status", systemStatusToJson(e)));
-//        ev.on(WebSocketBroadcastEvent.class, e -> safeBroadcast(e.message())); // Keep for raw messages if needed
+            @Override
+            public void onMessage(WebSocket conn, String message) {
+                handleMessage(conn, message);
+            }
 
-        // Broadcast external input if configured
-        if (c.broadcastInputAssertions) {
-            ev.on(Cog.ExternalInputEvent.class, this::onExternalInput);
-        }
+            @Override
+            public void onError(WebSocket conn, Exception ex) {
+                error("WebSocket error: " + (conn != null ? conn.getRemoteSocketAddress() : "unknown") + " " + ex.getMessage());
+                ex.printStackTrace();
+                if (conn != null) clients.remove(conn);
+            }
 
-        websocket.start();
+            @Override
+            public void onStart() {
+                message("WebSocket server started on port " + address.getPort());
+            }
+        };
+        server.start();
+
+        events.on(Cog.CogEvent.class, this::broadcastEvent);
+
+        context.events.on(Term.Lst.of(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
     }
 
     @Override
     public void stop() {
-        try {
-            websocket.stop(MyWebSocketServer.WS_STOP_TIMEOUT_MS);
-            System.out.println("WebSocket server stopped.");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            System.err.println("Interrupted while stopping WebSocket server.");
-        } catch (Exception e) {
-            System.err.println("Error stopping WebSocket server: " + e.getMessage());
-        }
-    }
-
-    private void registerCommandHandler(String command, CommandHandler handler) {
-        commandHandlers.put(command, handler);
-    }
-
-    private void onExternalInput(Cog.ExternalInputEvent event) {
-        // Only broadcast if it's a list term (potential assertion/rule/goal)
-        if (event.term() instanceof Term.Lst list) {
-            sendEvent("external_input", new JSONObject()
-                    .put("sourceId", event.sourceId())
-                    .put("noteId", requireNonNullElse(event.noteId(), JSONObject.NULL))
-                    .put("kif", list.toKif()));
-        }
-    }
-
-    private void sendEvent(String eventType, JSONObject payload) {
-        JSONObject eventMessage = new JSONObject();
-        eventMessage.put("type", "event");
-        eventMessage.put("event", eventType);
-        eventMessage.put("payload", payload);
-        safeBroadcast(eventMessage.toString());
-    }
-
-    private void sendResponse(WebSocket conn, String command, @Nullable String requestId, JSONObject payload, @Nullable JSONObject error) {
-        JSONObject responseMessage = new JSONObject();
-        responseMessage.put("type", "response");
-        responseMessage.put("command", command);
-        if (requestId != null) {
-            responseMessage.put("id", requestId);
-        }
-        if (payload != null) {
-            responseMessage.put("payload", payload);
-        }
-        if (error != null) {
-            responseMessage.put("error", error);
-        }
-        conn.send(responseMessage.toString());
-    }
-
-    private void safeBroadcast(String message) {
-        try {
-            if (!websocket.getConnections().isEmpty()) websocket.broadcast(message);
-        } catch (Exception e) {
-            if (!(e instanceof ConcurrentModificationException || ofNullable(e.getMessage()).map(m -> m.contains("closed") || m.contains("reset") || m.contains("Broken pipe")).orElse(false)))
-                System.err.println("Error during WebSocket broadcast: " + e.getMessage());
-        }
-    }
-
-    // --- JSON Payload Helpers ---
-
-    private JSONObject assertionToJson(Assertion assertion, String kbId) {
-        return new JSONObject()
-                .put("id", assertion.id())
-                .put("kif", assertion.toKifString())
-                .put("priority", assertion.pri())
-                .put("timestamp", assertion.timestamp())
-                .put("sourceNoteId", requireNonNullElse(assertion.sourceNoteId(), JSONObject.NULL))
-                .put("type", assertion.type().name())
-                .put("isEqual", assertion.isEquality())
-                .put("isNegative", assertion.negated())
-                .put("isOriented", assertion.isOrientedEquality())
-                .put("derivationDepth", assertion.derivationDepth())
-                .put("isActive", assertion.isActive())
-                .put("kbId", kbId);
-    }
-
-    private JSONObject ruleToJson(Rule rule) {
-        return new JSONObject()
-                .put("id", rule.id())
-                .put("kif", rule.form().toKif())
-                .put("priority", rule.pri())
-                .put("sourceNoteId", requireNonNullElse(rule.sourceNoteId(), JSONObject.NULL));
-    }
-
-    private JSONObject taskUpdateToJson(Cog.TaskUpdateEvent event) {
-        return new JSONObject()
-                .put("taskId", event.taskId())
-                .put("status", event.status().name())
-                .put("content", event.content());
-    }
-
-    private JSONObject systemStatusToJson(Cog.SystemStatusEvent event) {
-        return new JSONObject()
-                .put("statusMessage", event.statusMessage())
-                .put("kbCount", event.kbCount())
-                .put("kbCapacity", event.kbCapacity())
-                .put("taskQueueSize", event.taskQueueSize())
-                .put("ruleCount", event.ruleCount());
-    }
-
-
-    // --- Command Handling Interface and Implementations ---
-
-    private interface CommandHandler {
-        CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn);
-    }
-
-    private record AddKifHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    String kif = payload.getString("kif");
-                    String noteId = payload.optString("noteId", null);
-                    String sourceId = "ws:" + conn.getRemoteSocketAddress().toString();
-
-                    // Use the existing ExternalInputEvent mechanism
-                    KifParser.parseKif(kif).forEach(term ->
-                            cog.events.emit(new Cog.ExternalInputEvent(term, sourceId, noteId))
-                    );
-
-                    return new JSONObject().put("status", "success").put("message", "KIF submitted for processing.");
-                } catch (JSONException e) {
-                    throw new IllegalArgumentException("Invalid payload for 'add' command: Missing 'kif' or invalid format.", e);
-                } catch (KifParser.ParseException e) {
-                    throw new IllegalArgumentException("Failed to parse KIF: " + e.getMessage(), e);
-                } catch (Exception e) {
-                    throw new RuntimeException("Internal error processing 'add' command: " + e.getMessage(), e);
-                }
-            }, cog.mainExecutor); // Execute asynchronously
-        }
-    }
-
-    private record RetractHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    String target = payload.getString("target"); // Assertion ID, Note ID, or Rule KIF
-                    String typeStr = payload.optString("type", "BY_ID"); // BY_ID, BY_NOTE, BY_RULE_FORM
-                    Logic.RetractionType type;
-                    try {
-                        type = Logic.RetractionType.valueOf(typeStr.toUpperCase());
-                    } catch (IllegalArgumentException e) {
-                        throw new IllegalArgumentException("Invalid retraction type: " + typeStr + ". Must be BY_ID, BY_NOTE, or BY_RULE_FORM.");
-                    }
-                    String noteId = payload.optString("noteId", null); // Relevant for BY_NOTE
-                    String sourceId = "ws:" + conn.getRemoteSocketAddress().toString();
-
-                    cog.events.emit(new Cog.RetractionRequestEvent(target, type, sourceId, noteId));
-
-                    return new JSONObject().put("status", "success").put("message", "Retraction request submitted.");
-                } catch (JSONException e) {
-                    throw new IllegalArgumentException("Invalid payload for 'retract' command: Missing 'target' or invalid format.", e);
-                } catch (IllegalArgumentException e) {
-                    throw e; // Re-throw specific validation errors
-                } catch (Exception e) {
-                    throw new RuntimeException("Internal error processing 'retract' command: " + e.getMessage(), e);
-                }
-            }, cog.mainExecutor);
-        }
-    }
-
-    private record QueryHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    String kifPattern = payload.getString("kif_pattern");
-                    String typeStr = payload.optString("type", "ASK_BINDINGS"); // ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL
-                    Cog.QueryType type;
-                    try {
-                        type = Cog.QueryType.valueOf(typeStr.toUpperCase());
-                    } catch (IllegalArgumentException e) {
-                        throw new IllegalArgumentException("Invalid query type: " + typeStr + ". Must be ASK_BINDINGS, ASK_TRUE_FALSE, or ACHIEVE_GOAL.");
-                    }
-                    String targetKbId = payload.optString("targetKbId", null);
-                    JSONObject paramsJson = payload.optJSONObject("parameters");
-                    Map<String, Object> parameters = new HashMap<>();
-                    if (paramsJson != null) {
-                        paramsJson.keySet().forEach(key -> parameters.put(key, paramsJson.get(key)));
-                    }
-
-                    Term pattern = KifParser.parseKif(kifPattern).stream()
-                            .findFirst()
-                            .orElseThrow(() -> new IllegalArgumentException("Failed to parse KIF pattern: No term found."));
-
-                    String queryId = Cog.id(Cog.ID_PREFIX_QUERY);
-                    Cog.Query query = new Cog.Query(queryId, type, pattern, targetKbId, parameters);
-
-                    // Use the synchronous query method for simplicity over WS
-                    Cog.Answer answer = cog.querySync(query);
-
-                    JSONObject resultPayload = new JSONObject();
-                    resultPayload.put("queryId", answer.query());
-                    resultPayload.put("status", answer.status().name());
-                    if (answer.explanation() != null) {
-                        resultPayload.put("explanation", answer.explanation().details());
-                    }
-
-                    var b = answer.bindings();
-                    if (b != null && !b.isEmpty()) {
-                        var bindingsArray = new org.json.JSONArray();
-                        for (Map<Term.Var, Term> bindingSet : b) {
-                            var bindingJson = new JSONObject();
-                            bindingSet.forEach((var, term) -> bindingJson.put(var.name(), term.toKif()));
-                            bindingsArray.put(bindingJson);
-                        }
-                        resultPayload.put("bindings", bindingsArray);
-                    } else {
-                        resultPayload.put("bindings", new org.json.JSONArray()); // Ensure bindings is always an array
-                    }
-
-                    return resultPayload;
-                } catch (JSONException e) {
-                    throw new IllegalArgumentException("Invalid payload for 'query' command: Missing 'kif_pattern' or invalid format.", e);
-                } catch (KifParser.ParseException e) {
-                    throw new IllegalArgumentException("Failed to parse KIF pattern: " + e.getMessage(), e);
-                } catch (IllegalArgumentException e) {
-                    throw e; // Re-throw specific validation errors
-                } catch (RuntimeException e) {
-                    // querySync can throw RuntimeException (Timeout, ExecutionException)
-                    throw e;
-                } catch (Exception e) {
-                    throw new RuntimeException("Internal error processing 'query' command: " + e.getMessage(), e);
-                }
-            }, cog.mainExecutor);
-        }
-    }
-
-    private record PauseHandler(Cog cog) implements CommandHandler {
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                cog.setPaused(true);
-                return new JSONObject().put("status", "success").put("message", "System paused.");
-            }, cog.mainExecutor);
-        }
-    }
-
-    private record UnpauseHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                cog.setPaused(false);
-                return new JSONObject().put("status", "success").put("message", "System unpaused.");
-            }, cog.mainExecutor);
-        }
-    }
-
-    private record ClearHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                cog.clear();
-                return new JSONObject().put("status", "success").put("message", "Knowledge base cleared.");
-            }, cog.mainExecutor);
-        }
-    }
-
-    private record GetConfigHandler(Cog cog) implements CommandHandler {
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.completedFuture(new Cog.Configuration(cog).toJson());
-        }
-    }
-
-    private class GetStatusHandler implements CommandHandler {
-        private final Cog cog;
-
-        GetStatusHandler(Cog cog) {
-            this.cog = cog;
-        }
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.completedFuture(systemStatusToJson(
-                    new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())
-            ));
-        }
-    }
-
-    private class SetConfigHandler implements CommandHandler {
-        private final Cog cog;
-
-        SetConfigHandler(Cog cog) {
-            this.cog = cog;
-        }
-
-        @Override
-        public CompletableFuture<JSONObject> handle(JSONObject payload, WebSocket conn) {
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    if (payload.has("llmApiUrl")) cog.lm.llmApiUrl = payload.getString("llmApiUrl");
-                    if (payload.has("llmModel")) cog.lm.llmModel = payload.getString("llmModel");
-                    if (payload.has("globalKbCapacity")) cog.globalKbCapacity = payload.getInt("globalKbCapacity");
-                    if (payload.has("reasoningDepthLimit"))
-                        cog.reasoningDepthLimit = payload.getInt("reasoningDepthLimit");
-                    if (payload.has("broadcastInputAssertions")) {
-                        boolean broadcast = payload.getBoolean("broadcastInputAssertions");
-                        if (cog.broadcastInputAssertions != broadcast) {
-                            cog.broadcastInputAssertions = broadcast;
-                            // Re-register/unregister the listener based on the new value
-                            Consumer<Cog.ExternalInputEvent> i = WebSocketPlugin.this::onExternalInput;
-                            if (broadcast) {
-                                cog.events.on(Cog.ExternalInputEvent.class, i);
-                            } else {
-                                cog.events.off(Cog.ExternalInputEvent.class, i);
-                            }
-                        }
-                    }
-
-                    // Optionally save config to note-config here if persistence is implemented
-
-                    return new JSONObject().put("status", "success").put("message", "Configuration updated.").put("config",
-                            new Cog.Configuration(cog).toJson());
-                } catch (JSONException e) {
-                    throw new IllegalArgumentException("Invalid payload for 'set_config' command: Invalid format.", e);
-                } catch (Exception e) {
-                    throw new RuntimeException("Internal error processing 'set_config' command: " + e.getMessage(), e);
-                }
-            }, cog.mainExecutor);
-        }
-    }
-
-
-    class MyWebSocketServer extends WebSocketServer {
-        private static final int WS_STOP_TIMEOUT_MS = 1000;
-        private static final int WS_CONNECTION_LOST_TIMEOUT_MS = 100;
-        private final Cog cog;
-
-        MyWebSocketServer(InetSocketAddress address, Cog cog) {
-            super(address);
-            this.cog = cog;
-        }
-
-        @Override
-        public void onOpen(WebSocket conn, ClientHandshake handshake) {
-            System.out.println("WS Client connected: " + conn.getRemoteSocketAddress());
-            // Optionally send initial status or config on connect
-            sendEvent("system_status", systemStatusToJson(
-                    new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())
-            ));
-            sendEvent("config_updated", new Cog.Configuration(cog).toJson());
-        }
-
-        @Override
-        public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-            System.out.println("WS Client disconnected: " + conn.getRemoteSocketAddress() + " Code: " + code + " Reason: " + requireNonNullElse(reason, "N/A"));
-        }
-
-        @Override
-        public void onStart() {
-            System.out.println("System WebSocket listener active on port " + getPort() + ".");
-            setConnectionLostTimeout(WS_CONNECTION_LOST_TIMEOUT_MS);
-        }
-
-        @Override
-        public void onError(WebSocket conn, Exception ex) {
-            var addr = ofNullable(conn).map(WebSocket::getRemoteSocketAddress).map(Object::toString).orElse("server");
-            var msg = ofNullable(ex.getMessage()).orElse("");
-            if (ex instanceof IOException && (msg.contains("Socket closed") || msg.contains("Connection reset") || msg.contains("Broken pipe")))
-                System.err.println("WS Network Info from " + addr + ": " + msg);
-            else {
-                System.err.println("WS Error from " + addr + ": " + msg);
-                ex.printStackTrace();
-            }
-        }
-
-        @Override
-        public void onMessage(WebSocket conn, String message) {
-            JSONObject requestJson;
-            String requestId = null;
-            String command = null;
-
+        if (server != null) {
             try {
-                requestJson = new JSONObject(message);
-                String type = requestJson.optString("type");
-                requestId = requestJson.optString("id", null); // Optional request ID
-                command = requestJson.optString("command");
-                JSONObject payload = requestJson.optJSONObject("payload");
-
-                if (!"command".equals(type) || command.isEmpty()) {
-                    sendResponse(conn, command, requestId, null, new JSONObject().put("message", "Invalid message format. Expected type 'command' with a 'command' field.").put("code", "INVALID_FORMAT"));
-                    return;
-                }
-
-                CommandHandler handler = commandHandlers.get(command);
-
-                if (handler == null) {
-                    sendResponse(conn, command, requestId, null, new JSONObject().put("message", "Unknown command: " + command).put("code", "UNKNOWN_COMMAND"));
-                    return;
-                }
-
-                // Execute handler asynchronously and send response when complete
-                String COMMAND = command;
-                String REQUEST_ID = requestId;
-                handler.handle(payload, conn)
-                        .whenComplete((resultPayload, ex) -> {
-                            if (ex == null) {
-                                sendResponse(conn, COMMAND, REQUEST_ID, resultPayload, null);
-                            } else {
-                                // Unwrap common exception types
-                                Throwable cause = ex;
-                                if (cause instanceof CompletionException || cause instanceof ExecutionException) {
-                                    cause = cause.getCause();
-                                }
-                                String errorMessage = ofNullable(cause.getMessage()).orElse("An unexpected error occurred.");
-                                String errorCode = "INTERNAL_ERROR"; // Default error code
-
-                                switch (cause) {
-                                    case IllegalArgumentException _ -> errorCode = "INVALID_ARGUMENT";
-                                    case TimeoutException _ -> {
-                                        errorCode = "TIMEOUT";
-                                        errorMessage = "Command execution timed out.";
-                                    }
-                                    case Tool.ToolExecutionException _ -> errorCode = "TOOL_EXECUTION_ERROR";
-                                    default -> {
-                                    }
-                                }
-                                // Add more specific error code mappings if needed
-
-                                System.err.println("Error handling command '" + COMMAND + "' from " + conn.getRemoteSocketAddress() + ": " + errorMessage);
-                                if (!(cause instanceof IllegalArgumentException || cause instanceof Tool.ToolExecutionException)) { // Don't print stack trace for expected validation errors
-                                    cause.printStackTrace();
-                                }
-
-                                sendResponse(conn, COMMAND, REQUEST_ID, null, new JSONObject().put("message", errorMessage).put("code", errorCode));
-                            }
-                        });
-
-            } catch (JSONException e) {
-                System.err.printf("WS JSON Parse Error from %s: %s | Original: %s...%n", conn.getRemoteSocketAddress(), e.getMessage(),
-                        message.substring(0, Math.min(message.length(), Cog.MAX_WS_PARSE_PREVIEW)));
-                sendResponse(conn, command, requestId, null, new JSONObject().put("message", "Failed to parse JSON message: " + e.getMessage()).put("code", "JSON_PARSE_ERROR"));
-            } catch (Exception e) {
-                System.err.println("Unexpected WS message processing error from " + conn.getRemoteSocketAddress() + ": " + e.getMessage());
+                server.stop();
+                message("WebSocket server stopped.");
+            } catch (IOException | InterruptedException e) {
+                error("Error stopping WebSocket server: " + e.getMessage());
                 e.printStackTrace();
-                sendResponse(conn, command, requestId, null, new JSONObject().put("message", "Internal server error processing message.").put("code", "INTERNAL_ERROR"));
             }
+        }
+        clients.clear();
+    }
+
+    private void handleMessage(WebSocket conn, String message) {
+        try {
+            var signal = new JSONObject(new JSONTokener(message));
+            var type = signal.optString("type");
+            var id = signal.optString("id");
+            var inReplyToId = signal.optString("inReplyToId", null);
+            var payload = signal.optJSONObject("payload");
+
+            if (type == null || id == null || payload == null) {
+                sendErrorResponse(conn, id, "Invalid signal format: missing type, id, or payload.");
+                return;
+            }
+
+            switch (type) {
+                case SIGNAL_TYPE_COMMAND -> handleCommand(conn, id, payload);
+                case SIGNAL_TYPE_INTERACTION_FEEDBACK -> handleFeedback(conn, id, inReplyToId, payload);
+                case SIGNAL_TYPE_DIALOGUE_RESPONSE -> handleDialogueResponse(conn, id, inReplyToId, payload);
+                default -> sendErrorResponse(conn, id, "Unknown signal type: " + type);
+            }
+
+        } catch (org.json.JSONException e) {
+            error("Failed to parse incoming WebSocket message as JSON: " + message.substring(0, Math.min(message.length(), MAX_WS_PARSE_PREVIEW)) + "... Error: " + e.getMessage());
+        } catch (Exception e) {
+            error("Error handling incoming WebSocket message: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-//    public record WebSocketBroadcastEvent(String message) implements Cog.CogEvent {
-//    }
+    private void handleCommand(WebSocket conn, String commandId, JSONObject payload) {
+        var commandType = payload.optString("commandType");
+        var parameters = payload.optJSONObject("parameters");
+
+        if (commandType == null || parameters == null) {
+            sendFailureResponse(conn, commandId, "Invalid command format: missing commandType or parameters.");
+            return;
+        }
+
+        var handler = commandHandlers.get(commandType);
+        if (handler != null) {
+            try {
+                handler.accept(conn, payload);
+            } catch (Exception e) {
+                error("Error executing command '" + commandType + "': " + e.getMessage());
+                e.printStackTrace();
+                sendErrorResponse(conn, commandId, "Error executing command: " + e.getMessage());
+            }
+        } else {
+            sendErrorResponse(conn, commandId, "Unknown command type: " + commandType);
+        }
+    }
+
+    private void handleFeedback(WebSocket conn, String feedbackId, @Nullable String inReplyToId, JSONObject payload) {
+        var feedbackType = payload.optString("feedbackType");
+        var feedbackData = payload.optJSONObject("feedbackData");
+
+        if (feedbackType == null || feedbackData == null) {
+            sendFailureResponse(conn, feedbackId, "Invalid feedback format: missing feedbackType or feedbackData.");
+            return;
+        }
+
+        var handler = feedbackHandlers.get(feedbackType);
+        if (handler != null) {
+            try {
+                handler.accept(conn, payload);
+            } catch (Exception e) {
+                error("Error processing feedback '" + feedbackType + "': " + e.getMessage());
+                e.printStackTrace();
+                sendErrorResponse(conn, feedbackId, "Error processing feedback: " + e.getMessage());
+            }
+        } else {
+            sendErrorResponse(conn, feedbackId, "Unknown feedback type: " + feedbackType);
+        }
+    }
+
+    private void handleDialogueResponse(WebSocket conn, String responseId, @Nullable String inReplyToId, JSONObject payload) {
+        var dialogueId = payload.optString("dialogueId");
+        var responseData = payload.optJSONObject("responseData");
+
+        if (dialogueId == null || responseData == null) {
+            sendErrorResponse(conn, responseId, "Invalid dialogue response format: missing dialogueId or responseData.");
+            return;
+        }
+
+        cog.dialogueManager.handleDialogueResponse(dialogueId, responseData)
+                .ifPresentOrElse(
+                        future -> sendSuccessResponse(conn, responseId, null, "Dialogue response processed."),
+                        () -> sendErrorResponse(conn, responseId, "No pending dialogue request found for ID: " + dialogueId)
+                );
+    }
+
+
+    private void broadcastEvent(Cog.CogEvent event) {
+        var signal = new JSONObject()
+                .put("type", SIGNAL_TYPE_EVENT)
+                .put("id", UUID.randomUUID().toString())
+                .put("payload", event.toJson());
+        broadcast(signal.toString());
+    }
+
+    private void broadcast(String message) {
+        clients.forEach(client -> {
+            if (client.isOpen()) client.send(message);
+        });
+    }
+
+    private void sendInitialState(WebSocket conn) {
+        var initialState = new JSONObject()
+                .put("type", SIGNAL_TYPE_INITIAL_STATE)
+                .put("id", UUID.randomUUID().toString())
+                .put("payload", new JSONObject()
+                        .put("systemStatus", new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount()).toJson())
+                        .put("configuration", new Cog.Configuration(cog).toJson())
+                        .put("notes", new JSONArray(((CogNote) cog).getAllNotes().stream().map(Note::toJson).toList()))
+                        .put("assertions", new JSONArray(cog.context.truth.getAllActiveAssertions().stream().map(Assertion::toJson).toList()))
+                        .put("rules", new JSONArray(cog.context.rules().stream().map(Rule::toJson).toList()))
+                        .put("tasks", new JSONArray()));
+        conn.send(initialState.toString());
+    }
+
+    private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JSONObject result, @Nullable String message) {
+        var response = new JSONObject()
+                .put("type", SIGNAL_TYPE_RESPONSE)
+                .put("id", UUID.randomUUID().toString())
+                .put("inReplyToId", inReplyToId)
+                .put("payload", new JSONObject()
+                        .put("status", status)
+                        .put("result", result)
+                        .put("message", message));
+        if (conn.isOpen()) conn.send(response.toString());
+    }
+
+    private void sendSuccessResponse(WebSocket conn, String inReplyToId, @Nullable JSONObject result, @Nullable String message) {
+        sendResponse(conn, inReplyToId, RESPONSE_STATUS_SUCCESS, result, message);
+    }
+
+    private void sendFailureResponse(WebSocket conn, String inReplyToId, @Nullable String message) {
+        sendResponse(conn, inReplyToId, RESPONSE_STATUS_FAILURE, null, message);
+    }
+
+    private void sendErrorResponse(WebSocket conn, String inReplyToId, @Nullable String message) {
+        sendResponse(conn, inReplyToId, RESPONSE_STATUS_ERROR, null, message);
+    }
+
+    private void handleUiActionAssertion(Cog.CogEvent event, Map<Term.Var, Term> bindings) {
+        if (!(event instanceof Cog.AssertedEvent assertedEvent)) return;
+        var assertion = assertedEvent.assertion();
+        if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
+
+        var kif = assertion.kif();
+        if (kif.size() != 3 || !kif.op().filter(PRED_UI_ACTION::equals).isPresent()) {
+            logWarning("Invalid uiAction assertion format: " + kif.toKif());
+            return;
+        }
+
+        var typeTerm = kif.get(1);
+        var dataTerm = kif.get(2);
+
+        if (!(typeTerm instanceof Term.Atom typeAtom) || !(dataTerm instanceof Term.Atom dataAtom)) {
+            logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
+            return;
+        }
+
+        var uiActionType = typeAtom.value();
+        JSONObject uiActionData = null;
+        try {
+            uiActionData = new JSONObject(dataAtom.value());
+        } catch (org.json.JSONException e) {
+            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataAtom.value());
+        }
+
+        var signal = new JSONObject()
+                .put("type", SIGNAL_TYPE_UI_ACTION)
+                .put("id", UUID.randomUUID().toString())
+                .put("payload", new JSONObject()
+                        .put("uiActionType", uiActionType)
+                        .put("uiActionData", uiActionData));
+
+        broadcast(signal.toString());
+    }
+
+
+    // --- Command Handlers ---
+
+    private void handleAddNoteCommand(WebSocket conn, JSONObject payload) {
+        var title = payload.optString("title");
+        var text = payload.optString("text", "");
+        var commandId = payload.optString("id");
+        if (title == null || title.isBlank()) {
+            sendFailureResponse(conn, commandId, "Note title cannot be empty.");
+            return;
+        }
+        var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, text, Note.Status.IDLE);
+        ((CogNote) cog).addNote(newNote);
+        sendSuccessResponse(conn, commandId, newNote.toJson(), "Note added.");
+    }
+
+    private void handleRemoveNoteCommand(WebSocket conn, JSONObject payload) {
+        var noteId = payload.optString("noteId");
+        var commandId = payload.optString("id");
+        if (noteId == null || noteId.isBlank()) {
+            sendFailureResponse(conn, commandId, "Note ID is required.");
+            return;
+        }
+        ((CogNote) cog).removeNote(noteId);
+        sendSuccessResponse(conn, commandId, null, "Note removal requested.");
+    }
+
+    private void handleStartNoteCommand(WebSocket conn, JSONObject payload) {
+        var noteId = payload.optString("noteId");
+        var commandId = payload.optString("id");
+        if (noteId == null || noteId.isBlank()) {
+            sendFailureResponse(conn, commandId, "Note ID is required.");
+            return;
+        }
+        ((CogNote) cog).startNote(noteId);
+        sendSuccessResponse(conn, commandId, null, "Note start requested.");
+    }
+
+    private void handlePauseNoteCommand(WebSocket conn, JSONObject payload) {
+        var noteId = payload.optString("noteId");
+        var commandId = payload.optString("id");
+        if (noteId == null || noteId.isBlank()) {
+            sendFailureResponse(conn, commandId, "Note ID is required.");
+            return;
+        }
+        ((CogNote) cog).pauseNote(noteId);
+        sendSuccessResponse(conn, commandId, null, "Note pause requested.");
+    }
+
+    private void handleCompleteNoteCommand(WebSocket conn, JSONObject payload) {
+        var noteId = payload.optString("noteId");
+        var commandId = payload.optString("id");
+        if (noteId == null || noteId.isBlank()) {
+            sendFailureResponse(conn, commandId, "Note ID is required.");
+            return;
+        }
+        ((CogNote) cog).completeNote(noteId);
+        sendSuccessResponse(conn, commandId, null, "Note completion requested.");
+    }
+
+    private void handleRunToolCommand(WebSocket conn, JSONObject payload) {
+        var toolName = payload.optString("toolName");
+        var parameters = payload.optJSONObject("parameters");
+        var commandId = payload.optString("id");
+
+        if (toolName == null || toolName.isBlank() || parameters == null) {
+            sendFailureResponse(conn, commandId, "Invalid run_tool command: missing toolName or parameters.");
+            return;
+        }
+
+        cog.tools.get(toolName).ifPresentOrElse(tool -> {
+            Map<String, Object> paramMap = parameters.toMap();
+
+            tool.execute(paramMap).whenCompleteAsync((result, ex) -> {
+                if (ex != null) {
+                    error("Error executing tool '" + toolName + "': " + ex.getMessage());
+                    ex.printStackTrace();
+                    sendErrorResponse(conn, commandId, "Error executing tool: " + ex.getMessage());
+                } else {
+                    JSONObject resultJson = null;
+                    if (result != null) {
+                        try {
+                            if (result instanceof String s) {
+                                resultJson = new JSONObject().put("result", s);
+                            } else if (result instanceof Boolean b) {
+                                resultJson = new JSONObject().put("result", b);
+                            } else if (result instanceof Number n) {
+                                resultJson = new JSONObject().put("result", n);
+                            } else if (result instanceof JSONObject jo) {
+                                resultJson = jo; // Assume tool returned a JSONObject directly
+                            } else if (result instanceof JSONArray ja) {
+                                resultJson = new JSONObject().put("result", ja); // Wrap JSONArray
+                            } else {
+                                resultJson = new JSONObject().put("result", result.toString());
+                            }
+                        } catch (Exception e) {
+                            error("Failed to serialize tool result for '" + toolName + "': " + e.getMessage());
+                            resultJson = new JSONObject().put("result", result.toString());
+                        }
+                    }
+                    sendSuccessResponse(conn, commandId, resultJson, "Tool executed successfully.");
+                }
+            }, cog.events.exe);
+
+        }, () -> sendFailureResponse(conn, commandId, "Tool not found: " + toolName));
+    }
+
+    private void handleRunQueryCommand(WebSocket conn, JSONObject payload) {
+        var queryId = payload.optString("queryId", Cog.id(Cog.ID_PREFIX_QUERY));
+        var queryTypeStr = payload.optString("queryType");
+        var patternString = payload.optString("patternString");
+        var targetKbId = payload.optString("targetKbId");
+        var parameters = payload.optJSONObject("parameters", new JSONObject());
+        var commandId = payload.optString("id");
+
+        if (queryTypeStr == null || patternString == null) {
+            sendFailureResponse(conn, commandId, "Invalid run_query command: missing queryType or patternString.");
+            return;
+        }
+
+        try {
+            var queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
+            var terms = KifParser.parseKif(patternString);
+            if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst pattern)) {
+                throw new KifParser.ParseException("Query pattern must be a single KIF list.");
+            }
+
+            Map<String, Object> paramMap = parameters.toMap();
+
+            var query = new Query(queryId, queryType, pattern, targetKbId, paramMap);
+
+            cog.events.emit(new Query.QueryEvent(query));
+
+            sendSuccessResponse(conn, commandId, new JSONObject().put("queryId", queryId), "Query submitted.");
+
+        } catch (IllegalArgumentException e) {
+            sendFailureResponse(conn, commandId, "Invalid queryType: " + queryTypeStr);
+        } catch (KifParser.ParseException e) {
+            sendFailureResponse(conn, commandId, "Failed to parse query pattern KIF: " + e.getMessage());
+        } catch (Exception e) {
+            error("Error submitting query: " + e.getMessage());
+            e.printStackTrace();
+            sendErrorResponse(conn, commandId, "Error submitting query: " + e.getMessage());
+        }
+    }
+
+    private void handleClearAllCommand(WebSocket conn, JSONObject payload) {
+        var commandId = payload.optString("id");
+        ((CogNote) cog).clear();
+        sendSuccessResponse(conn, commandId, null, "Clear all requested.");
+    }
+
+    private void handleSetConfigCommand(WebSocket conn, JSONObject payload) {
+        var configJsonText = payload.optString("configJsonText");
+        var commandId = payload.optString("id");
+        if (configJsonText == null || configJsonText.isBlank()) {
+            sendFailureResponse(conn, commandId, "configJsonText parameter is required.");
+            return;
+        }
+        if (((CogNote) cog).updateConfig(configJsonText)) {
+            sendSuccessResponse(conn, commandId, new Cog.Configuration(cog).toJson(), "Configuration updated.");
+        } else {
+            sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
+        }
+    }
+
+    private void handleGetInitialStateCommand(WebSocket conn, JSONObject payload) {
+        var commandId = payload.optString("id");
+        sendInitialState(conn);
+        sendSuccessResponse(conn, commandId, null, "Initial state sent.");
+    }
+
+    private void handleSaveNotesCommand(WebSocket conn, JSONObject payload) {
+        var commandId = payload.optString("id");
+        ((CogNote) cog).save();
+        sendSuccessResponse(conn, commandId, null, "Notes saved.");
+    }
+
+
+    // --- Feedback Handlers ---
+
+    private void handleUserAssertedKifFeedback(WebSocket conn, JSONObject payload) {
+        var feedbackId = payload.optString("id");
+        var feedbackData = payload.optJSONObject("feedbackData");
+        var noteId = feedbackData.optString("noteId");
+        var kifString = feedbackData.optString("kifString");
+
+        if (noteId == null || kifString == null) {
+            sendFailureResponse(conn, feedbackId, "Invalid user_asserted_kif feedback: missing noteId or kifString.");
+            return;
+        }
+
+        try {
+            var terms = KifParser.parseKif(kifString);
+            if (terms.isEmpty()) {
+                sendFailureResponse(conn, feedbackId, "No KIF terms parsed from input.");
+                return;
+            }
+            terms.forEach(term -> events.emit(new Cog.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
+            sendSuccessResponse(conn, feedbackId, null, "KIF asserted.");
+
+            var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_ASSERTED_KIF), Term.Atom.of(noteId), Term.Atom.of(kifString));
+            context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+
+        } catch (KifParser.ParseException e) {
+            sendFailureResponse(conn, feedbackId, "Failed to parse KIF: " + e.getMessage());
+        } catch (Exception e) {
+            error("Error processing user_asserted_kif feedback: " + e.getMessage());
+            e.printStackTrace();
+            sendErrorResponse(conn, feedbackId, "Error processing feedback: " + e.getMessage());
+        }
+    }
+
+    private void handleUserEditedNoteTextFeedback(WebSocket conn, JSONObject payload) {
+        var feedbackId = payload.optString("id");
+        var feedbackData = payload.optJSONObject("feedbackData");
+        var noteId = feedbackData.optString("noteId");
+        var text = feedbackData.optString("text");
+
+        if (noteId == null || text == null) {
+            sendFailureResponse(conn, feedbackId, "Invalid user_edited_note_text feedback: missing noteId or text.");
+            return;
+        }
+
+        ((CogNote) cog).updateNoteText(noteId, text);
+        sendSuccessResponse(conn, feedbackId, null, "Note text updated.");
+
+        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TEXT), Term.Atom.of(noteId), Term.Atom.of(text));
+        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+    }
+
+    private void handleUserEditedNoteTitleFeedback(WebSocket conn, JSONObject payload) {
+        var feedbackId = payload.optString("id");
+        var feedbackData = payload.optJSONObject("feedbackData");
+        var noteId = feedbackData.optString("noteId");
+        var title = feedbackData.optString("title");
+
+        if (noteId == null || title == null) {
+            sendFailureResponse(conn, feedbackId, "Invalid user_edited_note_title feedback: missing noteId or title.");
+            return;
+        }
+
+        ((CogNote) cog).updateNoteTitle(noteId, title);
+        sendSuccessResponse(conn, feedbackId, null, "Note title updated.");
+
+        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TITLE), Term.Atom.of(noteId), Term.Atom.of(title));
+        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+    }
+
+    private void handleUserClickedFeedback(WebSocket conn, JSONObject payload) {
+        var feedbackId = payload.optString("id");
+        var feedbackData = payload.optJSONObject("feedbackData");
+        var elementId = feedbackData.optString("elementId");
+
+        if (elementId == null) {
+            sendFailureResponse(conn, feedbackId, "Invalid user_clicked feedback: missing elementId.");
+            return;
+        }
+
+        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_CLICKED), Term.Atom.of(elementId));
+        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+
+        sendSuccessResponse(conn, feedbackId, null, "User clicked feedback processed.");
+    }
 }

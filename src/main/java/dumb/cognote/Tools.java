@@ -6,6 +6,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
+import static dumb.cognote.Log.error;
+import static dumb.cognote.Log.message;
+
 public class Tools {
     private final Map<String, Tool> tools = new ConcurrentHashMap<>();
 
@@ -15,7 +18,7 @@ public class Tools {
             throw new IllegalArgumentException("Tool with name '" + n + "' already registered.");
 
         tools.put(n, tool);
-        System.out.println("Registered tool: " + n);
+        message("Registered tool: " + n);
     }
 
     public Optional<Tool> get(String name) {
@@ -35,7 +38,7 @@ public class Tools {
                 }
                 return false;
             } catch (Exception e) {
-                System.err.println("Error reflecting on tool class " + tool.getClass().getName() + " for @Tool annotation: " + e.getMessage());
+                error("Error reflecting on tool class " + tool.getClass().getName() + " for @Tool annotation: " + e.getMessage());
                 return false;
             }
         });
