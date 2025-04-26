@@ -1,6 +1,8 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +40,11 @@ public class Knowledge {
         this.groundEvictionQueue = new PriorityBlockingQueue<>(1024,
                 Comparator.<String, Double>
                                 comparing(id -> truth.get(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
-                        .thenComparing(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
+                        .thenComparingLong(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE))); // Tie-break by timestamp (oldest first)
+
+        // Listen for TMS events to update local indices
+        events.on(Cog.AssertionStateEvent.class, this::handleAssertionStateChange);
+        events.on(Cog.RetractedEvent.class, this::handleAssertionRetracted);
     }
 
     public int getAssertionCount() {
@@ -84,14 +90,7 @@ public class Knowledge {
             var addedAssertion = truth.get(newId).orElse(null);
             if (addedAssertion == null || !addedAssertion.isActive()) return null;
 
-            switch (finalType) {
-                case GROUND, SKOLEMIZED -> {
-                    paths.add(addedAssertion);
-                    groundEvictionQueue.offer(newId);
-                }
-                case UNIVERSAL ->
-                        addedAssertion.getReferencedPredicates().forEach(pred -> universalIndex.computeIfAbsent(pred, _ -> ConcurrentHashMap.newKeySet()).add(newId));
-            }
+            // Indices are updated by handleAssertionStateChange
             checkResourceThresholds();
             events.emit(new Cog.AssertedEvent(addedAssertion, id));
             return addedAssertion;
@@ -165,6 +164,34 @@ public class Knowledge {
             warning(String.format("KB WARNING (KB: %s): Size %d/%d (%.1f%%)", id, currentSize, capacity, 100.0 * currentSize / capacity));
     }
 
+    private void handleAssertionStateChange(Cog.AssertionStateEvent event) {
+        if (!event.kbId().equals(this.id)) return;
+        lock.writeLock().lock();
+        try {
+            truth.get(event.assertionId()).ifPresent(a -> {
+                if (a.isActive() != event.isActive()) {
+                    // This event is from TMS, the assertion status is already updated in the central store.
+                    // We just need to update local indices.
+                    handleExternalStatusChange(a);
+                }
+            });
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    private void handleAssertionRetracted(Cog.RetractedEvent event) {
+        if (!event.kbId().equals(this.id)) return;
+        lock.writeLock().lock();
+        try {
+            // The assertion is already removed from the central store by TMS.
+            // We just need to remove it from local indices.
+            retractExternal(event.assertion());
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
     void retractExternal(Assertion a) {
         lock.writeLock().lock();
         try {
@@ -194,7 +221,10 @@ public class Knowledge {
         try {
             if (a.isActive()) {
                 switch (a.type()) {
-                    case GROUND, SKOLEMIZED -> paths.add(a);
+                    case GROUND, SKOLEMIZED -> {
+                        paths.add(a);
+                        groundEvictionQueue.offer(a.id());
+                    }
                     case UNIVERSAL ->
                             a.getReferencedPredicates().forEach(pred -> universalIndex.computeIfAbsent(pred, _ -> ConcurrentHashMap.newKeySet()).add(a.id()));
                 }

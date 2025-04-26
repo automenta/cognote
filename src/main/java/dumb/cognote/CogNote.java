@@ -1,20 +1,29 @@
 package dumb.cognote;
 
+import dumb.cognote.plugin.InputPlugin;
+import dumb.cognote.plugin.RetractionPlugin;
+import dumb.cognote.plugin.StatusUpdaterPlugin;
+import dumb.cognote.plugin.TmsPlugin;
+import dumb.cognote.plugin.WebSocketPlugin;
+import dumb.cognote.tool.*;
+import org.jetbrains.annotations.Nullable;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static dumb.cognote.Logic.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static java.util.Optional.ofNullable;
@@ -99,6 +108,31 @@ public class CogNote extends Cog {
         }
     }
 
+    private static List<Note> loadNotesFromFile() {
+        var path = Paths.get(NOTES_FILE);
+        if (!Files.exists(path) || !Files.isReadable(path)) {
+            message("Notes file not found or not readable: " + NOTES_FILE + ". Starting with defaults.");
+            return new ArrayList<>();
+        }
+        try {
+            var jsonText = Files.readString(path);
+            var jsonArray = new JSONArray(new JSONTokener(jsonText));
+            return IntStream.range(0, jsonArray.length())
+                    .mapToObj(jsonArray::getJSONObject)
+                    .map(json -> new Note(
+                            json.getString("id"),
+                            json.getString("title"),
+                            json.optString("text", ""), // Handle missing text field
+                            Note.Status.valueOf(json.optString("status", Note.Status.IDLE.name())) // Handle missing status
+                    ))
+                    .collect(Collectors.toList());
+        } catch (IOException | org.json.JSONException e) {
+            error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+
 
     @Override
     public Optional<Note> note(String id) {
@@ -150,6 +184,7 @@ public class CogNote extends Cog {
                 message("Updated note status for [" + note.id + "] to " + newStatus);
 
                 if (newStatus == Note.Status.ACTIVE) {
+                    // Re-assert existing content when note becomes active
                     context.kb(noteId).getAllAssertions().forEach(assertion ->
                             events.emit(new ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
                     );
@@ -219,12 +254,19 @@ public class CogNote extends Cog {
     public synchronized void clear() {
         message("Clearing all knowledge...");
         setPaused(true);
+        // Retract from all KBs except system ones
         context.getAllNoteIds().stream()
                 .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
+        // Retract from Global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
+        // Clear rules
+        new HashSet<>(context.rules()).forEach(rule -> context.removeRule(rule));
+
+        // Clear internal context state
         context.clear();
 
+        // Reset notes to default/loaded state
         var configNote = notes.get(CONFIG_NOTE_ID);
         var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
 
@@ -232,8 +274,11 @@ public class CogNote extends Cog {
         notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
         notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
 
+        // Re-add system notes to active context
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
+        // CONFIG_NOTE is not typically active for reasoning, but keep it in notes map
 
+        // Emit events for the re-added system notes
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
 
@@ -242,7 +287,8 @@ public class CogNote extends Cog {
         status("Cleared");
         setPaused(false);
         message("Knowledge cleared.");
-        events.emit(new SystemStatusEvent(status, 0, globalKbCapacity, 0, 0));
+        // Emit status event reflecting the cleared state
+        events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
     public boolean updateConfig(String newConfigJsonText) {

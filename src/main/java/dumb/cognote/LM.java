@@ -103,7 +103,7 @@ public class LM {
                 cause.printStackTrace();
                 throw new CompletionException("LLM Service interaction error (" + interactionType + "): " + cause.getMessage(), cause);
             }
-        }, cog.events.exe);
+        }, cog.mainExecutor); // Use mainExecutor for LLM tasks
 
         activeLlmTasks.put(taskId, taskFuture);
 

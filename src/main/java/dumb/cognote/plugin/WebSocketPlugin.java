@@ -33,7 +33,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     public WebSocketPlugin(InetSocketAddress address, Cog cog) {
         this.address = address;
-        this.cog = cog;
+        this.cog = cog; // Initialize cog here as well, though BasePlugin.start will also set it
         setupCommandHandlers();
         setupFeedbackHandlers();
     }
@@ -61,7 +61,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     @Override
     public void start(Events e, Logic.Cognition ctx) {
-        super.start(e, ctx);
+        super.start(e, ctx); // This will also set the cog field
         server = new WebSocketServer(address) {
             @Override
             public void onOpen(WebSocket conn, ClientHandshake handshake) {
@@ -97,6 +97,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         events.on(Cog.CogEvent.class, this::broadcastEvent);
 
+        // Listen for UI Action assertions to broadcast them
         context.events.on(Term.Lst.of(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
     }
 
@@ -115,12 +116,18 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void handleMessage(WebSocket conn, String message) {
+        JSONObject signal;
+        String id = null;
+        String type = null;
+        JSONObject payload = null;
+        String inReplyToId = null;
+
         try {
-            var signal = new JSONObject(new JSONTokener(message));
-            var type = signal.optString("type");
-            var id = signal.optString("id");
-            var inReplyToId = signal.optString("inReplyToId", null);
-            var payload = signal.optJSONObject("payload");
+            signal = new JSONObject(new JSONTokener(message));
+            type = signal.optString("type");
+            id = signal.optString("id");
+            inReplyToId = signal.optString("inReplyToId", null);
+            payload = signal.optJSONObject("payload");
 
             if (type == null || id == null || payload == null) {
                 sendErrorResponse(conn, id, "Invalid signal format: missing type, id, or payload.");
@@ -136,9 +143,16 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         } catch (org.json.JSONException e) {
             error("Failed to parse incoming WebSocket message as JSON: " + message.substring(0, Math.min(message.length(), MAX_WS_PARSE_PREVIEW)) + "... Error: " + e.getMessage());
+            // If id is null, we can't send a response back related to the message
+            if (id != null) {
+                sendErrorResponse(conn, id, "Failed to parse JSON: " + e.getMessage());
+            }
         } catch (Exception e) {
             error("Error handling incoming WebSocket message: " + e.getMessage());
             e.printStackTrace();
+            if (id != null) {
+                sendErrorResponse(conn, id, "Internal server error: " + e.getMessage());
+            }
         }
     }
 
@@ -154,7 +168,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var handler = commandHandlers.get(commandType);
         if (handler != null) {
             try {
-                handler.accept(conn, payload);
+                handler.accept(conn, payload); // Handlers are responsible for sending response
             } catch (Exception e) {
                 error("Error executing command '" + commandType + "': " + e.getMessage());
                 e.printStackTrace();
@@ -177,7 +191,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var handler = feedbackHandlers.get(feedbackType);
         if (handler != null) {
             try {
-                handler.accept(conn, payload);
+                handler.accept(conn, payload); // Handlers are responsible for sending response
             } catch (Exception e) {
                 error("Error processing feedback '" + feedbackType + "': " + e.getMessage());
                 e.printStackTrace();
@@ -206,6 +220,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
 
     private void broadcastEvent(Cog.CogEvent event) {
+        // Don't broadcast LogMessageEvents back to clients, they are handled by the server's Log class
+        if (event instanceof Events.LogMessageEvent) return;
+
         var signal = new JSONObject()
                 .put("type", SIGNAL_TYPE_EVENT)
                 .put("id", UUID.randomUUID().toString())
@@ -229,7 +246,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                         .put("notes", new JSONArray(((CogNote) cog).getAllNotes().stream().map(Note::toJson).toList()))
                         .put("assertions", new JSONArray(cog.context.truth.getAllActiveAssertions().stream().map(Assertion::toJson).toList()))
                         .put("rules", new JSONArray(cog.context.rules().stream().map(Rule::toJson).toList()))
-                        .put("tasks", new JSONArray()));
+                        .put("tasks", new JSONArray())); // Tasks can be an empty array initially
         conn.send(initialState.toString());
     }
 
@@ -260,6 +277,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void handleUiActionAssertion(Cog.CogEvent event, Map<Term.Var, Term> bindings) {
         if (!(event instanceof Cog.AssertedEvent assertedEvent)) return;
         var assertion = assertedEvent.assertion();
+        // Only process UI actions asserted into the dedicated KB
         if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
 
         var kif = assertion.kif();
@@ -279,9 +297,12 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var uiActionType = typeAtom.value();
         JSONObject uiActionData = null;
         try {
-            uiActionData = new JSONObject(dataAtom.value());
+            // Attempt to parse the data atom's value as JSON
+            uiActionData = new JSONObject(new JSONTokener(dataAtom.value()));
         } catch (org.json.JSONException e) {
             logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataAtom.value());
+            // If data is not valid JSON, send it as a string instead
+            uiActionData = new JSONObject().put("value", dataAtom.value());
         }
 
         var signal = new JSONObject()
@@ -396,7 +417,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     }
                     sendSuccessResponse(conn, commandId, resultJson, "Tool executed successfully.");
                 }
-            }, cog.events.exe);
+            }, cog.events.exe); // Use events executor for tool result handling
 
         }, () -> sendFailureResponse(conn, commandId, "Tool not found: " + toolName));
     }
@@ -492,11 +513,14 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 sendFailureResponse(conn, feedbackId, "No KIF terms parsed from input.");
                 return;
             }
+            // Emit ExternalInputEvent for each parsed term
             terms.forEach(term -> events.emit(new Cog.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
-            sendSuccessResponse(conn, feedbackId, null, "KIF asserted.");
 
+            // Also assert the feedback itself into the user feedback KB
             var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_ASSERTED_KIF), Term.Atom.of(noteId), Term.Atom.of(kifString));
             context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+
+            sendSuccessResponse(conn, feedbackId, null, "KIF asserted.");
 
         } catch (KifParser.ParseException e) {
             sendFailureResponse(conn, feedbackId, "Failed to parse KIF: " + e.getMessage());
@@ -519,10 +543,12 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         ((CogNote) cog).updateNoteText(noteId, text);
-        sendSuccessResponse(conn, feedbackId, null, "Note text updated.");
 
+        // Assert the feedback into the user feedback KB
         var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TEXT), Term.Atom.of(noteId), Term.Atom.of(text));
         context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+
+        sendSuccessResponse(conn, feedbackId, null, "Note text updated.");
     }
 
     private void handleUserEditedNoteTitleFeedback(WebSocket conn, JSONObject payload) {
@@ -537,10 +563,12 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         ((CogNote) cog).updateNoteTitle(noteId, title);
-        sendSuccessResponse(conn, feedbackId, null, "Note title updated.");
 
+        // Assert the feedback into the user feedback KB
         var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TITLE), Term.Atom.of(noteId), Term.Atom.of(title));
         context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+
+        sendSuccessResponse(conn, feedbackId, null, "Note title updated.");
     }
 
     private void handleUserClickedFeedback(WebSocket conn, JSONObject payload) {
@@ -553,6 +581,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
 
+        // Assert the feedback into the user feedback KB
         var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_CLICKED), Term.Atom.of(elementId));
         context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
