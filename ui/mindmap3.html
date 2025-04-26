@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NeuroWeaver 🧠</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+  <style>
+    :root {
+        --bg-color: #000000;
+        --primary-color: #e8e8ff;
+        --accent-color: #00f7ff;
+        --accent-color-darker: #00a0a8;
+        --highlight-color: #ffa500;
+        --delete-color: #ff3d3d;
+        --delete-color-hover: #ff6666;
+        --node-bg-base: rgba(26, 26, 46, 0.9);
+        --node-border: var(--accent-color-darker);
+        --node-shadow: rgba(0, 247, 255, 0.1);
+        --node-hover-shadow: rgba(0, 247, 255, 0.3);
+        --edge-color: rgba(0, 247, 255, 0.6);
+        --edge-highlight-color: rgba(255, 165, 0, 0.9);
+        --menu-bg: rgba(30, 30, 50, 0.97);
+        --menu-border: var(--accent-color);
+        --menu-hover-bg: rgba(0, 247, 255, 0.15);
+        --dialog-bg: rgba(35, 35, 60, 0.98);
+        --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        --font-mono: 'Fira Code', 'Consolas', 'Monaco', monospace;
+        --transition-fast: 0.15s ease-out;
+        --transition-med: 0.3s ease-out;
+        --node-color-1: rgba(26, 26, 46, 0.9);
+        --node-color-2: rgba(46, 26, 46, 0.9);
+        --node-color-3: rgba(26, 46, 46, 0.9);
+        --node-color-4: rgba(46, 46, 26, 0.9);
+        --node-color-5: rgba(46, 26, 26, 0.9);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        overflow: hidden;
+        background-color: var(--bg-color);
+        color: var(--primary-color);
+        font-family: var(--font-family);
+        font-size: 14px;
+        overscroll-behavior: none;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    #mindmap-container { position: fixed; inset: 0; cursor: grab; }
+    #mindmap-container.panning { cursor: grabbing; }
+    #mindmap-container.linking { cursor: crosshair; }
+    #mindmap-container.rotating { cursor: crosshair; } /* Or a rotation cursor */
+
+    #webgl-canvas, #css3d-container { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #webgl-canvas { z-index: 1; }
+    #css3d-container { z-index: 2; pointer-events: none; }
+
+    .node-html {
+        position: absolute;
+        background-color: var(--node-bg-base);
+        border: 1px solid var(--node-border);
+        border-radius: 8px;
+        padding: 12px 15px;
+        color: var(--primary-color);
+        pointer-events: auto;
+        cursor: grab;
+        transition: transform var(--transition-fast), box-shadow var(--transition-med), border-color var(--transition-med), background-color var(--transition-med);
+        box-shadow: 0 2px 10px 2px var(--node-shadow);
+        min-width: 80px;
+        min-height: 40px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; /* Clip content and menus */
+        backdrop-filter: blur(5px);
+        user-select: none;
+        transform-origin: center center; /* For scaling */
+    }
+    .node-html:hover {
+        box-shadow: 0 4px 20px 5px var(--node-hover-shadow);
+        border-color: var(--accent-color);
+        z-index: 10 !important;
+    }
+    .node-html.dragging { cursor: grabbing; box-shadow: 0 10px 30px 8px var(--node-hover-shadow); z-index: 1000 !important; transition: none; }
+    .node-html.resizing { transition: none; }
+    .node-html.linking-target { border-color: var(--highlight-color); box-shadow: 0 0 25px 5px rgba(255, 170, 0, 0.6); }
+    .node-html.selected { border-color: var(--highlight-color); box-shadow: 0 4px 20px 5px rgba(255, 165, 0, 0.4); }
+
+    /* Node Color Variations */
+    .node-color-1 { background-color: var(--node-color-1); }
+    .node-color-2 { background-color: var(--node-color-2); }
+    .node-color-3 { background-color: var(--node-color-3); }
+    .node-color-4 { background-color: var(--node-color-4); }
+    .node-color-5 { background-color: var(--node-color-5); }
+
+
+    .node-content {
+        flex-grow: 1;
+        outline: none;
+        overflow-y: auto;
+        max-height: 400px;
+        font-size: 1em; /* Base size, controlled by textScale */
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        user-select: text;
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-color-darker) transparent;
+        transition: font-size var(--transition-fast);
+    }
+    .node-content::-webkit-scrollbar { width: 6px; }
+    .node-content::-webkit-scrollbar-track { background: transparent; }
+    .node-content::-webkit-scrollbar-thumb { background-color: var(--accent-color-darker); border-radius: 3px; }
+    .node-content:focus { box-shadow: inset 0 0 0 1px var(--accent-color); margin: -1px; }
+    .node-content > *:first-child { margin-top: 0; }
+    .node-content > *:last-child { margin-bottom: 0; }
+    .node-content h1, .node-content h2, .node-content h3 { margin: 0.5em 0; color: var(--accent-color); font-weight: 600; }
+    .node-content h1 { font-size: 1.3em; } .node-content h2 { font-size: 1.15em; } .node-content h3 { font-size: 1.05em; }
+    .node-content p { margin: 0.5em 0; }
+    .node-content ul, .node-content ol { margin: 0.5em 0; padding-left: 20px; }
+    .node-content li { margin-bottom: 0.2em; }
+    .node-content code { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+    .node-content pre { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.5em; border-radius: 4px; overflow-x: auto; font-size: 0.9em; }
+    .node-content blockquote { border-left: 3px solid var(--accent-color-darker); margin: 0.5em 0 0.5em 10px; padding-left: 10px; color: #bbb; }
+    .node-content a { color: var(--accent-color); text-decoration: none; }
+    .node-content a:hover { text-decoration: underline; }
+    .node-content button { background-color: var(--accent-color); color: var(--bg-color); border: none; padding: 5px 10px; margin: 5px 0; border-radius: 4px; cursor: pointer; transition: background-color var(--transition-fast); }
+    .node-content button:hover { background-color: #3fffff; }
+
+    .node-controls { position: absolute; top: -12px; right: -12px; display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition-fast); pointer-events: none; z-index: 15; }
+    .node-html:hover .node-controls, .node-html.selected .node-controls { opacity: 1; pointer-events: auto; }
+
+    .node-control-button, .resize-handle {
+        width: 24px; height: 24px; border-radius: 50%; border: none; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; font-size: 14px;
+        background-color: var(--menu-bg); color: var(--primary-color); box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+        transition: transform var(--transition-fast), background-color var(--transition-fast);
+    }
+    .node-control-button:hover, .resize-handle:hover { transform: scale(1.15); background-color: var(--accent-color); color: var(--bg-color); }
+    .node-control-button.delete { background-color: var(--delete-color); color: white; }
+    .node-control-button.delete:hover { background-color: var(--delete-color-hover); }
+
+    .resize-handle {
+        position: absolute; bottom: -8px; right: -8px; width: 16px; height: 16px;
+        border-radius: 3px; cursor: nwse-resize; background-color: var(--accent-color); border: 1px solid var(--bg-color);
+        opacity: 0; transition: opacity var(--transition-fast), transform var(--transition-fast); pointer-events: auto; z-index: 10;
+    }
+    .node-html:hover .resize-handle { opacity: 0.7; }
+    .resize-handle:hover { opacity: 1; transform: scale(1.15); }
+
+    .context-menu, .dialog {
+        position: fixed; background-color: var(--menu-bg); border: 1px solid var(--menu-border);
+        border-radius: 6px; box-shadow: 0 5px 25px rgba(0, 0, 0, 0.6); z-index: 10000;
+        display: none; backdrop-filter: blur(8px); animation: fadeIn 0.1s ease-out forwards;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
+    .context-menu { padding: 6px 0; min-width: 160px; }
+    .context-menu ul { list-style: none; padding: 0; margin: 0; }
+    .context-menu li { padding: 8px 18px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast); color: var(--primary-color); white-space: nowrap; }
+    .context-menu li:hover { background-color: var(--menu-hover-bg); color: var(--accent-color); }
+    .context-menu li[data-action^="delete"] { color: var(--delete-color); }
+    .context-menu li[data-action^="delete"]:hover { background-color: rgba(255, 61, 61, 0.2); }
+    .context-menu li.disabled { color: #777; cursor: default; background-color: transparent !important; }
+
+    .dialog { top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: var(--dialog-bg); padding: 25px 30px; text-align: center; color: var(--primary-color); min-width: 300px; }
+    .dialog p { margin: 0 0 25px 0; font-size: 1.1em; }
+    .dialog button { background-color: var(--accent-color); color: var(--bg-color); border: none; padding: 10px 22px; margin: 0 10px; border-radius: 5px; cursor: pointer; font-weight: 600; transition: background-color var(--transition-fast), box-shadow var(--transition-fast); min-width: 80px; }
+    .dialog button:hover { background-color: #3fffff; box-shadow: 0 0 12px var(--accent-color); }
+    .dialog button#confirm-no { background-color: #555; color: var(--primary-color); }
+    .dialog button#confirm-no:hover { background-color: #777; box-shadow: none; }
+
+    #status-indicator { position: fixed; bottom: 10px; left: 10px; background-color: rgba(0, 0, 0, 0.6); color: var(--primary-color); padding: 5px 12px; border-radius: 4px; font-size: 12px; z-index: 5; opacity: 1; transition: opacity 0.5s ease 1s; pointer-events: none; }
+    #status-indicator.hidden { opacity: 0; }
+
+    /* Edge Menu Frame */
+    .edge-menu {
+        position: fixed; display: none; background-color: var(--menu-bg); border: 1px solid var(--accent-color);
+        border-radius: 6px; padding: 5px; z-index: 9000; display: flex; gap: 4px; align-items: center;
+        box-shadow: 0 3px 15px rgba(0,0,0,0.5); backdrop-filter: blur(8px); animation: fadeIn 0.1s ease-out forwards;
+    }
+    .edge-menu button, .edge-menu select, .edge-menu input[type="color"] {
+        background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--primary-color);
+        border-radius: 4px; padding: 4px 6px; font-size: 12px; cursor: pointer; height: 26px;
+    }
+    .edge-menu button:hover, .edge-menu select:hover { background-color: var(--menu-hover-bg); }
+    .edge-menu input[type="color"] { padding: 1px 2px; width: 30px; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; }
+    .edge-menu .edge-delete-button { background-color: var(--delete-color); color: white; font-weight: bold; padding: 4px 8px; }
+    .edge-menu .edge-delete-button:hover { background-color: var(--delete-color-hover); }
+    .edge-menu .button-set { display: flex; gap: 1px; background-color: rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; }
+    .edge-menu .button-set button { border-radius: 0; border: none; background-color: rgba(255,255,255,0.1); height: 26px; padding: 4px 6px; }
+    .edge-menu .button-set button.active { background-color: var(--accent-color); color: var(--bg-color); }
+    .edge-menu .button-set button:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px;}
+    .edge-menu .button-set button:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px;}
+
+    /* Camera Rotation Button */
+    #rotate-button {
+        position: fixed; bottom: 10px; right: 10px; width: 40px; height: 40px;
+        background-color: var(--menu-bg); border: 1px solid var(--accent-color); border-radius: 50%;
+        color: var(--primary-color); font-size: 20px; cursor: pointer; z-index: 100;
+        display: flex; align-items: center; justify-content: center;
+        transition: background-color var(--transition-fast), color var(--transition-fast);
+        user-select: none;
+    }
+    #rotate-button:hover { background-color: var(--accent-color); color: var(--bg-color); }
+    #rotate-button.active { background-color: var(--accent-color); color: var(--bg-color); }
+
+  </style>
+</head>
+<body>
+<div id="mindmap-container">
+  <canvas id="webgl-canvas"></canvas>
+  <div id="css3d-container"></div>
+</div>
+
+<div id="context-menu" class="context-menu"></div>
+<div id="confirm-dialog" class="dialog">
+  <p id="confirm-message">Are you sure?</p>
+  <button id="confirm-yes">Yes</button>
+  <button id="confirm-no">No</button>
+</div>
+<div id="edge-menu" class="edge-menu"></div>
+<div id="status-indicator">Initializing NeuroWeaver...</div>
+<button id="rotate-button" title="Hold to Rotate Camera">🔄</button>
+
+<script type="importmap">
+  {
+      "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/",
+          "gsap": "https://cdn.jsdelivr.net/npm/gsap@3.12.5/index.js"
+      }
+  }
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+  import { gsap } from "gsap";
+
+  const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector) => document.querySelectorAll(selector);
+
+  const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const generateId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const NODE_COLOR_CLASSES = ['node-color-1', 'node-color-2', 'node-color-3', 'node-color-4', 'node-color-5'];
+  let nodeColorIndex = 0;
+
+  class MindMap {
+      nodes = new Map();
+      edges = new Map();
+      isDraggingNode = false;
+      isResizingNode = false;
+      isLinking = false;
+      linkSourceNode = null;
+      tempLinkLine = null;
+      uiManager = null;
+      cameraController = null;
+      layoutEngine = null;
+      selectedNode = null;
+      selectedEdge = null;
+
+      constructor(container) {
+          this.container = container;
+          this.scene = new THREE.Scene();
+          this.cssScene = new THREE.Scene();
+          this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 10, 20000);
+          this.camera.position.z = 600;
+
+          this.webglRenderer = new THREE.WebGLRenderer({ canvas: $('#webgl-canvas'), antialias: true, alpha: true });
+          this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
+          this.webglRenderer.setPixelRatio(window.devicePixelRatio);
+          this.webglRenderer.setClearColor(0x000000, 1); // Ensure black background
+
+          this.cssRenderer = new CSS3DRenderer();
+          this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+          $('#css3d-container').appendChild(this.cssRenderer.domElement);
+
+          const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+          this.scene.add(ambientLight);
+          const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+          directionalLight.position.set(0.5, 1, 0.75);
+          this.scene.add(directionalLight);
+
+          window.addEventListener('resize', this.onWindowResize.bind(this), false);
+      }
+
+      addNode(node) {
+          if (!node.id) node.id = generateId('node');
+          if (this.nodes.has(node.id)) return this.nodes.get(node.id);
+
+          node.colorClass = NODE_COLOR_CLASSES[nodeColorIndex % NODE_COLOR_CLASSES.length];
+          nodeColorIndex++;
+
+          this.nodes.set(node.id, node);
+          node.mindMap = this;
+          if (node.threeObject) this.scene.add(node.threeObject);
+          if (node.cssObject) {
+              this.cssScene.add(node.cssObject);
+              node.applyColorClass(); // Apply color after adding to map
+          }
+          this.layoutEngine?.addNode(node);
+          return node;
+      }
+
+      removeNode(nodeId) {
+          const node = this.nodes.get(nodeId);
+          if (!node) return;
+          if (this.selectedNode === node) this.selectNode(null);
+
+          const edgesToRemove = [...this.edges.values()].filter(edge => edge.source === node || edge.target === node);
+          edgesToRemove.forEach(edge => this.removeEdge(edge.id));
+
+          node.dispose();
+          this.nodes.delete(nodeId);
+          this.layoutEngine?.removeNode(node);
+          this.uiManager?.removeNodeHTML(nodeId);
+      }
+
+      addEdge(sourceNode, targetNode, data = {}) {
+          if (!sourceNode || !targetNode || sourceNode === targetNode) return null;
+          if ([...this.edges.values()].some(e => (e.source === sourceNode && e.target === targetNode) || (e.source === targetNode && e.target === sourceNode))) return null; // Prevent duplicates
+
+          const edgeId = generateId('edge');
+          const edge = new Edge(edgeId, sourceNode, targetNode, data);
+          edge.mindMap = this;
+          this.edges.set(edgeId, edge);
+          if (edge.threeObject) this.scene.add(edge.threeObject);
+          this.layoutEngine?.addEdge(edge);
+          return edge;
+      }
+
+      removeEdge(edgeId) {
+          const edge = this.edges.get(edgeId);
+          if (!edge) return;
+          if (this.selectedEdge === edge) this.selectEdge(null);
+          edge.dispose();
+          this.edges.delete(edgeId);
+          this.layoutEngine?.removeEdge(edge);
+          this.uiManager?.hideEdgeMenu();
+      }
+
+      getNodeById = (id) => this.nodes.get(id);
+      getEdgeById = (id) => this.edges.get(id);
+
+      selectNode(node) {
+          if (this.selectedNode === node) return;
+          this.selectedNode?.htmlElement?.classList.remove('selected');
+          this.selectedNode = node;
+          this.selectedNode?.htmlElement?.classList.add('selected');
+          this.selectEdge(null); // Deselect edge when node is selected
+          this.uiManager?.showNodeMenu(node);
+      }
+
+      selectEdge(edge) {
+          if (this.selectedEdge === edge) return;
+          this.selectedEdge?.unhighlight();
+          this.selectedEdge = edge;
+          this.selectedEdge?.highlight();
+          this.selectNode(null); // Deselect node when edge is selected
+          this.uiManager?.showEdgeMenu(edge);
+      }
+
+      update() {
+          this.nodes.forEach(node => node.update());
+          this.edges.forEach(edge => edge.update());
+          this.uiManager?.updateMenuPositions();
+      }
+
+      render() {
+          this.webglRenderer.render(this.scene, this.camera);
+          this.cssRenderer.render(this.cssScene, this.camera);
+      }
+
+      onWindowResize() {
+          this.camera.aspect = window.innerWidth / window.innerHeight;
+          this.camera.updateProjectionMatrix();
+          this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
+          this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      centerView(targetPosition = null, duration = 0.7) {
+          let targetPos;
+          if (targetPosition) {
+              targetPos = targetPosition.clone();
+          } else {
+              if (this.nodes.size === 0) targetPos = new THREE.Vector3(0, 0, 0);
+              else {
+                  targetPos = new THREE.Vector3();
+                  this.nodes.forEach(node => targetPos.add(node.position));
+                  targetPos.divideScalar(this.nodes.size);
+              }
+          }
+          const distance = this.nodes.size > 1 ? 600 : 300;
+          this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
+      }
+
+      focusOnNode(node, duration = 0.6) {
+          if (!node) return;
+          const targetPos = node.position.clone();
+          const distance = Math.max(node.size.width, node.size.height) * 1.5 + 100;
+          this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
+          this.selectNode(node);
+      }
+
+      getWorldPositionFromScreen(screenX, screenY, targetZ = 0) {
+          const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(vec, this.camera);
+          const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -targetZ);
+          const intersectPoint = new THREE.Vector3();
+          return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
+      }
+
+      getScreenCoordinates(worldPosition) {
+          const vector = worldPosition.clone().project(this.camera);
+          return {
+              x: Math.round((vector.x + 1) * window.innerWidth / 2),
+              y: Math.round((-vector.y + 1) * window.innerHeight / 2),
+              z: vector.z
+          };
+      }
+  }
+
+  class Node {
+      mindMap = null;
+      threeObject = null;
+      htmlElement = null;
+      cssObject = null;
+      position = new THREE.Vector3();
+      size = { width: 160, height: 70 };
+      data = {};
+      textScale = 1.0;
+      colorClass = 'node-color-1';
+
+      constructor(id, position = { x: 0, y: 0, z: 0 }, data = {}) {
+          this.id = id;
+          this.position.set(position.x, position.y, position.z);
+          this.data = data;
+          this.htmlElement = this._createHtmlElement();
+          this.cssObject = new CSS3DObject(this.htmlElement);
+          this.update();
+      }
+
+      _createHtmlElement() {
+          const el = document.createElement('div');
+          el.className = 'node-html';
+          el.id = `node-html-${this.id}`;
+          el.dataset.nodeId = this.id;
+          el.style.width = `${this.size.width}px`;
+          el.style.height = `${this.size.height}px`;
+
+          el.innerHTML = `
+              <div class="node-content" spellcheck="false">${this.data.label || ''}</div>
+              <div class="node-controls">
+                  <button class="node-control-button node-text-zoom-in" title="Increase Text Size (+)">+</button>
+                  <button class="node-control-button node-text-zoom-out" title="Decrease Text Size (-)">-</button>
+                  <button class="node-control-button node-grow" title="Grow Node (G)">➚</button>
+                  <button class="node-control-button node-shrink" title="Shrink Node (S)">➘</button>
+                  <button class="node-control-button delete node-delete" title="Delete Node (Del)">×</button>
+              </div>
+              <div class="resize-handle" title="Resize Node" data-node-id="${this.id}"></div>
+          `;
+          return el;
+      }
+
+      applyColorClass() {
+          NODE_COLOR_CLASSES.forEach(c => this.htmlElement?.classList.remove(c));
+          this.htmlElement?.classList.add(this.colorClass);
+      }
+
+      setPosition(x, y, z) { this.position.set(x, y, z); }
+
+      setSize(width, height) {
+          this.size.width = Math.max(80, width);
+          this.size.height = Math.max(40, height);
+          if (this.htmlElement) {
+              this.htmlElement.style.width = `${this.size.width}px`;
+              this.htmlElement.style.height = `${this.size.height}px`;
+          }
+          this.mindMap?.layoutEngine?.kick();
+      }
+
+      setScale(factor) {
+          this.setSize(this.size.width * factor, this.size.height * factor);
+      }
+
+      setTextScale(scale) {
+          this.textScale = clamp(scale, 0.5, 3.0);
+          const contentEl = this.htmlElement?.querySelector('.node-content');
+          if (contentEl) contentEl.style.fontSize = `${this.textScale}em`;
+      }
+
+      update() {
+          if (this.cssObject) this.cssObject.position.copy(this.position);
+      }
+
+      dispose() {
+          this.cssObject?.parent?.remove(this.cssObject);
+          this.threeObject?.parent?.remove(this.threeObject);
+          this.htmlElement?.remove();
+      }
+
+      startDrag() { this.htmlElement?.classList.add('dragging'); this.mindMap?.layoutEngine?.fixNode(this); }
+      drag(newPosition) { this.setPosition(newPosition.x, newPosition.y, newPosition.z); this.update(); }
+      endDrag() { this.htmlElement?.classList.remove('dragging'); this.mindMap?.layoutEngine?.releaseNode(this); this.mindMap?.layoutEngine?.kick(); }
+      startResize() { this.htmlElement?.classList.add('resizing'); this.mindMap?.layoutEngine?.fixNode(this); }
+      resize(newWidth, newHeight) { this.setSize(newWidth, newHeight); }
+      endResize() { this.htmlElement?.classList.remove('resizing'); this.mindMap?.layoutEngine?.releaseNode(this); }
+  }
+
+  class NoteNode extends Node {
+      constructor(position = { x: 0, y: 0, z: 0 }, data = { content: '' }) {
+          super(generateId('note'), position, { ...data, type: 'note', label: data.content }); // Use content as label for HTML creation
+          this._setupRichText();
+      }
+
+      _setupRichText() {
+          this.htmlElement.classList.add('note-node');
+          const contentDiv = this.htmlElement.querySelector('.node-content');
+          if (contentDiv) {
+              contentDiv.contentEditable = "true";
+              contentDiv.innerHTML = this.data.content || '';
+              let debounceTimer;
+              contentDiv.addEventListener('input', () => {
+                  clearTimeout(debounceTimer);
+                  debounceTimer = setTimeout(() => { this.data.content = contentDiv.innerHTML; }, 300);
+              });
+              contentDiv.addEventListener('mousedown', e => e.stopPropagation());
+              contentDiv.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+              contentDiv.addEventListener('wheel', e => { // Handle text zoom scroll
+                  if(e.ctrlKey || e.metaKey) { // Require Ctrl/Cmd + Scroll for text zoom
+                      e.stopPropagation();
+                      e.preventDefault();
+                      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                      this.setTextScale(this.textScale + delta);
+                  }
+              }, { passive: false });
+          }
+      }
+  }
+
+  class Edge {
+      mindMap = null;
+      threeObject = null;
+      color = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--edge-color').trim() || '#00f7ff');
+      thickness = 1.5;
+      style = 'solid'; // 'solid', 'dashed'
+      behavior = 'loose'; // 'loose', 'tight'
+      highlighted = false;
+
+      constructor(id, sourceNode, targetNode, data = {}) {
+          this.id = id;
+          this.source = sourceNode;
+          this.target = targetNode;
+          this.data = { ...data, behavior: 'loose', color: this.color.getHexString(), thickness: this.thickness, style: this.style };
+          this.threeObject = this._createThreeObject();
+          this.updateStyle();
+      }
+
+      _createThreeObject() {
+          const points = [this.source.position.clone(), this.target.position.clone()];
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          // Use LineBasicMaterial for simplicity, Line2 needed for reliable thickness > 1
+          const material = new THREE.LineBasicMaterial({
+              depthTest: false, // Render edges slightly on top
+              transparent: true
+          });
+          const line = new THREE.Line(geometry, material);
+          line.renderOrder = -1;
+          line.userData.edgeId = this.id; // Link back to edge object
+          return line;
+      }
+
+      updateStyle() {
+          if (!this.threeObject) return;
+          const material = this.threeObject.material;
+          const baseColor = this.highlighted
+              ? new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--edge-highlight-color').trim() || '#ffa500')
+              : this.color;
+
+          material.color.copy(baseColor);
+          material.opacity = this.highlighted ? 1.0 : 0.7;
+          material.linewidth = this.thickness * (this.highlighted ? 1.5 : 1); // Note: linewidth mostly ignored > 1
+
+          if (this.style === 'dashed' && !(material instanceof THREE.LineDashedMaterial)) {
+              this.threeObject.material.dispose(); // Dispose old material
+              this.threeObject.material = new THREE.LineDashedMaterial({
+                  color: material.color, opacity: material.opacity, linewidth: material.linewidth,
+                  depthTest: false, transparent: true, dashSize: 8, gapSize: 4
+              });
+              this.threeObject.computeLineDistances(); // Required for dashed lines
+          } else if (this.style === 'solid' && !(material instanceof THREE.LineBasicMaterial)) {
+              this.threeObject.material.dispose();
+              this.threeObject.material = new THREE.LineBasicMaterial({
+                  color: material.color, opacity: material.opacity, linewidth: material.linewidth,
+                  depthTest: false, transparent: true
+              });
+          } else if (this.style === 'dashed') {
+              this.threeObject.computeLineDistances(); // Recompute if already dashed
+          }
+
+          material.needsUpdate = true;
+          this.data.color = this.color.getHexString();
+          this.data.thickness = this.thickness;
+          this.data.style = this.style;
+          this.data.behavior = this.behavior;
+      }
+
+      setColor(hexColor) { this.color = new THREE.Color(hexColor); this.updateStyle(); }
+      setThickness(val) { this.thickness = clamp(val, 0.5, 10); this.updateStyle(); }
+      setStyle(style) { this.style = ['solid', 'dashed'].includes(style) ? style : 'solid'; this.updateStyle(); }
+      setBehavior(behavior) { this.behavior = ['loose', 'tight'].includes(behavior) ? behavior : 'loose'; this.mindMap?.layoutEngine?.kick(); this.updateStyle(); }
+
+      highlight() { this.highlighted = true; this.updateStyle(); }
+      unhighlight() { this.highlighted = false; this.updateStyle(); }
+
+      update() {
+          if (!this.threeObject || !this.source || !this.target) return;
+          const positions = this.threeObject.geometry.attributes.position;
+          positions.setXYZ(0, this.source.position.x, this.source.position.y, this.source.position.z);
+          positions.setXYZ(1, this.target.position.x, this.target.position.y, this.target.position.z);
+          positions.needsUpdate = true;
+          this.threeObject.geometry.computeBoundingSphere();
+          if (this.style === 'dashed') this.threeObject.computeLineDistances();
+      }
+
+      dispose() {
+          if (this.threeObject?.parent) {
+              this.threeObject.parent.remove(this.threeObject);
+              this.threeObject.geometry?.dispose();
+              this.threeObject.material?.dispose();
+          }
+      }
+
+      getMidpoint() {
+          return new THREE.Vector3().lerpVectors(this.source.position, this.target.position, 0.5);
+      }
+  }
+
+  class UIManager {
+      draggedNode = null;
+      resizedNode = null;
+      resizeStartPos = { x: 0, y: 0 };
+      resizeStartSize = { width: 0, height: 0 };
+      dragOffset = new THREE.Vector3();
+      isMouseDown = false;
+      potentialClick = true;
+      lastPointerPos = { x: 0, y: 0 };
+      confirmCallback = null;
+      edgeMenuTarget = null; // The edge the menu is currently shown for
+
+      constructor(mindMap) {
+          this.mindMap = mindMap;
+          this.container = mindMap.container;
+          this.cssContainer = mindMap.cssRenderer.domElement;
+          this.contextMenu = $('#context-menu');
+          this.confirmDialog = $('#confirm-dialog');
+          this.edgeMenu = $('#edge-menu');
+          this._bindEvents();
+          this._setupEdgeMenu();
+      }
+
+      _bindEvents() {
+          const eventTarget = this.container;
+          eventTarget.addEventListener('pointerdown', this.onPointerDown.bind(this));
+          window.addEventListener('pointermove', this.onPointerMove.bind(this));
+          window.addEventListener('pointerup', this.onPointerUp.bind(this));
+          eventTarget.addEventListener('contextmenu', this.onContextMenu.bind(this));
+          document.addEventListener('click', (e) => {
+              if (!this.contextMenu.contains(e.target)) this.hideContextMenu();
+              // Hide edge menu if clicking outside of it or its edge
+              if (this.edgeMenuTarget && !this.edgeMenu.contains(e.target) && e.target.closest('.node-html') !== this.edgeMenuTarget?.source?.htmlElement && e.target.closest('.node-html') !== this.edgeMenuTarget?.target?.htmlElement) {
+                 // Check if click was near the edge itself? For now, just hide if clicking elsewhere.
+                 // this.hideEdgeMenu();
+              }
+          }, true);
+          this.contextMenu.addEventListener('click', this.onMenuClick.bind(this));
+          $('#confirm-yes').addEventListener('click', this.onConfirmYes.bind(this));
+          $('#confirm-no').addEventListener('click', this.onConfirmNo.bind(this));
+          this.cssContainer.addEventListener('wheel', this.onNodeWheel.bind(this), { passive: false, capture: true }); // Capture to get node target reliably
+
+          // Node control button delegation
+          this.cssContainer.addEventListener('click', (e) => {
+              const button = e.target.closest('.node-control-button');
+              if (!button) return;
+              const nodeEl = button.closest('.node-html');
+              const nodeId = nodeEl?.dataset.nodeId;
+              const node = this.mindMap.getNodeById(nodeId);
+              if (!node) return;
+
+              e.stopPropagation(); // Prevent triggering node selection or background click
+
+              if (button.classList.contains('node-delete')) {
+                  this.showConfirm(`Delete node "${node.data.content?.substring(0,15) ?? node.id}..."?`, () => this.mindMap.removeNode(node.id));
+              } else if (button.classList.contains('node-text-zoom-in')) {
+                  node.setTextScale(node.textScale + 0.15);
+              } else if (button.classList.contains('node-text-zoom-out')) {
+                  node.setTextScale(node.textScale - 0.15);
+              } else if (button.classList.contains('node-grow')) {
+                  node.setScale(1.25);
+              } else if (button.classList.contains('node-shrink')) {
+                  node.setScale(0.8);
+              }
+          });
+      }
+
+      _setupEdgeMenu() {
+          this.edgeMenu.innerHTML = `
+              <input type="color" id="edge-color-picker" title="Edge Color">
+              <div class="button-set">
+                  <button data-thickness="1" title="Thin Edge">_</button>
+                  <button data-thickness="2.5" title="Medium Edge">-</button>
+                  <button data-thickness="5" title="Thick Edge">▬</button>
+              </div>
+              <div class="button-set">
+                  <button data-style="solid" title="Solid Line" class="active">―</button>
+                  <button data-style="dashed" title="Dashed Line">┅</button>
+              </div>
+               <div class="button-set">
+                  <button data-behavior="loose" title="Loose Connection" class="active">〰️</button>
+                  <button data-behavior="tight" title="Tight Connection">🔗</button>
+              </div>
+              <button class="edge-delete-button" title="Delete Edge">×</button>
+          `;
+
+          this.edgeMenu.addEventListener('input', e => {
+              if (e.target.id === 'edge-color-picker' && this.edgeMenuTarget) {
+                  this.edgeMenuTarget.setColor(e.target.value);
+              }
+          });
+          this.edgeMenu.addEventListener('click', e => {
+              const button = e.target.closest('button');
+              if (!button || !this.edgeMenuTarget) return;
+
+              if (button.classList.contains('edge-delete-button')) {
+                  this.mindMap.removeEdge(this.edgeMenuTarget.id); // No confirmation for edges? Add if needed.
+              } else if (button.dataset.thickness) {
+                  this.edgeMenuTarget.setThickness(parseFloat(button.dataset.thickness));
+                  this._updateEdgeMenuState();
+              } else if (button.dataset.style) {
+                  this.edgeMenuTarget.setStyle(button.dataset.style);
+                  this._updateEdgeMenuState();
+              } else if (button.dataset.behavior) {
+                  this.edgeMenuTarget.setBehavior(button.dataset.behavior);
+                  this._updateEdgeMenuState();
+              }
+          });
+      }
+
+      _updateEdgeMenuState() {
+          if (!this.edgeMenuTarget || !this.edgeMenu.style.display || this.edgeMenu.style.display === 'none') return;
+          const edge = this.edgeMenuTarget;
+          $('#edge-color-picker').value = `#${edge.color.getHexString()}`;
+
+          this.edgeMenu.querySelectorAll('.button-set button').forEach(btn => btn.classList.remove('active'));
+          this.edgeMenu.querySelector(`button[data-thickness="${edge.thickness}"]`)?.classList.add('active'); // Might not match exactly
+          this.edgeMenu.querySelector(`button[data-style="${edge.style}"]`)?.classList.add('active');
+          this.edgeMenu.querySelector(`button[data-behavior="${edge.behavior}"]`)?.classList.add('active');
+      }
+
+      showEdgeMenu(edge) {
+          if (!edge) { this.hideEdgeMenu(); return; }
+          this.edgeMenuTarget = edge;
+          this.edgeMenu.style.display = 'flex';
+          this._updateEdgeMenuState();
+          this.updateMenuPositions(); // Position immediately
+      }
+
+      hideEdgeMenu() {
+          this.edgeMenu.style.display = 'none';
+          this.edgeMenuTarget = null;
+      }
+
+      showNodeMenu(node) {
+          // Node menu is now part of the node HTML itself (.node-controls)
+          // This function might be used for other node-specific UI later
+          if (!node) this.hideEdgeMenu(); // Hide edge menu if selecting a node
+      }
+
+      updateMenuPositions() {
+          if (this.edgeMenuTarget && this.edgeMenu.style.display !== 'none') {
+              const midpoint = this.edgeMenuTarget.getMidpoint();
+              const screenPos = this.mindMap.getScreenCoordinates(midpoint);
+
+              if (screenPos.z < 1) { // Only show if in front of camera
+                  const menuRect = this.edgeMenu.getBoundingClientRect();
+                  let x = screenPos.x - menuRect.width / 2;
+                  let y = screenPos.y - menuRect.height - 10; // Position above midpoint
+
+                  x = clamp(x, 5, window.innerWidth - menuRect.width - 5);
+                  y = clamp(y, 5, window.innerHeight - menuRect.height - 5);
+
+                  this.edgeMenu.style.left = `${x}px`;
+                  this.edgeMenu.style.top = `${y}px`;
+                  this.edgeMenu.style.opacity = '1';
+              } else {
+                  this.edgeMenu.style.opacity = '0'; // Hide if behind camera
+              }
+          }
+      }
+
+      _getPointerEventNode(event) {
+          const element = document.elementFromPoint(event.clientX, event.clientY);
+          const nodeElement = element?.closest('.node-html');
+          return nodeElement ? this.mindMap.getNodeById(nodeElement.dataset.nodeId) : null;
+      }
+
+      _findClosestEdge(screenX, screenY, threshold = 30) {
+          let closestEdge = null;
+          let minDistSq = threshold * threshold;
+          const clickPos = new THREE.Vector2(screenX, screenY);
+
+          this.mindMap.edges.forEach(edge => {
+              const start = this.mindMap.getScreenCoordinates(edge.source.position);
+              const end = this.mindMap.getScreenCoordinates(edge.target.position);
+              if (start.z > 1 || end.z > 1) return; // Skip edges behind camera
+
+              const startV = new THREE.Vector2(start.x, start.y);
+              const endV = new THREE.Vector2(end.x, end.y);
+              const line = new THREE.Line3(new THREE.Vector3(startV.x, startV.y, 0), new THREE.Vector3(endV.x, endV.y, 0));
+              const closestPoint = new THREE.Vector3();
+              line.closestPointToPoint(new THREE.Vector3(clickPos.x, clickPos.y, 0), true, closestPoint);
+
+              const distSq = clickPos.distanceToSquared(new THREE.Vector2(closestPoint.x, closestPoint.y));
+
+              if (distSq < minDistSq) {
+                  minDistSq = distSq;
+                  closestEdge = edge;
+              }
+          });
+          return closestEdge;
+      }
+
+      onPointerDown(event) {
+          if (event.button !== 0 && event.pointerType === 'mouse') return;
+          this.isMouseDown = true;
+          this.potentialClick = true;
+          this.lastPointerPos = { x: event.clientX, y: event.clientY };
+          const target = event.target;
+
+          const nodeElement = target.closest('.node-html');
+          const resizeHandle = target.closest('.resize-handle');
+          const nodeControl = target.closest('.node-control-button');
+          const contentEditable = target.closest('.node-content[contenteditable="true"]');
+          const edgeMenu = target.closest('.edge-menu');
+          const contextMenu = target.closest('.context-menu');
+
+          if (resizeHandle) {
+              event.preventDefault(); event.stopPropagation();
+              const nodeId = resizeHandle.dataset.nodeId;
+              this.resizedNode = this.mindMap.getNodeById(nodeId);
+              if (this.resizedNode) {
+                  this.resizedNode.startResize();
+                  this.resizeStartPos = { x: event.clientX, y: event.clientY };
+                  this.resizeStartSize = { ...this.resizedNode.size };
+                  this.container.style.cursor = 'nwse-resize';
+              }
+              this.hideContextMenu(); this.hideEdgeMenu(); // Hide menus on interaction start
+              return;
+          }
+
+          if (nodeElement && !contentEditable && !nodeControl) {
+              event.preventDefault();
+              this.draggedNode = this.mindMap.getNodeById(nodeElement.dataset.nodeId);
+              if (this.draggedNode) {
+                  this.draggedNode.startDrag();
+                  const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
+                  if (worldPos) this.dragOffset.copy(worldPos).sub(this.draggedNode.position);
+                  else this.dragOffset.set(0,0,0);
+                  this.container.style.cursor = 'grabbing';
+              }
+              this.hideContextMenu(); this.hideEdgeMenu();
+              return;
+          }
+
+          // If not interacting with node internals, check for edge click
+          if (!nodeElement && !edgeMenu && !contextMenu && this.mindMap.cameraController?.interactionType === 'none') {
+               const edge = this._findClosestEdge(event.clientX, event.clientY);
+               if (edge) {
+                   this.mindMap.selectEdge(edge);
+                   this.potentialClick = false; // Prevent background click logic
+                   this.hideContextMenu();
+                   return; // Don't allow panning if edge selected
+               } else {
+                   // If not edge, deselect current edge/node if clicking background
+                   if (this.mindMap.selectedEdge) this.mindMap.selectEdge(null);
+                   if (this.mindMap.selectedNode && !nodeElement) this.mindMap.selectNode(null);
+               }
+          }
+
+          // If nothing specific clicked, let CameraController handle background interaction
+          this.hideContextMenu();
+          // Don't hide edge menu immediately on background click, wait for pointer up unless dragging starts
+      }
+
+      onPointerMove(event) {
+          if (!this.isMouseDown && !this.mindMap.isLinking) {
+              if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
+              const targetNode = this._getPointerEventNode(event);
+              $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+              if (this.mindMap.isLinking && targetNode && targetNode !== this.mindMap.linkSourceNode) {
+                  targetNode.htmlElement?.classList.add('linking-target');
+              }
+              return;
+          }
+
+          const dx = event.clientX - this.lastPointerPos.x;
+          const dy = event.clientY - this.lastPointerPos.y;
+          if (dx !== 0 || dy !== 0) {
+              if (this.potentialClick && !this.draggedNode && !this.resizedNode) {
+                  // If starting to drag background, hide edge menu
+                  this.hideEdgeMenu();
+              }
+              this.potentialClick = false;
+          }
+
+          this.lastPointerPos = { x: event.clientX, y: event.clientY };
+
+          if (this.resizedNode) {
+              event.preventDefault();
+              const newWidth = this.resizeStartSize.width + (event.clientX - this.resizeStartPos.x);
+              const newHeight = this.resizeStartSize.height + (event.clientY - this.resizeStartPos.y);
+              this.resizedNode.resize(newWidth, newHeight);
+          } else if (this.draggedNode) {
+              event.preventDefault();
+              const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
+              if (worldPos) this.draggedNode.drag(worldPos.sub(this.dragOffset));
+          } else {
+              // Background drag - handled by CameraController
+          }
+
+          if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
+      }
+
+      onPointerUp(event) {
+          if (!this.isMouseDown && !this.mindMap.isLinking) return;
+
+          this.container.style.cursor = this.mindMap.isLinking ? 'crosshair' : 'grab';
+
+          if (this.resizedNode) {
+              this.resizedNode.endResize();
+              this.resizedNode = null;
+          } else if (this.draggedNode) {
+              const droppedOnNode = this._getPointerEventNode(event);
+              this.draggedNode.endDrag();
+              this._checkPiling(this.draggedNode, droppedOnNode);
+              this.mindMap.selectNode(this.draggedNode); // Keep node selected after drag
+              this.draggedNode = null;
+          } else if (this.mindMap.isLinking) {
+              this._endLinking(event);
+          } else if (this.potentialClick) {
+              const clickedNode = this._getPointerEventNode(event);
+              if (clickedNode) {
+                  this.mindMap.selectNode(clickedNode);
+              } else {
+                  // Background click handled in onPointerDown for deselection
+              }
+          }
+
+          this.isMouseDown = false;
+          this.potentialClick = false;
+          $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+      }
+
+      onContextMenu(event) {
+          event.preventDefault();
+          this.hideEdgeMenu(); // Hide edge menu on context menu open
+
+          const targetNode = this._getPointerEventNode(event);
+          const targetEdge = !targetNode ? this._findClosestEdge(event.clientX, event.clientY) : null;
+
+          let items = [];
+          if (targetNode) {
+              this.mindMap.selectNode(targetNode); // Select node on right click
+              items = [
+                  { label: "Edit Content 📝", action: "edit-node", nodeId: targetNode.id, disabled: !(targetNode instanceof NoteNode) },
+                  { label: "Start Link ✨", action: "start-link", nodeId: targetNode.id },
+                  { label: "Focus Here 🎯", action: "focus-node", nodeId: targetNode.id },
+                  { label: "Delete Node 🗑️", action: "delete-node", nodeId: targetNode.id },
+              ];
+          } else if (targetEdge) {
+              this.mindMap.selectEdge(targetEdge); // Select edge on right click
+              items = [
+                  { label: "Edit Edge Style 🎨", action: "edit-edge", edgeId: targetEdge.id },
+                  { label: "Delete Edge 🗑️", action: "delete-edge", edgeId: targetEdge.id },
+              ];
+          } else {
+              this.mindMap.selectNode(null); // Deselect on background right click
+              this.mindMap.selectEdge(null);
+              const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, 0);
+              items = [
+                  { label: "Create Note Here ➕", action: "create-note", position: worldPos ? JSON.stringify(worldPos) : null },
+                  { label: "Center View 🧭", action: "center-view" },
+              ];
+          }
+
+          if (items.length > 0) this.showContextMenu(event.clientX, event.clientY, items);
+          else this.hideContextMenu();
+      }
+
+      showContextMenu(x, y, items) {
+          this.contextMenu.innerHTML = '';
+          const ul = document.createElement('ul');
+          items.forEach(item => {
+              const li = document.createElement('li');
+              li.textContent = item.label;
+              if (item.disabled) li.classList.add('disabled');
+              Object.entries(item).forEach(([key, value]) => {
+                  if (value !== undefined && value !== null) li.dataset[key] = value;
+              });
+              ul.appendChild(li);
+          });
+          this.contextMenu.appendChild(ul);
+
+          const menuRect = this.contextMenu.getBoundingClientRect();
+          let finalX = x; let finalY = y;
+          if (x + menuRect.width > window.innerWidth) finalX = window.innerWidth - menuRect.width - 5;
+          if (y + menuRect.height > window.innerHeight) finalY = window.innerHeight - menuRect.height - 5;
+          finalX = Math.max(5, finalX); finalY = Math.max(5, finalY);
+
+          this.contextMenu.style.left = `${finalX}px`;
+          this.contextMenu.style.top = `${finalY}px`;
+          this.contextMenu.style.display = 'block';
+      }
+
+      hideContextMenu = () => { if (this.contextMenu) this.contextMenu.style.display = 'none'; }
+
+      onMenuClick(event) {
+          const li = event.target.closest('li');
+          if (!li || li.classList.contains('disabled')) return;
+          const data = li.dataset;
+          const action = data.action;
+          this.hideContextMenu();
+
+          switch (action) {
+              case 'edit-node': {
+                  const node = this.mindMap.getNodeById(data.nodeId);
+                  node?.htmlElement?.querySelector('.node-content')?.focus();
+                  break;
+              }
+              case 'delete-node':
+                  this.showConfirm(`Delete node "${this.mindMap.getNodeById(data.nodeId)?.data.content?.substring(0,15) ?? data.nodeId}..."?`, () => this.mindMap.removeNode(data.nodeId));
+                  break;
+              case 'focus-node':
+                  this.mindMap.focusOnNode(this.mindMap.getNodeById(data.nodeId));
+                  break;
+              case 'create-note': {
+                  if (!data.position) break;
+                  const pos = JSON.parse(data.position);
+                  const newNode = this.mindMap.addNode(new NoteNode(pos, { content: 'New Note ✨' }));
+                  this.mindMap.layoutEngine?.kick();
+                  setTimeout(() => {
+                      this.mindMap.focusOnNode(newNode);
+                      newNode.htmlElement?.querySelector('.node-content')?.focus();
+                  }, 100);
+                  break;
+              }
+              case 'center-view': this.mindMap.centerView(); break;
+              case 'start-link': {
+                  const sourceNode = this.mindMap.getNodeById(data.nodeId);
+                  if (sourceNode) {
+                      this.mindMap.isLinking = true;
+                      this.mindMap.linkSourceNode = sourceNode;
+                      this.container.classList.add('linking');
+                      this._startTempLinkLine(sourceNode);
+                  }
+                  break;
+              }
+              case 'edit-edge':
+                  this.showEdgeMenu(this.mindMap.getEdgeById(data.edgeId));
+                  break;
+              case 'delete-edge':
+                   this.mindMap.removeEdge(data.edgeId); // No confirm?
+                  break;
+          }
+      }
+
+      onNodeWheel(event) {
+          const nodeEl = event.target.closest('.node-html');
+          if (nodeEl && (event.ctrlKey || event.metaKey)) {
+              const node = this.mindMap.getNodeById(nodeEl.dataset.nodeId);
+              if (node instanceof NoteNode) {
+                  // Already handled inside NoteNode's contentEditable listener
+              }
+          }
+      }
+
+      showConfirm(message, onConfirm) { $('#confirm-message').textContent = message; this.confirmCallback = onConfirm; this.confirmDialog.style.display = 'block'; }
+      hideConfirm = () => { this.confirmDialog.style.display = 'none'; this.confirmCallback = null; }
+      onConfirmYes = () => { this.confirmCallback?.(); this.hideConfirm(); }
+      onConfirmNo = () => { this.hideConfirm(); }
+
+      _startTempLinkLine(sourceNode) {
+          this._removeTempLinkLine();
+          const material = new THREE.LineDashedMaterial({ color: 0xffaa00, linewidth: 2, dashSize: 8, gapSize: 4, transparent: true, opacity: 0.8, depthTest: false });
+          const points = [sourceNode.position.clone(), sourceNode.position.clone()];
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          this.mindMap.tempLinkLine = new THREE.Line(geometry, material);
+          this.mindMap.tempLinkLine.computeLineDistances();
+          this.mindMap.tempLinkLine.renderOrder = 1;
+          this.mindMap.scene.add(this.mindMap.tempLinkLine);
+      }
+
+      _updateTempLinkLine(screenX, screenY) {
+          if (!this.mindMap.tempLinkLine || !this.mindMap.linkSourceNode) return;
+          const targetPos = this.mindMap.getWorldPositionFromScreen(screenX, screenY, this.mindMap.linkSourceNode.position.z);
+          if (targetPos) {
+              const positions = this.mindMap.tempLinkLine.geometry.attributes.position;
+              positions.setXYZ(1, targetPos.x, targetPos.y, targetPos.z);
+              positions.needsUpdate = true;
+              this.mindMap.tempLinkLine.geometry.computeBoundingSphere();
+              this.mindMap.tempLinkLine.computeLineDistances();
+          }
+      }
+
+      _removeTempLinkLine() {
+          if (this.mindMap.tempLinkLine) {
+              this.mindMap.scene.remove(this.mindMap.tempLinkLine);
+              this.mindMap.tempLinkLine.geometry?.dispose();
+              this.mindMap.tempLinkLine.material?.dispose();
+              this.mindMap.tempLinkLine = null;
+          }
+      }
+
+      _endLinking(event) {
+          this._removeTempLinkLine();
+          const targetNode = this._getPointerEventNode(event);
+          if (targetNode && targetNode !== this.mindMap.linkSourceNode) {
+              this.mindMap.addEdge(this.mindMap.linkSourceNode, targetNode);
+          }
+          this.mindMap.isLinking = false;
+          this.mindMap.linkSourceNode = null;
+          this.container.classList.remove('linking');
+          $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+      }
+
+      _checkPiling(droppedNode, droppedOnNode) {
+          if (!droppedNode || !this.mindMap.layoutEngine) return;
+          const MAX_PILE_DISTANCE_SQ = 100 * 100;
+          const PILE_STRENGTH = 0.05;
+
+          const targetNode = droppedOnNode ?? [...this.mindMap.nodes.values()].find(otherNode =>
+              otherNode !== droppedNode && droppedNode.position.distanceToSquared(otherNode.position) < MAX_PILE_DISTANCE_SQ
+          );
+
+          if (targetNode) {
+              this.mindMap.layoutEngine.addTemporaryAttraction(droppedNode, targetNode, PILE_STRENGTH, 60);
+              this.mindMap.layoutEngine.kick();
+          }
+      }
+
+      removeNodeHTML = (nodeId) => $(`#node-html-${nodeId}`)?.remove();
+  }
+
+  class CameraController {
+      isPanning = false;
+      isRotating = false;
+      panStart = new THREE.Vector2();
+      rotateStart = new THREE.Vector2();
+      targetPosition = new THREE.Vector3();
+      targetLookAt = new THREE.Vector3();
+      currentLookAt = new THREE.Vector3();
+      zoomSpeed = 0.0015;
+      panSpeed = 0.8;
+      rotateSpeed = 0.004;
+      minZoom = 30;
+      maxZoom = 10000;
+      dampingFactor = 0.15;
+      animationFrameId = null;
+      rotateButton = $('#rotate-button');
+      upVector = new THREE.Vector3(0, 1, 0);
+      spherical = new THREE.Spherical();
+      targetSpherical = new THREE.Spherical(); // For smooth rotation reset
+
+      constructor(camera, domElement, mindMap) {
+          this.camera = camera;
+          this.domElement = domElement;
+          this.mindMap = mindMap; // Needed for raycasting
+          this.targetPosition.copy(camera.position);
+          const initialDir = new THREE.Vector3();
+          camera.getWorldDirection(initialDir);
+          this.targetLookAt.copy(camera.position).addScaledVector(initialDir, 10);
+          this.currentLookAt.copy(this.targetLookAt);
+          this.spherical.setFromVector3(this.camera.position.clone().sub(this.currentLookAt));
+          this.targetSpherical.copy(this.spherical);
+
+          this._bindEvents();
+          this.update();
+      }
+
+      get interactionType() {
+          if (this.isPanning) return 'pan';
+          if (this.isRotating) return 'rotate';
+          return 'none';
+      }
+
+      _bindEvents() {
+          this.domElement.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
+          this.domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
+          window.addEventListener('pointermove', this.onPointerMove.bind(this));
+          window.addEventListener('pointerup', this.onPointerUp.bind(this));
+          this.rotateButton.addEventListener('pointerdown', this.onRotateButtonDown.bind(this));
+          // Rotate button pointer up is handled by the global window listener
+      }
+
+      _getPointerTargetType(event) {
+          const el = event.target;
+          if (el.closest('.node-html') || el.closest('.context-menu') || el.closest('.dialog') || el.closest('.edge-menu') || el === this.rotateButton) {
+              return 'ui';
+          }
+          return 'background';
+      }
+
+      onPointerDown(event) {
+          if (event.button === 0 && this._getPointerTargetType(event) === 'background') {
+              event.preventDefault();
+              this.isPanning = true;
+              this.panStart.set(event.clientX, event.clientY);
+              this.domElement.classList.add('panning');
+              gsap.killTweensOf(this.targetPosition);
+              gsap.killTweensOf(this.targetLookAt);
+          }
+      }
+
+      onRotateButtonDown(event) {
+          event.stopPropagation(); // Prevent background pan start
+          event.preventDefault();
+          this.isRotating = true;
+          this.rotateStart.set(event.clientX, event.clientY);
+          this.rotateButton.classList.add('active');
+          this.domElement.classList.add('rotating');
+          gsap.killTweensOf(this.targetSpherical); // Stop reset animation if interrupted
+      }
+
+      onPointerMove(event) {
+          if (this.isPanning) {
+              event.preventDefault();
+              const deltaX = event.clientX - this.panStart.x;
+              const deltaY = event.clientY - this.panStart.y;
+              const element = this.domElement;
+              const cameraZ = this.camera.position.distanceTo(this.currentLookAt);
+              const vFOV = THREE.MathUtils.degToRad(this.camera.fov);
+              const height = 2 * Math.tan(vFOV / 2) * Math.max(1, cameraZ);
+              const width = height * this.camera.aspect;
+              const panX = -(deltaX / element.clientHeight) * height * this.panSpeed;
+              const panY = (deltaY / element.clientHeight) * height * this.panSpeed;
+              const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+              const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+              const panOffset = right.multiplyScalar(panX).add(up.multiplyScalar(panY));
+              this.targetPosition.add(panOffset);
+              this.targetLookAt.add(panOffset);
+              this.panStart.set(event.clientX, event.clientY);
+          } else if (this.isRotating) {
+              event.preventDefault();
+              const deltaX = event.clientX - this.rotateStart.x;
+              const deltaY = event.clientY - this.rotateStart.y;
+
+              // Update target spherical coordinates based on drag
+              this.targetSpherical.theta -= deltaX * this.rotateSpeed;
+              this.targetSpherical.phi -= deltaY * this.rotateSpeed;
+              this.targetSpherical.phi = clamp(this.targetSpherical.phi, 0.1, Math.PI - 0.1); // Prevent gimbal lock
+
+              this.rotateStart.set(event.clientX, event.clientY);
+          }
+      }
+
+      onPointerUp(event) {
+          if (this.isPanning && event.button === 0) {
+              this.isPanning = false;
+              this.domElement.classList.remove('panning');
+          }
+          if (this.isRotating) {
+              this.isRotating = false;
+              this.rotateButton.classList.remove('active');
+              this.domElement.classList.remove('rotating');
+              this.resetRotation(); // Smoothly reset upright
+          }
+      }
+
+      resetRotation(duration = 0.5) {
+          // Reset target phi to upright (PI/2) while keeping theta and radius
+          const currentTargetTheta = this.targetSpherical.theta;
+          // Normalize theta to avoid excessive spinning
+          const twoPi = Math.PI * 2;
+          const normalizedTheta = ((currentTargetTheta % twoPi) + twoPi) % twoPi; // Ensure positive 0 to 2PI
+
+          gsap.to(this.targetSpherical, {
+              phi: Math.PI / 2,
+              theta: normalizedTheta, // Animate to normalized theta
+              duration: duration,
+              ease: "power2.out"
+          });
+      }
+
+
+      onWheel(event) {
+          if (this._getPointerTargetType(event) !== 'background') return;
+          event.preventDefault();
+          gsap.killTweensOf(this.targetPosition);
+          gsap.killTweensOf(this.targetLookAt);
+
+          const delta = -event.deltaY * this.zoomSpeed;
+          const currentDist = this.targetPosition.distanceTo(this.targetLookAt);
+          let newDist = currentDist * Math.pow(0.95, delta * 10);
+          newDist = clamp(newDist, this.minZoom, this.maxZoom);
+
+          const zoomFactor = (newDist - currentDist); // Amount to move along zoom vector
+
+          const mouseWorldPos = this._getLookAtPlaneIntersection(event.clientX, event.clientY);
+
+          if (mouseWorldPos) {
+               // Zoom direction is from current position towards the intersection point
+              const zoomDir = mouseWorldPos.clone().sub(this.targetPosition).normalize();
+              this.targetPosition.addScaledVector(zoomDir, zoomFactor);
+              // Also move the lookAt point proportionally towards the intersection point
+              const lookAtZoomDir = mouseWorldPos.clone().sub(this.targetLookAt).normalize();
+              // Scale lookAt movement by a smaller factor to keep focus relatively stable
+              this.targetLookAt.addScaledVector(lookAtZoomDir, zoomFactor * 0.5);
+          } else {
+              // Fallback: Zoom along camera direction
+              const dir = new THREE.Vector3();
+              this.camera.getWorldDirection(dir);
+              this.targetPosition.addScaledVector(dir, zoomFactor);
+          }
+           // Update spherical radius based on new distance
+          this.targetSpherical.radius = this.targetPosition.distanceTo(this.targetLookAt);
+      }
+
+      moveTo(x, y, z, duration = 0.7, lookAtTarget = null) {
+          const targetPos = new THREE.Vector3(x, y, z);
+          const targetLook = lookAtTarget ? lookAtTarget.clone() : new THREE.Vector3(x, y, 0);
+
+          gsap.to(this.targetPosition, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: duration, ease: "power3.out", overwrite: true });
+          gsap.to(this.targetLookAt, { x: targetLook.x, y: targetLook.y, z: targetLook.z, duration: duration, ease: "power3.out", overwrite: true,
+              onUpdate: () => {
+                   // Update target spherical during programmatic move to avoid jump when user interacts
+                  this.targetSpherical.setFromVector3(this.targetPosition.clone().sub(this.targetLookAt));
+              },
+              onComplete: () => {
+                  this.targetSpherical.setFromVector3(this.targetPosition.clone().sub(this.targetLookAt));
+              }
+          });
+      }
+
+      update = () => {
+          const positionDelta = this.targetPosition.distanceTo(this.camera.position);
+          const lookAtDelta = this.targetLookAt.distanceTo(this.currentLookAt);
+          const sphericalDelta = this.targetSpherical.radius === this.spherical.radius && this.targetSpherical.phi === this.spherical.phi && this.targetSpherical.theta === this.spherical.theta;
+
+
+          // Smooth lookAt point
+          this.currentLookAt.lerp(this.targetLookAt, this.dampingFactor);
+
+          // Smooth spherical coordinates (rotation/zoom)
+          this.spherical.radius = lerp(this.spherical.radius, this.targetSpherical.radius, this.dampingFactor);
+          this.spherical.phi = lerp(this.spherical.phi, this.targetSpherical.phi, this.dampingFactor);
+          this.spherical.theta = lerp(this.spherical.theta, this.targetSpherical.theta, this.dampingFactor); // Consider shortest angle lerp for theta if needed
+
+          // Calculate new camera position from smoothed spherical coords relative to smoothed lookAt
+          const offset = new THREE.Vector3().setFromSpherical(this.spherical);
+          this.targetPosition.copy(this.currentLookAt).add(offset);
+
+          // Smooth final position towards calculated target
+          this.camera.position.lerp(this.targetPosition, this.dampingFactor);
+
+          // Always look at the smoothed lookAt point
+          this.camera.lookAt(this.currentLookAt);
+
+          // Update targetSpherical if camera moved programmatically or via panning (not rotation)
+           if (!this.isRotating && (positionDelta > 0.01 || lookAtDelta > 0.01)) {
+               this.targetSpherical.setFromVector3(this.camera.position.clone().sub(this.currentLookAt));
+           }
+
+
+          this.animationFrameId = requestAnimationFrame(this.update);
+      }
+
+      dispose() {
+          if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+          // Remove listeners? (Window listeners might be harder to clean up perfectly)
+      }
+
+      _getLookAtPlaneIntersection(screenX, screenY) {
+          const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(vec, this.camera);
+          const camDir = new THREE.Vector3();
+          this.camera.getWorldDirection(camDir);
+          // Use the current smoothed lookAt point for the plane
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir.negate(), this.currentLookAt);
+          const intersectPoint = new THREE.Vector3();
+          return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
+      }
+  }
+
+  class ForceLayout {
+      nodes = [];
+      edges = [];
+      velocities = new Map();
+      fixedNodes = new Set();
+      tempAttractions = [];
+      isRunning = false;
+      animationFrameId = null;
+      energy = Infinity;
+
+      settings = {
+          repulsion: 8000, attraction: 0.03, idealEdgeLength: 200,
+          centerStrength: 0.001, damping: 0.9, minEnergyThreshold: 0.01, // Lower threshold
+          gravityCenter: new THREE.Vector3(0, 0, 0), zSpreadFactor: 0.1,
+          edgeLengthTightFactor: 0.6, // Multiplier for 'tight' edges
+          edgeAttractionTightFactor: 1.8, // Multiplier for 'tight' edges
+          maxStepsPerFrame: 5, // Limit calculations per frame
+          autoStopDelay: 4000 // ms of low energy before stopping continuous run
+      };
+      lowEnergyTimer = null;
+
+      constructor(mindMap) { this.mindMap = mindMap; }
+
+      addNode(node) { if (!this.velocities.has(node.id)) { this.nodes.push(node); this.velocities.set(node.id, new THREE.Vector3()); } }
+      removeNode(node) { this.nodes = this.nodes.filter(n => n !== node); this.velocities.delete(node.id); this.fixedNodes.delete(node); this.tempAttractions = this.tempAttractions.filter(a => a.nodeA !== node && a.nodeB !== node); }
+      addEdge(edge) { if (!this.edges.includes(edge)) this.edges.push(edge); }
+      removeEdge(edge) { this.edges = this.edges.filter(e => e !== edge); }
+      fixNode(node) { this.fixedNodes.add(node); this.velocities.get(node.id)?.set(0, 0, 0); }
+      releaseNode(node) { this.fixedNodes.delete(node); }
+      addTemporaryAttraction(nodeA, nodeB, strength, duration = 60) { this.tempAttractions.push({ nodeA, nodeB, strength, duration }); }
+
+      run(steps = 100) {
+          this.isRunning = true;
+          for (let i = 0; i < steps; i++) {
+              if (this._calculateStep() < this.settings.minEnergyThreshold) break;
+          }
+          this.isRunning = false;
+          this.energy = this._calculateTotalEnergy(); // Update final energy
+      }
+
+      startContinuous() {
+          if (this.animationFrameId) return;
+          this.isRunning = true;
+          this.energy = Infinity; // Reset energy to ensure it runs initially
+          clearTimeout(this.lowEnergyTimer);
+          const loop = () => {
+              if (!this.isRunning) return;
+              let steps = 0;
+              let currentEnergy = Infinity;
+              while(steps < this.settings.maxStepsPerFrame && currentEnergy > this.settings.minEnergyThreshold) {
+                  currentEnergy = this._calculateStep();
+                  steps++;
+              }
+              this.energy = currentEnergy;
+
+              if (this.energy < this.settings.minEnergyThreshold) {
+                  if (!this.lowEnergyTimer) {
+                      this.lowEnergyTimer = setTimeout(() => {
+                          this.stopContinuous();
+                          console.log("Layout settled, stopping continuous updates.");
+                      }, this.settings.autoStopDelay);
+                  }
+              } else {
+                   clearTimeout(this.lowEnergyTimer);
+                   this.lowEnergyTimer = null;
+              }
+
+              this.animationFrameId = requestAnimationFrame(loop);
+          };
+          this.animationFrameId = requestAnimationFrame(loop);
+      }
+
+      stopContinuous() {
+          this.isRunning = false;
+          clearTimeout(this.lowEnergyTimer);
+          this.lowEnergyTimer = null;
+          if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+          this.animationFrameId = null;
+      }
+
+      kick(intensity = 1) {
+          this.nodes.forEach(node => {
+              if (!this.fixedNodes.has(node)) {
+                  this.velocities.get(node.id)?.add(
+                      new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * this.settings.zSpreadFactor)
+                          .multiplyScalar(intensity * 5)
+                  );
+              }
+          });
+          if (!this.isRunning) this.startContinuous();
+          else { // Reset timer if already running but kicked
+              clearTimeout(this.lowEnergyTimer);
+              this.lowEnergyTimer = null;
+              this.energy = Infinity; // Ensure it keeps running
+          }
+      }
+
+       _calculateTotalEnergy() {
+          let totalEnergy = 0;
+          this.nodes.forEach(node => {
+              if (!this.fixedNodes.has(node)) {
+                  totalEnergy += this.velocities.get(node.id)?.lengthSq() ?? 0;
+              }
+          });
+          return totalEnergy;
+      }
+
+      _calculateStep() {
+          if (this.nodes.length < 2) return 0;
+          const forces = new Map(this.nodes.map(node => [node.id, new THREE.Vector3()]));
+          const { repulsion, attraction, idealEdgeLength, centerStrength, gravityCenter, zSpreadFactor, edgeLengthTightFactor, edgeAttractionTightFactor } = this.settings;
+
+          for (let i = 0; i < this.nodes.length; i++) {
+              const nodeA = this.nodes[i];
+              for (let j = i + 1; j < this.nodes.length; j++) {
+                  const nodeB = this.nodes[j];
+                  const delta = nodeB.position.clone().sub(nodeA.position);
+                  let distSq = delta.lengthSq();
+                  if (distSq < 1e-3) { distSq = 1e-3; delta.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize().multiplyScalar(0.1); }
+                  const dist = Math.sqrt(distSq);
+                  const nodeSizeFactor = (nodeA.size.width + nodeA.size.height + nodeB.size.width + nodeB.size.height) * 0.25;
+                  const minSafeDist = nodeSizeFactor * 1.1;
+                  const effectiveRepulsion = repulsion * Math.max(0.5, nodeSizeFactor / 100); // Scale repulsion, min 0.5x
+
+                  const forceMag = -effectiveRepulsion / Math.max(distSq, minSafeDist * minSafeDist * 0.5);
+                  const forceVec = delta.normalize().multiplyScalar(forceMag);
+                  forceVec.z *= zSpreadFactor;
+
+                  forces.get(nodeA.id).add(forceVec);
+                  forces.get(nodeB.id).sub(forceVec);
+              }
+          }
+
+          this.edges.forEach(edge => {
+              const { source, target, behavior } = edge;
+              const isTight = behavior === 'tight';
+              const currentIdealLength = idealEdgeLength * (isTight ? edgeLengthTightFactor : 1);
+              const currentAttraction = attraction * (isTight ? edgeAttractionTightFactor : 1);
+
+              const delta = target.position.clone().sub(source.position);
+              const dist = delta.length();
+              if (dist < 0.1) return;
+              const displacement = dist - currentIdealLength;
+              const forceMag = currentAttraction * displacement;
+              const forceVec = delta.normalize().multiplyScalar(forceMag);
+              forceVec.z *= zSpreadFactor;
+
+              if (!this.fixedNodes.has(source)) forces.get(source.id).add(forceVec);
+              if (!this.fixedNodes.has(target)) forces.get(target.id).sub(forceVec);
+          });
+
+          this.tempAttractions = this.tempAttractions.filter(attr => {
+              const delta = attr.nodeB.position.clone().sub(attr.nodeA.position);
+              const forceVec = delta.multiplyScalar(attr.strength);
+              forceVec.z *= zSpreadFactor;
+              if (!this.fixedNodes.has(attr.nodeA)) forces.get(attr.nodeA.id).add(forceVec);
+              if (!this.fixedNodes.has(attr.nodeB)) forces.get(attr.nodeB.id).sub(forceVec);
+              attr.duration--;
+              return attr.duration > 0;
+          });
+
+          if (centerStrength > 0) {
+              this.nodes.forEach(node => {
+                  if (this.fixedNodes.has(node)) return;
+                  const forceVec = gravityCenter.clone().sub(node.position).multiplyScalar(centerStrength);
+                  forceVec.z *= zSpreadFactor * 0.5;
+                  forces.get(node.id).add(forceVec);
+              });
+          }
+
+          let totalEnergy = 0;
+          this.nodes.forEach(node => {
+              if (this.fixedNodes.has(node)) return;
+              const force = forces.get(node.id);
+              const velocity = this.velocities.get(node.id);
+              velocity.add(force).multiplyScalar(this.settings.damping);
+              // Limit velocity to prevent explosion
+              if (velocity.lengthSq() > 100*100) velocity.normalize().multiplyScalar(100);
+              node.position.add(velocity);
+              totalEnergy += velocity.lengthSq();
+          });
+
+          return totalEnergy;
+      }
+  }
+
+  function initializeNeuroWeaver() {
+      const container = $('#mindmap-container');
+      const statusIndicator = $('#status-indicator');
+      if (!container) throw new Error("Mind map container not found!");
+
+      const mindMap = new MindMap(container);
+      const uiManager = new UIManager(mindMap);
+      const cameraController = new CameraController(mindMap.camera, mindMap.container, mindMap);
+      const forceLayout = new ForceLayout(mindMap);
+
+      mindMap.uiManager = uiManager;
+      mindMap.cameraController = cameraController;
+      mindMap.layoutEngine = forceLayout;
+
+      loadExampleMindMap(mindMap);
+
+      forceLayout.run(200);
+      mindMap.centerView(null, 0);
+      forceLayout.startContinuous();
+
+      function animate() {
+          // Layout steps handled by ForceLayout's continuous loop
+          mindMap.update(); // Updates node/edge positions/styles and UI menu positions
+          // Camera updates handled by CameraController's internal loop
+          mindMap.render();
+          requestAnimationFrame(animate);
+      }
+
+      animate();
+
+      statusIndicator.textContent = 'NeuroWeaver Ready ✨';
+      setTimeout(() => statusIndicator.classList.add('hidden'), 1500);
+  }
+
+  function loadExampleMindMap(mindMap) {
+      const n1 = mindMap.addNode(new NoteNode({ x: 0, y: 0, z: 0 }, { content: "<h1>🚀 NeuroWeaver 🧠</h1><p>Enhanced 3D Mind Mapping</p>✨" }));
+      n1.setSize(300, 110);
+
+      const n2 = mindMap.addNode(new NoteNode({ x: 300, y: 100, z: 20 }, { content: "<h2>New Features ✨</h2><ul><li>Edge Highlighting & Menu</li><li>Node Quick Controls (Zoom/Scale)</li><li>Camera Rotation Button</li><li>Colorful Nodes</li><li>Interactive HTML Below 👇</li></ul>" }));
+      n2.setSize(240, 220);
+
+      const n3 = mindMap.addNode(new NoteNode({ x: -250, y: 150, z: -10 }, { content: "<h2>Technology 💻</h2><p><code>Three.js</code> (WebGL + CSS3D)</p><p><code>GSAP</code> (Animation)</p><p>Modern <code>HTML</code>, <code>CSS</code>, <code>JS</code></p>" }));
+      n3.setSize(240, 140);
+
+      const n4 = mindMap.addNode(new NoteNode({ x: 0, y: -250, z: 0 }, { content: "<h2>Interactions 🖱️</h2><p><b>Left Click:</b> Select Node/Edge</p><p><b>Left Drag:</b> Pan / Move Node</p><p><b>Right Click:</b> Context Menu</p><p><b>Wheel:</b> Zoom</p><p><b>Ctrl+Wheel (Node):</b> Text Zoom</p><p><b>Rotate Btn:</b> Hold & Drag</p>" }));
+      n4.setSize(230, 190);
+
+      const n5 = mindMap.addNode(new NoteNode({ x: 350, y: -150, z: -30 }, { content: "<h2>Interactive HTML Demo</h2><p>Try clicking the button!</p><button onclick=\"alert('Button inside node clicked! 👋')\">Click Me!</button><p>Input: <input type='text' placeholder='Type here...' style='width: 90%'></p>" }));
+      n5.setSize(220, 160);
+
+      mindMap.addEdge(n1, n2);
+      mindMap.addEdge(n1, n3);
+      mindMap.addEdge(n1, n4);
+      mindMap.addEdge(n2, n5);
+      const edgeN4N5 = mindMap.addEdge(n4, n5);
+      if(edgeN4N5) edgeN4N5.setBehavior('tight'); // Make one edge tight example
+      const edgeN3N2 = mindMap.addEdge(n3, n2);
+      if(edgeN3N2) {
+           edgeN3N2.setColor('#ff88cc');
+           edgeN3N2.setStyle('dashed');
+           edgeN3N2.setThickness(2.5);
+      }
+  }
+
+  try {
+      console.log("🧠 NeuroWeaver Initializing...");
+      initializeNeuroWeaver();
+  } catch (error) {
+      console.error("NeuroWeaver Initialization Failed:", error);
+      const status = $('#status-indicator');
+      status.textContent = `Error: ${error.message}`;
+      status.style.backgroundColor = 'var(--delete-color)';
+      status.style.transition = 'none';
+      status.classList.remove('hidden');
+  }
+
+</script>
+</body>
+</html>
