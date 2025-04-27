@@ -199,6 +199,7 @@ public class CogNote extends Cog {
         tools.register(new GenerateQuestionsTool(this));
         tools.register(new TextToKifTool(this));
         tools.register(new DecomposeGoalTool(this));
+        tools.register(new EnhanceTool(this)); // Register the new EnhanceTool
     }
 
 

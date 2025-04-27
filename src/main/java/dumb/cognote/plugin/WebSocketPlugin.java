@@ -446,8 +446,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
             var query = new Query(queryId, queryType, pattern, targetKbId, paramMap);
 
+            // Emit the query event for the ReasonerManager to handle asynchronously
             cog.events.emit(new Query.QueryEvent(query));
 
+            // Send an immediate success response indicating the query was submitted
             sendSuccessResponse(conn, commandId, new JSONObject().put("queryId", queryId), "Query submitted.");
 
         } catch (IllegalArgumentException e) {
