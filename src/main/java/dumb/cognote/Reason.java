@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import dumb.cognote.Cog.QueryStatus;
+import dumb.cognote.Cog.QueryType;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -102,7 +104,7 @@ public class Reason {
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .thenApplyAsync(v -> {
                         List<Map<Term.Var, Term>> allBindings = new ArrayList<>();
-                        var overallStatus = Cog.QueryStatus.FAILURE;
+                        var overallStatus = QueryStatus.FAILURE;
                         Explanation combinedExplanation = null;
 
                         for (var future : futures) {
@@ -111,29 +113,29 @@ public class Reason {
                                 var e = result.explanation();
                                 var s = result.status();
 
-                                if (s == Cog.QueryStatus.SUCCESS) {
-                                    if (query.type() == Cog.QueryType.ASK_BINDINGS || query.type() == Cog.QueryType.ASK_TRUE_FALSE) {
+                                if (s == QueryStatus.SUCCESS) {
+                                    if (query.type() == QueryType.ASK_BINDINGS || query.type() == QueryType.ASK_TRUE_FALSE) {
                                         allBindings.addAll(result.bindings());
                                     }
-                                    overallStatus = Cog.QueryStatus.SUCCESS;
+                                    overallStatus = QueryStatus.SUCCESS;
                                     if (e != null) combinedExplanation = e;
-                                    if (query.type() == Cog.QueryType.ACHIEVE_GOAL) break;
+                                    if (query.type() == QueryType.ACHIEVE_GOAL) break;
 
-                                } else if (s != Cog.QueryStatus.FAILURE && overallStatus == Cog.QueryStatus.FAILURE) {
+                                } else if (s != QueryStatus.FAILURE && overallStatus == QueryStatus.FAILURE) {
                                     overallStatus = s;
                                     if (e != null) combinedExplanation = e;
                                 }
                             } catch (CompletionException | CancellationException e) {
                                 error("Query execution error for " + query.id() + ": " + e.getMessage());
-                                if (overallStatus != Cog.QueryStatus.ERROR) {
-                                    overallStatus = Cog.QueryStatus.ERROR;
+                                if (overallStatus != QueryStatus.ERROR) {
+                                    overallStatus = QueryStatus.ERROR;
                                     combinedExplanation = new Explanation(e.getMessage());
                                 }
                             }
                         }
 
-                        if (query.type() == Cog.QueryType.ASK_TRUE_FALSE) {
-                            overallStatus = allBindings.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
+                        if (query.type() == QueryType.ASK_TRUE_FALSE) {
+                            overallStatus = allBindings.isEmpty() ? QueryStatus.FAILURE : QueryStatus.SUCCESS;
                         }
 
 
@@ -207,12 +209,12 @@ public class Reason {
         }
 
         @Override
-        public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
+        public CompletableFuture<Answer> executeQuery(Query query) {
             return CompletableFuture.completedFuture(Answer.failure(query.id()));
         }
 
         @Override
-        public Set<Cog.QueryType> getSupportedQueryTypes() {
+        public Set<QueryType> getSupportedQueryTypes() {
             return Set.of();
         }
     }
@@ -601,12 +603,12 @@ public class Reason {
         }
 
         @Override
-        public Set<Cog.QueryType> getSupportedQueryTypes() {
-            return Set.of(Cog.QueryType.ASK_BINDINGS, Cog.QueryType.ASK_TRUE_FALSE, Cog.QueryType.ACHIEVE_GOAL);
+        public Set<QueryType> getSupportedQueryTypes() {
+            return Set.of(QueryType.ASK_BINDINGS, QueryType.ASK_TRUE_FALSE, QueryType.ACHIEVE_GOAL);
         }
 
         @Override
-        public CompletableFuture<Cog.Answer> executeQuery(Cog.Query query) {
+        public CompletableFuture<Answer> executeQuery(Query query) {
             if (isActiveContext(query.targetKbId())) {
                 return CompletableFuture.supplyAsync(() -> {
                     var results = new ArrayList<Map<Term.Var, Term>>();
@@ -614,7 +616,7 @@ public class Reason {
                     try {
                         prove(query.pattern(), query.targetKbId(), Map.of(), maxDepth, new HashSet<>()).forEach(results::add);
 
-                        var status = results.isEmpty() ? Cog.QueryStatus.FAILURE : Cog.QueryStatus.SUCCESS;
+                        var status = results.isEmpty() ? QueryStatus.FAILURE : QueryStatus.SUCCESS;
 
                         return new Answer(query.id(), status, results, null);
 

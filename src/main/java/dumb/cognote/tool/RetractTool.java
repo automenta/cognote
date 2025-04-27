@@ -1,6 +1,5 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
 import dumb.cognote.Tool;
@@ -28,7 +27,7 @@ public class RetractTool implements Tool {
         return "Retracts an assertion from the knowledge base by its ID.";
     }
 
-    @Tool("Retracts an assertion from the knowledge base by its ID.")
+    @dev.langchain4j.agent.tool.Tool("Retracts an assertion from the knowledge base by its ID.")
     public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("assertion_id") String assertionId) {
         return CompletableFuture.supplyAsync(() -> {
             if (assertionId == null || assertionId.isBlank()) {

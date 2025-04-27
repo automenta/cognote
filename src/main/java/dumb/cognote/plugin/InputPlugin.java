@@ -1,15 +1,14 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Assertion;
-import dumb.cognote.Cog;
-import dumb.cognote.Logic;
-import dumb.cognote.Term;
+import dumb.cognote.*;
 
 import java.util.List;
 import java.util.Set;
 
+import static dumb.cognote.Cog.DEFAULT_RULE_PRIORITY;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static java.rmi.server.LogStream.log;
 
 public class InputPlugin extends Plugin.BasePlugin {
 
@@ -32,7 +31,7 @@ public class InputPlugin extends Plugin.BasePlugin {
                 // Attempt to parse as a rule first
                 if (termList.op().filter(op -> op.equals(Logic.KIF_OP_IMPLIES) || op.equals(Logic.KIF_OP_EQUIV)).isPresent()) {
                     try {
-                        var rule = Logic.Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE), termList, Logic.DEFAULT_RULE_PRIORITY, noteId);
+                        var rule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE), termList, DEFAULT_RULE_PRIORITY, noteId);
                         if (context.addRule(rule)) {
                             message("InputPlugin: Added rule from " + sourceId + ": " + rule.form().toKif());
                             return; // Processed as a rule

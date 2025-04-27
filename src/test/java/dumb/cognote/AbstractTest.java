@@ -792,7 +792,7 @@ abstract class AbstractTest {
         try {
             var kb = context.kb(testKbId);
 
-            Cog.Answer answer = null;
+            Answer answer = null;
             var requiresAnswer = switch (expected.type) {
                 case "expectedResult", "expectedBindings" -> true;
                 default -> false;
@@ -800,7 +800,7 @@ abstract class AbstractTest {
 
             // If the expectation requires checking the action result (like query results or tool output)
             if (requiresAnswer) {
-                if (!(actionResult instanceof Cog.Answer queryAnswer)) {
+                if (!(actionResult instanceof Answer queryAnswer)) {
                     // This is an expectation failure, not a test setup error
                     fail("Expectation '" + expected.type + "' failed: Requires action result to be a query answer, but got: " + (actionResult == null ? "null" : actionResult.getClass().getSimpleName()) + " (Actual: " + termValueToString(actionResult) + ")");
                     return; // fail() throws, but return for clarity
@@ -836,7 +836,7 @@ abstract class AbstractTest {
 
     // --- Expectation Check Implementations (Adapted from TestPlugin, return Optional<String>) ---
 
-    private Optional<String> checkExpectedResult(TestExpected expected, Cog.Answer answer) {
+    private Optional<String> checkExpectedResult(TestExpected expected, Answer answer) {
         if (!(expected.value instanceof Boolean expectedBoolean)) {
             return Optional.of("Internal error - expected value is not a Boolean. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
         }
@@ -847,7 +847,7 @@ abstract class AbstractTest {
         return Optional.empty();
     }
 
-    private Optional<String> checkExpectedBindings(TestExpected expected, Cog.Answer answer) {
+    private Optional<String> checkExpectedBindings(TestExpected expected, Answer answer) {
         // Expected value is now stored as List<Map<Term.Var, Term>> by parseExpectedBindings
         if (!(expected.value instanceof List<?> expectedBindingsList)) {
             return Optional.of("Internal error - expected value is not a List. Found: " + (expected.value == null ? "null" : expected.value.getClass().getSimpleName()));
@@ -1025,8 +1025,7 @@ abstract class AbstractTest {
                     case "action" -> action = parseActions(sectionContents);
                     case "expected" -> expected.addAll(parseExpectations(sectionContents));
                     case "teardown" -> teardown.addAll(parseActions(sectionContents));
-                    default ->
-                            fail("Unknown section type '" + sectionOp + "' in test '" + testName + "': " + sectionList.toKif());
+                    default -> fail("Unknown section type '" + sectionOp + "' in test '" + testName + "': " + sectionList.toKif());
                 }
             } catch (Exception e) {
                 fail("Unexpected error parsing section '" + sectionOp + "' in test '" + testName + "': " + e.getMessage() + " | Term: " + sectionList.toKif(), e);

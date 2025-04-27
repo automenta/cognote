@@ -1,8 +1,6 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Cog;
-import dumb.cognote.Events;
-import dumb.cognote.Logic;
+import dumb.cognote.*;
 
 public class StatusUpdaterPlugin extends Plugin.BasePlugin {
 

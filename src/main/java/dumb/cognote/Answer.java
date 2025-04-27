@@ -1,5 +1,6 @@
 package dumb.cognote;
 
+import dumb.cognote.Logic.Explanation;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONArray;
 import org.json.JSONObject;

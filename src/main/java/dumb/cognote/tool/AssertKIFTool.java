@@ -1,6 +1,5 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
 import dumb.cognote.Cog;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
@@ -30,7 +29,7 @@ public class AssertKIFTool implements Tool {
         return "Asserts one or more KIF expressions into the knowledge base. Use this to add new facts or rules.";
     }
 
-    @Tool("Asserts one or more KIF expressions into the knowledge base. Use this to add new facts or rules.")
+    @dev.langchain4j.agent.tool.Tool("Asserts one or more KIF expressions into the knowledge base. Use this to add new facts or rules.")
     public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("kif_string") String kifString, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
         return CompletableFuture.supplyAsync(() -> {
             try {

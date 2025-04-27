@@ -26,6 +26,7 @@ import java.util.stream.IntStream;
 import static dumb.cognote.Logic.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public class CogNote extends Cog {
@@ -133,8 +134,6 @@ public class CogNote extends Cog {
         }
     }
 
-
-    @Override
     public Optional<Note> note(String id) {
         return ofNullable(notes.get(id));
     }
@@ -249,8 +248,6 @@ public class CogNote extends Cog {
         });
     }
 
-
-    @Override
     public synchronized void clear() {
         message("Clearing all knowledge...");
         setPaused(true);
@@ -365,10 +362,6 @@ public class CogNote extends Cog {
         saveNotesToFile(getAllNotes());
     }
 
-    Logic.Cognition cogNoteContext() {
-        return context;
-    }
-
     public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
         public NoteStatusEvent {
             requireNonNull(note);
@@ -378,12 +371,12 @@ public class CogNote extends Cog {
 
         public JSONObject toJson() {
             return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "NoteStatusEvent")
-                    .put("eventData", new JSONObject()
-                            .put("note", note.toJson())
-                            .put("oldStatus", oldStatus.name())
-                            .put("newStatus", newStatus.name()));
+                .put("type", "event")
+                .put("eventType", "NoteStatusEvent")
+                .put("eventData", new JSONObject()
+                    .put("note", note.toJson())
+                    .put("oldStatus", oldStatus.name())
+                    .put("newStatus", newStatus.name()));
         }
     }
 }

@@ -4,6 +4,7 @@ import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -40,7 +41,7 @@ public class Events {
 
     public void emit(Cog.CogEvent event) {
         if (exe.isShutdown()) {
-            Log.warning("Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
+            //Log.warning("Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
             return;
         }
         exe.submit(() -> {
@@ -57,8 +58,9 @@ public class Events {
     private void handlePatternMatching(Term term, Cog.CogEvent event) {
         patternListeners.forEach((pattern, listeners) -> {
             if (term instanceof Term.Lst termList) {
-                Logic.Unifier.match(pattern, termList, Map.of()).ifPresent(bindings ->
-                        listeners.forEach(listener -> exeSafe(e -> listener.accept(e, bindings), event, "pattern")));
+                var bindings = Logic.Unifier.match(pattern, termList, Map.of());
+                if (bindings!=null)
+                    listeners.forEach(listener -> exeSafe(e -> listener.accept(e, bindings), event, "pattern"));
             }
         });
     }

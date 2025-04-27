@@ -20,7 +20,7 @@ public interface Plugin {
     interface ReasonerPlugin extends Plugin {
         void initialize(Reason.Reasoning context);
 
-        CompletableFuture<Cog.Answer> executeQuery(Cog.Query query);
+        CompletableFuture<Answer> executeQuery(Query query);
 
         Set<Cog.QueryType> getSupportedQueryTypes();
 

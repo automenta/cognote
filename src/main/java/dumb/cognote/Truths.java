@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 import static dumb.cognote.Cog.id;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public interface Truths {

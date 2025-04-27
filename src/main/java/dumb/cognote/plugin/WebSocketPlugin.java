@@ -4,10 +4,12 @@ import dumb.cognote.*;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
+import org.jetbrains.annotations.Nullable;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
+import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.ProtocolConstants.*;
@@ -98,7 +101,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         events.on(Cog.CogEvent.class, this::broadcastEvent);
 
         // Listen for UI Action assertions to broadcast them
-        context.events.on(Term.Lst.of(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
+        context.events.on(new Term.Lst(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
     }
 
     @Override
@@ -107,7 +110,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             try {
                 server.stop();
                 message("WebSocket server stopped.");
-            } catch (IOException | InterruptedException e) {
+            } catch (InterruptedException e) {
                 error("Error stopping WebSocket server: " + e.getMessage());
                 e.printStackTrace();
             }

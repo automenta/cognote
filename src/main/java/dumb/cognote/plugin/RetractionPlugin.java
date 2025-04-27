@@ -2,6 +2,7 @@ package dumb.cognote.plugin;
 
 import dumb.cognote.Cog;
 import dumb.cognote.Logic;
+import dumb.cognote.Plugin;
 import dumb.cognote.Term;
 
 import static dumb.cognote.Log.error;

@@ -51,7 +51,7 @@ public class Knowledge {
         return (int) truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).count();
     }
 
-    List<String> getAllAssertionIds() {
+    public List<String> getAllAssertionIds() {
         return truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).map(Assertion::id).toList();
     }
 
@@ -124,7 +124,7 @@ public class Knowledge {
         return paths.findUnifiableAssertions(queryTerm);
     }
 
-    Stream<Assertion> findInstancesOf(Term queryPattern) {
+    public Stream<Assertion> findInstancesOf(Term queryPattern) {
         return paths.findInstancesOf(queryPattern);
     }
 

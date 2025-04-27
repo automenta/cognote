@@ -1,6 +1,7 @@
 package dumb.cognote;
 
 import org.jetbrains.annotations.Nullable;
+import org.json.JSONObject;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -182,8 +183,7 @@ public class Logic {
 
     public record Explanation(String details) {
         public JSONObject toJson() {
-            return new JSONObject()
-                    .put("details", details);
+            return new JSONObject().put("details", details);
         }
     }
 

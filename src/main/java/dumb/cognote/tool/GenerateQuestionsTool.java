@@ -1,11 +1,11 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
+import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -36,7 +36,7 @@ public class GenerateQuestionsTool implements Tool {
         return "Generates a list of questions based on the content of a note. Returns a JSON array of question strings.";
     }
 
-    @Tool("Generates a list of questions based on the content of a note. Returns a JSON array of question strings.")
+    @dev.langchain4j.agent.tool.Tool("Generates a list of questions based on the content of a note. Returns a JSON array of question strings.")
     public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));

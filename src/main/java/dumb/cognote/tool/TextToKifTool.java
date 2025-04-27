@@ -1,13 +1,14 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
+import dumb.cognote.CogNote;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
+import dumb.cognote.Tool.ToolExecutionException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +36,7 @@ public class TextToKifTool implements Tool {
         return "Converts the content of a note into KIF expressions and asserts them into the note's knowledge base.";
     }
 
-    @Tool("Converts the content of a note into KIF expressions and asserts them into the note's knowledge base.")
+    @dev.langchain4j.agent.tool.Tool("Converts the content of a note into KIF expressions and asserts them into the note's knowledge base.")
     public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));

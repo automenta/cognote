@@ -1,6 +1,6 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
+
 import dumb.cognote.Log;
 import dumb.cognote.Tool;
 import org.json.JSONObject;
@@ -21,7 +21,7 @@ public class LogMessageTool implements Tool {
         return "Logs a message to the system console/log. Use this for internal thoughts or debugging.";
     }
 
-    @Tool("Logs a message to the system console/log. Use this for internal thoughts or debugging.")
+    @dev.langchain4j.agent.tool.Tool("Logs a message to the system console/log. Use this for internal thoughts or debugging.")
     public CompletableFuture<Void> execute(@dev.langchain4j.agent.tool.P("message") String message) {
         Log.message("LLM Tool Log: " + message);
         return CompletableFuture.completedFuture(null);

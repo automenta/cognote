@@ -1,6 +1,6 @@
 package dumb.cognote.tool;
 
-import dev.langchain4j.agent.tool.Tool;
+
 import dumb.cognote.Cog;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
@@ -31,7 +31,7 @@ public class FindAssertionsTool implements Tool {
         return "Finds assertions in the knowledge base that match a given KIF pattern. Returns a JSON array of matching assertion IDs.";
     }
 
-    @Tool("Finds assertions in the knowledge base that match a given KIF pattern. Returns a JSON array of matching assertion IDs.")
+    @dev.langchain4j.agent.tool.Tool("Finds assertions in the knowledge base that match a given KIF pattern. Returns a JSON array of matching assertion IDs.")
     public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("kif_pattern") String kifPattern, @dev.langchain4j.agent.tool.P("target_kb_id") String targetKbId) {
         return CompletableFuture.supplyAsync(() -> {
             try {

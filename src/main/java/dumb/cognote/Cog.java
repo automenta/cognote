@@ -1,9 +1,6 @@
 package dumb.cognote;
 
-import dumb.cognote.plugin.StatusUpdaterPlugin;
-import dumb.cognote.plugin.TaskDecomposePlugin;
-import dumb.cognote.plugin.TmsPlugin;
-import dumb.cognote.plugin.WebSocketPlugin;
+import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
@@ -21,6 +18,7 @@ import java.util.function.Consumer;
 import static dumb.cognote.Logic.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public class Cog {
@@ -40,7 +38,7 @@ public class Cog {
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
-    private static final double DEFAULT_RULE_PRIORITY = 1;
+    public static final double DEFAULT_RULE_PRIORITY = 1;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
     private static final int PORT = 8080;
@@ -48,10 +46,15 @@ public class Cog {
     public final Cognition context;
     public final LM lm;
     public final Tools tools;
-    public final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+//    public final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    public final ScheduledExecutorService mainExecutor =
+        Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory())
+    ;
+
     public final DialogueManager dialogueManager;
     final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
-    private final Plugins plugins;
+    final Plugins plugins;
     private final Reason.ReasonerManager reasonerManager;
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
