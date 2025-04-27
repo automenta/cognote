@@ -207,10 +207,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent) {
-                Answer a = ((Answer.AnswerEvent) e).result();
-                if (a.query().equals(queryID))
-                    answerFuture.complete(a);
+            if (e instanceof Answer.AnswerEvent answerEvent && answerEvent.result().query().equals(queryID)) {
+                answerFuture.complete(answerEvent.result());
             }
         };
         @SuppressWarnings("unchecked")

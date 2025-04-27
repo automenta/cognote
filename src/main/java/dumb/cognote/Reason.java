@@ -228,6 +228,17 @@ public class Reason {
         public Set<Cog.Feature> getSupportedFeatures() {
             return Set.of();
         }
+
+        protected record DerivedAssertionProperties(boolean isNeg, boolean isEq, boolean isOriented, AssertionType type) {}
+
+        protected DerivedAssertionProperties getDerivedAssertionProperties(Term.Lst derivedTerm) {
+            var o = derivedTerm.op();
+            var isNeg = o.filter(KIF_OP_NOT::equals).isPresent();
+            var isEq = !isNeg && o.filter(KIF_OP_EQUAL::equals).isPresent();
+            var isOriented = isEq && derivedTerm.size() == 3 && derivedTerm.get(1).weight() > derivedTerm.get(2).weight();
+            var type = derivedTerm.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
+            return new DerivedAssertionProperties(isNeg, isEq, isOriented, type);
+        }
     }
 
     static class ForwardChainingReasonerPlugin extends BaseReasonerPlugin {
@@ -363,11 +374,8 @@ public class Reason {
             if (depth > getDerivationDepthMax()) return;
 
             var skolemBody = Cognition.performSkolemization(body, vars, result.bindings());
-            var isNeg = skolemBody.op().filter(KIF_OP_NOT::equals).isPresent();
-            var isEq = !isNeg && skolemBody.op().filter(KIF_OP_EQUAL::equals).isPresent();
-            var isOriented = isEq && skolemBody.size() == 3 && skolemBody.get(1).weight() > skolemBody.get(2).weight();
-            var type = skolemBody.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-            var pa = new Assertion.PotentialAssertion(skolemBody, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
+            var props = getDerivedAssertionProperties(skolemBody);
+            var pa = new Assertion.PotentialAssertion(skolemBody, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), props.isEq(), props.isNeg(), props.isOriented(), targetNoteId, props.type(), List.of(), depth);
             tryCommit(pa, rule.id());
         }
 
@@ -377,15 +385,12 @@ public class Reason {
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
             if (depth > getDerivationDepthMax() || derived.weight() > MAX_DERIVED_TERM_WEIGHT) return;
 
-            var isNeg = derived.op().filter(KIF_OP_NOT::equals).isPresent();
-            if (isNeg && derived.size() != 2) {
+            var props = getDerivedAssertionProperties(derived);
+            if (props.isNeg() && derived.size() != 2) {
                 error("Rule " + rule.id() + " derived invalid 'not': " + derived.toKif());
                 return;
             }
-            var isEq = !isNeg && derived.op().filter(KIF_OP_EQUAL::equals).isPresent();
-            var isOriented = isEq && derived.size() == 3 && derived.get(1).weight() > derived.get(2).weight();
-            var type = derived.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-            var pa = new Assertion.PotentialAssertion(derived, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
+            var pa = new Assertion.PotentialAssertion(derived, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), props.isEq(), props.isNeg(), props.isOriented(), targetNoteId, props.type(), List.of(), depth);
             tryCommit(pa, rule.id());
         }
 
@@ -459,14 +464,9 @@ public class Reason {
                         if (l.weight() > MAX_DERIVED_TERM_WEIGHT)
                             return;
 
-                        var o = l.op();
-                        var isNeg = o.filter(KIF_OP_NOT::equals).isPresent();
-                        var isEq = !isNeg && o.filter(KIF_OP_EQUAL::equals).isPresent();
-                        var isOriented = isEq && l.size() == 3 && l.get(1).weight() > l.get(2).weight();
-                        var type = l.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
-
+                        var props = getDerivedAssertionProperties(l);
                         tryCommit(new Assertion.PotentialAssertion(l, pri, support, ruleID,
-                                        isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth),
+                                        props.isEq(), props.isNeg(), props.isOriented(), targetNoteId, props.type(), List.of(), depth),
                                 ruleID);
                     });
         }
@@ -538,12 +538,9 @@ public class Reason {
                             var depth = Math.max(groundA.derivationDepth(), uniA.derivationDepth()) + 1;
 
                             if (depth <= getDerivationDepthMax() && instList.weight() <= MAX_DERIVED_TERM_WEIGHT) {
-                                var isNeg = instList.op().filter(KIF_OP_NOT::equals).isPresent();
-                                var isEq = !isNeg && instList.op().filter(KIF_OP_EQUAL::equals).isPresent();
-                                var isOriented = isEq && instList.size() == 3 && instList.get(1).weight() > instList.get(2).weight();
-                                var type = instList.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
+                                var props = getDerivedAssertionProperties(instList);
                                 var targetNoteId = getCogNoteContext().commonSourceNodeId(support);
-                                var pa = new Assertion.PotentialAssertion(instList, pri, support, uniA.id(), isEq, isNeg, isOriented, targetNoteId, type, List.of(), depth);
+                                var pa = new Assertion.PotentialAssertion(instList, pri, support, uniA.id(), props.isEq(), props.isNeg(), props.isOriented(), targetNoteId, props.type(), List.of(), depth);
                                 tryCommit(pa, uniA.id());
                             }
                         }
@@ -634,8 +631,8 @@ public class Reason {
 
                                     if (opResult == null) return Stream.empty();
 
-                                    if (opResult instanceof Term.Atom) { // Fix: Use traditional instanceof
-                                        String value = ((Term.Atom) opResult).value(); // Fix: Cast and access value
+                                    if (opResult instanceof Term.Atom atomResult) {
+                                        String value = atomResult.value();
                                         if ("true".equals(value)) return Stream.of(bindings);
                                         if ("false".equals(value)) return Stream.empty();
                                     }
