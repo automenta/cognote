@@ -10,7 +10,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const generateId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const DEG2RAD = Math.PI / 180;
 
-class MindMap {
+class SpaceGraph {
     nodes = new Map();
     edges = new Map();
 
@@ -19,7 +19,7 @@ class MindMap {
 
     isLinking = false;
     linkSourceNode = null;
-    tempLinkLine = null;
+    tempEdgeLine = null;
 
     ui = null;
     camera = null;
@@ -68,7 +68,7 @@ class MindMap {
         if (this.nodes.has(n.id)) return this.nodes.get(n.id);
 
         this.nodes.set(n.id, n);
-        n.mindMap = this;
+        n.space = this;
         if (n.cssObject) this.cssScene.add(n.cssObject);
         this.layout?.addNode(n);
         // UIManager setup moved to initialization to ensure all elements exist
@@ -212,14 +212,14 @@ class MindMap {
         raycaster.setFromCamera(vec, this._cam);
         raycaster.params.Line.threshold = 5; // Increase threshold for line picking
 
-        const edgeObjects = [...this.edges.values()].map(e => e.threeObject).filter(Boolean);
+        const edgeObjects = [...this.edges.values()].map(e => e.geo).filter(Boolean);
         if (edgeObjects.length === 0) return null;
 
         const intersects = raycaster.intersectObjects(edgeObjects);
 
         if (intersects.length > 0) {
             const intersectedLine = intersects[0].object;
-            return [...this.edges.values()].find(edge => edge.threeObject === intersectedLine);
+            return [...this.edges.values()].find(edge => edge.geo === intersectedLine);
         }
         return null; // No edge intersected
     }
@@ -230,7 +230,7 @@ class MindMap {
             // Layout step handled by forceLayout.start() -> requestAnimationFrame
             this.update(); // Update node/edge visuals based on positions
 
-            // Camera update handled by cameraController.update() -> requestAnimationFrame
+            // Camera update handled by camera.update() -> requestAnimationFrame
             this.render();
 
             requestAnimationFrame(frame); // Keep main render loop separate
@@ -240,7 +240,7 @@ class MindMap {
 }
 
 class Node {
-    mindMap = null;
+    space = null;
     htmlElement = null;
     cssObject = null;
     position = new THREE.Vector3();
@@ -304,7 +304,7 @@ class Node {
             const scaleFactor = Math.sqrt((this.size.width * this.size.height) / (oldWidth * oldHeight));
             this.setContentScale(this.data.contentScale * scaleFactor);
         }
-        this.mindMap?.layoutEngine?.kick();
+        this.space?.layoutEngine?.kick();
     }
 
     setContentScale(scale) {
@@ -323,12 +323,12 @@ class Node {
         this.setSize(this.size.width * factor, this.size.height * factor, false); // Don't auto-scale content here
     }
 
-    update(mindMap) {
+    update(space) {
         if (this.cssObject) {
             this.cssObject.position.copy(this.position);
-            if (mindMap && this.billboard) {
+            if (space && this.billboard) {
                 //TODO 'Billboarding': Face camera slightly (can cause jittering if layout is active)
-                //this.cssObject?.rotation.copy(mindMap.camera.rotation);
+                //this.cssObject?.rotation.copy(space.camera.rotation);
             }
         }
     }
@@ -340,7 +340,7 @@ class Node {
 
     startDrag() {
         this.htmlElement?.classList.add('dragging');
-        this.mindMap?.layoutEngine?.fixNode(this);
+        this.space?.layoutEngine?.fixNode(this);
     }
 
     drag(newPosition) {
@@ -350,13 +350,13 @@ class Node {
 
     endDrag() {
         this.htmlElement?.classList.remove('dragging');
-        this.mindMap?.layoutEngine?.releaseNode(this);
-        this.mindMap?.layoutEngine?.kick();
+        this.space?.layoutEngine?.releaseNode(this);
+        this.space?.layoutEngine?.kick();
     }
 
     startResize() {
         this.htmlElement?.classList.add('resizing');
-        this.mindMap?.layoutEngine?.fixNode(this);
+        this.space?.layoutEngine?.fixNode(this);
     }
 
     resize(newWidth, newHeight) {
@@ -365,7 +365,7 @@ class Node {
 
     endResize() {
         this.htmlElement?.classList.remove('resizing');
-        this.mindMap?.layoutEngine?.releaseNode(this);
+        this.space?.layoutEngine?.releaseNode(this);
     }
 }
 
@@ -390,7 +390,9 @@ class NoteNode extends Node {
             });
             c.addEventListener('mousedown', e => e.stopPropagation());
             c.addEventListener('touchstart', e => e.stopPropagation(), {passive: true});
-            c.addEventListener('wheel', e => { if (c.scrollHeight > c.clientHeight) e.stopPropagation();  /* Allow scrolling inside content */ }, {passive: false});
+            c.addEventListener('wheel', e => {
+                if (c.scrollHeight > c.clientHeight) e.stopPropagation();  /* Allow scrolling inside content */
+            }, {passive: false});
         }
     }
 }
@@ -424,7 +426,7 @@ class Edge {
         return line;
     }
 
-    update(mindMap) {
+    update(space) {
         if (!this.geo || !this.source || !this.target) return;
         const positions = this.geo.geometry.attributes.position;
         positions.setXYZ(0, this.source.position.x, this.source.position.y, this.source.position.z);
@@ -439,7 +441,7 @@ class Edge {
         m.opacity = highlight ? 1.0 : 0.6;
         m.color.set(highlight ? 0x00ffff : this.data.color);
         // Consider Line2 for thickness change on highlight if needed
-        // this.threeObject.material.linewidth = highlight ? this.data.thickness * 1.5 : this.data.thickness;
+        // this.geo.material.linewidth = highlight ? this.data.thickness * 1.5 : this.data.thickness;
         m.needsUpdate = true;
     }
 
@@ -471,9 +473,11 @@ class UIManager {
 
     confirmCallback = null;
 
-    constructor(mindMap) {
-        this.mindMap = mindMap;
-        this.container = mindMap.container;
+    space = null;
+
+    constructor(space) {
+        this.space = space;
+        this.container = space.container;
         this.contextMenu = $('#context-menu');
         this.confirmDialog = $('#confirm-dialog');
         this._bindEvents();
@@ -490,9 +494,9 @@ class UIManager {
             // FIX: Check edgeMenu.element.contains
             if (this.edgeMenu && this.edgeMenu.element && !this.edgeMenu.element.contains(e.target)) {
                 // Also ensure the click wasn't on the edge itself which might re-trigger the menu
-                const edgeObj = this.mindMap.intersectedObject(e.clientX, e.clientY);
-                if (this.mindMap.selectedEdge !== edgeObj) {
-                    this.mindMap.setSelectedEdge(null); // This implicitly hides the menu via the setter
+                const edgeObj = this.space.intersectedObject(e.clientX, e.clientY);
+                if (this.space.selectedEdge !== edgeObj) {
+                    this.space.setSelectedEdge(null); // This implicitly hides the menu via the setter
                 }
             }
         }, true); // Use capture phase
@@ -500,8 +504,9 @@ class UIManager {
         $('#confirm-yes').addEventListener('click', this.onConfirmYes.bind(this));
         $('#confirm-no').addEventListener('click', this.onConfirmNo.bind(this));
         window.addEventListener('keydown', this.onKeyDown.bind(this));
-        //this.container.addEventListener('wheel', this.onNodeWheel.bind(this), { passive: false });
+        this.container.addEventListener('wheel', this.onWheel.bind(this), {passive: false});
     }
+
 
     targetInfo(event) {
         const e = document.elementFromPoint(event.clientX, event.clientY);
@@ -511,9 +516,9 @@ class UIManager {
         const contentEditable = e?.closest('.node-content[contenteditable="true"]');
         const interactiveElement = e?.closest('.node-content button, .node-content input, .node-content a');
 
-        const node = nodeElement ? this.mindMap.getNodeById(nodeElement.dataset.nodeId) : null;
+        const node = nodeElement ? this.space.getNodeById(nodeElement.dataset.nodeId) : null;
         // Check edge intersection only if not clicking on a node element or its controls
-        const intersectedEdge = (!nodeElement) ? this.mindMap.intersectedObject(event.clientX, event.clientY) : null;
+        const intersectedEdge = (!nodeElement) ? this.space.intersectedObject(event.clientX, event.clientY) : null;
 
         return {
             element: e,
@@ -556,7 +561,7 @@ class UIManager {
                 e.stopPropagation();
                 const b = e.target.closest('button');
                 let bClasses = b?.classList;
-                if (bClasses?.contains('node-delete')) this.showConfirm(`Delete node "${node.id.substring(0, 10)}..."?`, () => this.mindMap.removeNode(node.id));
+                if (bClasses?.contains('node-delete')) this.showConfirm(`Delete node "${node.id.substring(0, 10)}..."?`, () => this.space.removeNode(node.id));
                 else if (bClasses?.contains('node-content-zoom-in')) node.adjustContentScale(0.15);
                 else if (bClasses?.contains('node-content-zoom-out')) node.adjustContentScale(-0.15);
                 else if (bClasses?.contains('node-grow')) node.adjustNodeSize(1.25);
@@ -584,10 +589,10 @@ class UIManager {
                 // FIX: Check if node exists before calling startDrag
                 if (this.draggedNode) {
                     this.draggedNode.startDrag();
-                    const worldPos = this.mindMap.screen2world(e.clientX, e.clientY, this.draggedNode.position.z);
+                    const worldPos = this.space.screen2world(e.clientX, e.clientY, this.draggedNode.position.z);
                     this.dragOffset = worldPos ? worldPos.sub(this.draggedNode.position) : new THREE.Vector3();
                     this.container.style.cursor = 'grabbing';
-                    this.mindMap.setSelectedNode(node); // Select node on drag start
+                    this.space.setSelectedNode(node); // Select node on drag start
                 } else {
                     console.warn("Attempted to drag non-existent node for element:", nodeElement);
                     this.draggedNode = null; // Ensure it's null if node lookup failed
@@ -599,7 +604,7 @@ class UIManager {
         // If clicking interactive or editable, stop propagation so background doesn't pan
         if (nodeElement && (interactiveElement || contentEditable)) {
             e.stopPropagation(); // Prevent pan
-            this.mindMap.setSelectedNode(node); // Select node even when clicking inside
+            this.space.setSelectedNode(node); // Select node even when clicking inside
             this.hideContextMenu();
             return;
         }
@@ -607,7 +612,7 @@ class UIManager {
         // --- Handle Edge Selection ---
         if (intersectedEdge && !node) { // Prioritize nodes over edges if overlapping
             e.preventDefault();
-            this.mindMap.setSelectedEdge(intersectedEdge);
+            this.space.setSelectedEdge(intersectedEdge);
             this.hideContextMenu();
             return; // Don't pan if edge selected
         }
@@ -615,13 +620,13 @@ class UIManager {
         // --- Handle Background Interaction (Panning or Deselection) ---
         if (!nodeElement && !intersectedEdge) { // Clicked on background
             this.hideContextMenu();
-            if (this.mindMap.selectedNode || this.mindMap.selectedEdge) {
+            if (this.space.selectedNode || this.space.selectedEdge) {
                 // Deselect on background click
-                this.mindMap.setSelectedNode(null);
-                this.mindMap.setSelectedEdge(null);
+                this.space.setSelectedNode(null);
+                this.space.setSelectedEdge(null);
             } else {
-                // Allow CameraController to handle panning (it checks isMouseDown)
-                this.mindMap.cameraController?.startPan(e);
+                // Allow camera to handle panning (it checks isMouseDown)
+                this.space.camera?.startPan(e);
             }
         }
     }
@@ -644,35 +649,35 @@ class UIManager {
         // --- Handle Dragging ---
         if (this.draggedNode) {
             e.preventDefault();
-            const worldPos = this.mindMap.screen2world(e.clientX, e.clientY, this.draggedNode.position.z);
+            const worldPos = this.space.screen2world(e.clientX, e.clientY, this.draggedNode.position.z);
             if (worldPos) this.draggedNode.drag(worldPos.sub(this.dragOffset));
             return; // Prevent other move actions
         }
 
         // --- Handle Linking Line ---
-        if (this.mindMap.isLinking) {
+        if (this.space.isLinking) {
             e.preventDefault(); // Prevent panning while linking
             this._updateTempLinkLine(e.clientX, e.clientY);
             const {node} = this.targetInfo(e);
             $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
-            if (node && node !== this.mindMap.linkSourceNode) {
+            if (node && node !== this.space.linkSourceNode) {
                 node.htmlElement?.classList.add('linking-target');
             }
             return;
         }
 
-        // --- Handle Panning (delegated to CameraController) ---
-        this.mindMap.cameraController?.pan(e);
+        // --- Handle Panning (delegated to Camera) ---
+        this.space.camera?.pan(e);
 
         // --- Handle Edge Highlighting on Hover (if nothing else is active) ---
-        if (!this.isMouseDown && !this.resizedNode && !this.draggedNode && !this.mindMap.isLinking) {
+        if (!this.isMouseDown && !this.resizedNode && !this.draggedNode && !this.space.isLinking) {
             const {intersectedEdge} = this.targetInfo(e);
             if (this.hoveredEdge !== intersectedEdge) {
-                if (this.hoveredEdge && this.hoveredEdge !== this.mindMap.selectedEdge) {
+                if (this.hoveredEdge && this.hoveredEdge !== this.space.selectedEdge) {
                     this.hoveredEdge.setHighlight(false);
                 }
                 this.hoveredEdge = intersectedEdge;
-                if (this.hoveredEdge && this.hoveredEdge !== this.mindMap.selectedEdge) {
+                if (this.hoveredEdge && this.hoveredEdge !== this.space.selectedEdge) {
                     this.hoveredEdge.setHighlight(true);
                 }
             }
@@ -680,7 +685,7 @@ class UIManager {
     }
 
     onPointerUp(e) {
-        this.container.style.cursor = this.mindMap.isLinking ? 'crosshair' : 'grab';
+        this.container.style.cursor = this.space.isLinking ? 'crosshair' : 'grab';
 
         if (this.resizedNode) {
             this.resizedNode.endResize();
@@ -688,12 +693,12 @@ class UIManager {
         } else if (this.draggedNode) {
             this.draggedNode.endDrag();
             this.draggedNode = null;
-        } else if (this.mindMap.isLinking) {
+        } else if (this.space.isLinking) {
             this._endLinking(e);
         } else if (e.button === 1) { // Middle button
             const {node} = this.targetInfo(e);
             if (node) {
-                this.mindMap.autoZoom(node);
+                this.space.autoZoom(node);
                 e.preventDefault();
             }
         } else if (e.button === 2 && this.isRightMouseDown && this.potentialClick) { // Right-click finish
@@ -713,14 +718,14 @@ class UIManager {
                     // Simple click on node (already selected in pointerdown)
                 } else if (intersectedEdge && !node) {
                     // Simple click on edge (already selected in pointerdown)
-                } else if (!node && !intersectedEdge && !this.mindMap.cameraController?.isPanning) {
+                } else if (!node && !intersectedEdge && !this.space.camera?.isPanning) {
                     // Background click - deselect handled by document click listener
                 }
             }
         }
 
         // End panning
-        this.mindMap.cameraController?.endPan();
+        this.space.camera?.endPan();
 
         this.isMouseDown = false;
         this.isRightMouseDown = false;
@@ -733,9 +738,9 @@ class UIManager {
         this.hideContextMenu(); // Hide previous first
         const {node, intersectedEdge} = this.targetInfo(e);
 
-        let items = [];
+        let items;
         if (node) {
-            if (this.mindMap.selectedNode !== node) this.mindMap.setSelectedNode(node); // Select node on right click if not already selected
+            if (this.space.selectedNode !== node) this.space.setSelectedNode(node); // Select node on right click if not already selected
             items = [
                 {
                     label: "Edit Content 📝",
@@ -749,7 +754,7 @@ class UIManager {
                 {label: "Delete Node 🗑️", action: "delete-node", nodeId: node.id},
             ];
         } else if (intersectedEdge) {
-            if (this.mindMap.selectedEdge !== intersectedEdge) this.mindMap.setSelectedEdge(intersectedEdge); // Select edge on right click
+            if (this.space.selectedEdge !== intersectedEdge) this.space.setSelectedEdge(intersectedEdge); // Select edge on right click
             items = [
                 {label: "Edit Edge Style...", action: "edit-edge", edgeId: intersectedEdge.id}, // Placeholder
                 {label: "Reverse Edge Direction", action: "reverse-edge", edgeId: intersectedEdge.id},
@@ -758,9 +763,9 @@ class UIManager {
             ];
         } else {
             // Deselect if right-clicking background
-            this.mindMap.setSelectedNode(null);
-            this.mindMap.setSelectedEdge(null);
-            const worldPos = this.mindMap.screen2world(e.clientX, e.clientY, 0);
+            this.space.setSelectedNode(null);
+            this.space.setSelectedEdge(null);
+            const worldPos = this.space.screen2world(e.clientX, e.clientY, 0);
             items = [
                 {
                     label: "Create Note Here ➕",
@@ -776,27 +781,28 @@ class UIManager {
     }
 
     showContextMenu(x, y, items) {
-        this.contextMenu.innerHTML = '';
+        const cm = this.contextMenu;
+        cm.innerHTML = '';
         const ul = document.createElement('ul');
-        items.forEach(item => {
-            if (item.type === 'separator') {
+        items.forEach(i => {
+            if (i.type === 'separator') {
                 const li = document.createElement('li');
                 li.className = 'separator';
                 ul.appendChild(li);
                 return;
             }
-            if (item.disabled) return;
+            if (i.disabled) return;
             const li = document.createElement('li');
-            li.textContent = item.label;
-            Object.entries(item).forEach(([key, value]) => {
+            li.textContent = i.label;
+            Object.entries(i).forEach(([key, value]) => {
                 if (value !== undefined && value !== null && key !== 'type' && key !== 'label') li.dataset[key] = value;
             });
             ul.appendChild(li);
         });
-        this.contextMenu.appendChild(ul);
+        cm.appendChild(ul);
 
-        const menuWidth = this.contextMenu.offsetWidth;
-        const menuHeight = this.contextMenu.offsetHeight;
+        const menuWidth = cm.offsetWidth;
+        const menuHeight = cm.offsetHeight;
         let finalX = x + 5;
         let finalY = y + 5;
         if (finalX + menuWidth > window.innerWidth) finalX = x - menuWidth - 5;
@@ -804,9 +810,10 @@ class UIManager {
         finalX = Math.max(5, finalX);
         finalY = Math.max(5, finalY);
 
-        this.contextMenu.style.left = `${finalX}px`;
-        this.contextMenu.style.top = `${finalY}px`;
-        this.contextMenu.style.display = 'block';
+        const cs = cm.style;
+        cs.left = `${finalX}px`;
+        cs.top = `${finalY}px`;
+        cs.display = 'block';
     }
 
     hideContextMenu = () => {
@@ -822,65 +829,63 @@ class UIManager {
 
         switch (action) {
             case 'edit-node': {
-                const node = this.mindMap.getNodeById(data.nodeId);
-                const contentDiv = node?.htmlElement?.querySelector('.node-content');
+                const contentDiv = this.space.getNodeById(data.nodeId)?.htmlElement?.querySelector('.node-content');
                 if (contentDiv?.contentEditable === "true") contentDiv.focus();
                 break;
             }
             case 'delete-node':
-                this.showConfirm(`Delete node "${data.nodeId.substring(0, 10)}..."?`, () => this.mindMap.removeNode(data.nodeId));
+                this.showConfirm(`Delete node "${data.nodeId.substring(0, 10)}..."?`, () => this.space.removeNode(data.nodeId));
                 break;
             case 'delete-edge':
-                this.showConfirm(`Delete edge "${data.edgeId.substring(0, 10)}..."?`, () => this.mindMap.removeEdge(data.edgeId));
+                this.showConfirm(`Delete edge "${data.edgeId.substring(0, 10)}..."?`, () => this.space.removeEdge(data.edgeId));
                 break;
             case 'autozoom-node': {
-                const node = this.mindMap.getNodeById(data.nodeId);
-                if (node) this.mindMap.autoZoom(node);
+                const node = this.space.getNodeById(data.nodeId);
+                if (node) this.space.autoZoom(node);
                 break;
             }
             case 'create-note': {
                 if (!data.position) break;
-                const pos = JSON.parse(data.position);
-                const newNode = this.mindMap.addNode(new NoteNode(null, pos, {content: 'New Note ✨'}));
-                this.mindMap.layoutEngine?.kick();
+                const newNode = this.space.addNode(new NoteNode(null, JSON.parse(data.position), {content: 'New Note ✨'}));
+                this.space.layoutEngine?.kick();
                 setTimeout(() => {
-                    this.mindMap.focusOnNode(newNode, 0.6, true); // Push history for new node focus
+                    this.space.focusOnNode(newNode, 0.6, true); // Push history for new node focus
                     newNode.htmlElement?.querySelector('.node-content')?.focus();
-                    this.mindMap.setSelectedNode(newNode); // Select the new node
+                    this.space.setSelectedNode(newNode); // Select the new node
                 }, 100);
                 break;
             }
             case 'center-view':
-                this.mindMap.centerView();
+                this.space.centerView();
                 break;
             case 'reset-view':
-                this.mindMap.cameraController?.resetView();
+                this.space.camera?.resetView();
                 break;
             case 'start-link': {
-                const sourceNode = this.mindMap.getNodeById(data.nodeId);
+                const sourceNode = this.space.getNodeById(data.nodeId);
                 if (sourceNode) {
-                    this.mindMap.isLinking = true;
-                    this.mindMap.linkSourceNode = sourceNode;
+                    this.space.isLinking = true;
+                    this.space.linkSourceNode = sourceNode;
                     this.container.style.cursor = 'crosshair';
                     this._startTempLinkLine(sourceNode);
                 }
                 break;
             }
             case 'reverse-edge': {
-                const edge = this.mindMap.getEdgeById(data.edgeId);
+                const edge = this.space.getEdgeById(data.edgeId);
                 if (edge) {
                     const oldSource = edge.source;
                     edge.source = edge.target;
                     edge.target = oldSource;
                     edge.update(); // Update visual immediately
-                    this.mindMap.layoutEngine?.kick(); // Nudge layout
+                    this.space.layoutEngine?.kick(); // Nudge layout
                 }
                 break;
             }
             case 'edit-edge':
                 console.warn("Edit Edge Style action not fully implemented.");
                 // Ensure menu is shown if not already (might be hidden by context menu closing)
-                this.showEdgeMenu(this.mindMap.getEdgeById(data.edgeId));
+                this.showEdgeMenu(this.space.getEdgeById(data.edgeId));
                 break;
         }
     }
@@ -916,61 +921,61 @@ class UIManager {
         });
         const points = [sourceNode.position.clone(), sourceNode.position.clone()];
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        this.mindMap.tempLinkLine = new THREE.Line(geometry, material);
-        this.mindMap.tempLinkLine.computeLineDistances();
-        this.mindMap.tempLinkLine.renderOrder = 1;
-        this.mindMap.scene.add(this.mindMap.tempLinkLine);
+        this.space.tempLinkLine = new THREE.Line(geometry, material);
+        this.space.tempLinkLine.computeLineDistances();
+        this.space.tempLinkLine.renderOrder = 1;
+        this.space.scene.add(this.space.tempLinkLine);
     }
 
     _updateTempLinkLine(screenX, screenY) {
-        if (!this.mindMap.tempLinkLine || !this.mindMap.linkSourceNode) return;
-        const targetPos = this.mindMap.screen2world(screenX, screenY, this.mindMap.linkSourceNode.position.z);
+        if (!this.space.tempLinkLine || !this.space.linkSourceNode) return;
+        const targetPos = this.space.screen2world(screenX, screenY, this.space.linkSourceNode.position.z);
         if (targetPos) {
-            const positions = this.mindMap.tempLinkLine.geometry.attributes.position;
+            const positions = this.space.tempLinkLine.geometry.attributes.position;
             positions.setXYZ(1, targetPos.x, targetPos.y, targetPos.z);
             positions.needsUpdate = true;
-            this.mindMap.tempLinkLine.geometry.computeBoundingSphere();
-            this.mindMap.tempLinkLine.computeLineDistances();
+            this.space.tempLinkLine.geometry.computeBoundingSphere();
+            this.space.tempLinkLine.computeLineDistances();
         }
     }
 
     _removeTempLinkLine() {
-        if (this.mindMap.tempLinkLine) {
-            this.mindMap.tempLinkLine.geometry?.dispose();
-            this.mindMap.tempLinkLine.material?.dispose();
-            this.mindMap.scene.remove(this.mindMap.tempLinkLine);
-            this.mindMap.tempLinkLine = null;
+        if (this.space.tempLinkLine) {
+            this.space.tempLinkLine.geometry?.dispose();
+            this.space.tempLinkLine.material?.dispose();
+            this.space.scene.remove(this.space.tempLinkLine);
+            this.space.tempLinkLine = null;
         }
     }
 
     _endLinking(event) {
         this._removeTempLinkLine();
         const {node: targetNode} = this.targetInfo(event);
-        if (targetNode && targetNode !== this.mindMap.linkSourceNode) {
-            this.mindMap.addEdge(this.mindMap.linkSourceNode, targetNode);
+        if (targetNode && targetNode !== this.space.linkSourceNode) {
+            this.space.addEdge(this.space.linkSourceNode, targetNode);
         }
         this.cancelLinking();
     }
 
     cancelLinking() {
         this._removeTempLinkLine();
-        this.mindMap.isLinking = false;
-        this.mindMap.linkSourceNode = null;
+        this.space.isLinking = false;
+        this.space.linkSourceNode = null;
         this.container.style.cursor = 'grab';
         $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
     }
 
     onKeyDown(event) {
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'DIV'].includes(document.activeElement.tagName) && document.activeElement.isContentEditable) {
-            if (event.key === 'Escape' && this.mindMap.isLinking) {
+            if (event.key === 'Escape' && this.space.isLinking) {
                 event.preventDefault();
                 this.cancelLinking();
             }
             return; // Don't process shortcuts if editing text
         }
 
-        const selectedNode = this.mindMap.selectedNode;
-        const selectedEdge = this.mindMap.selectedEdge;
+        const selectedNode = this.space.selectedNode;
+        const selectedEdge = this.space.selectedEdge;
 
         switch (event.key) {
             case 'Delete':
@@ -983,17 +988,17 @@ class UIManager {
                 break;
             case 'Escape':
                 event.preventDefault();
-                if (this.mindMap.isLinking) {
+                if (this.space.isLinking) {
                     this.cancelLinking();
                 } else if (this.contextMenu.style.display === 'block') {
                     this.hideContextMenu();
                 } else if (this.confirmDialog.style.display === 'block') {
                     this.hideConfirm();
                 } else if (this.edgeMenu) {
-                    this.mindMap.setSelectedEdge(null); // Deselect edge (hides menu)
+                    this.space.setSelectedEdge(null); // Deselect edge (hides menu)
                 } else if (selectedNode || selectedEdge) {
-                    this.mindMap.setSelectedNode(null);
-                    this.mindMap.setSelectedEdge(null);
+                    this.space.setSelectedNode(null);
+                    this.space.setSelectedEdge(null);
                 }
                 break;
             case 'Enter':
@@ -1025,17 +1030,17 @@ class UIManager {
             case ' ': // Spacebar - Recenter on selection or overall view
                 if (selectedNode) {
                     event.preventDefault();
-                    this.mindMap.focusOnNode(selectedNode, 0.5, true);
+                    this.space.focusOnNode(selectedNode, 0.5, true);
                 } else if (selectedEdge) {
                     event.preventDefault();
                     // Focus on midpoint of edge?
                     const midPoint = new THREE.Vector3().lerpVectors(selectedEdge.source.position, selectedEdge.target.position, 0.5);
                     const dist = selectedEdge.source.position.distanceTo(selectedEdge.target.position);
-                    this.mindMap.cameraController?.pushState();
-                    this.mindMap.cameraController?.moveTo(midPoint.x, midPoint.y, midPoint.z + dist * 0.6 + 100, 0.5, midPoint);
+                    this.space.camera?.pushState();
+                    this.space.camera?.moveTo(midPoint.x, midPoint.y, midPoint.z + dist * 0.6 + 100, 0.5, midPoint);
                 } else {
                     event.preventDefault();
-                    this.mindMap.centerView();
+                    this.space.centerView();
                 }
                 break;
         }
@@ -1043,21 +1048,31 @@ class UIManager {
 
     removeTry(selected, event) {
         event.preventDefault();
-        this.showConfirm(`Delete node "${selected.id.substring(0, 10)}..."?`, () => this.mindMap.removeNode(selected.id));
+        this.showConfirm(`Delete node "${selected.id.substring(0, 10)}..."?`, () => this.space.removeNode(selected.id));
     }
 
-    onNodeWheel(event) {
-        const {node, contentEditable} = this.targetInfo(event);
-        // Allow wheel scroll inside contentEditable OR if node controls are hovered
-        const controlsHovered = event.target.closest('.node-controls');
-        if (node && !contentEditable && !controlsHovered) {
+    onWheel(event) {
+        if (event.ctrlKey || event.metaKey) {
+            const {node, contentEditable} = this.targetInfo(event);
+            // Allow wheel scroll inside contentEditable OR if node controls are hovered
+            const controlsHovered = event.target.closest('.node-controls');
+            if (node && !contentEditable && !controlsHovered) {
+                event.preventDefault();
+                event.stopPropagation();
+                const delta = -event.deltaY * 0.001;
+                //this.adjustTextZoom(delta * 0.5); // Adjust sensitivity
+                node.adjustContentScale(delta);
+            }
+        } else {
+            //if (this._getPointerTargetType(event) !== 'background') return; // Don't zoom if over UI
             event.preventDefault();
-            event.stopPropagation();
-            const delta = -event.deltaY * 0.001; // Adjust sensitivity
-            node.adjustContentScale(delta);
+
+            const p = this.space.camera.targetPosition;
+            this.space.camera.moveTo(p.x, p.y, p.z + event.deltaY * this.space.camera.zoomSpeed);
         }
-        // Allow default wheel behavior (zoom/pan) if not over a node's main area
+
     }
+
 
     showEdgeMenu(edge) {
         if (!edge || this.edgeMenu) return; // Don't show if already visible or no edge
@@ -1081,7 +1096,7 @@ class UIManager {
 
             switch (action) {
                 case 'delete':
-                    this.showConfirm(`Delete edge "${edge.id.substring(0, 10)}..."?`, () => this.mindMap.removeEdge(edge.id));
+                    this.showConfirm(`Delete edge "${edge.id.substring(0, 10)}..."?`, () => this.space.removeEdge(edge.id));
                     // No need to hide menu here, removeEdge->setSelectedEdge(null) handles it
                     break;
                 default:
@@ -1090,7 +1105,7 @@ class UIManager {
         });
 
         this.edgeMenu = new CSS3DObject(menu);
-        this.mindMap.cssScene.add(this.edgeMenu);
+        this.space.cssScene.add(this.edgeMenu);
         this.updateEdgeMenuPosition(); // Initial position
     }
 
@@ -1103,12 +1118,12 @@ class UIManager {
     }
 
     updateEdgeMenuPosition() {
-        if (!this.edgeMenu || !this.mindMap.selectedEdge) return;
-        const edge = this.mindMap.selectedEdge;
+        if (!this.edgeMenu || !this.space.selectedEdge) return;
+        const edge = this.space.selectedEdge;
         const midPoint = new THREE.Vector3().lerpVectors(edge.source.position, edge.target.position, 0.5);
         this.edgeMenu.position.copy(midPoint);
         // Optional: Make menu face camera
-        // this.edgeMenu.rotation.copy(this.mindMap.camera.rotation);
+        // this.edgeMenu.rotation.copy(this.space.camera.rotation);
     }
 }
 
@@ -1118,7 +1133,7 @@ class Camera {
     targetPosition = new THREE.Vector3();
     targetLookAt = new THREE.Vector3();
     currentLookAt = new THREE.Vector3();
-    zoomSpeed = 0.0015;
+    zoomSpeed = 1;
     panSpeed = 0.8;
     minZoom = 20;
     maxZoom = 15000;
@@ -1129,9 +1144,9 @@ class Camera {
     currentTargetNodeId = null; // Track which node is targeted by autozoom
     initialState = null; // Store initial state after first positioning
 
-    constructor(mindMap) {
-        this.camera = mindMap._cam;
-        this.domElement = mindMap.container;
+    constructor(space) {
+        this.camera = space._cam;
+        this.domElement = space.container;
         // Initial state set after first centerView/focus
         this.targetPosition.copy(this.camera.position);
         this.targetLookAt.copy(new THREE.Vector3(0, 0, 0)); // Assume looking at origin initially
@@ -1339,6 +1354,7 @@ class ForceLayout {
     energy = Infinity;
     lastKickTime = 0;
     autoStopTimeout = null;
+    space = null;
 
     settings = {
         repulsion: 3000,
@@ -1352,8 +1368,8 @@ class ForceLayout {
         autoStopDelay: 4000 // Stop simulation after 4s of inactivity
     };
 
-    constructor(mindMap) {
-        this.mindMap = mindMap;
+    constructor(space) {
+        this.space = space;
     }
 
     addNode(node) {
@@ -1540,68 +1556,67 @@ class ForceLayout {
 
 // --- Initialization ---
 function init() {
-    const container = $('#mindmap-container');
+    const container = $('#space');
     if (!container) throw new Error("Mind map container not found!");
 
-    const m = new MindMap(container);
-    const layout = new ForceLayout(m);
-    m.layout = layout;
+    const s = new SpaceGraph(container);
+    const layout = new ForceLayout(s);
+    s.layout = layout;
 
-    m.ui = new UIManager(m); // Initialize UI Manager AFTER core components
-
+    s.ui = new UIManager(s); // Initialize UI Manager AFTER core components
 
 
     layout.runOnce(200); // Initial layout settling
     layout.start(); // Keep layout subtly active
 
-    exampleMindMap(m);
+    example(s);
 
-    m.animate();
+    s.animate();
 
-    window.mindMap = m; // Expose mindMap for debugging
+    window.space = s; // Expose space for debugging
 }
 
-function exampleMindMap(mindMap) {
+function example(space) {
     const colors = ['#2a2a50', '#2a402a', '#402a2a', '#40402a', '#2a4040', '#402a40'];
     let colorIndex = 0;
     const nextColor = () => colors[colorIndex++ % colors.length];
 
     // Core Node
-    const n1 = mindMap.addNode(new NoteNode(null, {x: 0, y: 0, z: 0}, {
-        content: "<h1>🚀 NeuroWeaver 🧠</h1><p>Enhanced Mind Map Demo</p>",
+    const n1 = space.addNode(new NoteNode(null, {x: 0, y: 0, z: 0}, {
+        content: "<h1>🚀 READY 🧠</h1><p>Mind Map</p>",
         width: 300, height: 110, backgroundColor: nextColor()
     }));
 
     // Features Branch
-    const n_features = mindMap.addNode(new NoteNode(null, {x: 350, y: 100, z: 20}, {
+    const n_features = space.addNode(new NoteNode(null, {x: 350, y: 100, z: 20}, {
         content: "<h2>Features ✨</h2><ul><li>Autozoom (RMB / Menu)</li><li>Node Quick Actions (Hover)</li><li>Edge Selection/Menu</li><li>Force Layout</li><li>Interactive Nodes</li></ul>",
         width: 240, height: 180, backgroundColor: nextColor()
     }));
-    mindMap.addEdge(n1, n_features);
+    space.addEdge(n1, n_features);
 
-    const n_autozoom = mindMap.addNode(new NoteNode(null, {x: 600, y: 150, z: 30}, {
-        content: "<h3>Autozoom Detail</h3><p>Right-click a node to zoom. Click again or use menu to go back. History stack enabled.</p>",
+    const n_autozoom = space.addNode(new NoteNode(null, {x: 600, y: 150, z: 30}, {
+        content: "<h3>Autozoom Detail</h3><p>Middle-click a node to autozoom. Click again or use menu to return. (History stack)</p>",
         width: 200, height: 120, backgroundColor: colors[1] // Reuse color
     }));
-    mindMap.addEdge(n_features, n_autozoom);
+    space.addEdge(n_features, n_autozoom);
 
     // Tech Branch
-    const n_tech = mindMap.addNode(new NoteNode(null, {x: -350, y: 100, z: -10}, {
+    const n_tech = space.addNode(new NoteNode(null, {x: -350, y: 100, z: -10}, {
         content: "<h2>Technology 💻</h2><p><code>HTML</code> <code>CSS</code> <code>JS (ESM)</code></p><p><b>Three.js</b> + <b>CSS3DRenderer</b></p><p><b>GSAP</b> for animation</p>",
         width: 250, height: 140, backgroundColor: nextColor()
     }));
-    mindMap.addEdge(n1, n_tech);
+    space.addEdge(n1, n_tech);
 
     // Style Branch
-    const n_style = mindMap.addNode(new NoteNode(null, {x: 0, y: -250, z: 0}, {
+    const n_style = space.addNode(new NoteNode(null, {x: 0, y: -250, z: 0}, {
         content: "<h2>Style 🎨</h2><p>✨ Minimal Dark Mode</p><p>🎨 Varied Node Colors</p><p>🕸️ Subtle Dot Grid</p><p>🔧 Simple CSS Vars</p>",
         width: 220, height: 140, backgroundColor: nextColor()
     }));
-    mindMap.addEdge(n1, n_style);
+    space.addEdge(n1, n_style);
 
     // Interactive Node Example
     const interactiveNodeId = generateId('interactive');
-    const n_interactive = mindMap.addNode(new NoteNode(interactiveNodeId, {x: 350, y: -150, z: -30}, {
+    const n_interactive = space.addNode(new NoteNode(interactiveNodeId, {x: 350, y: -150, z: -30}, {
         content: `<h2>Interactive HTML</h2>
                     <p>Slider value: <span id="slider-val-${interactiveNodeId}">50</span></p>
                     <input type="range" min="0" max="100" value="50" style="width: 90%; pointer-events: auto;"
@@ -1609,34 +1624,34 @@ function exampleMindMap(mindMap) {
                     <button onclick="alert('Button inside node ${interactiveNodeId} clicked!')" style="pointer-events: auto;">Click Me</button>`,
         width: 230, height: 160, backgroundColor: nextColor()
     }));
-    mindMap.addEdge(n_features, n_interactive);
-    mindMap.addEdge(n_style, n_interactive); // Cross link
+    space.addEdge(n_features, n_interactive);
+    space.addEdge(n_style, n_interactive); // Cross link
 
     // Hierarchical / Fractal Example
-    const n_fractal_root = mindMap.addNode(new NoteNode(null, {x: -400, y: -200, z: 50}, {
+    const n_fractal_root = space.addNode(new NoteNode(null, {x: -400, y: -200, z: 50}, {
         content: "<h3>Hierarchy</h3>", width: 120, height: 50, backgroundColor: colors[0]
     }));
-    mindMap.addEdge(n_tech, n_fractal_root);
+    space.addEdge(n_tech, n_fractal_root);
 
     for (let i = 0; i < 3; i++) {
         const angle = (i / 3) * Math.PI * 2;
         const np = n_fractal_root.position;
-        const n_level1 = mindMap.addNode(new NoteNode(null, {
+        const n_level1 = space.addNode(new NoteNode(null, {
             x: np.x + Math.cos(angle) * 150,
             y: np.y + Math.sin(angle) * 150,
             z: np.z + (Math.random() - 0.5) * 40
         }, {content: `L1-${i + 1}`, width: 80, height: 40, backgroundColor: colors[1]}));
-        mindMap.addEdge(n_fractal_root, n_level1);
+        space.addEdge(n_fractal_root, n_level1);
 
         for (let j = 0; j < 2; j++) {
             const angle2 = (j / 2) * Math.PI * 2 + Math.random() * 0.5;
             const np = n_level1.position;
-            const n_level2 = mindMap.addNode(new NoteNode(null, {
+            const n_level2 = space.addNode(new NoteNode(null, {
                 x: np.x + Math.cos(angle2) * 80,
                 y: np.y + Math.sin(angle2) * 80,
                 z: np.z + (Math.random() - 0.5) * 30
             }, {content: `L2-${j + 1}`, width: 60, height: 30, backgroundColor: colors[2]}));
-            mindMap.addEdge(n_level1, n_level2);
+            space.addEdge(n_level1, n_level2);
         }
     }
 }
