@@ -1,10 +1,13 @@
 package dumb.cognote;
 
+import dumb.cognote.plugin.*;
+import dumb.cognote.tool.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -13,11 +16,19 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static dumb.cognote.Logic.Cognition;
+import static dumb.cognote.Logic.RetractionType;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
@@ -26,7 +37,32 @@ public class CogNote extends Cog {
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
+        // Initialize executors and events first
+        // mainExecutor is initialized in Cog constructor
+        // events is initialized in Cog constructor, using mainExecutor
+        // dialogueManager is initialized in Cog constructor, using mainExecutor
+
+        // Load notes and config
         load();
+
+        // Initialize TMS and OperatorRegistry
+        var tms = new Truths.BasicTMS(events);
+        var operatorRegistry = new Op.Operators();
+
+        // Initialize Cognition context
+        // Pass dialogueManager to Cognition context
+        this.context = new Cognition(globalKbCapacity, events, tms, operatorRegistry, this);
+
+        // Initialize ReasonerManager and Plugins
+        // Pass dialogueManager to ReasonerManager
+        this.reasonerManager = new Reason.ReasonerManager(events, context, dialogueManager);
+        this.plugins = new Plugins(events, context);
+
+        // Setup default plugins, reasoners, and tools
+        setupDefaultPlugins();
+
+        // Add shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
     }
 
     public static void main(String[] args) {
@@ -48,6 +84,7 @@ public class CogNote extends Cog {
 
         try {
             var c = new CogNote();
+            // WebSocketPlugin needs the port, so it's registered here after parsing args
             c.plugins.loadPlugin(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
 
             c.start();
@@ -80,10 +117,12 @@ public class CogNote extends Cog {
     private static synchronized void saveNotesToFile(List<Note> notes) {
 
         var toSave = notes.stream()
-                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
+                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID)) // Don't save the global KB note itself
                 .toList();
 
+        // Ensure the config note is always saved, creating a default if necessary
         if (toSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+            toSave = new ArrayList<>(toSave); // Make mutable copy
             toSave.add(createDefaultConfigNote());
         }
 
@@ -126,6 +165,43 @@ public class CogNote extends Cog {
         }
     }
 
+    @Override
+    protected void setupDefaultPlugins() {
+        // Add core plugins
+        plugins.loadPlugin(new InputPlugin());
+        plugins.loadPlugin(new RetractionPlugin());
+        plugins.loadPlugin(new TmsPlugin());
+        plugins.loadPlugin(new UserFeedbackPlugin()); // Register the new feedback plugin
+
+        // Add task/goal plugins
+        plugins.loadPlugin(new TaskDecomposePlugin());
+
+        // Add UI/Protocol plugins (WebSocketPlugin is registered in main)
+        plugins.loadPlugin(new StatusUpdaterPlugin());
+
+        // Add reasoner plugins
+        reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
+        reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
+        reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
+        reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
+
+        // Add tools
+        tools.register(new AssertKIFTool(this));
+        tools.register(new GetNoteTextTool(this));
+        tools.register(new FindAssertionsTool(this));
+        tools.register(new RetractTool(this));
+        tools.register(new QueryTool(this));
+        tools.register(new LogMessageTool(this)); // Pass cog to LogMessageTool
+
+        // Add LLM-based tools
+        tools.register(new SummarizeTool(this));
+        tools.register(new IdentifyConceptsTool(this));
+        tools.register(new GenerateQuestionsTool(this));
+        tools.register(new TextToKifTool(this));
+        tools.register(new DecomposeGoalTool(this));
+    }
+
+
     public Optional<Note> note(String id) {
         return ofNullable(notes.get(id));
     }
@@ -139,6 +215,8 @@ public class CogNote extends Cog {
             events.emit(new AddedEvent(note));
             save();
             message("Added note: " + note.title + " [" + note.id + "]");
+            // Signal UI to update note list
+            assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
         } else {
             message("Note with ID " + note.id + " already exists.");
         }
@@ -156,6 +234,8 @@ public class CogNote extends Cog {
             context.removeActiveNote(noteId);
             save();
             message("Removed note: " + note.title + " [" + note.id + "]");
+            // Signal UI to update note list
+            assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
         });
     }
 
@@ -176,6 +256,7 @@ public class CogNote extends Cog {
 
                 if (newStatus == Note.Status.ACTIVE) {
                     // Re-assert existing content when note becomes active
+                    // This ensures reasoners/plugins process the note's content
                     context.kb(noteId).getAllAssertions().forEach(assertion ->
                             events.emit(new ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
                     );
@@ -278,6 +359,8 @@ public class CogNote extends Cog {
         message("Knowledge cleared.");
         // Emit status event reflecting the cleared state
         events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
+        // Signal UI to update note list
+        assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
     }
 
     public boolean updateConfig(String newConfigJsonText) {
@@ -289,6 +372,8 @@ public class CogNote extends Cog {
                 save();
                 message("Configuration updated and saved.");
             });
+            // Reconfigure LM immediately after config update
+            lm.reconfigure();
             return true;
         } catch (org.json.JSONException e) {
             error("Failed to parse new configuration JSON: " + e.getMessage());
@@ -301,7 +386,8 @@ public class CogNote extends Cog {
         loadedNotes.forEach(note -> {
             notes.put(note.id, note);
             if (note.status == Note.Status.ACTIVE) {
-                context.addActiveNote(note.id);
+                // Notes loaded as ACTIVE will be added to active context during start()
+                // after plugins are initialized.
             }
         });
 
@@ -319,8 +405,8 @@ public class CogNote extends Cog {
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
             notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
         }
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-
+        // Global KB is always active
+        // context.addActiveNote(GLOBAL_KB_NOTE_ID); // This happens in start()
     }
 
     private void parseConfig(String jsonText) {
@@ -341,8 +427,72 @@ public class CogNote extends Cog {
             this.reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
             this.broadcastInputAssertions = DEFAULT_BROADCAST_INPUT;
         }
-        lm.reconfigure();
+        // LM reconfig happens in start() and updateConfig()
     }
+
+    /**
+     * Asserts a UI action into the dedicated KB for UI communication.
+     *
+     * @param actionType The type of UI action (e.g., ProtocolConstants.UI_ACTION_DISPLAY_MESSAGE).
+     * @param actionData A JSONObject containing data for the UI action.
+     */
+    public void assertUiAction(String actionType, JSONObject actionData) {
+        var uiActionTerm = new Term.Lst(
+                Term.Atom.of(ProtocolConstants.PRED_UI_ACTION),
+                Term.Atom.of(actionType),
+                Term.Atom.of(actionData.toString()) // Store JSON string in an atom
+        );
+
+        var potentialAssertion = new Assertion.PotentialAssertion(
+                uiActionTerm,
+                Cog.INPUT_ASSERTION_BASE_PRIORITY, // Use a base priority
+                java.util.Set.of(), // No justifications needed for a UI action
+                "backend:ui-action", // Source
+                false, false, false, // Not equality, not negated
+                ProtocolConstants.KB_UI_ACTIONS, // Target KB for UI actions
+                Logic.AssertionType.GROUND, // UI actions are ground facts
+                List.of(), // No quantified variables
+                0 // Derivation depth 0
+        );
+        context.tryCommit(potentialAssertion, "backend:ui-action");
+    }
+
+
+    @Override
+    public void start() {
+        if (!running.get()) {
+            error("Cannot restart a stopped system.");
+            return;
+        }
+        paused.set(true);
+        status("Initializing");
+
+        // Initialize built-in operators
+        context.operators.addBuiltin();
+
+        // Plugins and Reasoners are loaded in the constructor now
+        // setupDefaultPlugins(); // Called in constructor
+
+        // Initialize plugins and reasoners
+        plugins.initializeAll();
+        reasonerManager.initializeAll();
+
+        // Reconfigure LM after plugins/tools are registered
+        lm.reconfigure();
+
+        // Add notes that were loaded as ACTIVE to the active context
+        notes.values().stream()
+                .filter(note -> note.status == Note.Status.ACTIVE)
+                .forEach(note -> context.addActiveNote(note.id));
+
+        // Ensure Global KB is active
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
+
+
+        status("Paused (Ready to Start)");
+        message("System initialized and paused.");
+    }
+
 
     @Override
     public void stop() {

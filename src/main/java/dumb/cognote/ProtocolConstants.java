@@ -48,11 +48,11 @@ public class ProtocolConstants {
 
     // Predicates for UI Actions
     public static final String PRED_UI_ACTION = "uiAction";
-    public static final String PRED_HIGHLIGHT_TEXT = "highlightText";
-    public static final String PRED_DISPLAY_MESSAGE = "displayMessage";
+    public static final String PRED_HIGHLIGHT_TEXT = "highlightText"; // Example, not currently asserted by backend
+    public static final String PRED_DISPLAY_MESSAGE = "displayMessage"; // Example, asserted by LogMessageTool
 
     // Predicates for User Feedback
-    public static final String PRED_USER_FEEDBACK = "userFeedback";
+    public static final String PRED_USER_FEEDBACK = "userFeedback"; // Generic predicate for feedback assertions
     public static final String PRED_USER_ASSERTED_KIF = "userAssertedKif";
     public static final String PRED_USER_EDITED_NOTE_TEXT = "userEditedNoteText";
     public static final String PRED_USER_EDITED_NOTE_TITLE = "userEditedNoteTitle";
@@ -65,4 +65,7 @@ public class ProtocolConstants {
     // Dialogue Response Data Keys
     public static final String DIALOGUE_RESPONSE_KEY_TEXT = "text";
     public static final String DIALOGUE_RESPONSE_KEY_CHOICE = "choice";
+
+    // Operators for Dialogue Interaction
+    public static final String OP_ASK_USER = "ask-user"; // Operator to request user input
 }

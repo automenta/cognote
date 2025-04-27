@@ -41,7 +41,7 @@ public class Cog {
     static final boolean DEFAULT_BROADCAST_INPUT = false;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    private static final int PORT = 8080;
+    private static final int PORT = 8080; // Default port, can be overridden in main
     public final Events events;
     public final Cognition context;
     public final LM lm;
@@ -54,7 +54,7 @@ public class Cog {
     public final DialogueManager dialogueManager;
     final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
     final Plugins plugins;
-    private final Reason.ReasonerManager reasonerManager;
+    protected Reason.ReasonerManager reasonerManager; // Changed to protected
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
@@ -62,23 +62,23 @@ public class Cog {
     public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
 
     public Cog() {
+        // Initialize core components that don't depend on config/plugins yet
+        this.mainExecutor = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
         this.events = new Events(mainExecutor);
         Log.setEvents(this.events);
 
         this.tools = new Tools();
-
         this.lm = new LM(this);
-
         this.dialogueManager = new DialogueManager(this);
 
-        var tms = new Truths.BasicTMS(events);
-        var operatorRegistry = new Op.Operators();
+        // Context, ReasonerManager, and Plugins are initialized in CogNote constructor
+        // because they depend on configuration loaded there.
+        this.context = null; // Will be set in CogNote
+        this.reasonerManager = null; // Will be set in CogNote
+        this.plugins = null; // Will be set in CogNote
 
-        this.context = new Cognition(globalKbCapacity, events, tms, operatorRegistry, this);
-        this.reasonerManager = new Reason.ReasonerManager(events, context);
-        this.plugins = new Plugins(events, context);
-
-        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+        // Shutdown hook is added in CogNote main or constructor
+        // Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
     }
 
 
@@ -113,29 +113,34 @@ public class Cog {
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE);
     }
 
-
-    private void setupDefaultPlugins() {
+    // Made protected so CogNote can override and add its specific plugins/tools
+    protected void setupDefaultPlugins() {
+        // Add core plugins
         plugins.loadPlugin(new InputPlugin());
         plugins.loadPlugin(new RetractionPlugin());
         plugins.loadPlugin(new TmsPlugin());
 
+        // Add task/goal plugins
         plugins.loadPlugin(new TaskDecomposePlugin());
 
-        plugins.loadPlugin(new WebSocketPlugin(new InetSocketAddress(PORT), this));
+        // Add UI/Protocol plugins (WebSocketPlugin is registered in CogNote main)
         plugins.loadPlugin(new StatusUpdaterPlugin());
 
+        // Add reasoner plugins
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
         reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
 
+        // Add tools
         tools.register(new AssertKIFTool(this));
         tools.register(new GetNoteTextTool(this));
         tools.register(new FindAssertionsTool(this));
         tools.register(new RetractTool(this));
         tools.register(new QueryTool(this));
-        tools.register(new LogMessageTool());
+        tools.register(new LogMessageTool(this)); // Pass cog to LogMessageTool
 
+        // Add LLM-based tools
         tools.register(new SummarizeTool(this));
         tools.register(new IdentifyConceptsTool(this));
         tools.register(new GenerateQuestionsTool(this));
@@ -151,10 +156,24 @@ public class Cog {
         paused.set(true);
         status("Initializing");
 
+        // Initialize built-in operators
         context.operators.addBuiltin();
-        setupDefaultPlugins();
+
+        // Plugins and Reasoners are loaded in the constructor now
+        // setupDefaultPlugins(); // Called in constructor
+
+        // Initialize plugins and reasoners
         plugins.initializeAll();
         reasonerManager.initializeAll();
+
+        // Reconfigure LM after plugins/tools are registered
+        lm.reconfigure();
+
+        // Add notes that were loaded as ACTIVE to the active context
+        // This logic is in CogNote.start()
+
+        // Ensure Global KB is active
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
 
 
         status("Paused (Ready to Start)");
@@ -268,6 +287,7 @@ public class Cog {
     public Answer querySync(Query query) {
         var resultFuture = new CompletableFuture<Answer>();
 
+        // Create a temporary listener for this specific query ID
         Consumer<CogEvent> listener = event -> {
             if (event instanceof Answer.AnswerEvent answerEvent) {
                 var result = answerEvent.result();
@@ -277,23 +297,28 @@ public class Cog {
             }
         };
 
+        // Add the listener. Need to cast to the raw type because of the generic Consumer<T>
         @SuppressWarnings("unchecked")
         var queryResultListeners = events.listeners.computeIfAbsent(Answer.AnswerEvent.class, k -> new CopyOnWriteArrayList<>());
         queryResultListeners.add(listener);
 
         try {
+            // Emit the query event
             events.emit(new Query.QueryEvent(query));
 
-            return resultFuture.get(60, TimeUnit.SECONDS);
+            // Wait for the result with a timeout
+            return resultFuture.get(60, TimeUnit.SECONDS); // Use a reasonable timeout
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Query execution interrupted", e);
         } catch (ExecutionException e) {
+            // Unwrap and re-throw the actual cause
             throw new RuntimeException("Error during query execution", e.getCause());
         } catch (TimeoutException e) {
             throw new RuntimeException("Query execution timed out after 60 seconds", e);
         } finally {
+            // Always remove the temporary listener
             queryResultListeners.remove(listener);
         }
     }
@@ -419,7 +444,7 @@ public class Cog {
 
         @Override
         public String assocNote() {
-            return null;
+            return null; // State change might affect multiple notes/KBs, no single assoc note
         }
 
         public JSONObject toJson() {
@@ -502,7 +527,7 @@ public class Cog {
 
         @Override
         public String assocNote() {
-            return null;
+            return null; // Tasks are system-wide
         }
 
         public JSONObject toJson() {
