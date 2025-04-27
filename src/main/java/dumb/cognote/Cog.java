@@ -207,7 +207,9 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent(Answer a)) {
+            if (e instanceof Answer.AnswerEvent) { // Fix: Use traditional instanceof
+                Answer.AnswerEvent answerEvent = (Answer.AnswerEvent) e; // Fix: Cast to access record components
+                Answer a = answerEvent.a(); // Fix: Access component via getter
                 if (a.query().equals(queryID)) answerFuture.complete(a);
             }
         };

@@ -633,7 +633,8 @@ public class Reason {
 
                                     if (opResult == null) return Stream.empty();
 
-                                    if (opResult instanceof Term.Atom(String value)) {
+                                    if (opResult instanceof Term.Atom) { // Fix: Use traditional instanceof
+                                        String value = ((Term.Atom) opResult).value(); // Fix: Cast and access value
                                         if ("true".equals(value)) return Stream.of(bindings);
                                         if ("false".equals(value)) return Stream.empty();
                                     }
