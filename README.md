@@ -4,10 +4,10 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 
 ## Features
 
-### Objects
+### Notes
 
-- **Shared Objects:** Create, prioritize, and manage data collaboratively as `Note`s.
-- **Thought Evolution:** `Note`s describe thoughts and ideas.
+- **Thought Evolution:** `Note`s describe thoughts and ideas, allowing them to evolve agentically.
+- **Shared Notes:** Create, prioritize, and manage data collaboratively as `Note`s.
 - **Privacy by Default:** All `Note`s are private unless explicitly shared.
 
 ### Search and Match
@@ -22,6 +22,20 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 - **Secure**
     - End-to-end encryption protects private data.
     - Crypto-signing ensures `Note` integrity and provenance.
+
+## UI
+
+### TODO List
+- Conventional "TODO List" editor
+- Semantic fields/forms: inserted by menu, or suggested
+- WYSIWYG editor
+- List: Sort, Search, Filter
+
+### Mind Map
+- Free-form Note editor and organization tool
+- Node/Edge Graph editing
+
+----
 
 ## Code Guidelines
 
