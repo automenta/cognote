@@ -11,6 +11,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -265,7 +266,7 @@ public class Reason {
         private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Var, Term> bindings, Set<String> support, String currentKbId) {
             if (getCogNoteContext().calculateDerivedDepth(support) + 1 > getDerivationDepthMax())
                 return Stream.empty();
-            if (remaining.isEmpty()) return Stream.of(new MatchResult(bindings, support));
+            if (remaining.isEmpty()) return Stream.of(new MatchResult(rule.id(), bindings, support));
 
             var clause = Logic.Unifier.substFully(remaining.getFirst(), bindings);
             var nextRemaining = remaining.subList(1, remaining.size());
@@ -650,7 +651,7 @@ public class Reason {
                                 }
                                 return Stream.empty();
                             };
-                            var o = context.operators().get(Term.Atom.of(op)).orElse(null);
+                            var o = context.ctx.operators.get(Term.Atom.of(op)).orElse(null);
                             resultStream = o != null ? f.apply(o) : Stream.empty();
                         }
                     }

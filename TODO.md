@@ -1,94 +1,119 @@
-# Backend Logic Integration & Reasoning Hooks
+# Implement the User Interface and the Peer-to-Peer network capabilities to realize the full vision described in README.md.
 
-## Connect the protocol layer to core cognitive functions, enabling backend-driven UI actions and dialogue requests.
+## Backend Refinements and API Stabilization
 
-• Refine InputPlugin: Handle parsing of different top-level KIF forms (assertions, rules, queries, commands) from
-ExternalInputEvent and route them appropriately (commit assertion, add rule, emit QueryEvent,
-etc.).                                                                     
-• Integrate DialogueManager: Modify relevant backend logic (e.g., a tool, a reasoner step, or a dedicated plugin) to
-call DialogueManager.requestDialogue when user input is needed, passing necessary context and handling the returned
-CompletableFuture.           
-• Implement UserFeedback processing: Create a plugin or add logic to an existing one that listens for assertions in
-KB_USER_FEEDBACK and triggers corresponding backend actions (e.g., updating a note, asserting a new fact based on user
-input).                                   
-• Implement UIAction assertion logic: Create a plugin or add logic to reasoners/plugins that asserts predicates into
-KB_UI_ACTIONS (e.g., (uiAction "highlight_text" "...")) based on backend conclusions or state changes.
+Codebase Review and Refactoring:                                                                                                     
+ • Apply the "Code Guidelines" from README.md: remove comments, ensure compactness, consolidation, deduplication, and modularity.              
+ • Improve error handling and logging consistency across all classes (Log.java is used, but ensure all potential errors are caught and logged appropriately).                                                                                                                             
+ • Refine the Plugin and ReasonerPlugin interfaces and base classes for clarity and extensibility.                                             
+ • Review and potentially refactor the Term, Assertion, Rule, Query, and Answer structures for robustness.                                     
 
-----
+WebSocket API Formalization:                                                                                                         
+ • Create a clear, versioned specification for the JSON messages exchanged over WebSocket (Commands, Events, Responses, Feedback, Dialogue). ProtocolConstants.java is a good start, but document the full JSON structures.                                                              
+ • Ensure all backend events (Cog.CogEvent implementations) have a stable and well-documented toJson() representation.                         
+ • Verify that all commands and feedback types handled by WebSocketPlugin have corresponding, documented JSON payloads.                        
 
-# Backend Logic Integration & Reasoning Hooks
+Enhance Backend Testing:                                                                                                             
+ • Expand AbstractTest and BasicTests to cover more backend logic, especially reasoning, TMS, and tool execution.                              
+ • Add tests specifically for the WebSocket command and feedback handlers.                                                                     
+ • Consider adding integration tests that simulate a client interacting via WebSocket.                                                         
 
-## Connect the protocol layer to core cognitive functions, enabling backend-driven UI actions and dialogue requests.
+Implement Missing Core Backend Features (if any identified):                                                                         
+ • Review the existing code for any placeholders or incomplete logic not directly tied to UI or P2P (e.g., full KB capacity management logic in Knowledge.java might need refinement).
 
-• Ensure Tool Execution: Verify all tools registered in Cog.setupDefaultPlugins are correctly invoked by
-WebSocketPlugin.handleRunToolCommand and their asynchronous results/errors are
-handled.                                                                                          
-• Verify Query Execution: Ensure WebSocketPlugin.handleRunQueryCommand correctly emits Query.QueryEvent and that the
-Answer.AnswerEvent is broadcast back to the client.
-• Implement EnhanceTool: Provide a basic implementation for EnhanceTool or remove it if not part of the immediate
-plan.                       
-• Review Reasoner Interactions: Ensure reasoner plugins correctly use Reasoning context methods (getKb, rules, getTMS,
-operators, getActiveNoteIds, tryCommit, isActiveContext) and emit derived assertions/rules/events.
 
----- 
+## Phase 2: Build the User Interface (Frontend)
 
-# Client-Side Core Implementation (JS)
+This phase focuses on creating the client-side application that connects to the backend via WebSocket and provides the user experience. This can  
+largely proceed in parallel with Phase 3, using the stable API from Phase 1.
 
-• Goal: Build a reusable client library for connecting to the Cognote server and managing its state.             
-•
-Tasks:                                                                                                                                         
-• Create CognoteClient class/module: Implement WebSocket connection, reconnection, and error
-handling.                                        
-• Implement message dispatcher: Parse incoming JSON signals and route them to handlers based on
-type.                                         
-• Implement client-side state store: Create a reactive or observable data structure (LiveModel) to mirror the server's
-state (notes,          
-assertions, rules, status, config). Update this store based on initial_state and event
-signals.                                             
-• Implement signal sending functions: Create methods like sendCommand(type, payload), sendFeedback(type,
-payload),                            
-sendDialogueResponse(dialogueId, responseData) that generate unique IDs, format the LMACP message, send via WebSocket,
-and return Promises  
-that resolve upon receiving the corresponding response
-signal.                                                                              
-• Implement Response handler: Match incoming response signals to pending Promises from sent commands/feedback/dialogue
-responses and          
-resolve/reject them based on the response
-status.                                                                                           
-• Implement UIAction handler: Receive ui_action signals and dispatch them to UI-specific
-logic.                                               
-• Implement DialogueRequest handler: Receive dialogue_request signals and dispatch them to UI-specific logic.
+• Task 2.1: Choose Frontend Technology: Select a framework/library (e.g., React, Vue, Svelte, or plain JavaScript/HTML/CSS as seen in other      
+prototypes like netmicro1/ui/dashboard.js).                                                                                                    
+• Task 2.2: Implement WebSocket Client:                                                                                                          
+• Connect to the WebSocketPlugin.                                                                                                             
+• Handle connection lifecycle (connecting, disconnecting, errors).                                                                            
+• Send commands (COMMAND_*) and feedback (FEEDBACK_*).                                                                                        
+• Receive and process events (SIGNAL_TYPE_EVENT, SIGNAL_TYPE_INITIAL_STATE, SIGNAL_TYPE_UI_ACTION, SIGNAL_TYPE_DIALOGUE_REQUEST).             
+• Handle responses (SIGNAL_TYPE_RESPONSE).                                                                                                    
+• Task 2.3: Implement Core UI Layout and Navigation: Structure the application with areas for note lists, editors, status, etc.                  
+• Task 2.4: Implement Note List View:                                                                                                            
+• Display the list of notes received in the initial state and via AddedEvent/RemovedEvent/NoteStatusEvent.                                    
+• Provide UI elements to trigger add_note, remove_note, start_note, pause_note, complete_note commands.                                       
+• React to UI_ACTION_UPDATE_NOTE_LIST.                                                                                                        
+• Task 2.5: Implement Note Editor View (Text-based):                                                                                             
+• Display note title and text.                                                                                                                
+• Allow editing and send user_edited_note_text and user_edited_note_title feedback.                                                           
+• Provide an input area for raw KIF and send user_asserted_kif feedback.                                                                      
+• Integrate basic tool execution (e.g., buttons for summarize, identify_concepts, text_to_kif, enhance_note) using the run_tool command.      
+• Integrate basic query execution using the run_query command and display results.                                                            
+• Handle DialogueRequestEvent by showing a prompt to the user and sending dialogue_response.                                                  
+• Task 2.6: Implement Status and Log Display: Show system status (SystemStatusEvent), task updates (TaskUpdateEvent), and log messages           
+(Events.LogMessageEvent, potentially via UI_ACTION_DISPLAY_MESSAGE from LogMessageTool).                                                       
+• Task 2.7: Implement Settings UI: Create an interface to view and modify system configuration using get_initial_state and set_config.           
+• Task 2.8: Implement UI Actions: Handle backend-initiated UI actions like UI_ACTION_DISPLAY_MESSAGE and UI_ACTION_HIGHLIGHT_TEXT.               
+• Task 2.9: Implement Mind Map View (Graph Visualization):                                                                                       
+• Choose a graph visualization library (e.g., Three.js as hinted, or a 2D library like Cytoscape.js).                                         
+• Render notes as nodes and relationships (derived from KIF assertions, e.g., (parent A B), (instance X Y)) as edges. This requires backend   
+logic to query/stream relevant graph data.                                                                                                  
+• Implement basic navigation and interaction (panning, zooming).                                                                              
+• Later: Implement graph editing features (add/remove nodes/edges), linking back to backend assertions/retractions.                           
+• Task 2.10: Implement Semantic Fields/Forms: Design and implement UI components for structured data entry within the editor, translating user   
+input into specific KIF assertion patterns.
 
-# Stage 4: Client-Side UI Integration (Framework-Specific)
+Phase 3: Implement the P2P Network Layer
 
-• Goal: Build a user interface that visualizes the Cognote state and allows user interaction via the client
-core.                                
-•
-Tasks:                                                                                                                                         
-• Connect UI to LiveModel: Use the chosen UI framework's reactivity features to render components based on the state in
-the client's          
-LiveModel.                                                                                                                                  
-• Build core UI components: Display lists of notes, assertions, rules, system status,
-etc.                                                    
-• Implement user input UI: Create forms/elements for adding notes, asserting KIF, triggering
-tools/queries.                                   
-• Connect UI interactions to client core: Call sendCommand or sendFeedback from UI event handlers (e.g., button clicks,
-form submissions).    
-• Implement Dialogue UI: Create components (e.g., modals, pop-ups) to display dialogue prompts and options, capture user
-input, and call      
-sendDialogueResponse.                                                                                                                       
-• Implement UI Action Display: Create logic to visually represent ui_action signals (e.g., highlighting text, showing
-notification banners).
+This is the most complex and foundational part for the "Decentralized" aspect.
 
-# Refinement, Persistence, and Advanced Features
+• Task 3.1: P2P Technology Selection and Design:                                                                                                 
+• Research and choose a P2P framework/library (e.g., libp2p, or design a custom protocol).                                                    
+• Design the network topology and discovery mechanism.                                                                                        
+• Design the identity management system (e.g., using public/private keys).                                                                    
+• Design the data model for sharing Notes, Assertions, and Rules across the network.                                                          
+• Design the data synchronization and conflict resolution strategy.                                                                           
+• Task 3.2: Implement Core P2P Node:                                                                                                             
+• Set up the P2P node lifecycle (start, stop, connect to peers).                                                                              
+• Implement peer discovery and connection handling.                                                                                           
+• Implement basic secure messaging between peers (encryption, signing).                                                                       
+• Task 3.3: Integrate P2P with CogNote Core:                                                                                                     
+• Create new backend components/plugins that listen for P2P events (e.g., receiving data from a peer).                                        
+• Modify existing backend components (e.g., Logic.Cognition, Truths) or add new ones to handle data received from peers (e.g., asserting      
+remote facts, handling remote retractions).                                                                                                 
+• Implement logic to send local updates (new assertions, retractions, rule changes) to relevant peers.                                        
+• Task 3.4: Implement Sharing and Access Control:                                                                                                
+• Implement the mechanism for users to explicitly mark Notes/KBs as shareable.                                                                
+• Implement logic to control which peers can access shared data.                                                                              
+• Implement the crypto-signing and verification logic for Note integrity and provenance as described in the README.                           
+• Task 3.5: Implement Data Synchronization Logic:                                                                                                
+• Implement the chosen synchronization protocol to keep shared KBs consistent across peers.                                                   
+• Implement conflict resolution logic.
 
-• Goal: Enhance robustness, add security, and implement remaining complex features.
+Phase 4: Integrate P2P with User Interface
 
-• Refine Serialization: Ensure complete and correct serialization/deserialization of all relevant data types, especially
-nested structures like bindings in Answer and terms within assertions/rules.
+Connect the frontend to the P2P capabilities.
 
-• Implement Full Dialogue Management: Complete the integration between DialogueManager and backend tasks/reasoning,
-including handling timeouts and cancellations gracefully.
+• Task 4.1: Update WebSocket API for P2P: Extend the WebSocket protocol to include P2P-related information and commands (e.g., list connected    
+peers, share a note, view shared notes from peers).                                                                                            
+• Task 4.2: Update Frontend WebSocket Client: Implement handling for new P2P-related WebSocket messages.                                         
+• Task 4.3: Update UI for P2P Features:                                                                                                          
+• Add UI elements to manage P2P identity and connections.                                                                                     
+• Add UI elements to share notes and manage sharing permissions.                                                                              
+• Display network status and connected peers.                                                                                                 
+• Integrate shared notes/knowledge from peers into the UI (e.g., in the note list, search results, or graph view).                            
+• Implement notifications for matches to persistent queries (this might involve backend logic triggering UI actions via WebSocket).
+
+Phase 5: Polish, Testing, and Deployment
+
+• Task 5.1: Comprehensive Testing:                                                                                                               
+• Add unit tests for all new P2P and UI components.                                                                                           
+• Add integration tests covering the full stack (UI <-> WebSocket <-> Backend <-> P2P).                                                       
+• Perform system testing, including multi-node P2P scenarios.                                                                                 
+• Task 5.2: Performance Optimization: Identify and address performance bottlenecks in the backend, P2P, and frontend.                            
+• Task 5.3: Usability Improvements: Gather feedback and refine the user interface based on user testing.                                         
+• Task 5.4: Documentation: Write user documentation and technical documentation for the codebase and API.                                        
+• Task 5.5: Packaging and Deployment: Prepare the application for distribution and deployment.
+
+This plan breaks down the significant remaining work into manageable phases, acknowledging the complexity of the P2P layer and the need for a     
+stable backend API before building the UI. Remember to continuously apply the "Code Guidelines" throughout these phases.
 
 ## Logging
 
@@ -96,19 +121,6 @@ including handling timeouts and cancellations gracefully.
 logging capabilities.   
 • Structured Error Handling: Implement a more robust error handling mechanism beyond printing to System.err and
 returning strings.
-
-• Implement Client Targeting: Modify server-side ui_action and dialogue_request sending to target specific clients based
-on backend logic (e.g., user session, note ownership). Update client to handle targeted signals.
-
-# Persistence
-
-• Implement Persistence for KB/Rules: Add saving/loading logic for assertions and rules (currently only notes are
-persisted).
-• Implement Task Serialization: Ensure task state is fully serialized for the initial_state payload.
-
-• Write Tests: Add unit, integration, and end-to-end tests for key components and
-workflows.                                                  
-• Improve Documentation: Document the LMACP protocol in detail, the client library API, and the server architecture.
 
 # Semantic Matching
 
