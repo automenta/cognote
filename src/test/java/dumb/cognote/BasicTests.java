@@ -23,9 +23,6 @@ public class BasicTests extends AbstractTest {
                 """);
     }
 
-
-    // --- JUnit Test Methods ---
-
     @Test
     void queryWithMultipleBindings() {
         runKifTest("""
@@ -44,9 +41,6 @@ public class BasicTests extends AbstractTest {
                     (retract (BY_KIF (instance MyDog Dog)))))
                 """);
     }
-
-
-    // --- Translated Tests ---
 
     @Test
     void queryFailure() {
@@ -110,7 +104,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void runLogMessageTool() {
-        // Need to register the tool manually for the test Cog instance
         cog.tools.register(new Tool() {
             @Override
             public String name() {
@@ -141,7 +134,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void runGetNoteTextTool() {
-        // Need to register the tool manually
         cog.tools.register(new Tool() {
             @Override
             public String name() {
@@ -160,7 +152,6 @@ public class BasicTests extends AbstractTest {
             }
         });
 
-        // Add a dummy note for the tool to read
         cog.addNote(new Note("note-dummy-for-tool", "Dummy Note", "; Define your tests here using the (test ...) format", Note.Status.IDLE));
 
         runKifTest("""
@@ -174,8 +165,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void waitTimeoutExpectedFailure() {
-        // This test is expected to fail due to the wait timing out.
-        // We use assertThrows to verify that the action execution throws an exception.
         assertThrows(RuntimeException.class, () -> runKifTest("""
                 (test "Wait Timeout (Expected Failure)"
                   (setup)
@@ -183,8 +172,6 @@ public class BasicTests extends AbstractTest {
                   (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail *if* the action didn't throw first
                   (teardown))
                 """), "The wait action was expected to time out and throw an exception.");
-        // Note: The expectation check won't run because the action execution throws.
-        // The failure is the exception from the action itself.
     }
 
     @Test
@@ -204,8 +191,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void multipleExpectationFailures() {
-        // This test is expected to fail because some expectations will not be met.
-        // We use assertThrows to verify that the expectation checking throws an exception.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Multiple Expectation Failures"
                   (setup (assert (fact A)))
@@ -329,7 +314,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void testWithMissingActionSection() {
-        // This test should fail because the 'action' section is missing.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Test with Missing Action Section"
                   (setup (assert (fact A)))
@@ -340,7 +324,6 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void testWithInvalidActionTerms() {
-        // This test should fail during parsing of the action section.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Test with Invalid Action Terms"
                   (setup (assert (fact A)))
@@ -363,11 +346,8 @@ public class BasicTests extends AbstractTest {
                 """), "Test was expected to fail due to invalid action terms.");
     }
 
-    // --- Tests for Test Framework Error Conditions (Now JUnit Failures) ---
-
     @Test
     void testWithInvalidExpectationTerms() {
-        // This test should fail during parsing of the expectation section.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Test with Invalid Expectation Terms"
                   (setup (assert (fact A)))
@@ -389,69 +369,63 @@ public class BasicTests extends AbstractTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "(assert \"not a list\")", // Invalid payload type
-            "(addRule \"not a list\")", // Invalid payload type
-            "(removeRuleForm \"not a list\")", // Invalid payload type
-            "(retract \"not a list\")", // Invalid payload type
-            "(retract (BY_KIF))", // Invalid target list size
-            "(retract (123 (fact A)))", // Invalid type (not atom)
-            "(retract (UNKNOWN_TYPE (fact A)))", // Invalid type value
-            "(runTool (params name \"log_message\"))", // Invalid runTool params format (missing value)
-            "(runTool (params (message \"hi\")))", // Missing name param
-            "(query \"not a list\")", // Invalid query payload type
-            "(query (a) (params name))", // Invalid params format
-            "(query (a) (params (query_type \"BAD_TYPE\")))", // Invalid query_type value
-            "(wait \"not a list\")", // Invalid payload type
-            "(wait (assertionExists))", // Invalid condition list size
-            "(wait (unknownCondition (fact A)))", // Unknown condition type
-            "(wait (assertionExists (fact A)) (params (timeout -5)))", // Invalid timeout value
-            "(wait (assertionExists (fact A)) (params (timeout \"abc\")))" // Invalid timeout type
+            "(assert \"not a list\")",
+            "(addRule \"not a list\")",
+            "(removeRuleForm \"not a list\")",
+            "(retract \"not a list\")",
+            "(retract (BY_KIF))",
+            "(retract (123 (fact A)))",
+            "(retract (UNKNOWN_TYPE (fact A)))",
+            "(runTool (params name \"log_message\"))",
+            "(runTool (params (message \"hi\")))",
+            "(query \"not a list\")",
+            "(query (a) (params name))",
+            "(query (a) (params (query_type \"BAD_TYPE\")))",
+            "(wait \"not a list\")",
+            "(wait (assertionExists))",
+            "(wait (unknownCondition (fact A)))",
+            "(wait (assertionExists (fact A)) (params (timeout -5)))",
+            "(wait (assertionExists (fact A)) (params (timeout \"abc\")))"
     })
     void actionErrorParsing(String actionKif) {
-        // These actions should fail during the parsing phase within runKifTest
         assertThrows(AssertionFailedError.class, () -> {
             runKifTest(String.format("""
                     (test "Action Error Parsing: %s"
                       (setup)
                       (action %s)
-                      (expected (expectedResult false)) ; This expectation won't be checked
+                      (expected (expectedResult false))
                       (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)); // Escape quotes for string literal
+                    """, actionKif.replace("\"", "\\\""), actionKif));
         }, "Action '" + actionKif + "' was expected to fail during parsing.");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "(retract (BY_KIF AtomValue))", // Invalid target type for BY_KIF (expects list)
-            "(retract (BY_ID (fact A)))", // Invalid target type for BY_ID (expects atom)
-            "(runTool (params (name \"nonexistent_tool\")))" // Tool not found
+            "(retract (BY_KIF AtomValue))",
+            "(retract (BY_ID (fact A)))",
+            "(runTool (params (name \"nonexistent_tool\")))"
     })
     void actionErrorExecution(String actionKif) {
-        // These actions should parse correctly but fail during execution.
-        // The failure should be a RuntimeException from executeSingleAction.
         assertThrows(RuntimeException.class, () -> {
             runKifTest(String.format("""
                     (test "Action Error Execution: %s"
                       (setup)
                       (action %s)
-                      (expected (expectedResult false)) ; This expectation won't be checked
+                      (expected (expectedResult false))
                       (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)); // Escape quotes for string literal
+                    """, actionKif.replace("\"", "\\\""), actionKif));
         }, "Action '" + actionKif + "' was expected to fail during execution.");
     }
 
-    // --- Action Execution Error Tests (Now JUnit Failures) ---
-
     @Test
     void expectationErrorExpectedBindingsOnNonQuery() {
-        // This test should fail because expectedBindings is used on a non-query action result.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Expectation Error: ExpectedBindings on NonQuery"
                   (setup (assert (fact A)))
-                  (action (assert (fact B))) ; Not a query
+                  (action (assert (fact B)))
                   (expected
-                    (expectedAssertionExists (fact A)) ; PASS
-                    (expectedBindings (((?X A)))) ; FAIL - actionResult is not a Query Answer
+                    (expectedAssertionExists (fact A))
+                    (expectedBindings (((?X A))))
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
@@ -463,14 +437,13 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void expectationErrorExpectedToolResultOnNonTool() {
-        // This test should fail because expectedToolResult is used on a non-tool action result.
         assertThrows(AssertionFailedError.class, () -> runKifTest("""
                 (test "Expectation Error: ExpectedToolResult on NonTool"
                   (setup (assert (fact A)))
-                  (action (query (fact ?X))) ; Not a tool run (result is Cog.Answer)
+                  (action (query (fact ?X)))
                   (expected
-                    (expectedAssertionExists (fact A)) ; PASS
-                    (expectedToolResult "abc") ; FAIL - actionResult is not a String
+                    (expectedAssertionExists (fact A))
+                    (expectedToolResult "abc")
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
@@ -479,32 +452,27 @@ public class BasicTests extends AbstractTest {
                 """), "Expectation 'expectedToolResult' was expected to fail on non-tool result.");
     }
 
-
-    // --- Expectation Check Error Tests (Now JUnit Failures) ---
-
     @ParameterizedTest
     @ValueSource(strings = {
-            "(expectedResult \"maybe\")", // Invalid boolean string
-            "(expectedBindings \"not a list\")", // Not a list
-            "(expectedBindings ((?X)))", // Pair size != 2
-            "(expectedAssertionExists \"not a list\")", // Not a KIF list
-            "(expectedAssertionDoesNotExist \"not a list\")", // Not a KIF list
-            "(expectedRuleExists \"not a list\")", // Not a KIF list
-            "(expectedRuleDoesNotExist \"not a list\")", // Not a KIF list
-            "(expectedKbSize \"big\")", // Not an integer string
-            "(expectedToolResultContains 123)" // Not a string
+            "(expectedResult \"maybe\")",
+            "(expectedBindings \"not a list\")",
+            "(expectedBindings ((?X)))",
+            "(expectedAssertionExists \"not a list\")",
+            "(expectedAssertionDoesNotExist \"not a list\")",
+            "(expectedRuleExists \"not a list\")",
+            "(expectedRuleDoesNotExist \"not a list\")",
+            "(expectedKbSize \"big\")",
+            "(expectedToolResultContains 123)"
     })
     void expectationErrorParsing(String expectationKif) {
-        // These expectations should fail during the parsing phase within runKifTest
         assertThrows(AssertionFailedError.class, () -> {
             runKifTest(String.format("""
                     (test "Expectation Error Parsing: %s"
                       (setup)
-                      (action (query (a))) ; Provide a query action so expectedResult/Bindings parsing is attempted
+                      (action (query (a)))
                       (expected %s)
                       (teardown))
-                    """, expectationKif.replace("\"", "\\\""), expectationKif)); // Escape quotes for string literal
+                    """, expectationKif.replace("\"", "\\\""), expectationKif));
         }, "Expectation '" + expectationKif + "' was expected to fail during parsing.");
     }
-
 }

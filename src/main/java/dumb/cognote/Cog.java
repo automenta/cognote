@@ -16,6 +16,7 @@ import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.RetractionType;
 import static java.util.Objects.requireNonNull;
+import static java.util.Optional.ofNullable;
 
 public class Cog {
 
@@ -37,7 +38,7 @@ public class Cog {
     static final boolean DEFAULT_BROADCAST_INPUT = false;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    private static final int PORT = 8080; // Default port, can be overridden in main
+    private static final int PORT = 8080;
     public final Events events;
 
     public final LM lm;
@@ -53,25 +54,16 @@ public class Cog {
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
     public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
-    protected Reason.ReasonerManager reasonerManager; // Changed to protected
+    protected Reason.ReasonerManager reasonerManager;
 
     public Cog() {
-
         this.events = new Events(mainExecutor);
         Log.setEvents(this.events);
-
         this.tools = new Tools();
         this.lm = new LM(this);
         this.dialogueManager = new DialogueManager(this);
-
-        // Context, ReasonerManager, and Plugins are initialized in CogNote constructor
-        // because they depend on configuration loaded there.
-        this.reasonerManager = null; // Will be set in CogNote
-
-        // Shutdown hook is added in CogNote main or constructor
-        // Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+        this.reasonerManager = null;
     }
-
 
     public static String id(String prefix) {
         return prefix + id.incrementAndGet();
@@ -111,37 +103,24 @@ public class Cog {
         }
         paused.set(true);
         status("Initializing");
-
-        // Plugins and Reasoners are loaded in the constructor now
-        // setupDefaultPlugins(); // Called in constructor
-
-        // Initialize plugins and reasoners
         reasonerManager.initializeAll();
-
-        // Reconfigure LM after plugins/tools are registered
         lm.reconfigure();
     }
 
     public void stop() {
         if (!running.compareAndSet(true, false)) return;
         message("Stopping system...");
-
         status("Stopping");
         paused.set(false);
         synchronized (pauseLock) {
             pauseLock.notifyAll();
         }
-
         lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
         lm.activeLlmTasks.clear();
         dialogueManager.clear();
-
         reasonerManager.shutdownAll();
-
-
         shutdownExecutor(mainExecutor, "Main Executor");
         events.shutdown();
-
         status("Stopped");
         message("System stopped.");
     }
@@ -226,38 +205,26 @@ public class Cog {
 
     public Answer querySync(Query query) {
         var answerFuture = new CompletableFuture<Answer>();
-
         var queryID = query.id();
-
-        // Create a temporary listener for this specific query ID
         Consumer<CogEvent> listener = e -> {
             if (e instanceof Answer.AnswerEvent(Answer a)) {
                 if (a.query().equals(queryID)) answerFuture.complete(a);
             }
         };
-
-        // Add the listener. Need to cast to the raw type because of the generic Consumer<T>
         @SuppressWarnings("unchecked")
         var listeners = events.listeners.computeIfAbsent(Answer.AnswerEvent.class, k -> new CopyOnWriteArrayList<>());
         listeners.add(listener);
-
         try {
-            // Emit the query event
             events.emit(new Query.QueryEvent(query));
-
-            // Wait for the result with a timeout
-            return answerFuture.get(60, TimeUnit.SECONDS); // Use a reasonable timeout
-
+            return answerFuture.get(60, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Query execution interrupted", e);
         } catch (ExecutionException e) {
-            // Unwrap and re-throw the actual cause
             throw new RuntimeException("Error during query execution", e.getCause());
         } catch (TimeoutException e) {
             throw new RuntimeException("Query execution timed out after 60 seconds", e);
         } finally {
-            // Always remove the temporary listener
             listeners.remove(listener);
         }
     }
@@ -383,7 +350,7 @@ public class Cog {
 
         @Override
         public String assocNote() {
-            return null; // State change might affect multiple notes/KBs, no single assoc note
+            return null;
         }
 
         public JSONObject toJson() {
@@ -456,7 +423,6 @@ public class Cog {
         }
     }
 
-
     public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
         public TaskUpdateEvent {
             requireNonNull(taskId);
@@ -466,7 +432,7 @@ public class Cog {
 
         @Override
         public String assocNote() {
-            return null; // Tasks are system-wide
+            return null;
         }
 
         public JSONObject toJson() {

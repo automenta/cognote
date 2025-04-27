@@ -338,12 +338,6 @@ public class Logic {
                 return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
             }
 
-            private Set<String> findCandidates(Term query, TriConsumer<Term, PathNode, Set<String>> searchFunc) {
-                Set<String> candidates = ConcurrentHashMap.newKeySet();
-                searchFunc.accept(query, root, candidates);
-                return Set.copyOf(candidates);
-            }
-
             @FunctionalInterface
             private interface TriConsumer<T, U, V> {
                 void accept(T t, U u, V v);
@@ -360,7 +354,6 @@ public class Logic {
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
-
 
         Cognition(int globalKbCapacity, Events events, Truths truth, Op.Operators operators, CogNote cog) {
             this.cog = cog;
@@ -479,7 +472,6 @@ public class Logic {
                     .findFirst();
         }
 
-
         @Nullable
         public String commonSourceNodeId(Set<String> supportIds) {
             if (supportIds == null || supportIds.isEmpty()) return null;
@@ -533,5 +525,4 @@ public class Logic {
             activeNoteIds.remove(noteId);
         }
     }
-
 }

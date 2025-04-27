@@ -86,7 +86,6 @@ public class Reason {
                     plugins.remove(plugin);
                 }
             });
-
             events.on(Query.QueryEvent.class, this::handleQueryRequest);
             message("Reasoner plugin initialization complete.");
         }
@@ -103,7 +102,6 @@ public class Reason {
                 return;
             }
 
-            // Combine results from all relevant reasoners
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .thenApplyAsync(v -> {
                         List<Map<Var, Term>> allBindings = new ArrayList<>();
@@ -112,7 +110,7 @@ public class Reason {
 
                         for (var future : futures) {
                             try {
-                                var result = future.join(); // Wait for each reasoner's result
+                                var result = future.join();
                                 var e = result.explanation();
                                 var s = result.status();
 
@@ -120,15 +118,11 @@ public class Reason {
                                     if (query.type() == QueryType.ASK_BINDINGS || query.type() == QueryType.ASK_TRUE_FALSE) {
                                         allBindings.addAll(result.bindings());
                                     }
-                                    overallStatus = QueryStatus.SUCCESS; // If any reasoner succeeds, the overall query succeeds
-                                    if (e != null)
-                                        combinedExplanation = e; // Keep the last explanation? Or combine? For now, last one wins.
+                                    overallStatus = QueryStatus.SUCCESS;
+                                    if (e != null) combinedExplanation = e;
                                     if (query.type() == QueryType.ACHIEVE_GOAL)
-                                        break; // For ACHIEVE_GOAL, first success is enough
-
+                                        break;
                                 } else if (s != QueryStatus.FAILURE && overallStatus == QueryStatus.FAILURE) {
-                                    // If no reasoner succeeded, but some had non-FAILURE status (e.g., TIMEOUT, ERROR),
-                                    // propagate the first non-FAILURE status.
                                     overallStatus = s;
                                     if (e != null) combinedExplanation = e;
                                 }
@@ -141,16 +135,11 @@ public class Reason {
                             }
                         }
 
-                        // For ASK_TRUE_FALSE, success means finding at least one binding
                         if (query.type() == QueryType.ASK_TRUE_FALSE) {
                             overallStatus = allBindings.isEmpty() ? QueryStatus.FAILURE : QueryStatus.SUCCESS;
                         }
 
-                        // Ensure unique bindings for ASK_BINDINGS
                         if (query.type() == QueryType.ASK_BINDINGS) {
-                            // Convert bindings to a comparable format (e.g., sorted string representation)
-                            // and use a Set to get unique ones, then convert back to List<Map<Var, Term>>
-                            // Use HashMap for mutable map
                             allBindings = allBindings.stream()
                                     .map(bindingMap -> {
                                         List<String> entryStrings = new ArrayList<>();
@@ -158,13 +147,11 @@ public class Reason {
                                         Collections.sort(entryStrings);
                                         return Map.entry(String.join(",", entryStrings), bindingMap);
                                     })
-                                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (existing, replacement) -> existing, HashMap::new)) // Use HashMap for mutable map
+                                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (existing, replacement) -> existing, HashMap::new))
                                     .values().stream().toList();
                         }
-
-
                         return new Answer(query.id(), overallStatus, allBindings, combinedExplanation);
-                    }, reasoning.events.exe) // Use the events executor for combining results
+                    }, reasoning.events.exe)
                     .thenAccept(result -> events.emit(new Answer.AnswerEvent(result)));
         }
 
@@ -187,7 +174,6 @@ public class Reason {
             return reasoning.getTMS();
         }
     }
-
 
     abstract static class BaseReasonerPlugin implements Plugin.ReasonerPlugin {
         protected final String id = Cog.id(ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("ReasonerPlugin", "").toLowerCase() + "_");
@@ -295,7 +281,6 @@ public class Reason {
             var currentKb = getKb(currentKbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
 
-
             final Stream<Assertion>[] assertionStream = new Stream[]{currentKb.findUnifiableAssertions(pattern)};
 
             context.getActiveNoteIds().stream()
@@ -326,7 +311,6 @@ public class Reason {
             var targetNoteId = getCogNoteContext().commonSourceNodeId(result.supportIds());
 
             if (!isActiveContext(targetNoteId) && !isActiveContext(rule.sourceNoteId())) return;
-
 
             switch (simplified) {
                 case Term.Lst derived when derived.op().filter(KIF_OP_AND::equals).isPresent() ->
@@ -462,8 +446,8 @@ public class Reason {
 
             var kb = getKb(kbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
-            var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
-            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream())
+            var allActiveAssertions = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct()
+                    .flatMap(k -> k.getAllAssertions().stream())
                     .filter(Assertion::isActive)
                     .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                     .distinct().toList();
@@ -553,8 +537,8 @@ public class Reason {
 
             var kb = getKb(kbId);
             var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
-            var relevantKbs = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct();
-            var allActiveAssertions = relevantKbs.flatMap(k -> k.getAllAssertions().stream())
+            var allActiveAssertions = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct()
+                    .flatMap(k -> k.getAllAssertions().stream())
                     .filter(Assertion::isActive)
                     .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
                     .distinct().toList();
@@ -642,19 +626,15 @@ public class Reason {
                     var results = new ArrayList<Map<Var, Term>>();
                     var maxDepth = (Integer) query.parameters().getOrDefault("maxDepth", MAX_BACKWARD_CHAIN_DEPTH);
                     try {
-                        // Use a separate proof stack for each top-level query execution
                         prove(query.pattern(), query.targetKbId(), Map.of(), maxDepth, new HashSet<>()).forEach(results::add);
-
                         var status = results.isEmpty() ? QueryStatus.FAILURE : QueryStatus.SUCCESS;
-
                         return new Answer(query.id(), status, results, null);
-
                     } catch (Exception e) {
                         error("Backward chaining query failed: " + e.getMessage());
                         e.printStackTrace();
                         return Answer.error(query.id(), e.getMessage());
                     }
-                }, context.events().exe); // Use events executor for query execution
+                }, context.events().exe);
             } else {
                 message("Query skipped: Target KB '" + query.targetKbId() + "' is not active.");
                 return CompletableFuture.completedFuture(Answer.failure(query.id()));
@@ -666,9 +646,7 @@ public class Reason {
 
             var currentGoal = Unifier.substFully(goal, bindings);
 
-            // Occurs check for recursion depth
             if (!proofStack.add(currentGoal)) {
-                // message("BC: Cycle detected for goal: " + currentGoal.toKif()); // Optional: log cycles
                 return Stream.empty();
             }
 
@@ -683,30 +661,25 @@ public class Reason {
                             if (goalList.size() > 1) {
                                 resultStream = proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack);
                             } else {
-                                resultStream = Stream.of(bindings); // (and) is true
+                                resultStream = Stream.of(bindings);
                             }
                         }
                         case KIF_OP_OR -> {
                             if (goalList.size() > 1) {
-                                // For OR, we need to explore each disjunct independently.
-                                // Each disjunct gets its own copy of the proof stack to avoid cycles within the disjunct,
-                                // but cycles across disjuncts are allowed (though might not terminate if not careful).
                                 resultStream = goalList.terms.stream().skip(1)
                                         .flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack)));
                             } else {
-                                resultStream = Stream.empty(); // (or) is false
+                                resultStream = Stream.empty();
                             }
                         }
                         case KIF_OP_NOT -> {
                             if (goalList.size() == 2) {
                                 var negatedGoal = goalList.get(1);
-                                // To prove NOT G, try to prove G. If G fails (no bindings found), then NOT G succeeds.
-                                // This is negation as failure.
                                 var negatedResults = prove(negatedGoal, kbId, bindings, depth, new HashSet<>(proofStack)).toList();
                                 if (negatedResults.isEmpty()) {
-                                    resultStream = Stream.of(bindings); // NOT G succeeds with the current bindings
+                                    resultStream = Stream.of(bindings);
                                 } else {
-                                    resultStream = Stream.empty(); // NOT G fails if G succeeds
+                                    resultStream = Stream.empty();
                                 }
                             } else {
                                 error("Warning: Invalid 'not' format in query: " + goalList.toKif());
@@ -714,109 +687,84 @@ public class Reason {
                             }
                         }
                         default ->
-                        // Try executing as an operator first
                         {
                             Function<Operator, Stream<Map<Var, Term>>> f = opInstance -> {
                                 try {
-                                    // Execute operator asynchronously and wait for result
                                     var opResultFuture = opInstance.exe(goalList, context);
-                                    var opResult = opResultFuture.join(); // Blocking wait for operator result
+                                    var opResult = opResultFuture.join();
 
                                     if (opResult == null)
                                         return Stream.empty();
 
-                                    // If operator returns a boolean atom ("true" or "false")
                                     if (opResult instanceof Term.Atom(String value)) {
                                         if ("true".equals(value)) {
-                                            return Stream.of(bindings); // Operator evaluated to true, goal is proven
+                                            return Stream.of(bindings);
                                         } else if ("false".equals(value)) {
-                                            return Stream.empty(); // Operator evaluated to false, goal fails
+                                            return Stream.empty();
                                         }
                                     }
 
-                                    // If operator returns a term, try to unify it with the goal
                                     var u = Unifier.unify(currentGoal, opResult, bindings);
                                     if (u != null)
                                         return Stream.of(u);
 
                                 } catch (CompletionException | CancellationException e) {
                                     error("Operator execution exception for " + opInstance.pred().toKif() + ": " + e.getMessage());
-                                    // Operator error causes goal failure
                                 } catch (Exception e) {
                                     error("Unexpected error during operator execution for " + opInstance.pred().toKif() + ": " + e.getMessage());
                                     e.printStackTrace();
-                                    // Unexpected error causes goal failure
                                 }
                                 return Stream.empty();
                             };
                             var o = context.operators().get(Term.Atom.of(op)).orElse(null);
-                            resultStream = o != null ? f.apply(o) : Stream.empty();  // If operator not found or execution fails, stream is empty
+                            resultStream = o != null ? f.apply(o) : Stream.empty();
                         }
                     }
-                } else {
-                    // List without operator - treat as a predicate/fact lookup
-                    // Fall through to fact/rule lookup below
                 }
             }
 
-            // If operator execution didn't yield results, try facts and rules
             if (resultStream.findAny().isEmpty()) {
-                resultStream = Stream.empty(); // Reset stream
+                resultStream = Stream.empty();
 
-                // 1. Try matching against existing facts in the current KB and global KB
                 Stream<Assertion>[] factStream = new Stream[]{getKb(kbId).findUnifiableAssertions(currentGoal)};
 
-                // Also check active notes' KBs
                 context.getActiveNoteIds().stream()
                         .filter(id -> !id.equals(kbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
                         .map(this::getKb)
                         .forEach(kb -> factStream[0] = Stream.concat(factStream[0], kb.findUnifiableAssertions(currentGoal)));
 
-                // Ensure global KB is checked if not the current KB
                 if (kbId == null || !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
                     factStream[0] = Stream.concat(factStream[0], context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
                 }
 
                 var factBindingsStream = factStream[0]
-                        .distinct() // Avoid processing the same assertion multiple times
+                        .distinct()
                         .filter(Assertion::isActive)
-                        .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId())) // Only use facts from active contexts
-                        .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream()); // Unify goal with fact
+                        .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
+                        .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
 
-                // 2. Try backward chaining using rules
                 var ruleStream = context.rules().stream()
-                        .filter(rule -> isActiveContext(rule.sourceNoteId())) // Only use rules from active contexts
+                        .filter(rule -> isActiveContext(rule.sourceNoteId()))
                         .flatMap(rule -> {
-                            // Rename variables in the rule to avoid conflicts with query bindings
                             var renamedRule = renameRuleVariables(rule, depth);
-                            // Try to unify the rule's consequent with the current goal
                             return ofNullable(Unifier.unify(renamedRule.consequent(), currentGoal, bindings))
-                                    .map(consequentBindings -> {
-                                        // If consequent unifies, try to prove the rule's antecedents recursively
-                                        // Pass the new bindings and reduced depth
-                                        return proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack));
-                                    })
-                                    .orElse(Stream.empty()); // If consequent doesn't unify, this rule doesn't apply
+                                    .map(consequentBindings -> proveAntecedents(renamedRule.antecedents(), kbId, consequentBindings, depth - 1, new HashSet<>(proofStack)))
+                                    .orElse(Stream.empty());
                         });
 
-                // Combine results from facts and rules
                 resultStream = Stream.concat(factBindingsStream, ruleStream);
             }
 
-
-            proofStack.remove(currentGoal); // Remove goal from stack when done exploring its possibilities
-            return resultStream.distinct(); // Ensure unique bindings are returned
+            proofStack.remove(currentGoal);
+            return resultStream.distinct();
         }
 
         private Stream<Map<Var, Term>> proveAntecedents(List<Term> antecedents, @Nullable String kbId, Map<Var, Term> bindings, int depth, Set<Term> proofStack) {
             var n = antecedents.size();
-            if (n == 0) return Stream.of(bindings); // Empty antecedent list is true
+            if (n == 0) return Stream.of(bindings);
             else {
                 var firstAntecedent = antecedents.getFirst();
                 var rest = antecedents.subList(1, n);
-
-                // Recursively prove the first antecedent. For each successful binding,
-                // try to prove the rest of the antecedents with the updated bindings.
                 return prove(firstAntecedent, kbId, bindings, depth, proofStack)
                         .flatMap(newBindings -> proveAntecedents(rest, kbId, newBindings, depth, proofStack));
             }
