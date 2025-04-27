@@ -7,7 +7,6 @@ public class StatusUpdaterPlugin extends Plugin.BasePlugin {
     @Override
     public void start(Events ev, Logic.Cognition ctx) {
         super.start(ev, ctx);
-
         ev.on(Cog.AssertedEvent.class, e -> updateStatus());
         ev.on(Cog.RetractedEvent.class, e -> updateStatus());
         ev.on(Cog.AssertionEvictedEvent.class, e -> updateStatus());

@@ -36,7 +36,7 @@ public class TextToKifTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Converts the content of a note into KIF expressions and asserts them into the note's knowledge base.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> text2kif(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));
 
@@ -93,6 +93,6 @@ public class TextToKifTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return text2kif(noteId);
     }
 }

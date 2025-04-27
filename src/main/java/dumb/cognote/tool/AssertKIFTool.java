@@ -28,7 +28,7 @@ public class AssertKIFTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Asserts one or more KIF expressions into the knowledge base. Use this to add new facts or rules.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("kif_string") String kifString, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> assertKIF(@dev.langchain4j.agent.tool.P("kif_string") String kifString, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var terms = KifParser.parseKif(kifString);
@@ -55,6 +55,6 @@ public class AssertKIFTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'kif_string' parameter."));
         }
 
-        return execute(kifString, noteId);
+        return assertKIF(kifString, noteId);
     }
 }

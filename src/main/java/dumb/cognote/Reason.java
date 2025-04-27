@@ -2,6 +2,8 @@ package dumb.cognote;
 
 import dumb.cognote.Cog.QueryStatus;
 import dumb.cognote.Cog.QueryType;
+import dumb.cognote.Op.Operator;
+import dumb.cognote.Term.Var;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -25,33 +27,33 @@ public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
 
-    public record Reasoning(Logic.Cognition cognition, Events events, DialogueManager dialogueManager) {
+    public record Reasoning(Logic.Cognition ctx, Events events, DialogueManager dialogueManager) {
         Knowledge getKb(@Nullable String noteId) {
-            return cognition.kb(noteId);
+            return ctx.kb(noteId);
         }
 
         Set<Rule> rules() {
-            return cognition.rules();
+            return ctx.rules();
         }
 
         Cog.Configuration getConfig() {
-            return new Cog.Configuration(cognition.cog);
+            return new Cog.Configuration(ctx.cog);
         }
 
         Truths getTMS() {
-            return cognition.truth;
+            return ctx.truth;
         }
 
         Op.Operators operators() {
-            return cognition.operators;
+            return ctx.operators;
         }
 
         Set<String> getActiveNoteIds() {
-            return cognition.activeNoteIds;
+            return ctx.activeNoteIds;
         }
     }
 
-    static class ReasonerManager {
+    protected static class ReasonerManager {
         private final Events events;
         private final Reasoning reasoning;
         private final List<Plugin.ReasonerPlugin> plugins = new CopyOnWriteArrayList<>();
@@ -104,7 +106,7 @@ public class Reason {
             // Combine results from all relevant reasoners
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .thenApplyAsync(v -> {
-                        List<Map<Term.Var, Term>> allBindings = new ArrayList<>();
+                        List<Map<Var, Term>> allBindings = new ArrayList<>();
                         var overallStatus = QueryStatus.FAILURE;
                         Explanation combinedExplanation = null;
 
@@ -119,8 +121,10 @@ public class Reason {
                                         allBindings.addAll(result.bindings());
                                     }
                                     overallStatus = QueryStatus.SUCCESS; // If any reasoner succeeds, the overall query succeeds
-                                    if (e != null) combinedExplanation = e; // Keep the last explanation? Or combine? For now, last one wins.
-                                    if (query.type() == QueryType.ACHIEVE_GOAL) break; // For ACHIEVE_GOAL, first success is enough
+                                    if (e != null)
+                                        combinedExplanation = e; // Keep the last explanation? Or combine? For now, last one wins.
+                                    if (query.type() == QueryType.ACHIEVE_GOAL)
+                                        break; // For ACHIEVE_GOAL, first success is enough
 
                                 } else if (s != QueryStatus.FAILURE && overallStatus == QueryStatus.FAILURE) {
                                     // If no reasoner succeeded, but some had non-FAILURE status (e.g., TIMEOUT, ERROR),
@@ -146,7 +150,8 @@ public class Reason {
                         if (query.type() == QueryType.ASK_BINDINGS) {
                             // Convert bindings to a comparable format (e.g., sorted string representation)
                             // and use a Set to get unique ones, then convert back to List<Map<Var, Term>>
-                            var uniqueBindings = allBindings.stream()
+                            // Use HashMap for mutable map
+                            allBindings = allBindings.stream()
                                     .map(bindingMap -> {
                                         List<String> entryStrings = new ArrayList<>();
                                         bindingMap.forEach((var, term) -> entryStrings.add(var.name() + "=" + term.toKif()));
@@ -155,7 +160,6 @@ public class Reason {
                                     })
                                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (existing, replacement) -> existing, HashMap::new)) // Use HashMap for mutable map
                                     .values().stream().toList();
-                            allBindings = uniqueBindings;
                         }
 
 
@@ -212,7 +216,7 @@ public class Reason {
         }
 
         protected Logic.Cognition getCogNoteContext() {
-            return context.cognition();
+            return context.ctx();
         }
 
         protected int getDerivationDepthMax() {
@@ -277,7 +281,7 @@ public class Reason {
                     }));
         }
 
-        private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Term.Var, Term> bindings, Set<String> support, String currentKbId) {
+        private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Var, Term> bindings, Set<String> support, String currentKbId) {
             if (getCogNoteContext().calculateDerivedDepth(support) + 1 > getDerivationDepthMax())
                 return Stream.empty();
             if (remaining.isEmpty()) return Stream.of(new MatchResult(bindings, support));
@@ -332,7 +336,7 @@ public class Reason {
                 case Term.Lst derived when derived.op().filter(KIF_OP_EXISTS::equals).isPresent() ->
                         processDerivedExists(rule, derived, result, targetNoteId);
                 case Term.Lst derived -> processDerivedStandard(rule, derived, result, targetNoteId);
-                case Term term when !(term instanceof Term.Var) ->
+                case Term term when !(term instanceof Var) ->
                         error("Warning: Rule " + rule.id() + " derived non-list/non-var consequent: " + term.toKif());
                 default -> {
                 }
@@ -344,13 +348,13 @@ public class Reason {
                 var simp = (term instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : term;
                 if (simp instanceof Term.Lst c)
                     processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents(), rule.sourceNoteId()), result);
-                else if (!(simp instanceof Term.Var))
+                else if (!(simp instanceof Var))
                     error("Warning: Rule " + rule.id() + " derived (and ...) with non-list/non-var conjunct: " + term.toKif());
             });
         }
 
         private void processDerivedForall(Rule rule, Term.Lst forall, MatchResult result, @Nullable String targetNoteId) {
-            if (forall.size() != 3 || !(forall.get(1) instanceof Term.Lst || forall.get(1) instanceof Term.Var) || !(forall.get(2) instanceof Term.Lst body))
+            if (forall.size() != 3 || !(forall.get(1) instanceof Term.Lst || forall.get(1) instanceof Var) || !(forall.get(2) instanceof Term.Lst body))
                 return;
             var vars = Term.collectSpecVars(forall.get(1));
             if (vars.isEmpty()) {
@@ -380,7 +384,7 @@ public class Reason {
         }
 
         private void processDerivedExists(Rule rule, Term.Lst exists, MatchResult result, @Nullable String targetNoteId) {
-            if (exists.size() != 3 || !(exists.get(1) instanceof Term.Lst || exists.get(1) instanceof Term.Var) || !(exists.get(2) instanceof Term.Lst body)) {
+            if (exists.size() != 3 || !(exists.get(1) instanceof Term.Lst || exists.get(1) instanceof Var) || !(exists.get(2) instanceof Term.Lst body)) {
                 error("Rule " + rule.id() + " derived invalid 'exists' structure: " + exists.toKif());
                 return;
             }
@@ -420,14 +424,14 @@ public class Reason {
             tryCommit(pa, rule.id());
         }
 
-        record MatchResult(Map<Term.Var, Term> bindings, Set<String> supportIds) {
+        record MatchResult(Map<Var, Term> bindings, Set<String> supportIds) {
         }
     }
 
     static class RewriteRuleReasonerPlugin extends BaseReasonerPlugin {
         private static Rule renameRuleVariables(Rule rule, int depth) {
             var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
-            Map<Term.Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix)));
+            Map<Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Var.of(v.name() + suffix)));
             var renamedForm = (Term.Lst) Unifier.subst(rule.form(), renameMap);
             try {
                 return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId());
@@ -522,7 +526,7 @@ public class Reason {
     }
 
     static class UniversalInstantiationReasonerPlugin extends BaseReasonerPlugin {
-        private static Stream<Map<Term.Var, Term>> findSubExpressionMatches(Term expr, Term target) {
+        private static Stream<Map<Var, Term>> findSubExpressionMatches(Term expr, Term target) {
             return Stream.concat(
                     ofNullable(Unifier.match(expr, target, Map.of())).stream(),
                     (expr instanceof Term.Lst l) ? l.terms.stream().flatMap(sub -> findSubExpressionMatches(sub, target)) : Stream.empty()
@@ -612,7 +616,7 @@ public class Reason {
             var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
             var renamedForm = (Term.Lst) Unifier.subst(rule.form(),
                     rule.form().vars().stream().collect(
-                            Collectors.toMap(Function.identity(), v -> Term.Var.of(v.name() + suffix))));
+                            Collectors.toMap(Function.identity(), v -> Var.of(v.name() + suffix))));
             try {
                 return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId());
             } catch (IllegalArgumentException e) {
@@ -635,7 +639,7 @@ public class Reason {
         public CompletableFuture<Answer> executeQuery(Query query) {
             if (isActiveContext(query.targetKbId())) {
                 return CompletableFuture.supplyAsync(() -> {
-                    var results = new ArrayList<Map<Term.Var, Term>>();
+                    var results = new ArrayList<Map<Var, Term>>();
                     var maxDepth = (Integer) query.parameters().getOrDefault("maxDepth", MAX_BACKWARD_CHAIN_DEPTH);
                     try {
                         // Use a separate proof stack for each top-level query execution
@@ -657,7 +661,7 @@ public class Reason {
             }
         }
 
-        private Stream<Map<Term.Var, Term>> prove(Term goal, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack) {
+        private Stream<Map<Var, Term>> prove(Term goal, @Nullable String kbId, Map<Var, Term> bindings, int depth, Set<Term> proofStack) {
             if (depth <= 0) return Stream.empty();
 
             var currentGoal = Unifier.substFully(goal, bindings);
@@ -668,7 +672,7 @@ public class Reason {
                 return Stream.empty();
             }
 
-            Stream<Map<Term.Var, Term>> resultStream = Stream.empty();
+            Stream<Map<Var, Term>> resultStream = Stream.empty();
 
             if (currentGoal instanceof Term.Lst goalList) {
                 var opOpt = goalList.op();
@@ -709,39 +713,44 @@ public class Reason {
                                 resultStream = Stream.empty();
                             }
                         }
-                        default -> {
-                            // Try executing as an operator first
-                            resultStream = context.operators().get(Term.Atom.of(op))
-                                    .flatMap(opInstance -> {
-                                        try {
-                                            // Execute operator asynchronously and wait for result
-                                            var opResultFuture = opInstance.exe(goalList, context);
-                                            var opResult = opResultFuture.join(); // Blocking wait for operator result
+                        default ->
+                        // Try executing as an operator first
+                        {
+                            Function<Operator, Stream<Map<Var, Term>>> f = opInstance -> {
+                                try {
+                                    // Execute operator asynchronously and wait for result
+                                    var opResultFuture = opInstance.exe(goalList, context);
+                                    var opResult = opResultFuture.join(); // Blocking wait for operator result
 
-                                            if (opResult == null) return Optional.empty();
+                                    if (opResult == null)
+                                        return Stream.empty();
 
-                                            // If operator returns a boolean atom ("true" or "false")
-                                            if (opResult instanceof Term.Atom value) {
-                                                if ("true".equals(value.value())) {
-                                                    return Optional.of(Stream.of(bindings)); // Operator evaluated to true, goal is proven
-                                                } else if ("false".equals(value.value())) {
-                                                    return Optional.of(Stream.empty()); // Operator evaluated to false, goal fails
-                                                }
-                                            }
-
-                                            // If operator returns a term, try to unify it with the goal
-                                            return Optional.of(ofNullable(Unifier.unify(currentGoal, opResult, bindings)).stream());
-
-                                        } catch (CompletionException | CancellationException e) {
-                                            error("Operator execution exception for " + opInstance.pred().toKif() + ": " + e.getMessage());
-                                            return Optional.of(Stream.empty()); // Operator error causes goal failure
-                                        } catch (Exception e) {
-                                            error("Unexpected error during operator execution for " + opInstance.pred().toKif() + ": " + e.getMessage());
-                                            e.printStackTrace();
-                                            return Optional.of(Stream.empty()); // Unexpected error causes goal failure
+                                    // If operator returns a boolean atom ("true" or "false")
+                                    if (opResult instanceof Term.Atom(String value)) {
+                                        if ("true".equals(value)) {
+                                            return Stream.of(bindings); // Operator evaluated to true, goal is proven
+                                        } else if ("false".equals(value)) {
+                                            return Stream.empty(); // Operator evaluated to false, goal fails
                                         }
-                                    })
-                                    .orElse(Stream.empty()); // If operator not found or execution fails, stream is empty
+                                    }
+
+                                    // If operator returns a term, try to unify it with the goal
+                                    var u = Unifier.unify(currentGoal, opResult, bindings);
+                                    if (u != null)
+                                        return Stream.of(u);
+
+                                } catch (CompletionException | CancellationException e) {
+                                    error("Operator execution exception for " + opInstance.pred().toKif() + ": " + e.getMessage());
+                                    // Operator error causes goal failure
+                                } catch (Exception e) {
+                                    error("Unexpected error during operator execution for " + opInstance.pred().toKif() + ": " + e.getMessage());
+                                    e.printStackTrace();
+                                    // Unexpected error causes goal failure
+                                }
+                                return Stream.empty();
+                            };
+                            var o = context.operators().get(Term.Atom.of(op)).orElse(null);
+                            resultStream = o != null ? f.apply(o) : Stream.empty();  // If operator not found or execution fails, stream is empty
                         }
                     }
                 } else {
@@ -751,7 +760,7 @@ public class Reason {
             }
 
             // If operator execution didn't yield results, try facts and rules
-            if (!resultStream.findAny().isPresent()) {
+            if (resultStream.findAny().isEmpty()) {
                 resultStream = Stream.empty(); // Reset stream
 
                 // 1. Try matching against existing facts in the current KB and global KB
@@ -799,7 +808,7 @@ public class Reason {
             return resultStream.distinct(); // Ensure unique bindings are returned
         }
 
-        private Stream<Map<Term.Var, Term>> proveAntecedents(List<Term> antecedents, @Nullable String kbId, Map<Term.Var, Term> bindings, int depth, Set<Term> proofStack) {
+        private Stream<Map<Var, Term>> proveAntecedents(List<Term> antecedents, @Nullable String kbId, Map<Var, Term> bindings, int depth, Set<Term> proofStack) {
             var n = antecedents.size();
             if (n == 0) return Stream.of(bindings); // Empty antecedent list is true
             else {

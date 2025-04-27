@@ -92,7 +92,7 @@ abstract class AbstractTest {
         if (terms.size() != 1) {
             fail("Expected exactly one top-level term, but found " + terms.size() + " in: " + kifString);
         }
-        return terms.get(0);
+        return terms.getFirst();
     }
 
     /**
@@ -614,16 +614,14 @@ abstract class AbstractTest {
             throw new IllegalArgumentException("Invalid payload for addRule: Expected Rule KIF list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         // TODO: Implement KB-scoped rules. Currently adds to global context.
         var r = Rule.parseRule(Cog.id(ID_PREFIX_RULE), ruleForm, 1.0, testKbId); // Rule is tagged with testKbId, but context.addRule is global
-        var added = context.addRule(r);
-        return added;
+        return context.addRule(r);
     }
 
     private Object executeRemoveRuleFormAction(TestAction action) {
         if (!(action.payload instanceof Term.Lst ruleForm))
             throw new IllegalArgumentException("Invalid payload for removeRuleForm: Expected Rule KIF list. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         // TODO: Implement KB-scoped rules. Currently removes from global context.
-        var removed = context.removeRule(ruleForm);
-        return removed;
+        return context.removeRule(ruleForm);
     }
 
     private Object executeRetractAction(TestAction action) {
@@ -823,10 +821,8 @@ abstract class AbstractTest {
                         Optional.of("Internal error: Unknown expectation type '" + expected.type + "' passed to checkSingleExpectation."); // Should be caught by parseExpectation
             };
 
-            if (failureReason.isPresent()) {
-                // This is an expectation failure
-                fail("Expectation '" + expected.type + " " + termValueToString(expected.value()) + "' failed: " + failureReason.get());
-            }
+            // This is an expectation failure
+            failureReason.ifPresent(s -> fail("Expectation '" + expected.type + " " + termValueToString(expected.value()) + "' failed: " + s));
 
         } catch (Exception e) {
             // Unexpected error during expectation check
@@ -866,7 +862,7 @@ abstract class AbstractTest {
 
         // Case 2: Expecting specific bindings
         // Ensure the list contains maps (check first element if not empty)
-        if (!expectedBindingsList.isEmpty() && !(expectedBindingsList.get(0) instanceof Map)) {
+        if (!(expectedBindingsList.getFirst() instanceof Map)) {
             return Optional.of("Internal error - expected value list does not contain Maps.");
         }
 
@@ -985,7 +981,7 @@ abstract class AbstractTest {
         var testTerm = parseSingleTerm(testKif);
 
         // Check if the top-level term is a valid (test ...) list
-        if (!(testTerm instanceof Term.Lst testList) || testList.terms.isEmpty() || !testList.op().filter("test"::equals).isPresent()) {
+        if (!(testTerm instanceof Term.Lst testList) || testList.terms.isEmpty() || testList.op().filter("test"::equals).isEmpty()) {
             fail("Top-level term is not a valid (test ...) list: " + testTerm.toKif());
             return; // Exit if parsing fails
         }

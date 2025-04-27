@@ -28,7 +28,7 @@ public class RetractTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Retracts an assertion from the knowledge base by its ID.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("assertion_id") String assertionId) {
+    public CompletableFuture<String> retract(@dev.langchain4j.agent.tool.P("assertion_id") String assertionId) {
         return CompletableFuture.supplyAsync(() -> {
             if (assertionId == null || assertionId.isBlank()) {
                 throw new ToolExecutionException("Assertion ID is required.");
@@ -47,6 +47,6 @@ public class RetractTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'assertion_id' parameter."));
         }
 
-        return execute(assertionId);
+        return retract(assertionId);
     }
 }

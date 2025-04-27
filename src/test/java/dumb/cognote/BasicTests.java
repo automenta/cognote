@@ -176,15 +176,13 @@ public class BasicTests extends AbstractTest {
     void waitTimeoutExpectedFailure() {
         // This test is expected to fail due to the wait timing out.
         // We use assertThrows to verify that the action execution throws an exception.
-        assertThrows(RuntimeException.class, () -> {
-            runKifTest("""
-                    (test "Wait Timeout (Expected Failure)"
-                      (setup)
-                      (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1)))) ; Wait for 1 second
-                      (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail *if* the action didn't throw first
-                      (teardown))
-                    """);
-        }, "The wait action was expected to time out and throw an exception.");
+        assertThrows(RuntimeException.class, () -> runKifTest("""
+                (test "Wait Timeout (Expected Failure)"
+                  (setup)
+                  (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1)))) ; Wait for 1 second
+                  (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail *if* the action didn't throw first
+                  (teardown))
+                """), "The wait action was expected to time out and throw an exception.");
         // Note: The expectation check won't run because the action execution throws.
         // The failure is the exception from the action itself.
     }
@@ -208,25 +206,23 @@ public class BasicTests extends AbstractTest {
     void multipleExpectationFailures() {
         // This test is expected to fail because some expectations will not be met.
         // We use assertThrows to verify that the expectation checking throws an exception.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Multiple Expectation Failures"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B)))
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedAssertionExists (fact B)) ; PASS
-                        (expectedAssertionExists (fact C)) ; FAIL
-                        (expectedAssertionDoesNotExist (fact A)) ; FAIL
-                        (expectedKbSize 10) ; FAIL
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Multiple expectations were expected to fail.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Multiple Expectation Failures"
+                  (setup (assert (fact A)))
+                  (action (assert (fact B)))
+                  (expected
+                    (expectedAssertionExists (fact A)) ; PASS
+                    (expectedAssertionExists (fact B)) ; PASS
+                    (expectedAssertionExists (fact C)) ; FAIL
+                    (expectedAssertionDoesNotExist (fact A)) ; FAIL
+                    (expectedKbSize 10) ; FAIL
+                  )
+                  (teardown
+                    (retract (BY_KIF (fact A)))
+                    (retract (BY_KIF (fact B)))
+                  )
+                )
+                """), "Multiple expectations were expected to fail.");
     }
 
     @Test
@@ -334,41 +330,37 @@ public class BasicTests extends AbstractTest {
     @Test
     void testWithMissingActionSection() {
         // This test should fail because the 'action' section is missing.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Missing Action Section"
-                      (setup (assert (fact A)))
-                      (expected (expectedAssertionExists (fact A)))
-                      (teardown (retract (BY_KIF (fact A)))))
-                    """);
-        }, "Test was expected to fail due to missing action section.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Test with Missing Action Section"
+                  (setup (assert (fact A)))
+                  (expected (expectedAssertionExists (fact A)))
+                  (teardown (retract (BY_KIF (fact A)))))
+                """), "Test was expected to fail due to missing action section.");
     }
 
     @Test
     void testWithInvalidActionTerms() {
         // This test should fail during parsing of the action section.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Invalid Action Terms"
-                      (setup (assert (fact A)))
-                      (action
-                        (assert (fact B)) ; Valid
-                        (invalidActionType (arg1 arg2)) ; Invalid action type - Parsing Error
-                        (assert) ; Invalid assert payload size - Parsing Error
-                        (runTool (params name "log_message")) ; Invalid runTool params format - Parsing Error
-                        (query "not a list") ; Invalid query payload type - Parsing Error
-                      )
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS (from setup)
-                        (expectedAssertionExists (fact B)) ; PASS (from valid action)
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Test was expected to fail due to invalid action terms.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Test with Invalid Action Terms"
+                  (setup (assert (fact A)))
+                  (action
+                    (assert (fact B)) ; Valid
+                    (invalidActionType (arg1 arg2)) ; Invalid action type - Parsing Error
+                    (assert) ; Invalid assert payload size - Parsing Error
+                    (runTool (params name "log_message")) ; Invalid runTool params format - Parsing Error
+                    (query "not a list") ; Invalid query payload type - Parsing Error
+                  )
+                  (expected
+                    (expectedAssertionExists (fact A)) ; PASS (from setup)
+                    (expectedAssertionExists (fact B)) ; PASS (from valid action)
+                  )
+                  (teardown
+                    (retract (BY_KIF (fact A)))
+                    (retract (BY_KIF (fact B)))
+                  )
+                )
+                """), "Test was expected to fail due to invalid action terms.");
     }
 
     // --- Tests for Test Framework Error Conditions (Now JUnit Failures) ---
@@ -376,25 +368,23 @@ public class BasicTests extends AbstractTest {
     @Test
     void testWithInvalidExpectationTerms() {
         // This test should fail during parsing of the expectation section.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Test with Invalid Expectation Terms"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B)))
-                      (expected
-                        (expectedAssertionExists (fact A)) ; Valid
-                        (invalidExpectationType (arg1 arg2)) ; Invalid expectation type - Parsing Error
-                        (expectedResult) ; Invalid expectedResult payload size - Parsing Error
-                        (expectedBindings "not a list") ; Invalid expectedBindings payload type - Parsing Error
-                        (expectedKbSize (not an integer)) ; Invalid expectedKbSize value - Parsing Error
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Test was expected to fail due to invalid expectation terms.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Test with Invalid Expectation Terms"
+                  (setup (assert (fact A)))
+                  (action (assert (fact B)))
+                  (expected
+                    (expectedAssertionExists (fact A)) ; Valid
+                    (invalidExpectationType (arg1 arg2)) ; Invalid expectation type - Parsing Error
+                    (expectedResult) ; Invalid expectedResult payload size - Parsing Error
+                    (expectedBindings "not a list") ; Invalid expectedBindings payload type - Parsing Error
+                    (expectedKbSize (not an integer)) ; Invalid expectedKbSize value - Parsing Error
+                  )
+                  (teardown
+                    (retract (BY_KIF (fact A)))
+                    (retract (BY_KIF (fact B)))
+                  )
+                )
+                """), "Test was expected to fail due to invalid expectation terms.");
     }
 
     @ParameterizedTest
@@ -455,42 +445,38 @@ public class BasicTests extends AbstractTest {
     @Test
     void expectationErrorExpectedBindingsOnNonQuery() {
         // This test should fail because expectedBindings is used on a non-query action result.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Expectation Error: ExpectedBindings on NonQuery"
-                      (setup (assert (fact A)))
-                      (action (assert (fact B))) ; Not a query
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedBindings (((?X A)))) ; FAIL - actionResult is not a Query Answer
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                        (retract (BY_KIF (fact B)))
-                      )
-                    )
-                    """);
-        }, "Expectation 'expectedBindings' was expected to fail on non-query result.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Expectation Error: ExpectedBindings on NonQuery"
+                  (setup (assert (fact A)))
+                  (action (assert (fact B))) ; Not a query
+                  (expected
+                    (expectedAssertionExists (fact A)) ; PASS
+                    (expectedBindings (((?X A)))) ; FAIL - actionResult is not a Query Answer
+                  )
+                  (teardown
+                    (retract (BY_KIF (fact A)))
+                    (retract (BY_KIF (fact B)))
+                  )
+                )
+                """), "Expectation 'expectedBindings' was expected to fail on non-query result.");
     }
 
     @Test
     void expectationErrorExpectedToolResultOnNonTool() {
         // This test should fail because expectedToolResult is used on a non-tool action result.
-        assertThrows(AssertionFailedError.class, () -> {
-            runKifTest("""
-                    (test "Expectation Error: ExpectedToolResult on NonTool"
-                      (setup (assert (fact A)))
-                      (action (query (fact ?X))) ; Not a tool run (result is Cog.Answer)
-                      (expected
-                        (expectedAssertionExists (fact A)) ; PASS
-                        (expectedToolResult "abc") ; FAIL - actionResult is not a String
-                      )
-                      (teardown
-                        (retract (BY_KIF (fact A)))
-                      )
-                    )
-                    """);
-        }, "Expectation 'expectedToolResult' was expected to fail on non-tool result.");
+        assertThrows(AssertionFailedError.class, () -> runKifTest("""
+                (test "Expectation Error: ExpectedToolResult on NonTool"
+                  (setup (assert (fact A)))
+                  (action (query (fact ?X))) ; Not a tool run (result is Cog.Answer)
+                  (expected
+                    (expectedAssertionExists (fact A)) ; PASS
+                    (expectedToolResult "abc") ; FAIL - actionResult is not a String
+                  )
+                  (teardown
+                    (retract (BY_KIF (fact A)))
+                  )
+                )
+                """), "Expectation 'expectedToolResult' was expected to fail on non-tool result.");
     }
 
 

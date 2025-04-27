@@ -1,5 +1,6 @@
 package dumb.cognote.tool;
 
+import dev.langchain4j.agent.tool.P;
 import dumb.cognote.Cog;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
@@ -28,10 +29,10 @@ public class QueryTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Runs a KIF query against the knowledge base. Supports ASK_BINDINGS, ASK_TRUE_FALSE, and ACHIEVE_GOAL query types. Returns a JSON object with status and bindings.")
-    public CompletableFuture<String> execute(
-            @dev.langchain4j.agent.tool.P("query_type") String queryTypeStr,
-            @dev.langchain4j.agent.tool.P("kif_pattern") String kifPattern,
-            @dev.langchain4j.agent.tool.P("target_kb_id") String targetKbId) {
+    public CompletableFuture<String> query(
+            @P("query_type") String queryTypeStr,
+            @P("kif_pattern") String kifPattern,
+            @P("target_kb_id") String targetKbId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
@@ -78,6 +79,6 @@ public class QueryTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'kif_pattern' parameter."));
         }
 
-        return execute(queryTypeStr, kifPattern, targetKbId);
+        return query(queryTypeStr, kifPattern, targetKbId);
     }
 }

@@ -1,5 +1,6 @@
 package dumb.cognote;
 
+import dumb.cognote.Term.Atom;
 import org.json.JSONObject;
 
 import java.util.Optional;
@@ -11,8 +12,8 @@ import java.util.function.DoubleBinaryOperator;
 import java.util.function.Function;
 
 import static dumb.cognote.Log.message;
-import static dumb.cognote.ProtocolConstants.DIALOGUE_TYPE_TEXT_INPUT;
 import static dumb.cognote.ProtocolConstants.DIALOGUE_RESPONSE_KEY_TEXT;
+import static dumb.cognote.ProtocolConstants.DIALOGUE_TYPE_TEXT_INPUT;
 import static java.util.Optional.ofNullable;
 
 public class Op {
@@ -20,7 +21,7 @@ public class Op {
     interface Operator {
         String id();
 
-        Term.Atom pred();
+        Atom pred();
 
         CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context);
 
@@ -28,24 +29,24 @@ public class Op {
     }
 
     public static class Operators {
-        private final ConcurrentMap<Term.Atom, Operator> ops = new ConcurrentHashMap<>();
+        private final ConcurrentMap<Atom, Operator> ops = new ConcurrentHashMap<>();
 
         void add(Operator operator) {
             ops.put(operator.pred(), operator);
             message("Registered operator: " + operator.pred().toKif());
         }
 
-        Optional<Operator> get(Term.Atom predicate) {
+        Optional<Operator> get(Atom predicate) {
             return ofNullable(ops.get(predicate));
         }
 
         public void addBuiltin() {
             BiFunction<Term.Lst, DoubleBinaryOperator, Optional<Term>> numeric = (args, op) -> {
-                if (args.size() == 3 && args.get(1) instanceof Term.Atom && args.get(2) instanceof Term.Atom) {
+                if (args.size() == 3 && args.get(1) instanceof Atom && args.get(2) instanceof Atom) {
                     try {
-                        var value1 = ((Term.Atom) args.get(1)).value();
-                        var value2 = ((Term.Atom) args.get(2)).value();
-                        return Optional.of(Term.Atom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
+                        var value1 = ((Atom) args.get(1)).value();
+                        var value2 = ((Atom) args.get(2)).value();
+                        return Optional.of(Atom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
                     } catch (NumberFormatException e) {
                         // Ignore if parsing fails
                     }
@@ -53,37 +54,37 @@ public class Op {
                 return Optional.empty();
             };
             BiFunction<Term.Lst, Cog.DoubleDoublePredicate, Optional<Term>> comparison = (args, op) -> {
-                if (args.size() == 3 && args.get(1) instanceof Term.Atom && args.get(2) instanceof Term.Atom) {
+                if (args.size() == 3 && args.get(1) instanceof Atom && args.get(2) instanceof Atom) {
                     try {
-                        var value1 = ((Term.Atom) args.get(1)).value();
-                        var value2 = ((Term.Atom) args.get(2)).value();
-                        return Optional.of(Term.Atom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
+                        var value1 = ((Atom) args.get(1)).value();
+                        var value2 = ((Atom) args.get(2)).value();
+                        return Optional.of(Atom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
                     } catch (NumberFormatException e) {
                         // Ignore if parsing fails
                     }
                 }
                 return Optional.empty();
             };
-            add(new Op.BasicOperator(Term.Atom.of("+"), args -> numeric.apply(args, Double::sum)));
-            add(new Op.BasicOperator(Term.Atom.of("-"), args -> numeric.apply(args, (a, b) -> a - b)));
-            add(new Op.BasicOperator(Term.Atom.of("*"), args -> numeric.apply(args, (a, b) -> a * b)));
-            add(new Op.BasicOperator(Term.Atom.of("/"), args -> numeric.apply(args, (a, b) -> b == 0 ? Double.NaN : a / b)));
-            add(new Op.BasicOperator(Term.Atom.of("<"), args -> comparison.apply(args, (a, b) -> a < b)));
-            add(new Op.BasicOperator(Term.Atom.of(">"), args -> comparison.apply(args, (a, b) -> a > b)));
-            add(new Op.BasicOperator(Term.Atom.of("<="), args -> comparison.apply(args, (a, b) -> a <= b)));
-            add(new Op.BasicOperator(Term.Atom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
+            add(new Op.BasicOperator(Atom.of("+"), args -> numeric.apply(args, Double::sum)));
+            add(new Op.BasicOperator(Atom.of("-"), args -> numeric.apply(args, (a, b) -> a - b)));
+            add(new Op.BasicOperator(Atom.of("*"), args -> numeric.apply(args, (a, b) -> a * b)));
+            add(new Op.BasicOperator(Atom.of("/"), args -> numeric.apply(args, (a, b) -> b == 0 ? Double.NaN : a / b)));
+            add(new Op.BasicOperator(Atom.of("<"), args -> comparison.apply(args, (a, b) -> a < b)));
+            add(new Op.BasicOperator(Atom.of(">"), args -> comparison.apply(args, (a, b) -> a > b)));
+            add(new Op.BasicOperator(Atom.of("<="), args -> comparison.apply(args, (a, b) -> a <= b)));
+            add(new Op.BasicOperator(Atom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
 
             // Add the new (ask-user ?Prompt) operator
-            add(new DialogueOperator(Term.Atom.of(ProtocolConstants.OP_ASK_USER)));
+            add(new DialogueOperator(Atom.of(ProtocolConstants.OP_ASK_USER)));
         }
     }
 
     static class BasicOperator implements Operator {
         private final String id = Cog.id(Logic.ID_PREFIX_OPERATOR);
-        private final Term.Atom pred;
+        private final Atom pred;
         private final Function<Term.Lst, Optional<Term>> function;
 
-        BasicOperator(Term.Atom pred, Function<Term.Lst, Optional<Term>> function) {
+        BasicOperator(Atom pred, Function<Term.Lst, Optional<Term>> function) {
             this.pred = pred;
             this.function = function;
         }
@@ -94,7 +95,7 @@ public class Op {
         }
 
         @Override
-        public Term.Atom pred() {
+        public Atom pred() {
             return pred;
         }
 
@@ -115,9 +116,9 @@ public class Op {
 
     static class DialogueOperator implements Operator {
         private final String id = Cog.id(Logic.ID_PREFIX_OPERATOR);
-        private final Term.Atom pred;
+        private final Atom pred;
 
-        DialogueOperator(Term.Atom pred) {
+        DialogueOperator(Atom pred) {
             this.pred = pred;
         }
 
@@ -127,31 +128,30 @@ public class Op {
         }
 
         @Override
-        public Term.Atom pred() {
+        public Atom pred() {
             return pred;
         }
 
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
-            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom promptAtom)) {
+            if (arguments.size() != 2 || !(arguments.get(1) instanceof Atom(String value))) {
                 Log.error("Invalid arguments for (ask-user): Expected (ask-user \"Prompt string\"). Found: " + arguments.toKif());
                 return CompletableFuture.completedFuture(null); // Fail the goal if arguments are invalid
             }
 
-            var prompt = promptAtom.value();
             var dialogueId = Cog.id("dialogue_");
             var options = new JSONObject(); // No specific options for text input for now
             var dialogueContext = new JSONObject(); // Add context if needed, e.g., related assertion IDs
 
             // Request dialogue from the UI via DialogueManager
-            return context.dialogueManager().requestDialogue(dialogueId, DIALOGUE_TYPE_TEXT_INPUT, prompt, options, dialogueContext)
+            return context.dialogueManager().requestDialogue(dialogueId, DIALOGUE_TYPE_TEXT_INPUT, value, options, dialogueContext)
                     .thenApply(responseJson -> {
                         // Process the response from the UI
                         var responseText = responseJson.optString(DIALOGUE_RESPONSE_KEY_TEXT, null);
                         if (responseText != null) {
                             // Convert the response text into a KIF Term (e.g., a string atom)
                             // This term will be unified with the variable in the original goal (if any)
-                            return Term.Atom.of(responseText);
+                            return (Term) Atom.of(responseText);
                         } else {
                             Log.warning("Dialogue response for " + dialogueId + " did not contain expected key: " + DIALOGUE_RESPONSE_KEY_TEXT);
                             return null; // Dialogue failed or user cancelled/provided no text

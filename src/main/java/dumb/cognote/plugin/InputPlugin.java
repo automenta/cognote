@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Set;
 
 import static dumb.cognote.Cog.DEFAULT_RULE_PRIORITY;
-import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 
 public class InputPlugin extends Plugin.BasePlugin {
@@ -70,8 +69,10 @@ public class InputPlugin extends Plugin.BasePlugin {
                             }
 
                             // Check for query_type parameter
-                            if (parameters.containsKey("query_type") && parameters.get("query_type") instanceof Term.Atom typeAtom) {
-                                queryTypeStr = typeAtom.value();
+                            if (parameters.containsKey("query_type") && parameters.get("query_type") instanceof Term.Atom(
+                                    String value
+                            )) {
+                                queryTypeStr = value;
                                 parameters = new java.util.HashMap<>(parameters);
                                 parameters.remove("query_type"); // Remove from params map passed to reasoner
                             }

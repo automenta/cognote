@@ -35,7 +35,7 @@ public class SummarizeTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Summarizes the content of a specific note.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> summarize(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Summarizing note: " + noteId));
 
@@ -81,6 +81,6 @@ public class SummarizeTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return summarize(noteId);
     }
 }

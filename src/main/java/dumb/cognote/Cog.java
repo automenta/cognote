@@ -1,12 +1,9 @@
 package dumb.cognote;
 
-import dumb.cognote.plugin.*;
-import dumb.cognote.tool.*;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Map;
@@ -17,7 +14,6 @@ import java.util.function.Consumer;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
-import static dumb.cognote.Logic.Cognition;
 import static dumb.cognote.Logic.RetractionType;
 import static java.util.Objects.requireNonNull;
 
@@ -43,27 +39,24 @@ public class Cog {
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
     private static final int PORT = 8080; // Default port, can be overridden in main
     public final Events events;
-    public final Cognition context;
+
     public final LM lm;
     public final Tools tools;
 
-    //    public final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     public final ScheduledExecutorService mainExecutor =
             Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
 
     public final DialogueManager dialogueManager;
     final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
-    final Plugins plugins;
-    protected Reason.ReasonerManager reasonerManager; // Changed to protected
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
     public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
+    protected Reason.ReasonerManager reasonerManager; // Changed to protected
 
     public Cog() {
-        // Initialize core components that don't depend on config/plugins yet
-        this.mainExecutor = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
+
         this.events = new Events(mainExecutor);
         Log.setEvents(this.events);
 
@@ -73,9 +66,7 @@ public class Cog {
 
         // Context, ReasonerManager, and Plugins are initialized in CogNote constructor
         // because they depend on configuration loaded there.
-        this.context = null; // Will be set in CogNote
         this.reasonerManager = null; // Will be set in CogNote
-        this.plugins = null; // Will be set in CogNote
 
         // Shutdown hook is added in CogNote main or constructor
         // Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
@@ -113,41 +104,6 @@ public class Cog {
         return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE);
     }
 
-    // Made protected so CogNote can override and add its specific plugins/tools
-    protected void setupDefaultPlugins() {
-        // Add core plugins
-        plugins.loadPlugin(new InputPlugin());
-        plugins.loadPlugin(new RetractionPlugin());
-        plugins.loadPlugin(new TmsPlugin());
-
-        // Add task/goal plugins
-        plugins.loadPlugin(new TaskDecomposePlugin());
-
-        // Add UI/Protocol plugins (WebSocketPlugin is registered in CogNote main)
-        plugins.loadPlugin(new StatusUpdaterPlugin());
-
-        // Add reasoner plugins
-        reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
-
-        // Add tools
-        tools.register(new AssertKIFTool(this));
-        tools.register(new GetNoteTextTool(this));
-        tools.register(new FindAssertionsTool(this));
-        tools.register(new RetractTool(this));
-        tools.register(new QueryTool(this));
-        tools.register(new LogMessageTool(this)); // Pass cog to LogMessageTool
-
-        // Add LLM-based tools
-        tools.register(new SummarizeTool(this));
-        tools.register(new IdentifyConceptsTool(this));
-        tools.register(new GenerateQuestionsTool(this));
-        tools.register(new TextToKifTool(this));
-        tools.register(new DecomposeGoalTool(this));
-    }
-
     public void start() {
         if (!running.get()) {
             error("Cannot restart a stopped system.");
@@ -156,28 +112,14 @@ public class Cog {
         paused.set(true);
         status("Initializing");
 
-        // Initialize built-in operators
-        context.operators.addBuiltin();
-
         // Plugins and Reasoners are loaded in the constructor now
         // setupDefaultPlugins(); // Called in constructor
 
         // Initialize plugins and reasoners
-        plugins.initializeAll();
         reasonerManager.initializeAll();
 
         // Reconfigure LM after plugins/tools are registered
         lm.reconfigure();
-
-        // Add notes that were loaded as ACTIVE to the active context
-        // This logic is in CogNote.start()
-
-        // Ensure Global KB is active
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-
-
-        status("Paused (Ready to Start)");
-        message("System initialized and paused.");
     }
 
     public void stop() {
@@ -194,7 +136,6 @@ public class Cog {
         lm.activeLlmTasks.clear();
         dialogueManager.clear();
 
-        plugins.shutdownAll();
         reasonerManager.shutdownAll();
 
 
@@ -222,7 +163,6 @@ public class Cog {
 
     public void status(String status) {
         this.status = status;
-        events.emit(new SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
     public void loadRules(String filename) throws IOException {
@@ -285,29 +225,28 @@ public class Cog {
     }
 
     public Answer querySync(Query query) {
-        var resultFuture = new CompletableFuture<Answer>();
+        var answerFuture = new CompletableFuture<Answer>();
+
+        var queryID = query.id();
 
         // Create a temporary listener for this specific query ID
-        Consumer<CogEvent> listener = event -> {
-            if (event instanceof Answer.AnswerEvent answerEvent) {
-                var result = answerEvent.result();
-                if (result.query().equals(query.id())) {
-                    resultFuture.complete(result);
-                }
+        Consumer<CogEvent> listener = e -> {
+            if (e instanceof Answer.AnswerEvent(Answer a)) {
+                if (a.query().equals(queryID)) answerFuture.complete(a);
             }
         };
 
         // Add the listener. Need to cast to the raw type because of the generic Consumer<T>
         @SuppressWarnings("unchecked")
-        var queryResultListeners = events.listeners.computeIfAbsent(Answer.AnswerEvent.class, k -> new CopyOnWriteArrayList<>());
-        queryResultListeners.add(listener);
+        var listeners = events.listeners.computeIfAbsent(Answer.AnswerEvent.class, k -> new CopyOnWriteArrayList<>());
+        listeners.add(listener);
 
         try {
             // Emit the query event
             events.emit(new Query.QueryEvent(query));
 
             // Wait for the result with a timeout
-            return resultFuture.get(60, TimeUnit.SECONDS); // Use a reasonable timeout
+            return answerFuture.get(60, TimeUnit.SECONDS); // Use a reasonable timeout
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -319,13 +258,13 @@ public class Cog {
             throw new RuntimeException("Query execution timed out after 60 seconds", e);
         } finally {
             // Always remove the temporary listener
-            queryResultListeners.remove(listener);
+            listeners.remove(listener);
         }
     }
 
     public enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
 
-    enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}
+    public enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}
 
     public enum QueryStatus {SUCCESS, FAILURE, TIMEOUT, ERROR}
 

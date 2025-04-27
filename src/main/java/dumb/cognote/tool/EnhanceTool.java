@@ -35,7 +35,7 @@ public class EnhanceTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Uses the LLM to enhance or expand upon the content of a specific note.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> enhance(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Enhancing note: " + noteId));
 
@@ -69,7 +69,7 @@ public class EnhanceTool implements Tool {
                             dumb.cognote.Term.Atom.of(noteId),
                             dumb.cognote.Term.Atom.of(enhancedText) // Could assert the new text or just a timestamp/tool ID
                     );
-                     cog.events.emit(new Cog.ExternalInputEvent(enhancementKif, "tool:enhance_note", noteId));
+                    cog.events.emit(new Cog.ExternalInputEvent(enhancementKif, "tool:enhance_note", noteId));
 
 
                     return "Note '" + noteId + "' enhanced.";
@@ -89,6 +89,6 @@ public class EnhanceTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return enhance(noteId);
     }
 }

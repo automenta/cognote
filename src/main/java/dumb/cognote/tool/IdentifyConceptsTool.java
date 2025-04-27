@@ -36,7 +36,7 @@ public class IdentifyConceptsTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Identifies key concepts, entities, or topics mentioned in the content of a note. Returns a JSON array of concept strings.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> identifyConcepts(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
 
@@ -97,6 +97,6 @@ public class IdentifyConceptsTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return identifyConcepts(noteId);
     }
 }

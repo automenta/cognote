@@ -31,7 +31,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private final Map<String, BiConsumer<WebSocket, JSONObject>> feedbackHandlers = new ConcurrentHashMap<>();
     private WebSocketServer server;
 
-    public WebSocketPlugin(InetSocketAddress address, Cog cog) {
+    public WebSocketPlugin(InetSocketAddress address, CogNote cog) {
         this.address = address;
         this.cog = cog; // Initialize cog here as well, though BasePlugin.start will also set it
         setupCommandHandlers();
@@ -243,7 +243,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 .put("payload", new JSONObject()
                         .put("systemStatus", new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount()).toJson())
                         .put("configuration", new Cog.Configuration(cog).toJson())
-                        .put("notes", new JSONArray(((CogNote) cog).getAllNotes().stream().map(Note::toJson).toList()))
+                        .put("notes", new JSONArray(cog.getAllNotes().stream().map(Note::toJson).toList()))
                         .put("assertions", new JSONArray(cog.context.truth.getAllActiveAssertions().stream().map(Assertion::toJson).toList()))
                         .put("rules", new JSONArray(cog.context.rules().stream().map(Rule::toJson).toList()))
                         .put("tasks", new JSONArray())); // Tasks can be an empty array initially
@@ -281,7 +281,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
 
         var kif = assertion.kif();
-        if (kif.size() != 3 || !kif.op().filter(PRED_UI_ACTION::equals).isPresent()) {
+        if (kif.size() != 3 || kif.op().filter(PRED_UI_ACTION::equals).isEmpty()) {
             logWarning("Invalid uiAction assertion format: " + kif.toKif());
             return;
         }
@@ -289,27 +289,26 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var typeTerm = kif.get(1);
         var dataTerm = kif.get(2);
 
-        if (!(typeTerm instanceof Term.Atom typeAtom) || !(dataTerm instanceof Term.Atom dataAtom)) {
+        if (!(typeTerm instanceof Term.Atom(String value)) || !(dataTerm instanceof Term.Atom(String value1))) {
             logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
             return;
         }
 
-        var uiActionType = typeAtom.value();
         JSONObject uiActionData = null;
         try {
             // Attempt to parse the data atom's value as JSON
-            uiActionData = new JSONObject(new JSONTokener(dataAtom.value()));
+            uiActionData = new JSONObject(new JSONTokener(value1));
         } catch (org.json.JSONException e) {
-            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataAtom.value());
+            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + value1);
             // If data is not valid JSON, send it as a string instead
-            uiActionData = new JSONObject().put("value", dataAtom.value());
+            uiActionData = new JSONObject().put("value", value1);
         }
 
         var signal = new JSONObject()
                 .put("type", SIGNAL_TYPE_UI_ACTION)
                 .put("id", UUID.randomUUID().toString())
                 .put("payload", new JSONObject()
-                        .put("uiActionType", uiActionType)
+                        .put("uiActionType", value)
                         .put("uiActionData", uiActionData));
 
         broadcast(signal.toString());
@@ -327,7 +326,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
         var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, text, Note.Status.IDLE);
-        ((CogNote) cog).addNote(newNote);
+        cog.addNote(newNote);
         sendSuccessResponse(conn, commandId, newNote.toJson(), "Note added.");
     }
 
@@ -338,7 +337,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             sendFailureResponse(conn, commandId, "Note ID is required.");
             return;
         }
-        ((CogNote) cog).removeNote(noteId);
+        cog.removeNote(noteId);
         sendSuccessResponse(conn, commandId, null, "Note removal requested.");
     }
 
@@ -349,7 +348,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             sendFailureResponse(conn, commandId, "Note ID is required.");
             return;
         }
-        ((CogNote) cog).startNote(noteId);
+        cog.startNote(noteId);
         sendSuccessResponse(conn, commandId, null, "Note start requested.");
     }
 
@@ -360,7 +359,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             sendFailureResponse(conn, commandId, "Note ID is required.");
             return;
         }
-        ((CogNote) cog).pauseNote(noteId);
+        cog.pauseNote(noteId);
         sendSuccessResponse(conn, commandId, null, "Note pause requested.");
     }
 
@@ -371,7 +370,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             sendFailureResponse(conn, commandId, "Note ID is required.");
             return;
         }
-        ((CogNote) cog).completeNote(noteId);
+        cog.completeNote(noteId);
         sendSuccessResponse(conn, commandId, null, "Note completion requested.");
     }
 
@@ -465,7 +464,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     private void handleClearAllCommand(WebSocket conn, JSONObject payload) {
         var commandId = payload.optString("id");
-        ((CogNote) cog).clear();
+        cog.clear();
         sendSuccessResponse(conn, commandId, null, "Clear all requested.");
     }
 
@@ -476,7 +475,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             sendFailureResponse(conn, commandId, "configJsonText parameter is required.");
             return;
         }
-        if (((CogNote) cog).updateConfig(configJsonText)) {
+        if (cog.updateConfig(configJsonText)) {
             sendSuccessResponse(conn, commandId, new Cog.Configuration(cog).toJson(), "Configuration updated.");
         } else {
             sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
@@ -491,7 +490,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     private void handleSaveNotesCommand(WebSocket conn, JSONObject payload) {
         var commandId = payload.optString("id");
-        ((CogNote) cog).save();
+        cog.save();
         sendSuccessResponse(conn, commandId, null, "Notes saved.");
     }
 
@@ -544,7 +543,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        ((CogNote) cog).updateNoteText(noteId, text);
+        cog.updateNoteText(noteId, text);
 
         // Assert the feedback into the user feedback KB
         var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TEXT), Term.Atom.of(noteId), Term.Atom.of(text));
@@ -564,7 +563,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        ((CogNote) cog).updateNoteTitle(noteId, title);
+        cog.updateNoteTitle(noteId, title);
 
         // Assert the feedback into the user feedback KB
         var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TITLE), Term.Atom.of(noteId), Term.Atom.of(title));

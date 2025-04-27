@@ -34,7 +34,7 @@ public class DecomposeGoalTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Decomposes a high-level goal into a sequence of smaller, actionable steps or sub-goals, expressed as a KIF list.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("goal") String goal, @dev.langchain4j.agent.tool.P("context") String context, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> decomposeGoal(@dev.langchain4j.agent.tool.P("goal") String goal, @dev.langchain4j.agent.tool.P("context") String context, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Decomposing goal: " + goal));
 
@@ -79,6 +79,6 @@ public class DecomposeGoalTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'goal' parameter."));
         }
 
-        return execute(goal, context, noteId);
+        return decomposeGoal(goal, context, noteId);
     }
 }

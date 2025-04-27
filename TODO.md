@@ -1,43 +1,40 @@
-Stage 2: Backend Logic Integration & Reasoning Hooks
+# Backend Logic Integration & Reasoning Hooks
 
-• Goal: Connect the protocol layer to core cognitive functions, enabling backend-driven UI actions and dialogue
-requests.                        
-•
-Tasks:                                                                                                                                         
+## Connect the protocol layer to core cognitive functions, enabling backend-driven UI actions and dialogue requests.
+
 • Refine InputPlugin: Handle parsing of different top-level KIF forms (assertions, rules, queries, commands) from
-ExternalInputEvent and route
-them appropriately (commit assertion, add rule, emit QueryEvent,
+ExternalInputEvent and route them appropriately (commit assertion, add rule, emit QueryEvent,
 etc.).                                                                     
 • Integrate DialogueManager: Modify relevant backend logic (e.g., a tool, a reasoner step, or a dedicated plugin) to
-call                     
-DialogueManager.requestDialogue when user input is needed, passing necessary context and handling the returned
+call DialogueManager.requestDialogue when user input is needed, passing necessary context and handling the returned
 CompletableFuture.           
 • Implement UserFeedback processing: Create a plugin or add logic to an existing one that listens for assertions in
-KB_USER_FEEDBACK and      
-triggers corresponding backend actions (e.g., updating a note, asserting a new fact based on user
+KB_USER_FEEDBACK and triggers corresponding backend actions (e.g., updating a note, asserting a new fact based on user
 input).                                   
 • Implement UIAction assertion logic: Create a plugin or add logic to reasoners/plugins that asserts predicates into
-KB_UI_ACTIONS (e.g.,     
-(uiAction "highlight_text" "...")) based on backend conclusions or state
-changes.                                                           
+KB_UI_ACTIONS (e.g., (uiAction "highlight_text" "...")) based on backend conclusions or state changes.
+
+----
+
+# Backend Logic Integration & Reasoning Hooks
+
+## Connect the protocol layer to core cognitive functions, enabling backend-driven UI actions and dialogue requests.
+
 • Ensure Tool Execution: Verify all tools registered in Cog.setupDefaultPlugins are correctly invoked by
-WebSocketPlugin.handleRunToolCommand
-and their asynchronous results/errors are
+WebSocketPlugin.handleRunToolCommand and their asynchronous results/errors are
 handled.                                                                                          
 • Verify Query Execution: Ensure WebSocketPlugin.handleRunQueryCommand correctly emits Query.QueryEvent and that the
-Answer.AnswerEvent is    
-broadcast back to the
-client.                                                                                                               
+Answer.AnswerEvent is broadcast back to the client.
 • Implement EnhanceTool: Provide a basic implementation for EnhanceTool or remove it if not part of the immediate
 plan.                       
 • Review Reasoner Interactions: Ensure reasoner plugins correctly use Reasoning context methods (getKb, rules, getTMS,
-operators,             
-getActiveNoteIds, tryCommit, isActiveContext) and emit derived assertions/rules/events.
+operators, getActiveNoteIds, tryCommit, isActiveContext) and emit derived assertions/rules/events.
 
-Stage 3: Client-Side Core Implementation (JS/TS)
+---- 
 
-• Goal: Build a reusable client library for connecting to the Cognote server and managing its
-state.                                             
+# Client-Side Core Implementation (JS)
+
+• Goal: Build a reusable client library for connecting to the Cognote server and managing its state.             
 •
 Tasks:                                                                                                                                         
 • Create CognoteClient class/module: Implement WebSocket connection, reconnection, and error
@@ -62,7 +59,7 @@ status.
 logic.                                               
 • Implement DialogueRequest handler: Receive dialogue_request signals and dispatch them to UI-specific logic.
 
-Stage 4: Client-Side UI Integration (Framework-Specific)
+# Stage 4: Client-Side UI Integration (Framework-Specific)
 
 • Goal: Build a user interface that visualizes the Cognote state and allows user interaction via the client
 core.                                
@@ -83,38 +80,35 @@ sendDialogueResponse.
 • Implement UI Action Display: Create logic to visually represent ui_action signals (e.g., highlighting text, showing
 notification banners).
 
-Stage 5: Refinement, Persistence, and Advanced Features
+# Refinement, Persistence, and Advanced Features
 
-• Goal: Enhance robustness, add security, and implement remaining complex
-features.                                                              
-•
-Tasks:                                                                                                                                         
-• Implement WebSocket Security: Add authentication/authorization handshake during
-connection.                                                 
+• Goal: Enhance robustness, add security, and implement remaining complex features.
+
 • Refine Serialization: Ensure complete and correct serialization/deserialization of all relevant data types, especially
-nested structures    
-like bindings in Answer and terms within
-assertions/rules.                                                                                  
-• Implement Client Targeting: Modify server-side ui_action and dialogue_request sending to target specific clients based
-on backend logic     
-(e.g., user session, note ownership). Update client to handle targeted
-signals.                                                             
+nested structures like bindings in Answer and terms within assertions/rules.
+
 • Implement Full Dialogue Management: Complete the integration between DialogueManager and backend tasks/reasoning,
-including handling        
-timeouts and cancellations
-gracefully.                                                                                                      
-• Implement Persistence for KB/Rules: Add saving/loading logic for assertions and rules (currently only notes are
-persisted).                 
-• Implement Task Serialization: Ensure task state is fully serialized for the initial_state
-payload.                                          
+including handling timeouts and cancellations gracefully.
+
+## Logging
+
 • Add Comprehensive Logging/Monitoring: Implement detailed logging on both server and client, potentially with remote
 logging capabilities.   
+• Structured Error Handling: Implement a more robust error handling mechanism beyond printing to System.err and
+returning strings.
+
+• Implement Client Targeting: Modify server-side ui_action and dialogue_request sending to target specific clients based
+on backend logic (e.g., user session, note ownership). Update client to handle targeted signals.
+
+# Persistence
+
+• Implement Persistence for KB/Rules: Add saving/loading logic for assertions and rules (currently only notes are
+persisted).
+• Implement Task Serialization: Ensure task state is fully serialized for the initial_state payload.
+
 • Write Tests: Add unit, integration, and end-to-end tests for key components and
 workflows.                                                  
 • Improve Documentation: Document the LMACP protocol in detail, the client library API, and the server architecture.
-
-• Structured Error Handling: Implement a more robust error handling mechanism beyond printing to System.err and
-returning strings.
 
 # Semantic Matching
 

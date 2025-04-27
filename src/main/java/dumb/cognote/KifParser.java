@@ -79,10 +79,9 @@ public class KifParser {
             if (Character.isWhitespace(c)) {
                 consumeChar();
             } else if (c == ';') {
-                consumeChar();
-                while (peek() != '\n' && peek() != -1) {
+                do {
                     consumeChar();
-                }
+                } while (peek() != '\n' && peek() != -1);
             } else {
                 return;
             }

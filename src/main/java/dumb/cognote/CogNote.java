@@ -7,7 +7,6 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -16,27 +15,23 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.Cognition;
-import static dumb.cognote.Logic.RetractionType;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public class CogNote extends Cog {
 
+    public final Cognition context;
+    final Plugins plugins;
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
+        super();
         // Initialize executors and events first
         // mainExecutor is initialized in Cog constructor
         // events is initialized in Cog constructor, using mainExecutor
@@ -58,8 +53,8 @@ public class CogNote extends Cog {
         this.reasonerManager = new Reason.ReasonerManager(events, context, dialogueManager);
         this.plugins = new Plugins(events, context);
 
-        // Setup default plugins, reasoners, and tools
-        setupDefaultPlugins();
+
+        initPlugins();
 
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
@@ -165,8 +160,10 @@ public class CogNote extends Cog {
         }
     }
 
-    @Override
-    protected void setupDefaultPlugins() {
+    /**
+     * Setup default plugins, reasoners, and tools
+     */
+    protected void initPlugins() {
         // Add core plugins
         plugins.loadPlugin(new InputPlugin());
         plugins.loadPlugin(new RetractionPlugin());
@@ -177,7 +174,7 @@ public class CogNote extends Cog {
         plugins.loadPlugin(new TaskDecomposePlugin());
 
         // Add UI/Protocol plugins (WebSocketPlugin is registered in main)
-        plugins.loadPlugin(new StatusUpdaterPlugin());
+        //plugins.loadPlugin(new StatusUpdaterPlugin());
 
         // Add reasoner plugins
         reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
@@ -202,6 +199,11 @@ public class CogNote extends Cog {
         tools.register(new EnhanceTool(this)); // Register the new EnhanceTool
     }
 
+    @Override
+    public void status(String status) {
+        super.status(status);
+        events.emit(new SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
+    }
 
     public Optional<Note> note(String id) {
         return ofNullable(notes.get(id));
@@ -332,7 +334,7 @@ public class CogNote extends Cog {
         // Retract from Global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
         // Clear rules
-        new HashSet<>(context.rules()).forEach(rule -> context.removeRule(rule));
+        new HashSet<>(context.rules()).forEach(context::removeRule);
 
         // Clear internal context state
         context.clear();
@@ -461,43 +463,22 @@ public class CogNote extends Cog {
 
     @Override
     public void start() {
-        if (!running.get()) {
-            error("Cannot restart a stopped system.");
-            return;
-        }
-        paused.set(true);
-        status("Initializing");
+        super.start();
 
-        // Initialize built-in operators
-        context.operators.addBuiltin();
-
-        // Plugins and Reasoners are loaded in the constructor now
-        // setupDefaultPlugins(); // Called in constructor
-
-        // Initialize plugins and reasoners
         plugins.initializeAll();
-        reasonerManager.initializeAll();
-
-        // Reconfigure LM after plugins/tools are registered
-        lm.reconfigure();
 
         // Add notes that were loaded as ACTIVE to the active context
         notes.values().stream()
                 .filter(note -> note.status == Note.Status.ACTIVE)
                 .forEach(note -> context.addActiveNote(note.id));
 
-        // Ensure Global KB is active
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-
-
-        status("Paused (Ready to Start)");
-        message("System initialized and paused.");
+        context.addActiveNote(GLOBAL_KB_NOTE_ID); // Ensure Global KB is active
     }
-
 
     @Override
     public void stop() {
         save();
+        plugins.shutdownAll();
         super.stop();
     }
 

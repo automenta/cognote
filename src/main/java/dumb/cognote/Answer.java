@@ -56,11 +56,6 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
             requireNonNull(result);
         }
 
-        @Override
-        public String assocNote() {
-            return null;
-        }
-
         public JSONObject toJson() {
             return new JSONObject()
                     .put("type", "event")

@@ -356,13 +356,13 @@ public class Logic {
         public final Op.Operators operators;
         public final Set<String> activeNoteIds = ConcurrentHashMap.newKeySet();
         public final Events events;
-        public final Cog cog;
+        public final CogNote cog;
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
 
 
-        Cognition(int globalKbCapacity, Events events, Truths truth, Op.Operators operators, Cog cog) {
+        Cognition(int globalKbCapacity, Events events, Truths truth, Op.Operators operators, CogNote cog) {
             this.cog = cog;
             this.events = requireNonNull(events);
             this.truth = requireNonNull(truth);

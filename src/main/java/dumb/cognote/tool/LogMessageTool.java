@@ -1,11 +1,7 @@
 package dumb.cognote.tool;
 
 
-import dumb.cognote.Cog;
-import dumb.cognote.Log;
-import dumb.cognote.ProtocolConstants;
-import dumb.cognote.Term;
-import dumb.cognote.Tool;
+import dumb.cognote.*;
 import org.json.JSONObject;
 
 import java.util.List;
@@ -16,9 +12,9 @@ import static dumb.cognote.Log.error;
 
 public class LogMessageTool implements Tool {
 
-    private final Cog cog; // Need access to cog to assert UI action
+    private final CogNote cog; // Need access to cog to assert UI action
 
-    public LogMessageTool(Cog cog) {
+    public LogMessageTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -33,7 +29,7 @@ public class LogMessageTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Logs a message to the system console/log and displays it in the UI. Use this for internal thoughts or debugging.")
-    public CompletableFuture<Void> execute(@dev.langchain4j.agent.tool.P("message") String message) {
+    public CompletableFuture<Void> logMessage(@dev.langchain4j.agent.tool.P("message") String message) {
         Log.message("LLM Tool Log: " + message);
 
         // Also assert a UI action to display the message in the UI
@@ -72,6 +68,6 @@ public class LogMessageTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'message' parameter."));
         }
 
-        return execute(message);
+        return logMessage(message);
     }
 }

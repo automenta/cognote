@@ -28,7 +28,7 @@ public class GetNoteTextTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Retrieves the plain text content of a specific note.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> getNoteText(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         return CompletableFuture.supplyAsync(() -> {
             var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
             return note.text;
@@ -44,6 +44,6 @@ public class GetNoteTextTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return getNoteText(noteId);
     }
 }

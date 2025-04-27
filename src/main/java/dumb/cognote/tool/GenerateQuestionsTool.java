@@ -36,7 +36,7 @@ public class GenerateQuestionsTool implements Tool {
     }
 
     @dev.langchain4j.agent.tool.Tool("Generates a list of questions based on the content of a note. Returns a JSON array of question strings.")
-    public CompletableFuture<String> execute(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
+    public CompletableFuture<String> generateQuestions(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
 
@@ -97,6 +97,6 @@ public class GenerateQuestionsTool implements Tool {
             return CompletableFuture.failedFuture(new ToolExecutionException("Missing 'note_id' parameter."));
         }
 
-        return execute(noteId);
+        return generateQuestions(noteId);
     }
 }
