@@ -11,7 +11,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -42,10 +41,6 @@ public class Reason {
 
         Truths getTMS() {
             return ctx.truth;
-        }
-
-        Op.Operators operators() {
-            return ctx.operators;
         }
 
         Set<String> getActiveNoteIds() {
@@ -262,7 +257,7 @@ public class Reason {
                             var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
                             ofNullable(Logic.Unifier.unify(pattern, newAssertion.getEffectiveTerm(), Map.of()))
                                     .ifPresent(bindings -> findMatchesRecursive(rule, rule.antecedents(), bindings, Set.of(newAssertion.id()), sourceKbId)
-                                            .forEach(match -> processDerivedAssertion(rule, match)));
+                                            .forEach(this::processDerivedAssertion));
                         }
                     }));
         }
@@ -278,32 +273,17 @@ public class Reason {
             var pattern = neg ? ((Term.Lst) clause).get(1) : clause;
             if (!(pattern instanceof Term.Lst)) return Stream.empty();
 
-            var currentKb = getKb(currentKbId);
-            var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
-
-            final Stream<Assertion>[] assertionStream = new Stream[]{currentKb.findUnifiableAssertions(pattern)};
-
-            context.getActiveNoteIds().stream()
-                    .filter(id -> !id.equals(currentKbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
-                    .map(this::getKb)
-                    .forEach(kb -> assertionStream[0] = Stream.concat(assertionStream[0], kb.findUnifiableAssertions(pattern)));
-
-            if (!currentKbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
-                assertionStream[0] = Stream.concat(assertionStream[0], globalKb.findUnifiableAssertions(pattern));
-            }
-
-            return assertionStream[0]
-                    .distinct()
-                    .filter(Assertion::isActive)
-                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
-                    .filter(c -> c.negated() == neg)
+            return getCogNoteContext().findAssertionsAcrossActiveKbs(pattern, a -> a.negated() == neg)
                     .flatMap(c -> ofNullable(Logic.Unifier.unify(pattern, c.getEffectiveTerm(), bindings))
                             .map(newB -> findMatchesRecursive(rule, nextRemaining, newB,
                                     Stream.concat(support.stream(), Stream.of(c.id())).collect(Collectors.toSet()), c.kb()))
                             .orElse(Stream.empty()));
         }
 
-        private void processDerivedAssertion(Rule rule, MatchResult result) {
+        private void processDerivedAssertion(MatchResult result) {
+            var rule = context.rules().stream().filter(r -> r.id().equals(result.ruleId())).findFirst().orElse(null);
+            if (rule == null) return;
+
             var consequent = Logic.Unifier.substFully(rule.consequent(), result.bindings());
             if (consequent == null) return;
 
@@ -331,7 +311,7 @@ public class Reason {
             conj.terms.stream().skip(1).forEach(term -> {
                 var simp = (term instanceof Term.Lst kl) ? Cognition.simplifyLogicalTerm(kl) : term;
                 if (simp instanceof Term.Lst c)
-                    processDerivedAssertion(new Rule(rule.id(), rule.form(), rule.antecedent(), c, rule.pri(), rule.antecedents(), rule.sourceNoteId()), result);
+                    processDerivedAssertion(new MatchResult(rule.id(), result.bindings(), result.supportIds()));
                 else if (!(simp instanceof Var))
                     error("Warning: Rule " + rule.id() + " derived (and ...) with non-list/non-var conjunct: " + term.toKif());
             });
@@ -408,23 +388,11 @@ public class Reason {
             tryCommit(pa, rule.id());
         }
 
-        record MatchResult(Map<Var, Term> bindings, Set<String> supportIds) {
+        record MatchResult(String ruleId, Map<Var, Term> bindings, Set<String> supportIds) {
         }
     }
 
     static class RewriteRuleReasonerPlugin extends BaseReasonerPlugin {
-        private static Rule renameRuleVariables(Rule rule, int depth) {
-            var suffix = "_d" + depth + "_" + Cog.id.incrementAndGet();
-            Map<Var, Term> renameMap = rule.form().vars().stream().collect(Collectors.toMap(Function.identity(), v -> Var.of(v.name() + suffix)));
-            var renamedForm = (Term.Lst) Unifier.subst(rule.form(), renameMap);
-            try {
-                return Rule.parseRule(rule.id() + suffix, renamedForm, rule.pri(), rule.sourceNoteId());
-            } catch (IllegalArgumentException e) {
-                error("Error renaming rule variables: " + e.getMessage());
-                return rule;
-            }
-        }
-
         @Override
         public Set<Cog.Feature> getSupportedFeatures() {
             return Set.of(Cog.Feature.REWRITE_RULES);
@@ -444,13 +412,7 @@ public class Reason {
             if (!newA.isActive() || (newA.type() != AssertionType.GROUND && newA.type() != AssertionType.SKOLEMIZED))
                 return;
 
-            var kb = getKb(kbId);
-            var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
-            var allActiveAssertions = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct()
-                    .flatMap(k -> k.getAllAssertions().stream())
-                    .filter(Assertion::isActive)
-                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
-                    .distinct().toList();
+            var allActiveAssertions = getCogNoteContext().getAllActiveAssertionsAcrossActiveKbs().toList();
 
             if (newA.isEquality() && newA.isOrientedEquality() && !newA.negated() && newA.kif().size() == 3) {
                 var lhs = newA.kif().get(1);
@@ -535,13 +497,7 @@ public class Reason {
 
             if (!newA.isActive()) return;
 
-            var kb = getKb(kbId);
-            var globalKb = context.getKb(Cog.GLOBAL_KB_NOTE_ID);
-            var allActiveAssertions = Stream.of(kb, globalKb).filter(Objects::nonNull).distinct()
-                    .flatMap(k -> k.getAllAssertions().stream())
-                    .filter(Assertion::isActive)
-                    .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
-                    .distinct().toList();
+            var allActiveAssertions = getCogNoteContext().getAllActiveAssertionsAcrossActiveKbs().toList();
 
             if ((newA.type() == AssertionType.GROUND || newA.type() == AssertionType.SKOLEMIZED) && newA.kif().get(0) instanceof Term.Atom pred) {
                 allActiveAssertions.stream()
@@ -554,9 +510,8 @@ public class Reason {
 
                 ofNullable(newA.getEffectiveTerm()).filter(Term.Lst.class::isInstance).map(Term.Lst.class::cast)
                         .flatMap(Term.Lst::op).map(Term.Atom::of)
-                        .ifPresent(pred -> allActiveAssertions.stream()
+                        .ifPresent(pred -> getCogNoteContext().getAllActiveAssertionsAcrossActiveKbs()
                                 .filter(g -> g.type() == AssertionType.GROUND || g.type() == AssertionType.SKOLEMIZED)
-                                .filter(g -> isActiveContext(g.kb()) || isActiveContext(g.sourceNoteId()))
                                 .filter(g -> g.getReferencedPredicates().contains(pred))
                                 .forEach(g -> tryInstantiate(newA, g)));
             }
@@ -657,30 +612,13 @@ public class Reason {
                 if (opOpt.isPresent()) {
                     var op = opOpt.get();
                     switch (op) {
-                        case KIF_OP_AND -> {
-                            if (goalList.size() > 1) {
-                                resultStream = proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack);
-                            } else {
-                                resultStream = Stream.of(bindings);
-                            }
-                        }
-                        case KIF_OP_OR -> {
-                            if (goalList.size() > 1) {
-                                resultStream = goalList.terms.stream().skip(1)
-                                        .flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack)));
-                            } else {
-                                resultStream = Stream.empty();
-                            }
-                        }
+                        case KIF_OP_AND -> resultStream = goalList.size() > 1 ? proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack) : Stream.of(bindings);
+                        case KIF_OP_OR -> resultStream = goalList.size() > 1 ? goalList.terms.stream().skip(1).flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack))) : Stream.empty();
                         case KIF_OP_NOT -> {
                             if (goalList.size() == 2) {
                                 var negatedGoal = goalList.get(1);
                                 var negatedResults = prove(negatedGoal, kbId, bindings, depth, new HashSet<>(proofStack)).toList();
-                                if (negatedResults.isEmpty()) {
-                                    resultStream = Stream.of(bindings);
-                                } else {
-                                    resultStream = Stream.empty();
-                                }
+                                resultStream = negatedResults.isEmpty() ? Stream.of(bindings) : Stream.empty();
                             } else {
                                 error("Warning: Invalid 'not' format in query: " + goalList.toKif());
                                 resultStream = Stream.empty();
@@ -693,20 +631,15 @@ public class Reason {
                                     var opResultFuture = opInstance.exe(goalList, context);
                                     var opResult = opResultFuture.join();
 
-                                    if (opResult == null)
-                                        return Stream.empty();
+                                    if (opResult == null) return Stream.empty();
 
                                     if (opResult instanceof Term.Atom(String value)) {
-                                        if ("true".equals(value)) {
-                                            return Stream.of(bindings);
-                                        } else if ("false".equals(value)) {
-                                            return Stream.empty();
-                                        }
+                                        if ("true".equals(value)) return Stream.of(bindings);
+                                        if ("false".equals(value)) return Stream.empty();
                                     }
 
                                     var u = Unifier.unify(currentGoal, opResult, bindings);
-                                    if (u != null)
-                                        return Stream.of(u);
+                                    if (u != null) return Stream.of(u);
 
                                 } catch (CompletionException | CancellationException e) {
                                     error("Operator execution exception for " + opInstance.pred().toKif() + ": " + e.getMessage());
@@ -726,21 +659,7 @@ public class Reason {
             if (resultStream.findAny().isEmpty()) {
                 resultStream = Stream.empty();
 
-                Stream<Assertion>[] factStream = new Stream[]{getKb(kbId).findUnifiableAssertions(currentGoal)};
-
-                context.getActiveNoteIds().stream()
-                        .filter(id -> !id.equals(kbId) && !id.equals(Cog.GLOBAL_KB_NOTE_ID))
-                        .map(this::getKb)
-                        .forEach(kb -> factStream[0] = Stream.concat(factStream[0], kb.findUnifiableAssertions(currentGoal)));
-
-                if (kbId == null || !kbId.equals(Cog.GLOBAL_KB_NOTE_ID)) {
-                    factStream[0] = Stream.concat(factStream[0], context.getKb(Cog.GLOBAL_KB_NOTE_ID).findUnifiableAssertions(currentGoal));
-                }
-
-                var factBindingsStream = factStream[0]
-                        .distinct()
-                        .filter(Assertion::isActive)
-                        .filter(a -> isActiveContext(a.kb()) || isActiveContext(a.sourceNoteId()))
+                var factBindingsStream = getCogNoteContext().findAssertionsAcrossActiveKbs(currentGoal, Assertion::isActive)
                         .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
 
                 var ruleStream = context.rules().stream()

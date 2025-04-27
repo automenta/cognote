@@ -362,7 +362,7 @@ public class Cog {
                             .put("isActive", isActive)
                             .put("kbId", kbId));
         }
-    }
+        }
 
     public record TemporaryAssertionEvent(Term.Lst temporaryAssertion, Map<Term.Var, Term> bindings,
                                           String noteId) implements NoteIDEvent {

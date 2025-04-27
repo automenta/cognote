@@ -18,7 +18,7 @@ public class BasicTests extends AbstractTest {
                 (test "Simple Fact Query"
                   (setup (assert (instance MyCat Cat)))
                   (action (query (instance ?X Cat)))
-                  (expected (expectedResult true) (expectedBindings (((?X MyCat))))) ; Corrected KIF for expectedBindings
+                  (expected (expectedResult true) (expectedBindings (((?X MyCat)))))
                   (teardown (retract (BY_KIF (instance MyCat Cat)))))
                 """);
     }
@@ -34,7 +34,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (instance ?X Cat)))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?X MyCat)) ((?X YourCat))))) ; Corrected KIF for expectedBindings (two solutions)
+                    (expectedBindings (((?X MyCat)) ((?X YourCat)))))
                   (teardown
                     (retract (BY_KIF (instance MyCat Cat)))
                     (retract (BY_KIF (instance YourCat Cat)))
@@ -48,7 +48,7 @@ public class BasicTests extends AbstractTest {
                 (test "Query Failure"
                   (setup (assert (instance MyDog Dog)))
                   (action (query (instance MyDog Cat)))
-                  (expected (expectedResult false) (expectedBindings ())) ; Expected empty bindings list (no solutions)
+                  (expected (expectedResult false) (expectedBindings ()))
                   (teardown (retract (BY_KIF (instance MyDog Dog)))))
                 """);
     }
@@ -60,7 +60,7 @@ public class BasicTests extends AbstractTest {
                   (setup
                     (addRule (=> (instance ?X Dog) (attribute ?X Canine)))
                     (assert (instance MyDog Dog)))
-                  (action (wait (assertionExists (attribute MyDog Canine)))) ; Wait for inference to happen
+                  (action (wait (assertionExists (attribute MyDog Canine))))
                   (expected
                     (expectedAssertionExists (attribute MyDog Canine)))
                   (teardown
@@ -97,7 +97,7 @@ public class BasicTests extends AbstractTest {
                   (teardown
                     (retract (BY_KIF (fact1 a)))
                     (retract (BY_KIF (fact2 b)))
-                    (retract (BY_KIF (fact3 c)))) ; Use BY_KIF for retracting assertions added by assert
+                    (retract (BY_KIF (fact3 c))))
                   )
                 """);
     }
@@ -123,11 +123,13 @@ public class BasicTests extends AbstractTest {
             }
         });
 
+        cog.addNote(new Note("note-dummy-for-tool", "Dummy Note", "; Define your tests here using the (test ...) format", Note.Status.IDLE));
+
         runKifTest("""
                 (test "Run LogMessageTool"
                   (setup)
                   (action (runTool (params (name "log_message2") (message "Hello from test!"))))
-                  (expected (expectedToolResult "Message logged."))
+                  (expected (expectedToolResultContains "; Define your tests here using the (test ...) format"))
                   (teardown))
                 """);
     }
@@ -168,8 +170,8 @@ public class BasicTests extends AbstractTest {
         assertThrows(RuntimeException.class, () -> runKifTest("""
                 (test "Wait Timeout (Expected Failure)"
                   (setup)
-                  (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1)))) ; Wait for 1 second
-                  (expected (expectedAssertionExists (this_will_never_exist))) ; This expectation should fail *if* the action didn't throw first
+                  (action (wait (assertionExists (this_will_never_exist)) (params (timeout 1))))
+                  (expected (expectedAssertionExists (this_will_never_exist)))
                   (teardown))
                 """), "The wait action was expected to time out and throw an exception.");
     }
@@ -181,9 +183,9 @@ public class BasicTests extends AbstractTest {
                   (setup)
                   (action
                     (assert (tempFact ToBeWaitedFor))
-                    (wait (assertionExists (tempFact ToBeWaitedFor)) (params (timeout 5))) ; Wait for 5 seconds max
+                    (wait (assertionExists (tempFact ToBeWaitedFor)) (params (timeout 5)))
                   )
-                  (expected (expectedAssertionExists (tempFact ToBeWaitedFor))) ; Expect it to exist after waiting
+                  (expected (expectedAssertionExists (tempFact ToBeWaitedFor)))
                   (teardown (retract (BY_KIF (tempFact ToBeWaitedFor))))
                 )
                 """);
@@ -196,11 +198,11 @@ public class BasicTests extends AbstractTest {
                   (setup (assert (fact A)))
                   (action (assert (fact B)))
                   (expected
-                    (expectedAssertionExists (fact A)) ; PASS
-                    (expectedAssertionExists (fact B)) ; PASS
-                    (expectedAssertionExists (fact C)) ; FAIL
-                    (expectedAssertionDoesNotExist (fact A)) ; FAIL
-                    (expectedKbSize 10) ; FAIL
+                    (expectedAssertionExists (fact A))
+                    (expectedAssertionExists (fact B))
+                    (expectedAssertionExists (fact C))
+                    (expectedAssertionDoesNotExist (fact A))
+                    (expectedKbSize 10)
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
@@ -220,10 +222,10 @@ public class BasicTests extends AbstractTest {
                   (action (query (?Rel Dog Animal)))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?Rel isA))))) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?Rel isA)))))
                   (teardown
                     (retract (BY_KIF (isA Dog Animal)))
-                    (retract (BY_KIF (isA Cat Animal))))) ; Corrected KIF syntax
+                    (retract (BY_KIF (isA Cat Animal)))))
                 """);
     }
 
@@ -238,7 +240,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (parent ?Child ?Parent)))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill))))) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?Child John) (?Parent Jane)) ((?Child Jane) (?Parent Jim)) ((?Child John) (?Parent Jill)))))
                   (teardown
                     (retract (BY_KIF (parent John Jane)))
                     (retract (BY_KIF (parent Jane Jim)))
@@ -256,7 +258,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (hasProperty (color ?C) Apple)))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?C Red)) ((?C Green))))) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?C Red)) ((?C Green)))))
                   (teardown
                     (retract (BY_KIF (hasProperty (color Red) Apple)))
                     (retract (BY_KIF (hasProperty (color Green) Apple)))))
@@ -273,7 +275,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (items (?X ?Y ?Z))))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C))))) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?X 1) (?Y 2) (?Z 3)) ((?X A) (?Y B) (?Z C)))))
                   (teardown
                     (retract (BY_KIF (items (1 2 3))))
                     (retract (BY_KIF (items (A B C))))))
@@ -289,7 +291,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (emptyList ?L)))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?L ())))) ) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?L ())))) )
                   (teardown
                     (retract (BY_KIF (emptyList ())))))
                 """);
@@ -305,7 +307,7 @@ public class BasicTests extends AbstractTest {
                   (action (query (sequence (a b ?Rest))))
                   (expected
                     (expectedResult true)
-                    (expectedBindings (((?Rest (c d))))) ) ; Corrected KIF for expectedBindings
+                    (expectedBindings (((?Rest (c d))))) )
                   (teardown
                     (retract (BY_KIF (sequence (a b c d))))
                     (retract (BY_KIF (sequence (x y z))))))
@@ -328,15 +330,15 @@ public class BasicTests extends AbstractTest {
                 (test "Test with Invalid Action Terms"
                   (setup (assert (fact A)))
                   (action
-                    (assert (fact B)) ; Valid
-                    (invalidActionType (arg1 arg2)) ; Invalid action type - Parsing Error
-                    (assert) ; Invalid assert payload size - Parsing Error
-                    (runTool (params name "log_message")) ; Invalid runTool params format - Parsing Error
-                    (query "not a list") ; Invalid query payload type - Parsing Error
+                    (assert (fact B))
+                    (invalidActionType (arg1 arg2))
+                    (assert)
+                    (runTool (params name "log_message"))
+                    (query "not a list")
                   )
                   (expected
-                    (expectedAssertionExists (fact A)) ; PASS (from setup)
-                    (expectedAssertionExists (fact B)) ; PASS (from valid action)
+                    (expectedAssertionExists (fact A))
+                    (expectedAssertionExists (fact B))
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
@@ -353,11 +355,11 @@ public class BasicTests extends AbstractTest {
                   (setup (assert (fact A)))
                   (action (assert (fact B)))
                   (expected
-                    (expectedAssertionExists (fact A)) ; Valid
-                    (invalidExpectationType (arg1 arg2)) ; Invalid expectation type - Parsing Error
-                    (expectedResult) ; Invalid expectedResult payload size - Parsing Error
-                    (expectedBindings "not a list") ; Invalid expectedBindings payload type - Parsing Error
-                    (expectedKbSize (not an integer)) ; Invalid expectedKbSize value - Parsing Error
+                    (expectedAssertionExists (fact A))
+                    (invalidExpectationType (arg1 arg2))
+                    (expectedResult)
+                    (expectedBindings "not a list")
+                    (expectedKbSize (not an integer))
                   )
                   (teardown
                     (retract (BY_KIF (fact A)))
@@ -388,15 +390,15 @@ public class BasicTests extends AbstractTest {
             "(wait (assertionExists (fact A)) (params (timeout \"abc\")))"
     })
     void actionErrorParsing(String actionKif) {
-        assertThrows(AssertionFailedError.class, () -> {
+        assertThrows(AssertionFailedError.class, () ->
             runKifTest(String.format("""
                     (test "Action Error Parsing: %s"
                       (setup)
                       (action %s)
                       (expected (expectedResult false))
                       (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif));
-        }, "Action '" + actionKif + "' was expected to fail during parsing.");
+                    """, actionKif.replace("\"", "\\\""), actionKif)),
+            "Action '" + actionKif + "' was expected to fail during parsing.");
     }
 
     @ParameterizedTest
@@ -406,15 +408,15 @@ public class BasicTests extends AbstractTest {
             "(runTool (params (name \"nonexistent_tool\")))"
     })
     void actionErrorExecution(String actionKif) {
-        assertThrows(RuntimeException.class, () -> {
+        assertThrows(RuntimeException.class, () ->
             runKifTest(String.format("""
                     (test "Action Error Execution: %s"
                       (setup)
                       (action %s)
                       (expected (expectedResult false))
                       (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif));
-        }, "Action '" + actionKif + "' was expected to fail during execution.");
+                    """, actionKif.replace("\"", "\\\""), actionKif)),
+            "Action '" + actionKif + "' was expected to fail during execution.");
     }
 
     @Test
@@ -465,14 +467,14 @@ public class BasicTests extends AbstractTest {
             "(expectedToolResultContains 123)"
     })
     void expectationErrorParsing(String expectationKif) {
-        assertThrows(AssertionFailedError.class, () -> {
+        assertThrows(AssertionFailedError.class, () ->
             runKifTest(String.format("""
                     (test "Expectation Error Parsing: %s"
                       (setup)
                       (action (query (a)))
                       (expected %s)
                       (teardown))
-                    """, expectationKif.replace("\"", "\\\""), expectationKif));
-        }, "Expectation '" + expectationKif + "' was expected to fail during parsing.");
+                    """, expectationKif.replace("\"", "\\\""), expectationKif)),
+            "Expectation '" + expectationKif + "' was expected to fail during parsing.");
     }
 }

@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.*;
@@ -338,6 +339,12 @@ public class Logic {
                 return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
             }
 
+            private Set<String> findCandidates(Term queryTerm, TriConsumer<Term, PathNode, Set<String>> findMethod) {
+                Set<String> candidates = new HashSet<>();
+                findMethod.accept(queryTerm, root, candidates);
+                return candidates;
+            }
+
             @FunctionalInterface
             private interface TriConsumer<T, U, V> {
                 void accept(T t, U u, V v);
@@ -459,18 +466,30 @@ public class Logic {
         }
 
         public Optional<Assertion> findAssertionByKif(Term.Lst kif, @Nullable String kbId) {
-            Stream<Knowledge> kbsToSearch;
-            if (kbId == null || GLOBAL_KB_NOTE_ID.equals(kbId)) {
-                kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream().filter(kb -> activeNoteIds.contains(kb.id)));
-            } else {
-                kbsToSearch = ofNullable(noteKbs.get(kbId)).filter(kb -> activeNoteIds.contains(kb.id)).stream();
-            }
+            return findAssertionsAcrossActiveKbs(kif, a -> kif.equals(a.kif())).findFirst();
+        }
+
+        public Stream<Assertion> findAssertionsAcrossActiveKbs(Term pattern, Predicate<Assertion> filter) {
+            Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
+                    .filter(kb -> activeNoteIds.contains(kb.id));
 
             return kbsToSearch
-                    .flatMap(kb -> kb.findInstancesOf(kif))
-                    .filter(a -> kif.equals(a.kif()))
-                    .findFirst();
+                    .flatMap(kb -> kb.findUnifiableAssertions(pattern))
+                    .filter(Assertion::isActive)
+                    .filter(a -> activeNoteIds.contains(a.kb()) || activeNoteIds.contains(a.sourceNoteId()))
+                    .filter(filter);
         }
+
+        public Stream<Assertion> getAllActiveAssertionsAcrossActiveKbs() {
+             Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
+                    .filter(kb -> activeNoteIds.contains(kb.id));
+
+            return kbsToSearch
+                    .flatMap(kb -> kb.getAllAssertions().stream())
+                    .filter(Assertion::isActive)
+                    .filter(a -> activeNoteIds.contains(a.kb()) || activeNoteIds.contains(a.sourceNoteId()));
+        }
+
 
         @Nullable
         public String commonSourceNodeId(Set<String> supportIds) {
