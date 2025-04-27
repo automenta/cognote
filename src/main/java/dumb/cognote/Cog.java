@@ -9,17 +9,17 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import static dumb.cognote.Logic.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static dumb.cognote.Logic.Cognition;
+import static dumb.cognote.Logic.RetractionType;
 import static java.util.Objects.requireNonNull;
-import static java.util.Optional.ofNullable;
 
 public class Cog {
 
@@ -31,6 +31,7 @@ public class Cog {
     public static final String CONFIG_NOTE_TITLE = "System Configuration";
     public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     public static final int MAX_WS_PARSE_PREVIEW = 100;
+    public static final double DEFAULT_RULE_PRIORITY = 1;
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
@@ -38,7 +39,6 @@ public class Cog {
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
-    public static final double DEFAULT_RULE_PRIORITY = 1;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
     private static final int PORT = 8080;
@@ -47,10 +47,9 @@ public class Cog {
     public final LM lm;
     public final Tools tools;
 
-//    public final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    //    public final ExecutorService mainExecutor = Executors.newVirtualThreadPerTaskExecutor();
     public final ScheduledExecutorService mainExecutor =
-        Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory())
-    ;
+            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
 
     public final DialogueManager dialogueManager;
     final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
@@ -604,7 +603,8 @@ public class Cog {
         }
     }
 
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options, JSONObject context) implements CogEvent {
+    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options,
+                                       JSONObject context) implements CogEvent {
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
             requireNonNull(requestType);

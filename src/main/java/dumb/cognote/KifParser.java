@@ -8,8 +8,6 @@ import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
 
-import static dumb.cognote.Log.error;
-
 public class KifParser {
     private static final int CONTEXT_BUFFER_SIZE = 50;
     private final Reader reader;

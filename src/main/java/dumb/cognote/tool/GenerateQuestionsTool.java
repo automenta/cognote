@@ -8,7 +8,6 @@ import dumb.cognote.Cog;
 import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,24 +41,24 @@ public class GenerateQuestionsTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
-            var systemMessage = SystemMessage.from("""
-                    You are a question generation assistant. Your task is to read the provided text and generate a list of insightful questions that could be answered based on the text, or that the text prompts you to ask.
-                    The output MUST be a JSON array of strings, where each string is a question.
-                    Example: ["What is the main topic?", "How does X relate to Y?", "What are the implications of Z?"]
-                    Output ONLY the JSON array, nothing else.
-                    """);
+                    var systemMessage = SystemMessage.from("""
+                            You are a question generation assistant. Your task is to read the provided text and generate a list of insightful questions that could be answered based on the text, or that the text prompts you to ask.
+                            The output MUST be a JSON array of strings, where each string is a question.
+                            Example: ["What is the main topic?", "How does X relate to Y?", "What are the implications of Z?"]
+                            Output ONLY the JSON array, nothing else.
+                            """);
 
-            var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text);
 
-            List<ChatMessage> history = new ArrayList<>();
-            history.add(systemMessage);
-            history.add(userMessage);
+                    List<ChatMessage> history = new ArrayList<>();
+                    history.add(systemMessage);
+                    history.add(userMessage);
 
-            return cog.lm.llmAsync(taskId, history, "Question Generation", noteId).join();
+                    return cog.lm.llmAsync(taskId, history, "Question Generation", noteId).join();
 
-        }, cog.events.exe)
+                }, cog.events.exe)
                 .thenApply(AiMessage::text)
                 .thenApply(jsonString -> {
                     try {

@@ -1,6 +1,5 @@
 package dumb.cognote;
 
-import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 
 import java.util.Map;
@@ -48,7 +47,8 @@ public class Events {
             listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "class"));
             switch (event) {
                 case Cog.AssertedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), aaEvent);
-                case Cog.TemporaryAssertionEvent taEvent -> handlePatternMatching(taEvent.temporaryAssertion(), taEvent);
+                case Cog.TemporaryAssertionEvent taEvent ->
+                        handlePatternMatching(taEvent.temporaryAssertion(), taEvent);
                 default -> {
                 }
             }
@@ -59,7 +59,7 @@ public class Events {
         patternListeners.forEach((pattern, listeners) -> {
             if (term instanceof Term.Lst termList) {
                 var bindings = Logic.Unifier.match(pattern, termList, Map.of());
-                if (bindings!=null)
+                if (bindings != null)
                     listeners.forEach(listener -> exeSafe(e -> listener.accept(e, bindings), event, "pattern"));
             }
         });
@@ -85,7 +85,8 @@ public class Events {
         }
     }
 
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options, JSONObject context) implements Cog.CogEvent {
+    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options,
+                                       JSONObject context) implements Cog.CogEvent {
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
             requireNonNull(requestType);

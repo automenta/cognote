@@ -8,7 +8,6 @@ import dumb.cognote.Cog;
 import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,24 +41,24 @@ public class IdentifyConceptsTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
-            var systemMessage = SystemMessage.from("""
-                    You are a concept extraction assistant. Your task is to read the provided text and identify the most important concepts, entities, or topics mentioned.
-                    The output MUST be a JSON array of strings, where each string is a key concept or entity.
-                    Example: ["Artificial Intelligence", "Machine Learning", "Neural Networks", "Deep Learning"]
-                    Output ONLY the JSON array, nothing else.
-                    """);
+                    var systemMessage = SystemMessage.from("""
+                            You are a concept extraction assistant. Your task is to read the provided text and identify the most important concepts, entities, or topics mentioned.
+                            The output MUST be a JSON array of strings, where each string is a key concept or entity.
+                            Example: ["Artificial Intelligence", "Machine Learning", "Neural Networks", "Deep Learning"]
+                            Output ONLY the JSON array, nothing else.
+                            """);
 
-            var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text);
 
-            List<ChatMessage> history = new ArrayList<>();
-            history.add(systemMessage);
-            history.add(userMessage);
+                    List<ChatMessage> history = new ArrayList<>();
+                    history.add(systemMessage);
+                    history.add(userMessage);
 
-            return cog.lm.llmAsync(taskId, history, "Concept Identification", noteId).join();
+                    return cog.lm.llmAsync(taskId, history, "Concept Identification", noteId).join();
 
-        }, cog.events.exe)
+                }, cog.events.exe)
                 .thenApply(AiMessage::text)
                 .thenApply(jsonString -> {
                     try {

@@ -1025,7 +1025,8 @@ abstract class AbstractTest {
                     case "action" -> action = parseActions(sectionContents);
                     case "expected" -> expected.addAll(parseExpectations(sectionContents));
                     case "teardown" -> teardown.addAll(parseActions(sectionContents));
-                    default -> fail("Unknown section type '" + sectionOp + "' in test '" + testName + "': " + sectionList.toKif());
+                    default ->
+                            fail("Unknown section type '" + sectionOp + "' in test '" + testName + "': " + sectionList.toKif());
                 }
             } catch (Exception e) {
                 fail("Unexpected error parsing section '" + sectionOp + "' in test '" + testName + "': " + e.getMessage() + " | Term: " + sectionList.toKif(), e);

@@ -16,9 +16,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.ID_PREFIX_PLUGIN;
-import static dumb.cognote.Logic.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
+import static dumb.cognote.Logic.*;
 import static java.util.Optional.ofNullable;
 
 public class Reason {
@@ -536,8 +536,7 @@ public class Reason {
                         .filter(u -> isActiveContext(u.sourceNoteId()))
                         .filter(u -> u.getReferencedPredicates().contains(pred))
                         .forEach(u -> tryInstantiate(u, newA));
-            }
-            else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getDerivationDepthMax()) {
+            } else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getDerivationDepthMax()) {
                 if (!isActiveContext(newA.sourceNoteId())) return;
 
                 ofNullable(newA.getEffectiveTerm()).filter(Term.Lst.class::isInstance).map(Term.Lst.class::cast)

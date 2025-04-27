@@ -6,7 +6,6 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.Tool;
-import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;

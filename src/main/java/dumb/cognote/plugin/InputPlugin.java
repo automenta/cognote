@@ -8,7 +8,6 @@ import java.util.Set;
 import static dumb.cognote.Cog.DEFAULT_RULE_PRIORITY;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
-import static java.rmi.server.LogStream.log;
 
 public class InputPlugin extends Plugin.BasePlugin {
 

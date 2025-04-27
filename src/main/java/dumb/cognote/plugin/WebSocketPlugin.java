@@ -9,7 +9,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
@@ -18,21 +17,19 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.ProtocolConstants.*;
-import static java.util.Optional.ofNullable;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
     private final InetSocketAddress address;
-    private WebSocketServer server;
     private final Set<WebSocket> clients = new CopyOnWriteArraySet<>();
     private final Map<String, BiConsumer<WebSocket, JSONObject>> commandHandlers = new ConcurrentHashMap<>();
     private final Map<String, BiConsumer<WebSocket, JSONObject>> feedbackHandlers = new ConcurrentHashMap<>();
+    private WebSocketServer server;
 
     public WebSocketPlugin(InetSocketAddress address, Cog cog) {
         this.address = address;

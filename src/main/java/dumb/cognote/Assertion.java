@@ -94,7 +94,8 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
 
         if (sourceNoteId != null) json.put("sourceNoteId", sourceNoteId);
         if (!justificationIds.isEmpty()) json.put("justificationIds", new JSONArray(justificationIds));
-        if (!quantifiedVars.isEmpty()) json.put("quantifiedVars", new JSONArray(quantifiedVars.stream().map(Term.Var::toJson).collect(Collectors.toList())));
+        if (!quantifiedVars.isEmpty())
+            json.put("quantifiedVars", new JSONArray(quantifiedVars.stream().map(Term.Var::toJson).collect(Collectors.toList())));
 
         return json;
     }

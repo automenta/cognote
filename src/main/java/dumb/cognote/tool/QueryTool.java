@@ -3,12 +3,9 @@ package dumb.cognote.tool;
 import dumb.cognote.Cog;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Log.error;
 

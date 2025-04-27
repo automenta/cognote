@@ -8,7 +8,6 @@ import dumb.cognote.Cog;
 import dumb.cognote.CogNote;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
-import dumb.cognote.Tool.ToolExecutionException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,27 +41,27 @@ public class TextToKifTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
-            var systemMessage = SystemMessage.from("""
-                    You are a KIF conversion expert. Your task is to read the provided text and convert the factual statements and relationships into KIF expressions.
-                    Represent the information accurately and concisely using KIF syntax.
-                    Output ONLY the KIF expressions, one per line or grouped logically, nothing else.
-                    Example:
-                    (instance John Person)
-                    (hasAge John 30)
-                    (likes John Mary)
-                    """);
+                    var systemMessage = SystemMessage.from("""
+                            You are a KIF conversion expert. Your task is to read the provided text and convert the factual statements and relationships into KIF expressions.
+                            Represent the information accurately and concisely using KIF syntax.
+                            Output ONLY the KIF expressions, one per line or grouped logically, nothing else.
+                            Example:
+                            (instance John Person)
+                            (hasAge John 30)
+                            (likes John Mary)
+                            """);
 
-            var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text);
 
-            List<ChatMessage> history = new ArrayList<>();
-            history.add(systemMessage);
-            history.add(userMessage);
+                    List<ChatMessage> history = new ArrayList<>();
+                    history.add(systemMessage);
+                    history.add(userMessage);
 
-            return cog.lm.llmAsync(taskId, history, "Text to KIF Conversion", noteId).join();
+                    return cog.lm.llmAsync(taskId, history, "Text to KIF Conversion", noteId).join();
 
-        }, cog.events.exe)
+                }, cog.events.exe)
                 .thenApply(AiMessage::text)
                 .thenApply(kifString -> {
                     try {

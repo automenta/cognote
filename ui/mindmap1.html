@@ -1,1326 +1,1327 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>NeuroWeaver 🧠</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
-  <style>
-    :root {
-        --bg-color: #10101a;
-        --primary-color: #e8e8ff;
-        --accent-color: #00f7ff;
-        --accent-color-darker: #00a0a8;
-        --node-bg: rgba(26, 26, 46, 0.9);
-        --node-border: var(--accent-color-darker);
-        --node-shadow: rgba(0, 247, 255, 0.15);
-        --node-hover-shadow: rgba(0, 247, 255, 0.4);
-        --edge-color: rgba(0, 247, 255, 0.6);
-        --delete-button-bg: #ff3d3d;
-        --delete-button-text: #ffffff;
-        --menu-bg: rgba(30, 30, 50, 0.97);
-        --menu-border: var(--accent-color);
-        --menu-hover-bg: rgba(0, 247, 255, 0.15);
-        --dialog-bg: rgba(35, 35, 60, 0.98);
-        --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-        --font-mono: 'Fira Code', 'Consolas', 'Monaco', monospace;
-        --transition-fast: 0.15s ease-out;
-        --transition-med: 0.3s ease-out;
-    }
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+    <title>NeuroWeaver 🧠</title>
+    <link href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>"
+          rel="icon">
+    <style>
+        :root {
+            --bg-color: #10101a;
+            --primary-color: #e8e8ff;
+            --accent-color: #00f7ff;
+            --accent-color-darker: #00a0a8;
+            --node-bg: rgba(26, 26, 46, 0.9);
+            --node-border: var(--accent-color-darker);
+            --node-shadow: rgba(0, 247, 255, 0.15);
+            --node-hover-shadow: rgba(0, 247, 255, 0.4);
+            --edge-color: rgba(0, 247, 255, 0.6);
+            --delete-button-bg: #ff3d3d;
+            --delete-button-text: #ffffff;
+            --menu-bg: rgba(30, 30, 50, 0.97);
+            --menu-border: var(--accent-color);
+            --menu-hover-bg: rgba(0, 247, 255, 0.15);
+            --dialog-bg: rgba(35, 35, 60, 0.98);
+            --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            --font-mono: 'Fira Code', 'Consolas', 'Monaco', monospace;
+            --transition-fast: 0.15s ease-out;
+            --transition-med: 0.3s ease-out;
+        }
 
-    *, *::before, *::after { box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; }
 
-    body {
-        margin: 0;
-        overflow: hidden;
-        background-color: var(--bg-color);
-        color: var(--primary-color);
-        font-family: var(--font-family);
-        font-size: 14px;
-        overscroll-behavior: none;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--primary-color);
+            font-family: var(--font-family);
+            font-size: 14px;
+            overscroll-behavior: none;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
 
-    #mindmap-container {
-        position: fixed;
-        inset: 0;
-        cursor: grab;
-    }
-    #mindmap-container.panning { cursor: grabbing; }
-    #mindmap-container.linking { cursor: crosshair; }
-
-
-    #webgl-canvas, #css3d-container {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        display: block;
-    }
-
-    #webgl-canvas { z-index: 1; }
-    #css3d-container { z-index: 2; pointer-events: none; }
-
-    .node-html {
-        position: absolute;
-        background-color: var(--node-bg);
-        border: 1px solid var(--node-border);
-        border-radius: 8px;
-        padding: 12px 15px;
-        color: var(--primary-color);
-        pointer-events: auto;
-        cursor: grab;
-        transition: transform var(--transition-fast), box-shadow var(--transition-med), border-color var(--transition-med);
-        box-shadow: 0 2px 10px 2px var(--node-shadow);
-        min-width: 80px;
-        min-height: 40px;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        backdrop-filter: blur(5px);
-        user-select: none; /* Prevent text selection during drag */
-    }
-    .node-html:hover {
-        box-shadow: 0 4px 20px 5px var(--node-hover-shadow);
-        border-color: var(--accent-color);
-        z-index: 10 !important; /* Bring hovered node slightly forward */
-    }
-    .node-html.dragging {
-        cursor: grabbing;
-        box-shadow: 0 10px 30px 8px var(--node-hover-shadow);
-        z-index: 1000 !important;
-        transition: none; /* No transition while dragging */
-    }
-    .node-html.resizing {
-        transition: none;
-    }
-    .node-html.linking-target {
-        border-color: #ffaa00;
-        box-shadow: 0 0 25px 5px rgba(255, 170, 0, 0.6);
-    }
-
-    .node-content {
-        flex-grow: 1;
-        outline: none;
-        overflow-y: auto;
-        max-height: 400px;
-        font-size: 1em;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        user-select: text; /* Allow text selection inside content */
-        scrollbar-width: thin;
-        scrollbar-color: var(--accent-color-darker) transparent;
-    }
-    .node-content::-webkit-scrollbar { width: 6px; }
-    .node-content::-webkit-scrollbar-track { background: transparent; }
-    .node-content::-webkit-scrollbar-thumb { background-color: var(--accent-color-darker); border-radius: 3px; }
-    .node-content:focus {
-        box-shadow: inset 0 0 0 1px var(--accent-color);
-        margin: -1px; /* Prevent layout shift */
-    }
-    .node-content > *:first-child { margin-top: 0; }
-    .node-content > *:last-child { margin-bottom: 0; }
-    .node-content h1, .node-content h2, .node-content h3 { margin: 0.5em 0; color: var(--accent-color); font-weight: 600; }
-    .node-content h1 { font-size: 1.3em; }
-    .node-content h2 { font-size: 1.15em; }
-    .node-content h3 { font-size: 1.05em; }
-    .node-content p { margin: 0.5em 0; }
-    .node-content ul, .node-content ol { margin: 0.5em 0; padding-left: 20px; }
-    .node-content li { margin-bottom: 0.2em; }
-    .node-content code { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
-    .node-content pre { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.5em; border-radius: 4px; overflow-x: auto; font-size: 0.9em; }
-    .node-content blockquote { border-left: 3px solid var(--accent-color-darker); margin: 0.5em 0 0.5em 10px; padding-left: 10px; color: #bbb; }
-    .node-content a { color: var(--accent-color); text-decoration: none; }
-    .node-content a:hover { text-decoration: underline; }
+        #mindmap-container {
+            position: fixed;
+            inset: 0;
+            cursor: grab;
+        }
+        #mindmap-container.panning { cursor: grabbing; }
+        #mindmap-container.linking { cursor: crosshair; }
 
 
-    .delete-button, .resize-handle {
-        position: absolute;
-        opacity: 0;
-        transition: opacity var(--transition-fast), transform var(--transition-fast);
-        pointer-events: auto;
-        z-index: 10;
-    }
-    .node-html:hover .delete-button,
-    .node-html:hover .resize-handle { opacity: 0.7; }
-    .delete-button:hover, .resize-handle:hover { opacity: 1; transform: scale(1.15); }
+        #webgl-canvas, #css3d-container {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
 
-    .delete-button {
-        top: -10px;
-        right: -10px;
-        width: 22px;
-        height: 22px;
-        background-color: var(--delete-button-bg);
-        color: var(--delete-button-text);
-        border: none;
-        border-radius: 50%;
-        font-size: 16px;
-        font-weight: bold;
-        line-height: 20px;
-        text-align: center;
-        cursor: pointer;
-        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-    }
+        #webgl-canvas { z-index: 1; }
+        #css3d-container { z-index: 2; pointer-events: none; }
 
-    .resize-handle {
-        bottom: -8px;
-        right: -8px;
-        width: 16px;
-        height: 16px;
-        background-color: var(--accent-color);
-        border: 1px solid var(--bg-color);
-        border-radius: 3px;
-        cursor: nwse-resize;
-        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-    }
+        .node-html {
+            position: absolute;
+            background-color: var(--node-bg);
+            border: 1px solid var(--node-border);
+            border-radius: 8px;
+            padding: 12px 15px;
+            color: var(--primary-color);
+            pointer-events: auto;
+            cursor: grab;
+            transition: transform var(--transition-fast), box-shadow var(--transition-med), border-color var(--transition-med);
+            box-shadow: 0 2px 10px 2px var(--node-shadow);
+            min-width: 80px;
+            min-height: 40px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            backdrop-filter: blur(5px);
+            user-select: none; /* Prevent text selection during drag */
+        }
+        .node-html:hover {
+            box-shadow: 0 4px 20px 5px var(--node-hover-shadow);
+            border-color: var(--accent-color);
+            z-index: 10 !important; /* Bring hovered node slightly forward */
+        }
+        .node-html.dragging {
+            cursor: grabbing;
+            box-shadow: 0 10px 30px 8px var(--node-hover-shadow);
+            z-index: 1000 !important;
+            transition: none; /* No transition while dragging */
+        }
+        .node-html.resizing {
+            transition: none;
+        }
+        .node-html.linking-target {
+            border-color: #ffaa00;
+            box-shadow: 0 0 25px 5px rgba(255, 170, 0, 0.6);
+        }
 
-    .context-menu, .dialog {
-        position: fixed;
-        background-color: var(--menu-bg);
-        border: 1px solid var(--menu-border);
-        border-radius: 6px;
-        box-shadow: 0 5px 25px rgba(0, 0, 0, 0.6);
-        z-index: 10000;
-        display: none;
-        backdrop-filter: blur(8px);
-        animation: fadeIn 0.1s ease-out forwards;
-    }
+        .node-content {
+            flex-grow: 1;
+            outline: none;
+            overflow-y: auto;
+            max-height: 400px;
+            font-size: 1em;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            user-select: text; /* Allow text selection inside content */
+            scrollbar-width: thin;
+            scrollbar-color: var(--accent-color-darker) transparent;
+        }
+        .node-content::-webkit-scrollbar { width: 6px; }
+        .node-content::-webkit-scrollbar-track { background: transparent; }
+        .node-content::-webkit-scrollbar-thumb { background-color: var(--accent-color-darker); border-radius: 3px; }
+        .node-content:focus {
+            box-shadow: inset 0 0 0 1px var(--accent-color);
+            margin: -1px; /* Prevent layout shift */
+        }
+        .node-content > *:first-child { margin-top: 0; }
+        .node-content > *:last-child { margin-bottom: 0; }
+        .node-content h1, .node-content h2, .node-content h3 { margin: 0.5em 0; color: var(--accent-color); font-weight: 600; }
+        .node-content h1 { font-size: 1.3em; }
+        .node-content h2 { font-size: 1.15em; }
+        .node-content h3 { font-size: 1.05em; }
+        .node-content p { margin: 0.5em 0; }
+        .node-content ul, .node-content ol { margin: 0.5em 0; padding-left: 20px; }
+        .node-content li { margin-bottom: 0.2em; }
+        .node-content code { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+        .node-content pre { font-family: var(--font-mono); background-color: rgba(0,0,0,0.2); padding: 0.5em; border-radius: 4px; overflow-x: auto; font-size: 0.9em; }
+        .node-content blockquote { border-left: 3px solid var(--accent-color-darker); margin: 0.5em 0 0.5em 10px; padding-left: 10px; color: #bbb; }
+        .node-content a { color: var(--accent-color); text-decoration: none; }
+        .node-content a:hover { text-decoration: underline; }
 
-    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 
-    .context-menu {
-        padding: 6px 0;
-        min-width: 160px;
-    }
-    .context-menu ul { list-style: none; padding: 0; margin: 0; }
-    .context-menu li {
-        padding: 8px 18px;
-        cursor: pointer;
-        transition: background-color var(--transition-fast), color var(--transition-fast);
-        color: var(--primary-color);
-        white-space: nowrap;
-    }
-    .context-menu li:hover { background-color: var(--menu-hover-bg); color: var(--accent-color); }
-    .context-menu li[data-action^="delete"] { color: var(--delete-button-bg); }
-    .context-menu li[data-action^="delete"]:hover { background-color: rgba(255, 61, 61, 0.2); }
+        .delete-button, .resize-handle {
+            position: absolute;
+            opacity: 0;
+            transition: opacity var(--transition-fast), transform var(--transition-fast);
+            pointer-events: auto;
+            z-index: 10;
+        }
+        .node-html:hover .delete-button,
+        .node-html:hover .resize-handle { opacity: 0.7; }
+        .delete-button:hover, .resize-handle:hover { opacity: 1; transform: scale(1.15); }
 
-    .dialog {
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background-color: var(--dialog-bg);
-        padding: 25px 30px;
-        text-align: center;
-        color: var(--primary-color);
-        min-width: 300px;
-    }
-    .dialog p { margin: 0 0 25px 0; font-size: 1.1em; }
-    .dialog button {
-        background-color: var(--accent-color);
-        color: var(--bg-color);
-        border: none;
-        padding: 10px 22px;
-        margin: 0 10px;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: 600;
-        transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
-        min-width: 80px;
-    }
-    .dialog button:hover { background-color: #3fffff; box-shadow: 0 0 12px var(--accent-color); }
-    .dialog button#confirm-no { background-color: #555; color: var(--primary-color); }
-    .dialog button#confirm-no:hover { background-color: #777; box-shadow: none; }
+        .delete-button {
+            top: -10px;
+            right: -10px;
+            width: 22px;
+            height: 22px;
+            background-color: var(--delete-button-bg);
+            color: var(--delete-button-text);
+            border: none;
+            border-radius: 50%;
+            font-size: 16px;
+            font-weight: bold;
+            line-height: 20px;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }
 
-    #status-indicator {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        background-color: rgba(0, 0, 0, 0.6);
-        color: var(--primary-color);
-        padding: 5px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        z-index: 5;
-        opacity: 1;
-        transition: opacity 0.5s ease 1s; /* Fade out after delay */
-        pointer-events: none;
-    }
-    #status-indicator.hidden { opacity: 0; }
+        .resize-handle {
+            bottom: -8px;
+            right: -8px;
+            width: 16px;
+            height: 16px;
+            background-color: var(--accent-color);
+            border: 1px solid var(--bg-color);
+            border-radius: 3px;
+            cursor: nwse-resize;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }
 
-    /* Subtle background pattern */
-    body::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background-image: radial-gradient(rgba(0, 247, 255, 0.03) 1px, transparent 1px);
-        background-size: 20px 20px;
-        opacity: 0.5;
-        z-index: 0;
-        pointer-events: none;
-    }
-  </style>
+        .context-menu, .dialog {
+            position: fixed;
+            background-color: var(--menu-bg);
+            border: 1px solid var(--menu-border);
+            border-radius: 6px;
+            box-shadow: 0 5px 25px rgba(0, 0, 0, 0.6);
+            z-index: 10000;
+            display: none;
+            backdrop-filter: blur(8px);
+            animation: fadeIn 0.1s ease-out forwards;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
+        .context-menu {
+            padding: 6px 0;
+            min-width: 160px;
+        }
+        .context-menu ul { list-style: none; padding: 0; margin: 0; }
+        .context-menu li {
+            padding: 8px 18px;
+            cursor: pointer;
+            transition: background-color var(--transition-fast), color var(--transition-fast);
+            color: var(--primary-color);
+            white-space: nowrap;
+        }
+        .context-menu li:hover { background-color: var(--menu-hover-bg); color: var(--accent-color); }
+        .context-menu li[data-action^="delete"] { color: var(--delete-button-bg); }
+        .context-menu li[data-action^="delete"]:hover { background-color: rgba(255, 61, 61, 0.2); }
+
+        .dialog {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: var(--dialog-bg);
+            padding: 25px 30px;
+            text-align: center;
+            color: var(--primary-color);
+            min-width: 300px;
+        }
+        .dialog p { margin: 0 0 25px 0; font-size: 1.1em; }
+        .dialog button {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            border: none;
+            padding: 10px 22px;
+            margin: 0 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
+            min-width: 80px;
+        }
+        .dialog button:hover { background-color: #3fffff; box-shadow: 0 0 12px var(--accent-color); }
+        .dialog button#confirm-no { background-color: #555; color: var(--primary-color); }
+        .dialog button#confirm-no:hover { background-color: #777; box-shadow: none; }
+
+        #status-indicator {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: var(--primary-color);
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 5;
+            opacity: 1;
+            transition: opacity 0.5s ease 1s; /* Fade out after delay */
+            pointer-events: none;
+        }
+        #status-indicator.hidden { opacity: 0; }
+
+        /* Subtle background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(rgba(0, 247, 255, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            opacity: 0.5;
+            z-index: 0;
+            pointer-events: none;
+        }
+    </style>
 </head>
 <body>
 <div id="mindmap-container">
-  <canvas id="webgl-canvas"></canvas>
-  <div id="css3d-container"></div>
+    <canvas id="webgl-canvas"></canvas>
+    <div id="css3d-container"></div>
 </div>
 
-<div id="context-menu" class="context-menu"></div>
-<div id="confirm-dialog" class="dialog">
-  <p id="confirm-message">Are you sure?</p>
-  <button id="confirm-yes">Yes</button>
-  <button id="confirm-no">No</button>
+<div class="context-menu" id="context-menu"></div>
+<div class="dialog" id="confirm-dialog">
+    <p id="confirm-message">Are you sure?</p>
+    <button id="confirm-yes">Yes</button>
+    <button id="confirm-no">No</button>
 </div>
 <div id="status-indicator">Initializing NeuroWeaver...</div>
 
 <script type="importmap">
-  {
-      "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
-      }
-  }
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+        }
+    }
 </script>
 
 <script type="module">
-  import * as THREE from 'three';
-  import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
-  // Optional: import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // If more complex controls needed
-  // Optional: import { LineMaterial } from 'three/addons/lines/LineMaterial.js'; // For thicker lines
-  // Optional: import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
-  // Optional: import { Line2 } from 'three/addons/lines/Line2.js';
-  // Optional: import { gsap } from "https://cdn.jsdelivr.net/npm/gsap@3.12.5/index.js"; // For smoother animations
-
-  const $ = (selector) => document.querySelector(selector);
-  const $$ = (selector) => document.querySelectorAll(selector);
-
-  let nodeIdCounter = 0;
-  let edgeIdCounter = 0;
-
-  // --- Utilities ---
-  const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const generateId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-
-  // --- Core Classes ---
-
-  class MindMap {
-      nodes = new Map();
-      edges = new Map();
-      isDraggingNode = false;
-      isResizingNode = false;
-      isLinking = false;
-      linkSourceNode = null;
-      tempLinkLine = null;
-      uiManager = null;
-      cameraController = null;
-      layoutEngine = null;
-
-      constructor(container) {
-          this.container = container;
-          this.scene = new THREE.Scene();
-          this.cssScene = new THREE.Scene();
-          this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 10, 20000);
-          this.camera.position.z = 600;
-
-          this.webglRenderer = new THREE.WebGLRenderer({ canvas: $('#webgl-canvas'), antialias: true, alpha: true });
-          this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
-          this.webglRenderer.setPixelRatio(window.devicePixelRatio);
-
-          this.cssRenderer = new CSS3DRenderer();
-          this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
-          $('#css3d-container').appendChild(this.cssRenderer.domElement);
-
-          const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-          this.scene.add(ambientLight);
-          const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-          directionalLight.position.set(0.5, 1, 0.75);
-          this.scene.add(directionalLight);
-
-          window.addEventListener('resize', this.onWindowResize.bind(this), false);
-      }
-
-      addNode(node) {
-          if (!node.id) node.id = generateId('node');
-          if (this.nodes.has(node.id)) return this.nodes.get(node.id);
-
-          this.nodes.set(node.id, node);
-          node.mindMap = this;
-          if (node.threeObject) this.scene.add(node.threeObject);
-          if (node.cssObject) this.cssScene.add(node.cssObject);
-          this.layoutEngine?.addNode(node);
-          return node;
-      }
-
-      removeNode(nodeId) {
-          const node = this.nodes.get(nodeId);
-          if (!node) return;
-
-          const edgesToRemove = [...this.edges.values()].filter(edge => edge.source === node || edge.target === node);
-          edgesToRemove.forEach(edge => this.removeEdge(edge.id));
-
-          node.dispose();
-          this.nodes.delete(nodeId);
-          this.layoutEngine?.removeNode(node);
-          this.uiManager?.removeNodeHTML(nodeId);
-      }
-
-      addEdge(sourceNode, targetNode, data = {}) {
-          if (!sourceNode || !targetNode || sourceNode === targetNode) return null;
-          // Optional: Prevent duplicate edges
-          // if ([...this.edges.values()].some(e => e.source === sourceNode && e.target === targetNode)) return null;
-
-          const edgeId = generateId('edge');
-          const edge = new Edge(edgeId, sourceNode, targetNode, data);
-          edge.mindMap = this;
-          this.edges.set(edgeId, edge);
-          if (edge.threeObject) this.scene.add(edge.threeObject);
-          this.layoutEngine?.addEdge(edge);
-          return edge;
-      }
-
-      removeEdge(edgeId) {
-          const edge = this.edges.get(edgeId);
-          if (!edge) return;
-          edge.dispose();
-          this.edges.delete(edgeId);
-          this.layoutEngine?.removeEdge(edge);
-          this.uiManager?.removeEdgeHTML(edgeId);
-      }
-
-      getNodeById = (id) => this.nodes.get(id);
-      getEdgeById = (id) => this.edges.get(id);
-
-      update() {
-          this.nodes.forEach(node => node.update());
-          this.edges.forEach(edge => edge.update());
-      }
-
-      render() {
-          this.webglRenderer.render(this.scene, this.camera);
-          this.cssRenderer.render(this.cssScene, this.camera);
-      }
-
-      onWindowResize() {
-          this.camera.aspect = window.innerWidth / window.innerHeight;
-          this.camera.updateProjectionMatrix();
-          this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
-          this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
-      }
-
-      centerView(targetPosition = null, duration = 0.7) {
-          let targetPos;
-          if (targetPosition) {
-              targetPos = targetPosition.clone();
-          } else {
-              if (this.nodes.size === 0) targetPos = new THREE.Vector3(0, 0, 0);
-              else {
-                  targetPos = new THREE.Vector3();
-                  this.nodes.forEach(node => targetPos.add(node.position));
-                  targetPos.divideScalar(this.nodes.size);
-              }
-          }
-          const distance = this.nodes.size > 1 ? 600 : 300; // Adjust zoom based on content
-          this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
-      }
-
-      focusOnNode(node, duration = 0.6) {
-          if (!node) return;
-          const targetPos = node.position.clone();
-          const distance = Math.max(node.size.width, node.size.height) * 1.5 + 100; // Zoom based on size
-          this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
-      }
-
-      getWorldPositionFromScreen(screenX, screenY, targetZ = 0) {
-          const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
-          const raycaster = new THREE.Raycaster();
-          raycaster.setFromCamera(vec, this.camera);
-          const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -targetZ);
-          const intersectPoint = new THREE.Vector3();
-          return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
-      }
-  }
-
-  class Node {
-      mindMap = null;
-      threeObject = null; // Optional WebGL visual
-      htmlElement = null;
-      cssObject = null;
-      position = new THREE.Vector3();
-      size = { width: 160, height: 70 };
-      data = {};
-
-      constructor(id, position = { x: 0, y: 0, z: 0 }, data = {}) {
-          this.id = id;
-          this.position.set(position.x, position.y, position.z);
-          this.data = data;
-          this.htmlElement = this._createHtmlElement();
-          this.cssObject = new CSS3DObject(this.htmlElement); // Correct instantiation
-          this.update();
-      }
-
-      _createHtmlElement() {
-          const el = document.createElement('div');
-          el.className = 'node-html';
-          el.id = `node-html-${this.id}`;
-          el.dataset.nodeId = this.id;
-          el.style.width = `${this.size.width}px`;
-          el.style.height = `${this.size.height}px`;
-
-          el.innerHTML = `
-                  <div class="node-content" spellcheck="false">${this.data.label || ''}</div>
-                  <button class="delete-button node-delete" title="Delete Node" data-node-id="${this.id}">×</button>
-                  <div class="resize-handle" title="Resize Node" data-node-id="${this.id}"></div>
-              `;
-          return el;
-      }
-
-      setPosition(x, y, z) { this.position.set(x, y, z); }
-
-      setSize(width, height) {
-          this.size.width = Math.max(80, width);
-          this.size.height = Math.max(40, height);
-          if (this.htmlElement) {
-              this.htmlElement.style.width = `${this.size.width}px`;
-              this.htmlElement.style.height = `${this.size.height}px`;
-          }
-          this.mindMap?.layoutEngine?.kick(); // Nudge layout after resize
-      }
-
-      update() {
-          if (this.cssObject) {
-              this.cssObject.position.copy(this.position);
-              // Optional: Make nodes face camera slightly for better readability at angles
-              // this.cssObject.rotation.copy(this.mindMap.camera.rotation);
-          }
-      }
-
-      dispose() {
-          this.cssObject?.parent?.remove(this.cssObject);
-          this.threeObject?.parent?.remove(this.threeObject);
-          // Geometry/material disposal if threeObject exists
-      }
-
-      startDrag() {
-          this.htmlElement?.classList.add('dragging');
-          this.mindMap?.layoutEngine?.fixNode(this);
-      }
-      drag(newPosition) { this.setPosition(newPosition.x, newPosition.y, newPosition.z); this.update(); }
-      endDrag() {
-          this.htmlElement?.classList.remove('dragging');
-          this.mindMap?.layoutEngine?.releaseNode(this);
-          this.mindMap?.layoutEngine?.kick();
-      }
-      startResize() { this.htmlElement?.classList.add('resizing'); this.mindMap?.layoutEngine?.fixNode(this); }
-      resize(newWidth, newHeight) { this.setSize(newWidth, newHeight); }
-      endResize() { this.htmlElement?.classList.remove('resizing'); this.mindMap?.layoutEngine?.releaseNode(this); }
-  }
-
-  class NoteNode extends Node {
-      constructor(position = { x: 0, y: 0, z: 0 }, data = { content: '' }) {
-          super(generateId('note'), position, { ...data, type: 'note' });
-          this._setupRichText();
-      }
-
-      _setupRichText() {
-          this.htmlElement.classList.add('note-node');
-          const contentDiv = this.htmlElement.querySelector('.node-content');
-          if (contentDiv) {
-              contentDiv.contentEditable = "true";
-              contentDiv.innerHTML = this.data.content || '';
-              let debounceTimer;
-              contentDiv.addEventListener('input', () => {
-                  clearTimeout(debounceTimer);
-                  debounceTimer = setTimeout(() => { this.data.content = contentDiv.innerHTML; }, 300);
-              });
-              // Prevent drag start when clicking/interacting with contenteditable
-              contentDiv.addEventListener('mousedown', e => e.stopPropagation());
-              contentDiv.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-          }
-      }
-  }
-
-  class Edge {
-      mindMap = null;
-      threeObject = null;
-
-      constructor(id, sourceNode, targetNode, data = {}) {
-          this.id = id;
-          this.source = sourceNode;
-          this.target = targetNode;
-          this.data = data;
-          this.threeObject = this._createThreeObject();
-          this.update();
-      }
-
-      _createThreeObject() {
-          const material = new THREE.LineBasicMaterial({
-              color: 0x00f7ff, // Use var(--edge-color)
-              linewidth: 1.5, // Note: limited support, consider Line2 for width
-              transparent: true,
-              opacity: 0.6,
-              depthTest: false, // Render edges on top slightly
-          });
-          const points = [this.source.position.clone(), this.target.position.clone()];
-          const geometry = new THREE.BufferGeometry().setFromPoints(points);
-          const line = new THREE.Line(geometry, material);
-          line.renderOrder = -1; // Render before nodes (if depthTest is true)
-          return line;
-      }
-
-      update() {
-          if (!this.threeObject || !this.source || !this.target) return;
-          const positions = this.threeObject.geometry.attributes.position;
-          positions.setXYZ(0, this.source.position.x, this.source.position.y, this.source.position.z);
-          positions.setXYZ(1, this.target.position.x, this.target.position.y, this.target.position.z);
-          positions.needsUpdate = true;
-          this.threeObject.geometry.computeBoundingSphere();
-      }
-
-      dispose() {
-          if (this.threeObject?.parent) {
-              this.threeObject.parent.remove(this.threeObject);
-              this.threeObject.geometry?.dispose();
-              this.threeObject.material?.dispose();
-          }
-      }
-  }
-
-  class UIManager {
-      draggedNode = null;
-      resizedNode = null;
-      resizeStartPos = { x: 0, y: 0 };
-      resizeStartSize = { width: 0, height: 0 };
-      dragOffset = new THREE.Vector3();
-      isMouseDown = false;
-      potentialClick = true;
-      lastPointerPos = { x: 0, y: 0 };
-      confirmCallback = null;
-
-      constructor(mindMap) {
-          this.mindMap = mindMap;
-          this.container = mindMap.container; // Main container for events
-          this.cssContainer = mindMap.cssRenderer.domElement; // Where HTML nodes live
-          this.contextMenu = $('#context-menu');
-          this.confirmDialog = $('#confirm-dialog');
-          this._bindEvents();
-      }
-
-      _bindEvents() {
-          const eventTarget = this.container; // Listen on the main container
-          eventTarget.addEventListener('pointerdown', this.onPointerDown.bind(this));
-          window.addEventListener('pointermove', this.onPointerMove.bind(this)); // Use window for global move/up
-          window.addEventListener('pointerup', this.onPointerUp.bind(this));
-          eventTarget.addEventListener('contextmenu', this.onContextMenu.bind(this));
-          document.addEventListener('click', (e) => { // Hide context menu on outside click
-              if (!this.contextMenu.contains(e.target)) this.hideContextMenu();
-          }, true); // Use capture phase
-          this.contextMenu.addEventListener('click', this.onMenuClick.bind(this));
-          $('#confirm-yes').addEventListener('click', this.onConfirmYes.bind(this));
-          $('#confirm-no').addEventListener('click', this.onConfirmNo.bind(this));
-      }
-
-      _getPointerEventNode(event) {
-          // Raycast from CSS container perspective if needed, but direct target check is often enough
-          const element = document.elementFromPoint(event.clientX, event.clientY);
-          const nodeElement = element?.closest('.node-html');
-          return nodeElement ? this.mindMap.getNodeById(nodeElement.dataset.nodeId) : null;
-      }
-
-      onPointerDown(event) {
-          if (event.button !== 0 && event.pointerType === 'mouse') return; // Allow only primary button for main actions
-          this.isMouseDown = true;
-          this.potentialClick = true;
-          this.lastPointerPos = { x: event.clientX, y: event.clientY };
-          const target = event.target;
-
-          // Check target directly first
-          const nodeElement = target.closest('.node-html');
-          const resizeHandle = target.closest('.resize-handle');
-          const deleteButton = target.closest('.delete-button');
-          const contentEditable = target.closest('.node-content[contenteditable="true"]');
-
-          if (deleteButton) {
-              event.preventDefault(); event.stopPropagation();
-              const nodeId = deleteButton.dataset.nodeId;
-              // Add edge delete logic if needed
-              if (nodeId) this.showConfirm(`Delete node "${nodeId.substring(0, 15)}..."?`, () => this.mindMap.removeNode(nodeId));
-              this.hideContextMenu();
-              return;
-          }
-
-          if (resizeHandle) {
-              event.preventDefault(); event.stopPropagation();
-              const nodeId = resizeHandle.dataset.nodeId;
-              this.resizedNode = this.mindMap.getNodeById(nodeId);
-              if (this.resizedNode) {
-                  this.resizedNode.startResize();
-                  this.resizeStartPos = { x: event.clientX, y: event.clientY };
-                  this.resizeStartSize = { ...this.resizedNode.size };
-                  this.container.style.cursor = 'nwse-resize';
-              }
-              this.hideContextMenu();
-              return;
-          }
-
-          if (nodeElement && !contentEditable) {
-              event.preventDefault(); // Prevent text selection/browser drag
-              this.draggedNode = this.mindMap.getNodeById(nodeElement.dataset.nodeId);
-              if (this.draggedNode) {
-                  this.draggedNode.startDrag();
-                  // Calculate offset in world space at node's depth
-                  const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
-                  if (worldPos) this.dragOffset.copy(worldPos).sub(this.draggedNode.position);
-                  else this.dragOffset.set(0,0,0); // Fallback
-                  this.container.style.cursor = 'grabbing';
-              }
-              this.hideContextMenu();
-              return;
-          }
-
-          // If nothing specific clicked, assume background interaction (panning handled by CameraController)
-          this.hideContextMenu();
-      }
-
-      onPointerMove(event) {
-          if (!this.isMouseDown) {
-              // Update linking line even if mouse isn't down
-              if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
-              // Highlight potential link targets
-              const targetNode = this._getPointerEventNode(event);
-              $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
-              if (this.mindMap.isLinking && targetNode && targetNode !== this.mindMap.linkSourceNode) {
-                  targetNode.htmlElement?.classList.add('linking-target');
-              }
-              return;
-          }
-
-          const dx = event.clientX - this.lastPointerPos.x;
-          const dy = event.clientY - this.lastPointerPos.y;
-          if (dx !== 0 || dy !== 0) this.potentialClick = false; // Moved pointer
-
-          this.lastPointerPos = { x: event.clientX, y: event.clientY };
-
-          if (this.resizedNode) {
-              event.preventDefault();
-              const newWidth = this.resizeStartSize.width + (event.clientX - this.resizeStartPos.x);
-              const newHeight = this.resizeStartSize.height + (event.clientY - this.resizeStartPos.y);
-              this.resizedNode.resize(newWidth, newHeight);
-          } else if (this.draggedNode) {
-              event.preventDefault();
-              const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
-              if (worldPos) {
-                  this.draggedNode.drag(worldPos.sub(this.dragOffset));
-              }
-          } else {
-              // Background drag - handled by CameraController
-          }
-
-          // Update linking line if active during drag (though usually linking starts from context menu)
-          if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
-      }
-
-      onPointerUp(event) {
-          if (!this.isMouseDown && !this.mindMap.isLinking) return; // Only handle if interaction was active or linking
-
-          this.container.style.cursor = this.mindMap.isLinking ? 'crosshair' : 'grab';
-
-          if (this.resizedNode) {
-              this.resizedNode.endResize();
-              this.resizedNode = null;
-          } else if (this.draggedNode) {
-              const droppedOnNode = this._getPointerEventNode(event);
-              this.draggedNode.endDrag();
-              this._checkPiling(this.draggedNode, droppedOnNode);
-              this.draggedNode = null;
-          } else if (this.mindMap.isLinking) {
-              this._endLinking(event); // Handle link completion/cancellation
-          } else if (this.potentialClick) {
-              // Handle background click or node click (if not handled by drag/resize/link)
-              const clickedNode = this._getPointerEventNode(event);
-              if (clickedNode) {
-                  // Maybe focus on simple click?
-                  // this.mindMap.focusOnNode(clickedNode);
-                  console.log("Clicked node:", clickedNode.id);
-              } else {
-                  console.log("Clicked background");
-              }
-          }
-
-          this.isMouseDown = false;
-          this.potentialClick = false;
-          $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
-      }
-
-      onContextMenu(event) {
-          event.preventDefault();
-          const targetNode = this._getPointerEventNode(event);
-          // Add edge context menu logic if needed
-
-          let items = [];
-          if (targetNode) {
-              items = [
-                  { label: "Edit Content 📝", action: "edit-node", nodeId: targetNode.id, disabled: !(targetNode instanceof NoteNode) },
-                  { label: "Start Link ✨", action: "start-link", nodeId: targetNode.id },
-                  { label: "Focus Here 🎯", action: "focus-node", nodeId: targetNode.id },
-                  { label: "Delete Node 🗑️", action: "delete-node", nodeId: targetNode.id },
-              ];
-          } else {
-              const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, 0);
-              items = [
-                  { label: "Create Note Here ➕", action: "create-note", position: worldPos ? JSON.stringify(worldPos) : null },
-                  { label: "Center View 🧭", action: "center-view" },
-              ];
-          }
-
-          if (items.length > 0) this.showContextMenu(event.clientX, event.clientY, items);
-          else this.hideContextMenu();
-      }
-
-      showContextMenu(x, y, items) {
-          this.contextMenu.innerHTML = '';
-          const ul = document.createElement('ul');
-          items.forEach(item => {
-              if (item.disabled) return;
-              const li = document.createElement('li');
-              li.textContent = item.label;
-              Object.entries(item).forEach(([key, value]) => {
-                  if (value !== undefined && value !== null) li.dataset[key] = value;
-              });
-              ul.appendChild(li);
-          });
-          this.contextMenu.appendChild(ul);
-
-          // Position and ensure visibility
-          const menuRect = this.contextMenu.getBoundingClientRect(); // Get initial size
-          let finalX = x;
-          let finalY = y;
-          if (x + menuRect.width > window.innerWidth) finalX = window.innerWidth - menuRect.width - 5;
-          if (y + menuRect.height > window.innerHeight) finalY = window.innerHeight - menuRect.height - 5;
-          finalX = Math.max(5, finalX);
-          finalY = Math.max(5, finalY);
-
-          this.contextMenu.style.left = `${finalX}px`;
-          this.contextMenu.style.top = `${finalY}px`;
-          this.contextMenu.style.display = 'block';
-      }
-
-      hideContextMenu = () => { if (this.contextMenu) this.contextMenu.style.display = 'none'; }
-
-      onMenuClick(event) {
-          const li = event.target.closest('li');
-          if (!li) return;
-          const data = li.dataset;
-          const action = data.action;
-          this.hideContextMenu();
-
-          switch (action) {
-              case 'edit-node': {
-                  const node = this.mindMap.getNodeById(data.nodeId);
-                  const contentDiv = node?.htmlElement?.querySelector('.node-content');
-                  if (contentDiv?.contentEditable === "true") contentDiv.focus();
-                  break;
-              }
-              case 'delete-node':
-                  this.showConfirm(`Delete node "${data.nodeId.substring(0, 15)}..."?`, () => this.mindMap.removeNode(data.nodeId));
-                  break;
-              case 'focus-node':
-                  this.mindMap.focusOnNode(this.mindMap.getNodeById(data.nodeId));
-                  break;
-              case 'create-note': {
-                  if (!data.position) break;
-                  const pos = JSON.parse(data.position);
-                  const newNode = this.mindMap.addNode(new NoteNode(pos, { content: 'New Note ✨' }));
-                  this.mindMap.layoutEngine?.kick();
-                  setTimeout(() => {
-                      this.mindMap.focusOnNode(newNode);
-                      newNode.htmlElement?.querySelector('.node-content')?.focus();
-                  }, 100);
-                  break;
-              }
-              case 'center-view':
-                  this.mindMap.centerView();
-                  break;
-              case 'start-link': {
-                  const sourceNode = this.mindMap.getNodeById(data.nodeId);
-                  if (sourceNode) {
-                      this.mindMap.isLinking = true;
-                      this.mindMap.linkSourceNode = sourceNode;
-                      this.container.style.cursor = 'crosshair';
-                      this._startTempLinkLine(sourceNode);
-                  }
-                  break;
-              }
-          }
-      }
-
-      showConfirm(message, onConfirm) {
-          $('#confirm-message').textContent = message;
-          this.confirmCallback = onConfirm;
-          this.confirmDialog.style.display = 'block';
-      }
-      hideConfirm = () => { this.confirmDialog.style.display = 'none'; this.confirmCallback = null; }
-      onConfirmYes = () => { this.confirmCallback?.(); this.hideConfirm(); }
-      onConfirmNo = () => { this.hideConfirm(); }
-
-      _startTempLinkLine(sourceNode) {
-          this._removeTempLinkLine(); // Clear existing if any
-          const material = new THREE.LineDashedMaterial({ color: 0xffaa00, linewidth: 2, dashSize: 8, gapSize: 4, transparent: true, opacity: 0.8, depthTest: false });
-          const points = [sourceNode.position.clone(), sourceNode.position.clone()];
-          const geometry = new THREE.BufferGeometry().setFromPoints(points);
-          this.mindMap.tempLinkLine = new THREE.Line(geometry, material);
-          this.mindMap.tempLinkLine.computeLineDistances(); // Required for dashed lines
-          this.mindMap.tempLinkLine.renderOrder = 1; // Render on top
-          this.mindMap.scene.add(this.mindMap.tempLinkLine);
-      }
-
-      _updateTempLinkLine(screenX, screenY) {
-          if (!this.mindMap.tempLinkLine || !this.mindMap.linkSourceNode) return;
-          const targetPos = this.mindMap.getWorldPositionFromScreen(screenX, screenY, this.mindMap.linkSourceNode.position.z);
-          if (targetPos) {
-              const positions = this.mindMap.tempLinkLine.geometry.attributes.position;
-              positions.setXYZ(1, targetPos.x, targetPos.y, targetPos.z);
-              positions.needsUpdate = true;
-              this.mindMap.tempLinkLine.geometry.computeBoundingSphere();
-              this.mindMap.tempLinkLine.computeLineDistances();
-          }
-      }
-
-      _removeTempLinkLine() {
-          if (this.mindMap.tempLinkLine) {
-              this.mindMap.scene.remove(this.mindMap.tempLinkLine);
-              this.mindMap.tempLinkLine.geometry?.dispose();
-              this.mindMap.tempLinkLine.material?.dispose();
-              this.mindMap.tempLinkLine = null;
-          }
-      }
-
-      _endLinking(event) {
-          this._removeTempLinkLine();
-          const targetNode = this._getPointerEventNode(event);
-          if (targetNode && targetNode !== this.mindMap.linkSourceNode) {
-              this.mindMap.addEdge(this.mindMap.linkSourceNode, targetNode);
-          } else {
-              console.log("Linking cancelled.");
-          }
-          this.mindMap.isLinking = false;
-          this.mindMap.linkSourceNode = null;
-          this.container.style.cursor = 'grab';
-          $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
-      }
-
-      _checkPiling(droppedNode, droppedOnNode) {
-          if (!droppedNode || !this.mindMap.layoutEngine) return;
-          const MAX_PILE_DISTANCE_SQ = 100 * 100; // Use squared distance
-          const PILE_STRENGTH = 0.05; // Gentle pull
-
-          const targetNode = droppedOnNode ?? [...this.mindMap.nodes.values()].find(otherNode =>
-              otherNode !== droppedNode && droppedNode.position.distanceToSquared(otherNode.position) < MAX_PILE_DISTANCE_SQ
-          );
-
-          if (targetNode) {
-              console.log(`Node ${droppedNode.id} piled near ${targetNode.id}.`);
-              this.mindMap.layoutEngine.addTemporaryAttraction(droppedNode, targetNode, PILE_STRENGTH, 60); // Attract for 60 steps
-              this.mindMap.layoutEngine.kick();
-          }
-      }
-
-      removeNodeHTML = (nodeId) => $(`#node-html-${nodeId}`)?.remove();
-      removeEdgeHTML = (edgeId) => { /* Implement if edges get HTML */ };
-  }
-
-  class CameraController {
-      isPanning = false;
-      panStart = new THREE.Vector2();
-      targetPosition = new THREE.Vector3();
-      targetLookAt = new THREE.Vector3();
-      currentLookAt = new THREE.Vector3(); // Smoothed lookAt target
-      zoomSpeed = 0.0015;
-      panSpeed = 0.8;
-      minZoom = 30;
-      maxZoom = 10000;
-      dampingFactor = 0.15; // Smoother damping
-      lastTouchDistance = 0;
-      isZoomingTouch = false;
-      animationFrameId = null;
-      gsap = window.gsap; // Use global GSAP if available
-
-      constructor(camera, domElement) {
-          this.camera = camera;
-          this.domElement = domElement;
-          this.targetPosition.copy(camera.position);
-          // Initial lookAt based on camera direction
-          const initialDir = new THREE.Vector3();
-          camera.getWorldDirection(initialDir);
-          this.targetLookAt.copy(camera.position).addScaledVector(initialDir, 10); // Look slightly ahead
-          this.currentLookAt.copy(this.targetLookAt);
-
-          this._bindEvents();
-          this.update(); // Start animation loop
-      }
-
-      _bindEvents() {
-          this.domElement.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
-          this.domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
-          window.addEventListener('pointermove', this.onPointerMove.bind(this)); // Global listeners
-          window.addEventListener('pointerup', this.onPointerUp.bind(this));
-          // Basic touch support merged into pointer events where possible
-      }
-
-      _getPointerTargetType(event) {
-          const el = event.target;
-          if (el.closest('.node-html') || el.closest('.context-menu') || el.closest('.dialog')) {
-              return 'ui';
-          }
-          return 'background';
-      }
-
-      onPointerDown(event) {
-          // Only pan with primary button on background
-          if (event.button === 0 && this._getPointerTargetType(event) === 'background') {
-              event.preventDefault();
-              this.isPanning = true;
-              this.panStart.set(event.clientX, event.clientY);
-              this.domElement.classList.add('panning');
-              this.gsap?.killTweensOf(this.targetPosition); // Stop programmatic movement on user interaction
-              this.gsap?.killTweensOf(this.targetLookAt);
-          }
-          // Handle touch pinch-zoom start (more complex, basic version below)
-          // if (event.pointerType === 'touch' && event.touches?.length === 2) { ... }
-      }
-
-      onPointerMove(event) {
-          if (!this.isPanning) return;
-          event.preventDefault();
-          const deltaX = event.clientX - this.panStart.x;
-          const deltaY = event.clientY - this.panStart.y;
-
-          const element = this.domElement;
-          const cameraZ = this.camera.position.distanceTo(this.currentLookAt); // Use distance to lookAt for better scaling
-          const vFOV = THREE.MathUtils.degToRad(this.camera.fov);
-          const height = 2 * Math.tan(vFOV / 2) * Math.max(1, cameraZ); // Ensure positive height
-          const width = height * this.camera.aspect;
-
-          const panX = -(deltaX / element.clientHeight) * height * this.panSpeed; // Use height for both axes for consistent feel
-          const panY = (deltaY / element.clientHeight) * height * this.panSpeed;
-
-          // Pan using camera's local axes for more intuitive movement
-          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
-          const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
-          const panOffset = right.multiplyScalar(panX).add(up.multiplyScalar(panY));
-
-          this.targetPosition.add(panOffset);
-          this.targetLookAt.add(panOffset);
-
-          this.panStart.set(event.clientX, event.clientY);
-      }
-
-      onPointerUp(event) {
-          if (this.isPanning && event.button === 0) {
-              this.isPanning = false;
-              this.domElement.classList.remove('panning');
-          }
-      }
-
-      onWheel(event) {
-          if (this._getPointerTargetType(event) !== 'background') return; // Don't zoom if over UI
-          event.preventDefault();
-          this.gsap?.killTweensOf(this.targetPosition); // Stop programmatic movement
-          this.gsap?.killTweensOf(this.targetLookAt);
-
-          const delta = -event.deltaY * this.zoomSpeed;
-          const currentDist = this.targetPosition.distanceTo(this.targetLookAt);
-          let newDist = currentDist * Math.pow(0.95, delta * 10);
-          newDist = clamp(newDist, this.minZoom, this.maxZoom);
-
-          const zoomFactor = (newDist - currentDist) / currentDist;
-
-          // Zoom towards mouse pointer projected onto the lookAt plane
-          const mouseWorldPos = this._getLookAtPlaneIntersection(event.clientX, event.clientY);
-
-          if (mouseWorldPos) {
-              const zoomTargetVec = mouseWorldPos.clone().sub(this.targetPosition);
-              this.targetPosition.addScaledVector(zoomTargetVec, zoomFactor);
-              // Keep lookAt the same unless zooming very close? Or zoom lookAt too?
-              // this.targetLookAt.addScaledVector(zoomTargetVec, zoomFactor); // Option: Zoom lookAt point as well
-          } else {
-              // Fallback: Zoom along camera direction if intersection fails
-              const dir = new THREE.Vector3();
-              this.camera.getWorldDirection(dir);
-              this.targetPosition.addScaledVector(dir, newDist - currentDist);
-          }
-      }
-
-      moveTo(x, y, z, duration = 0.7, lookAtTarget = null) {
-          const targetPos = new THREE.Vector3(x, y, z);
-          const targetLook = lookAtTarget ? lookAtTarget.clone() : new THREE.Vector3(x, y, 0);
-
-          if (this.gsap) {
-              this.gsap.to(this.targetPosition, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: duration, ease: "power3.out", overwrite: true });
-              this.gsap.to(this.targetLookAt, { x: targetLook.x, y: targetLook.y, z: targetLook.z, duration: duration, ease: "power3.out", overwrite: true });
-          } else {
-              this.targetPosition.copy(targetPos);
-              this.targetLookAt.copy(targetLook);
-          }
-      }
-
-      update = () => { // Use arrow function to preserve 'this' in requestAnimationFrame
-          const delta = this.targetPosition.distanceTo(this.camera.position) + this.targetLookAt.distanceTo(this.currentLookAt);
-
-          if (delta > 0.01 || this.isPanning) { // Only lerp if moving or panning
-              this.camera.position.lerp(this.targetPosition, this.dampingFactor);
-              this.currentLookAt.lerp(this.targetLookAt, this.dampingFactor);
-              this.camera.lookAt(this.currentLookAt);
-          } else { // Snap to final position if close enough and not interacting
-              this.camera.position.copy(this.targetPosition);
-              this.currentLookAt.copy(this.targetLookAt);
-              this.camera.lookAt(this.currentLookAt);
-          }
-          this.animationFrameId = requestAnimationFrame(this.update);
-      }
-
-      dispose() {
-          if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
-          // Remove event listeners if needed (though window listeners might persist)
-      }
-
-      _getLookAtPlaneIntersection(screenX, screenY) {
-          const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
-          const raycaster = new THREE.Raycaster();
-          raycaster.setFromCamera(vec, this.camera);
-          // Plane passing through targetLookAt, perpendicular to camera direction
-          const camDir = new THREE.Vector3();
-          this.camera.getWorldDirection(camDir);
-          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, this.targetLookAt);
-          const intersectPoint = new THREE.Vector3();
-          return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
-      }
-  }
-
-  class ForceLayout {
-      nodes = [];
-      edges = [];
-      velocities = new Map();
-      fixedNodes = new Set();
-      tempAttractions = []; // { nodeA, nodeB, strength, duration }
-      isRunning = false;
-      animationFrameId = null;
-
-      // Tunable parameters
-      settings = {
-          repulsion: 8000,
-          attraction: 0.03,
-          idealEdgeLength: 200,
-          centerStrength: 0.001,
-          damping: 0.9,
-          minEnergyThreshold: 0.05,
-          gravityCenter: new THREE.Vector3(0, 0, 0),
-          zSpreadFactor: 0.1 // How much repulsion/attraction affects Z
-      };
-
-      constructor(mindMap) {
-          this.mindMap = mindMap;
-      }
-
-      addNode(node) { if (!this.velocities.has(node.id)) { this.nodes.push(node); this.velocities.set(node.id, new THREE.Vector3()); } }
-      removeNode(node) { this.nodes = this.nodes.filter(n => n !== node); this.velocities.delete(node.id); this.fixedNodes.delete(node); this.tempAttractions = this.tempAttractions.filter(a => a.nodeA !== node && a.nodeB !== node); }
-      addEdge(edge) { if (!this.edges.includes(edge)) this.edges.push(edge); }
-      removeEdge(edge) { this.edges = this.edges.filter(e => e !== edge); }
-      fixNode(node) { this.fixedNodes.add(node); this.velocities.get(node.id)?.set(0, 0, 0); }
-      releaseNode(node) { this.fixedNodes.delete(node); }
-      addTemporaryAttraction(nodeA, nodeB, strength, duration = 60) { this.tempAttractions.push({ nodeA, nodeB, strength, duration }); }
-
-      run(steps = 100) {
-          console.log(`Running layout simulation for ${steps} steps...`);
-          this.isRunning = true;
-          for (let i = 0; i < steps; i++) {
-              if (this._calculateStep() < this.settings.minEnergyThreshold) break;
-          }
-          this.isRunning = false;
-          console.log("Layout simulation finished.");
-      }
-
-      startContinuous() {
-          if (this.animationFrameId) return;
-          this.isRunning = true;
-          const loop = () => {
-              if (!this.isRunning) return;
-              this._calculateStep();
-              this.animationFrameId = requestAnimationFrame(loop);
-          };
-          this.animationFrameId = requestAnimationFrame(loop);
-      }
-
-      stopContinuous() {
-          this.isRunning = false;
-          if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
-          this.animationFrameId = null;
-      }
-
-      kick(intensity = 1) {
-          this.nodes.forEach(node => {
-              if (!this.fixedNodes.has(node)) {
-                  this.velocities.get(node.id)?.add(
-                      new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * this.settings.zSpreadFactor)
-                          .multiplyScalar(intensity * 5) // Increased kick intensity
-                  );
-              }
-          });
-          if (!this.isRunning) this.startContinuous(); // Start if not running
-          // Auto-stop after a while if kicked?
-          // setTimeout(() => this.stopContinuous(), 5000);
-      }
-
-      _calculateStep() {
-          if (this.nodes.length < 2) return 0;
-          let totalEnergy = 0;
-          const forces = new Map(this.nodes.map(node => [node.id, new THREE.Vector3()]));
-          const { repulsion, attraction, idealEdgeLength, centerStrength, gravityCenter, zSpreadFactor } = this.settings;
-
-          // Repulsion
-          for (let i = 0; i < this.nodes.length; i++) {
-              const nodeA = this.nodes[i];
-              for (let j = i + 1; j < this.nodes.length; j++) {
-                  const nodeB = this.nodes[j];
-                  const delta = nodeB.position.clone().sub(nodeA.position);
-                  const distSq = delta.lengthSq();
-                  if (distSq < 1) delta.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); // Avoid division by zero
-                  const dist = Math.sqrt(distSq);
-                  const nodeSizeFactor = (nodeA.size.width + nodeA.size.height + nodeB.size.width + nodeB.size.height) * 0.25; // Avg dimension
-                  const minSafeDist = nodeSizeFactor * 1.2; // Keep nodes slightly apart based on size
-                  const effectiveRepulsion = repulsion * (nodeSizeFactor / 100); // Scale repulsion by size
-
-                  const forceMag = -effectiveRepulsion / Math.max(distSq, minSafeDist * minSafeDist * 0.5); // Push away, stronger for larger nodes
-                  const forceVec = delta.normalize().multiplyScalar(forceMag);
-                  forceVec.z *= zSpreadFactor; // Reduce Z force
-
-                  forces.get(nodeA.id).add(forceVec);
-                  forces.get(nodeB.id).sub(forceVec);
-              }
-          }
-
-          // Attraction (Edges)
-          this.edges.forEach(edge => {
-              const { source, target } = edge;
-              const delta = target.position.clone().sub(source.position);
-              const dist = delta.length();
-              if (dist < 0.1) return;
-              const displacement = dist - idealEdgeLength;
-              const forceMag = attraction * displacement; // Pull/Push towards ideal length
-              const forceVec = delta.normalize().multiplyScalar(forceMag);
-              forceVec.z *= zSpreadFactor;
-
-              forces.get(source.id).add(forceVec);
-              forces.get(target.id).sub(forceVec);
-          });
-
-          // Temporary Attractions
-          this.tempAttractions = this.tempAttractions.filter(attr => {
-              const delta = attr.nodeB.position.clone().sub(attr.nodeA.position);
-              const forceVec = delta.multiplyScalar(attr.strength); // Simple linear attraction
-              forceVec.z *= zSpreadFactor;
-              forces.get(attr.nodeA.id).add(forceVec);
-              forces.get(attr.nodeB.id).sub(forceVec);
-              attr.duration--;
-              return attr.duration > 0;
-          });
-
-          // Center Gravity
-          if (centerStrength > 0) {
-              this.nodes.forEach(node => {
-                  const forceVec = gravityCenter.clone().sub(node.position).multiplyScalar(centerStrength);
-                  forceVec.z *= zSpreadFactor * 0.5; // Less Z gravity
-                  forces.get(node.id).add(forceVec);
-              });
-          }
-
-          // Apply forces
-          this.nodes.forEach(node => {
-              if (this.fixedNodes.has(node)) return;
-              const force = forces.get(node.id);
-              const velocity = this.velocities.get(node.id);
-              velocity.add(force).multiplyScalar(this.settings.damping);
-              node.position.add(velocity);
-              totalEnergy += velocity.lengthSq();
-          });
-
-          return totalEnergy;
-      }
-  }
-
-  // --- Initialization ---
-  function initializeNeuroWeaver() {
-      const container = $('#mindmap-container');
-      const statusIndicator = $('#status-indicator');
-      if (!container) throw new Error("Mind map container not found!");
-
-      const mindMap = new MindMap(container);
-      const uiManager = new UIManager(mindMap);
-      const cameraController = new CameraController(mindMap.camera, mindMap.container); // Use main container for camera controls
-      const forceLayout = new ForceLayout(mindMap);
-
-      mindMap.uiManager = uiManager;
-      mindMap.cameraController = cameraController;
-      mindMap.layoutEngine = forceLayout;
-
-      loadExampleMindMap(mindMap);
-
-      forceLayout.run(150); // Initial layout settling
-      mindMap.centerView(null, 0); // Center immediately after layout
-      forceLayout.startContinuous(); // Keep layout subtly active
-
-      function animate() {
-          // Layout step is handled by forceLayout.startContinuous()
-          mindMap.update(); // Update node/edge visuals based on positions
-          // Camera update is handled by cameraController.update() internally
-          mindMap.render();
-          requestAnimationFrame(animate);
-      }
-
-      animate(); // Start main render loop
-
-      statusIndicator.textContent = 'NeuroWeaver Ready ✨';
-      setTimeout(() => statusIndicator.classList.add('hidden'), 1500);
-  }
-
-  function loadExampleMindMap(mindMap) {
-      const n1 = mindMap.addNode(new NoteNode({ x: 0, y: 0, z: 0 }, { content: "<h1>🚀 NeuroWeaver 🧠</h1><p>A 3D Mind Mapping Experience</p>✨" }));
-      n1.setSize(280, 100);
-
-      const n2 = mindMap.addNode(new NoteNode({ x: 300, y: 100, z: 20 }, { content: "<h2>Features 💡</h2><ul><li>Full 3D Canvas (Three.js)</li><li>HTML Notes via CSS3D</li><li>Zooming UI (ZUI)</li><li>Force-Directed Layout</li><li>Context Menus</li><li>Node Resizing</li><li>Linking & Deleting</li></ul>" }));
-      n2.setSize(220, 200);
-
-      const n3 = mindMap.addNode(new NoteNode({ x: -250, y: 150, z: -10 }, { content: "<h2>Technology 💻</h2><p><code>HTML</code>, <code>CSS</code>, <code>JavaScript (ESM)</code></p><p><b>Three.js</b> (WebGL + CSS3D)</p><p><i>(No external frameworks needed!)</i></p>" }));
-      n3.setSize(240, 140);
-
-      const n4 = mindMap.addNode(new NoteNode({ x: 0, y: -250, z: 0 }, { content: "<h2>UX Principles 🧑‍🎨</h2><p>✨ Intuitive Interaction</p><p>🌑 Dark High-Tech Theme</p><p>🔎 Progressive Disclosure</p><p>💨 Subtle Animations</p>" }));
-      n4.setSize(230, 140);
-
-      const n5 = mindMap.addNode(new NoteNode({ x: 350, y: -150, z: -30 }, { content: "<h2>Next Steps? 🤔</h2><ul><li>Extensible Node/Edge Menus</li></ul><ul><li>More Node Types: Images, URLs, IFrame, Video) 🖼️</li><li>Search / Filtering 🔍</li></ul>" }));
-      n5.setSize(220, 150);
-
-      mindMap.addEdge(n1, n2);
-      mindMap.addEdge(n1, n3);
-      mindMap.addEdge(n1, n4);
-      mindMap.addEdge(n2, n5);
-      mindMap.addEdge(n4, n5);
-      mindMap.addEdge(n3, n2); // Cross link
-  }
-
-  // --- Start the App ---
-  try {
-      console.log("🧠 NeuroWeaver Initializing...");
-      initializeNeuroWeaver();
-  } catch (error) {
-      console.error("NeuroWeaver Initialization Failed:", error);
-      $('#status-indicator').textContent = `Error: ${error.message}`;
-      $('#status-indicator').style.backgroundColor = 'var(--delete-button-bg)';
-      $('#status-indicator').style.transition = 'none';
-      $('#status-indicator').classList.remove('hidden');
-  }
+    import * as THREE from 'three';
+    import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+    // Optional: import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // If more complex controls needed
+    // Optional: import { LineMaterial } from 'three/addons/lines/LineMaterial.js'; // For thicker lines
+    // Optional: import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+    // Optional: import { Line2 } from 'three/addons/lines/Line2.js';
+    // Optional: import { gsap } from "https://cdn.jsdelivr.net/npm/gsap@3.12.5/index.js"; // For smoother animations
+
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => document.querySelectorAll(selector);
+
+    let nodeIdCounter = 0;
+    let edgeIdCounter = 0;
+
+    // --- Utilities ---
+    const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const generateId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // --- Core Classes ---
+
+    class MindMap {
+        nodes = new Map();
+        edges = new Map();
+        isDraggingNode = false;
+        isResizingNode = false;
+        isLinking = false;
+        linkSourceNode = null;
+        tempLinkLine = null;
+        uiManager = null;
+        cameraController = null;
+        layoutEngine = null;
+
+        constructor(container) {
+            this.container = container;
+            this.scene = new THREE.Scene();
+            this.cssScene = new THREE.Scene();
+            this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 10, 20000);
+            this.camera.position.z = 600;
+
+            this.webglRenderer = new THREE.WebGLRenderer({ canvas: $('#webgl-canvas'), antialias: true, alpha: true });
+            this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
+            this.webglRenderer.setPixelRatio(window.devicePixelRatio);
+
+            this.cssRenderer = new CSS3DRenderer();
+            this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+            $('#css3d-container').appendChild(this.cssRenderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            this.scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(0.5, 1, 0.75);
+            this.scene.add(directionalLight);
+
+            window.addEventListener('resize', this.onWindowResize.bind(this), false);
+        }
+
+        addNode(node) {
+            if (!node.id) node.id = generateId('node');
+            if (this.nodes.has(node.id)) return this.nodes.get(node.id);
+
+            this.nodes.set(node.id, node);
+            node.mindMap = this;
+            if (node.threeObject) this.scene.add(node.threeObject);
+            if (node.cssObject) this.cssScene.add(node.cssObject);
+            this.layoutEngine?.addNode(node);
+            return node;
+        }
+
+        removeNode(nodeId) {
+            const node = this.nodes.get(nodeId);
+            if (!node) return;
+
+            const edgesToRemove = [...this.edges.values()].filter(edge => edge.source === node || edge.target === node);
+            edgesToRemove.forEach(edge => this.removeEdge(edge.id));
+
+            node.dispose();
+            this.nodes.delete(nodeId);
+            this.layoutEngine?.removeNode(node);
+            this.uiManager?.removeNodeHTML(nodeId);
+        }
+
+        addEdge(sourceNode, targetNode, data = {}) {
+            if (!sourceNode || !targetNode || sourceNode === targetNode) return null;
+            // Optional: Prevent duplicate edges
+            // if ([...this.edges.values()].some(e => e.source === sourceNode && e.target === targetNode)) return null;
+
+            const edgeId = generateId('edge');
+            const edge = new Edge(edgeId, sourceNode, targetNode, data);
+            edge.mindMap = this;
+            this.edges.set(edgeId, edge);
+            if (edge.threeObject) this.scene.add(edge.threeObject);
+            this.layoutEngine?.addEdge(edge);
+            return edge;
+        }
+
+        removeEdge(edgeId) {
+            const edge = this.edges.get(edgeId);
+            if (!edge) return;
+            edge.dispose();
+            this.edges.delete(edgeId);
+            this.layoutEngine?.removeEdge(edge);
+            this.uiManager?.removeEdgeHTML(edgeId);
+        }
+
+        getNodeById = (id) => this.nodes.get(id);
+        getEdgeById = (id) => this.edges.get(id);
+
+        update() {
+            this.nodes.forEach(node => node.update());
+            this.edges.forEach(edge => edge.update());
+        }
+
+        render() {
+            this.webglRenderer.render(this.scene, this.camera);
+            this.cssRenderer.render(this.cssScene, this.camera);
+        }
+
+        onWindowResize() {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.webglRenderer.setSize(window.innerWidth, window.innerHeight);
+            this.cssRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        centerView(targetPosition = null, duration = 0.7) {
+            let targetPos;
+            if (targetPosition) {
+                targetPos = targetPosition.clone();
+            } else {
+                if (this.nodes.size === 0) targetPos = new THREE.Vector3(0, 0, 0);
+                else {
+                    targetPos = new THREE.Vector3();
+                    this.nodes.forEach(node => targetPos.add(node.position));
+                    targetPos.divideScalar(this.nodes.size);
+                }
+            }
+            const distance = this.nodes.size > 1 ? 600 : 300; // Adjust zoom based on content
+            this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
+        }
+
+        focusOnNode(node, duration = 0.6) {
+            if (!node) return;
+            const targetPos = node.position.clone();
+            const distance = Math.max(node.size.width, node.size.height) * 1.5 + 100; // Zoom based on size
+            this.cameraController?.moveTo(targetPos.x, targetPos.y, targetPos.z + distance, duration, targetPos);
+        }
+
+        getWorldPositionFromScreen(screenX, screenY, targetZ = 0) {
+            const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(vec, this.camera);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -targetZ);
+            const intersectPoint = new THREE.Vector3();
+            return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
+        }
+    }
+
+    class Node {
+        mindMap = null;
+        threeObject = null; // Optional WebGL visual
+        htmlElement = null;
+        cssObject = null;
+        position = new THREE.Vector3();
+        size = { width: 160, height: 70 };
+        data = {};
+
+        constructor(id, position = { x: 0, y: 0, z: 0 }, data = {}) {
+            this.id = id;
+            this.position.set(position.x, position.y, position.z);
+            this.data = data;
+            this.htmlElement = this._createHtmlElement();
+            this.cssObject = new CSS3DObject(this.htmlElement); // Correct instantiation
+            this.update();
+        }
+
+        _createHtmlElement() {
+            const el = document.createElement('div');
+            el.className = 'node-html';
+            el.id = `node-html-${this.id}`;
+            el.dataset.nodeId = this.id;
+            el.style.width = `${this.size.width}px`;
+            el.style.height = `${this.size.height}px`;
+
+            el.innerHTML = `
+                    <div class="node-content" spellcheck="false">${this.data.label || ''}</div>
+                    <button class="delete-button node-delete" title="Delete Node" data-node-id="${this.id}">×</button>
+                    <div class="resize-handle" title="Resize Node" data-node-id="${this.id}"></div>
+                `;
+            return el;
+        }
+
+        setPosition(x, y, z) { this.position.set(x, y, z); }
+
+        setSize(width, height) {
+            this.size.width = Math.max(80, width);
+            this.size.height = Math.max(40, height);
+            if (this.htmlElement) {
+                this.htmlElement.style.width = `${this.size.width}px`;
+                this.htmlElement.style.height = `${this.size.height}px`;
+            }
+            this.mindMap?.layoutEngine?.kick(); // Nudge layout after resize
+        }
+
+        update() {
+            if (this.cssObject) {
+                this.cssObject.position.copy(this.position);
+                // Optional: Make nodes face camera slightly for better readability at angles
+                // this.cssObject.rotation.copy(this.mindMap.camera.rotation);
+            }
+        }
+
+        dispose() {
+            this.cssObject?.parent?.remove(this.cssObject);
+            this.threeObject?.parent?.remove(this.threeObject);
+            // Geometry/material disposal if threeObject exists
+        }
+
+        startDrag() {
+            this.htmlElement?.classList.add('dragging');
+            this.mindMap?.layoutEngine?.fixNode(this);
+        }
+        drag(newPosition) { this.setPosition(newPosition.x, newPosition.y, newPosition.z); this.update(); }
+        endDrag() {
+            this.htmlElement?.classList.remove('dragging');
+            this.mindMap?.layoutEngine?.releaseNode(this);
+            this.mindMap?.layoutEngine?.kick();
+        }
+        startResize() { this.htmlElement?.classList.add('resizing'); this.mindMap?.layoutEngine?.fixNode(this); }
+        resize(newWidth, newHeight) { this.setSize(newWidth, newHeight); }
+        endResize() { this.htmlElement?.classList.remove('resizing'); this.mindMap?.layoutEngine?.releaseNode(this); }
+    }
+
+    class NoteNode extends Node {
+        constructor(position = { x: 0, y: 0, z: 0 }, data = { content: '' }) {
+            super(generateId('note'), position, { ...data, type: 'note' });
+            this._setupRichText();
+        }
+
+        _setupRichText() {
+            this.htmlElement.classList.add('note-node');
+            const contentDiv = this.htmlElement.querySelector('.node-content');
+            if (contentDiv) {
+                contentDiv.contentEditable = "true";
+                contentDiv.innerHTML = this.data.content || '';
+                let debounceTimer;
+                contentDiv.addEventListener('input', () => {
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => { this.data.content = contentDiv.innerHTML; }, 300);
+                });
+                // Prevent drag start when clicking/interacting with contenteditable
+                contentDiv.addEventListener('mousedown', e => e.stopPropagation());
+                contentDiv.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+            }
+        }
+    }
+
+    class Edge {
+        mindMap = null;
+        threeObject = null;
+
+        constructor(id, sourceNode, targetNode, data = {}) {
+            this.id = id;
+            this.source = sourceNode;
+            this.target = targetNode;
+            this.data = data;
+            this.threeObject = this._createThreeObject();
+            this.update();
+        }
+
+        _createThreeObject() {
+            const material = new THREE.LineBasicMaterial({
+                color: 0x00f7ff, // Use var(--edge-color)
+                linewidth: 1.5, // Note: limited support, consider Line2 for width
+                transparent: true,
+                opacity: 0.6,
+                depthTest: false, // Render edges on top slightly
+            });
+            const points = [this.source.position.clone(), this.target.position.clone()];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, material);
+            line.renderOrder = -1; // Render before nodes (if depthTest is true)
+            return line;
+        }
+
+        update() {
+            if (!this.threeObject || !this.source || !this.target) return;
+            const positions = this.threeObject.geometry.attributes.position;
+            positions.setXYZ(0, this.source.position.x, this.source.position.y, this.source.position.z);
+            positions.setXYZ(1, this.target.position.x, this.target.position.y, this.target.position.z);
+            positions.needsUpdate = true;
+            this.threeObject.geometry.computeBoundingSphere();
+        }
+
+        dispose() {
+            if (this.threeObject?.parent) {
+                this.threeObject.parent.remove(this.threeObject);
+                this.threeObject.geometry?.dispose();
+                this.threeObject.material?.dispose();
+            }
+        }
+    }
+
+    class UIManager {
+        draggedNode = null;
+        resizedNode = null;
+        resizeStartPos = { x: 0, y: 0 };
+        resizeStartSize = { width: 0, height: 0 };
+        dragOffset = new THREE.Vector3();
+        isMouseDown = false;
+        potentialClick = true;
+        lastPointerPos = { x: 0, y: 0 };
+        confirmCallback = null;
+
+        constructor(mindMap) {
+            this.mindMap = mindMap;
+            this.container = mindMap.container; // Main container for events
+            this.cssContainer = mindMap.cssRenderer.domElement; // Where HTML nodes live
+            this.contextMenu = $('#context-menu');
+            this.confirmDialog = $('#confirm-dialog');
+            this._bindEvents();
+        }
+
+        _bindEvents() {
+            const eventTarget = this.container; // Listen on the main container
+            eventTarget.addEventListener('pointerdown', this.onPointerDown.bind(this));
+            window.addEventListener('pointermove', this.onPointerMove.bind(this)); // Use window for global move/up
+            window.addEventListener('pointerup', this.onPointerUp.bind(this));
+            eventTarget.addEventListener('contextmenu', this.onContextMenu.bind(this));
+            document.addEventListener('click', (e) => { // Hide context menu on outside click
+                if (!this.contextMenu.contains(e.target)) this.hideContextMenu();
+            }, true); // Use capture phase
+            this.contextMenu.addEventListener('click', this.onMenuClick.bind(this));
+            $('#confirm-yes').addEventListener('click', this.onConfirmYes.bind(this));
+            $('#confirm-no').addEventListener('click', this.onConfirmNo.bind(this));
+        }
+
+        _getPointerEventNode(event) {
+            // Raycast from CSS container perspective if needed, but direct target check is often enough
+            const element = document.elementFromPoint(event.clientX, event.clientY);
+            const nodeElement = element?.closest('.node-html');
+            return nodeElement ? this.mindMap.getNodeById(nodeElement.dataset.nodeId) : null;
+        }
+
+        onPointerDown(event) {
+            if (event.button !== 0 && event.pointerType === 'mouse') return; // Allow only primary button for main actions
+            this.isMouseDown = true;
+            this.potentialClick = true;
+            this.lastPointerPos = { x: event.clientX, y: event.clientY };
+            const target = event.target;
+
+            // Check target directly first
+            const nodeElement = target.closest('.node-html');
+            const resizeHandle = target.closest('.resize-handle');
+            const deleteButton = target.closest('.delete-button');
+            const contentEditable = target.closest('.node-content[contenteditable="true"]');
+
+            if (deleteButton) {
+                event.preventDefault(); event.stopPropagation();
+                const nodeId = deleteButton.dataset.nodeId;
+                // Add edge delete logic if needed
+                if (nodeId) this.showConfirm(`Delete node "${nodeId.substring(0, 15)}..."?`, () => this.mindMap.removeNode(nodeId));
+                this.hideContextMenu();
+                return;
+            }
+
+            if (resizeHandle) {
+                event.preventDefault(); event.stopPropagation();
+                const nodeId = resizeHandle.dataset.nodeId;
+                this.resizedNode = this.mindMap.getNodeById(nodeId);
+                if (this.resizedNode) {
+                    this.resizedNode.startResize();
+                    this.resizeStartPos = { x: event.clientX, y: event.clientY };
+                    this.resizeStartSize = { ...this.resizedNode.size };
+                    this.container.style.cursor = 'nwse-resize';
+                }
+                this.hideContextMenu();
+                return;
+            }
+
+            if (nodeElement && !contentEditable) {
+                event.preventDefault(); // Prevent text selection/browser drag
+                this.draggedNode = this.mindMap.getNodeById(nodeElement.dataset.nodeId);
+                if (this.draggedNode) {
+                    this.draggedNode.startDrag();
+                    // Calculate offset in world space at node's depth
+                    const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
+                    if (worldPos) this.dragOffset.copy(worldPos).sub(this.draggedNode.position);
+                    else this.dragOffset.set(0,0,0); // Fallback
+                    this.container.style.cursor = 'grabbing';
+                }
+                this.hideContextMenu();
+                return;
+            }
+
+            // If nothing specific clicked, assume background interaction (panning handled by CameraController)
+            this.hideContextMenu();
+        }
+
+        onPointerMove(event) {
+            if (!this.isMouseDown) {
+                // Update linking line even if mouse isn't down
+                if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
+                // Highlight potential link targets
+                const targetNode = this._getPointerEventNode(event);
+                $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+                if (this.mindMap.isLinking && targetNode && targetNode !== this.mindMap.linkSourceNode) {
+                    targetNode.htmlElement?.classList.add('linking-target');
+                }
+                return;
+            }
+
+            const dx = event.clientX - this.lastPointerPos.x;
+            const dy = event.clientY - this.lastPointerPos.y;
+            if (dx !== 0 || dy !== 0) this.potentialClick = false; // Moved pointer
+
+            this.lastPointerPos = { x: event.clientX, y: event.clientY };
+
+            if (this.resizedNode) {
+                event.preventDefault();
+                const newWidth = this.resizeStartSize.width + (event.clientX - this.resizeStartPos.x);
+                const newHeight = this.resizeStartSize.height + (event.clientY - this.resizeStartPos.y);
+                this.resizedNode.resize(newWidth, newHeight);
+            } else if (this.draggedNode) {
+                event.preventDefault();
+                const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, this.draggedNode.position.z);
+                if (worldPos) {
+                    this.draggedNode.drag(worldPos.sub(this.dragOffset));
+                }
+            } else {
+                // Background drag - handled by CameraController
+            }
+
+            // Update linking line if active during drag (though usually linking starts from context menu)
+            if (this.mindMap.isLinking) this._updateTempLinkLine(event.clientX, event.clientY);
+        }
+
+        onPointerUp(event) {
+            if (!this.isMouseDown && !this.mindMap.isLinking) return; // Only handle if interaction was active or linking
+
+            this.container.style.cursor = this.mindMap.isLinking ? 'crosshair' : 'grab';
+
+            if (this.resizedNode) {
+                this.resizedNode.endResize();
+                this.resizedNode = null;
+            } else if (this.draggedNode) {
+                const droppedOnNode = this._getPointerEventNode(event);
+                this.draggedNode.endDrag();
+                this._checkPiling(this.draggedNode, droppedOnNode);
+                this.draggedNode = null;
+            } else if (this.mindMap.isLinking) {
+                this._endLinking(event); // Handle link completion/cancellation
+            } else if (this.potentialClick) {
+                // Handle background click or node click (if not handled by drag/resize/link)
+                const clickedNode = this._getPointerEventNode(event);
+                if (clickedNode) {
+                    // Maybe focus on simple click?
+                    // this.mindMap.focusOnNode(clickedNode);
+                    console.log("Clicked node:", clickedNode.id);
+                } else {
+                    console.log("Clicked background");
+                }
+            }
+
+            this.isMouseDown = false;
+            this.potentialClick = false;
+            $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+        }
+
+        onContextMenu(event) {
+            event.preventDefault();
+            const targetNode = this._getPointerEventNode(event);
+            // Add edge context menu logic if needed
+
+            let items = [];
+            if (targetNode) {
+                items = [
+                    { label: "Edit Content 📝", action: "edit-node", nodeId: targetNode.id, disabled: !(targetNode instanceof NoteNode) },
+                    { label: "Start Link ✨", action: "start-link", nodeId: targetNode.id },
+                    { label: "Focus Here 🎯", action: "focus-node", nodeId: targetNode.id },
+                    { label: "Delete Node 🗑️", action: "delete-node", nodeId: targetNode.id },
+                ];
+            } else {
+                const worldPos = this.mindMap.getWorldPositionFromScreen(event.clientX, event.clientY, 0);
+                items = [
+                    { label: "Create Note Here ➕", action: "create-note", position: worldPos ? JSON.stringify(worldPos) : null },
+                    { label: "Center View 🧭", action: "center-view" },
+                ];
+            }
+
+            if (items.length > 0) this.showContextMenu(event.clientX, event.clientY, items);
+            else this.hideContextMenu();
+        }
+
+        showContextMenu(x, y, items) {
+            this.contextMenu.innerHTML = '';
+            const ul = document.createElement('ul');
+            items.forEach(item => {
+                if (item.disabled) return;
+                const li = document.createElement('li');
+                li.textContent = item.label;
+                Object.entries(item).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null) li.dataset[key] = value;
+                });
+                ul.appendChild(li);
+            });
+            this.contextMenu.appendChild(ul);
+
+            // Position and ensure visibility
+            const menuRect = this.contextMenu.getBoundingClientRect(); // Get initial size
+            let finalX = x;
+            let finalY = y;
+            if (x + menuRect.width > window.innerWidth) finalX = window.innerWidth - menuRect.width - 5;
+            if (y + menuRect.height > window.innerHeight) finalY = window.innerHeight - menuRect.height - 5;
+            finalX = Math.max(5, finalX);
+            finalY = Math.max(5, finalY);
+
+            this.contextMenu.style.left = `${finalX}px`;
+            this.contextMenu.style.top = `${finalY}px`;
+            this.contextMenu.style.display = 'block';
+        }
+
+        hideContextMenu = () => { if (this.contextMenu) this.contextMenu.style.display = 'none'; }
+
+        onMenuClick(event) {
+            const li = event.target.closest('li');
+            if (!li) return;
+            const data = li.dataset;
+            const action = data.action;
+            this.hideContextMenu();
+
+            switch (action) {
+                case 'edit-node': {
+                    const node = this.mindMap.getNodeById(data.nodeId);
+                    const contentDiv = node?.htmlElement?.querySelector('.node-content');
+                    if (contentDiv?.contentEditable === "true") contentDiv.focus();
+                    break;
+                }
+                case 'delete-node':
+                    this.showConfirm(`Delete node "${data.nodeId.substring(0, 15)}..."?`, () => this.mindMap.removeNode(data.nodeId));
+                    break;
+                case 'focus-node':
+                    this.mindMap.focusOnNode(this.mindMap.getNodeById(data.nodeId));
+                    break;
+                case 'create-note': {
+                    if (!data.position) break;
+                    const pos = JSON.parse(data.position);
+                    const newNode = this.mindMap.addNode(new NoteNode(pos, { content: 'New Note ✨' }));
+                    this.mindMap.layoutEngine?.kick();
+                    setTimeout(() => {
+                        this.mindMap.focusOnNode(newNode);
+                        newNode.htmlElement?.querySelector('.node-content')?.focus();
+                    }, 100);
+                    break;
+                }
+                case 'center-view':
+                    this.mindMap.centerView();
+                    break;
+                case 'start-link': {
+                    const sourceNode = this.mindMap.getNodeById(data.nodeId);
+                    if (sourceNode) {
+                        this.mindMap.isLinking = true;
+                        this.mindMap.linkSourceNode = sourceNode;
+                        this.container.style.cursor = 'crosshair';
+                        this._startTempLinkLine(sourceNode);
+                    }
+                    break;
+                }
+            }
+        }
+
+        showConfirm(message, onConfirm) {
+            $('#confirm-message').textContent = message;
+            this.confirmCallback = onConfirm;
+            this.confirmDialog.style.display = 'block';
+        }
+        hideConfirm = () => { this.confirmDialog.style.display = 'none'; this.confirmCallback = null; }
+        onConfirmYes = () => { this.confirmCallback?.(); this.hideConfirm(); }
+        onConfirmNo = () => { this.hideConfirm(); }
+
+        _startTempLinkLine(sourceNode) {
+            this._removeTempLinkLine(); // Clear existing if any
+            const material = new THREE.LineDashedMaterial({ color: 0xffaa00, linewidth: 2, dashSize: 8, gapSize: 4, transparent: true, opacity: 0.8, depthTest: false });
+            const points = [sourceNode.position.clone(), sourceNode.position.clone()];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            this.mindMap.tempLinkLine = new THREE.Line(geometry, material);
+            this.mindMap.tempLinkLine.computeLineDistances(); // Required for dashed lines
+            this.mindMap.tempLinkLine.renderOrder = 1; // Render on top
+            this.mindMap.scene.add(this.mindMap.tempLinkLine);
+        }
+
+        _updateTempLinkLine(screenX, screenY) {
+            if (!this.mindMap.tempLinkLine || !this.mindMap.linkSourceNode) return;
+            const targetPos = this.mindMap.getWorldPositionFromScreen(screenX, screenY, this.mindMap.linkSourceNode.position.z);
+            if (targetPos) {
+                const positions = this.mindMap.tempLinkLine.geometry.attributes.position;
+                positions.setXYZ(1, targetPos.x, targetPos.y, targetPos.z);
+                positions.needsUpdate = true;
+                this.mindMap.tempLinkLine.geometry.computeBoundingSphere();
+                this.mindMap.tempLinkLine.computeLineDistances();
+            }
+        }
+
+        _removeTempLinkLine() {
+            if (this.mindMap.tempLinkLine) {
+                this.mindMap.scene.remove(this.mindMap.tempLinkLine);
+                this.mindMap.tempLinkLine.geometry?.dispose();
+                this.mindMap.tempLinkLine.material?.dispose();
+                this.mindMap.tempLinkLine = null;
+            }
+        }
+
+        _endLinking(event) {
+            this._removeTempLinkLine();
+            const targetNode = this._getPointerEventNode(event);
+            if (targetNode && targetNode !== this.mindMap.linkSourceNode) {
+                this.mindMap.addEdge(this.mindMap.linkSourceNode, targetNode);
+            } else {
+                console.log("Linking cancelled.");
+            }
+            this.mindMap.isLinking = false;
+            this.mindMap.linkSourceNode = null;
+            this.container.style.cursor = 'grab';
+            $$('.node-html.linking-target').forEach(el => el.classList.remove('linking-target'));
+        }
+
+        _checkPiling(droppedNode, droppedOnNode) {
+            if (!droppedNode || !this.mindMap.layoutEngine) return;
+            const MAX_PILE_DISTANCE_SQ = 100 * 100; // Use squared distance
+            const PILE_STRENGTH = 0.05; // Gentle pull
+
+            const targetNode = droppedOnNode ?? [...this.mindMap.nodes.values()].find(otherNode =>
+                otherNode !== droppedNode && droppedNode.position.distanceToSquared(otherNode.position) < MAX_PILE_DISTANCE_SQ
+            );
+
+            if (targetNode) {
+                console.log(`Node ${droppedNode.id} piled near ${targetNode.id}.`);
+                this.mindMap.layoutEngine.addTemporaryAttraction(droppedNode, targetNode, PILE_STRENGTH, 60); // Attract for 60 steps
+                this.mindMap.layoutEngine.kick();
+            }
+        }
+
+        removeNodeHTML = (nodeId) => $(`#node-html-${nodeId}`)?.remove();
+        removeEdgeHTML = (edgeId) => { /* Implement if edges get HTML */ };
+    }
+
+    class CameraController {
+        isPanning = false;
+        panStart = new THREE.Vector2();
+        targetPosition = new THREE.Vector3();
+        targetLookAt = new THREE.Vector3();
+        currentLookAt = new THREE.Vector3(); // Smoothed lookAt target
+        zoomSpeed = 0.0015;
+        panSpeed = 0.8;
+        minZoom = 30;
+        maxZoom = 10000;
+        dampingFactor = 0.15; // Smoother damping
+        lastTouchDistance = 0;
+        isZoomingTouch = false;
+        animationFrameId = null;
+        gsap = window.gsap; // Use global GSAP if available
+
+        constructor(camera, domElement) {
+            this.camera = camera;
+            this.domElement = domElement;
+            this.targetPosition.copy(camera.position);
+            // Initial lookAt based on camera direction
+            const initialDir = new THREE.Vector3();
+            camera.getWorldDirection(initialDir);
+            this.targetLookAt.copy(camera.position).addScaledVector(initialDir, 10); // Look slightly ahead
+            this.currentLookAt.copy(this.targetLookAt);
+
+            this._bindEvents();
+            this.update(); // Start animation loop
+        }
+
+        _bindEvents() {
+            this.domElement.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
+            this.domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
+            window.addEventListener('pointermove', this.onPointerMove.bind(this)); // Global listeners
+            window.addEventListener('pointerup', this.onPointerUp.bind(this));
+            // Basic touch support merged into pointer events where possible
+        }
+
+        _getPointerTargetType(event) {
+            const el = event.target;
+            if (el.closest('.node-html') || el.closest('.context-menu') || el.closest('.dialog')) {
+                return 'ui';
+            }
+            return 'background';
+        }
+
+        onPointerDown(event) {
+            // Only pan with primary button on background
+            if (event.button === 0 && this._getPointerTargetType(event) === 'background') {
+                event.preventDefault();
+                this.isPanning = true;
+                this.panStart.set(event.clientX, event.clientY);
+                this.domElement.classList.add('panning');
+                this.gsap?.killTweensOf(this.targetPosition); // Stop programmatic movement on user interaction
+                this.gsap?.killTweensOf(this.targetLookAt);
+            }
+            // Handle touch pinch-zoom start (more complex, basic version below)
+            // if (event.pointerType === 'touch' && event.touches?.length === 2) { ... }
+        }
+
+        onPointerMove(event) {
+            if (!this.isPanning) return;
+            event.preventDefault();
+            const deltaX = event.clientX - this.panStart.x;
+            const deltaY = event.clientY - this.panStart.y;
+
+            const element = this.domElement;
+            const cameraZ = this.camera.position.distanceTo(this.currentLookAt); // Use distance to lookAt for better scaling
+            const vFOV = THREE.MathUtils.degToRad(this.camera.fov);
+            const height = 2 * Math.tan(vFOV / 2) * Math.max(1, cameraZ); // Ensure positive height
+            const width = height * this.camera.aspect;
+
+            const panX = -(deltaX / element.clientHeight) * height * this.panSpeed; // Use height for both axes for consistent feel
+            const panY = (deltaY / element.clientHeight) * height * this.panSpeed;
+
+            // Pan using camera's local axes for more intuitive movement
+            const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+            const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+            const panOffset = right.multiplyScalar(panX).add(up.multiplyScalar(panY));
+
+            this.targetPosition.add(panOffset);
+            this.targetLookAt.add(panOffset);
+
+            this.panStart.set(event.clientX, event.clientY);
+        }
+
+        onPointerUp(event) {
+            if (this.isPanning && event.button === 0) {
+                this.isPanning = false;
+                this.domElement.classList.remove('panning');
+            }
+        }
+
+        onWheel(event) {
+            if (this._getPointerTargetType(event) !== 'background') return; // Don't zoom if over UI
+            event.preventDefault();
+            this.gsap?.killTweensOf(this.targetPosition); // Stop programmatic movement
+            this.gsap?.killTweensOf(this.targetLookAt);
+
+            const delta = -event.deltaY * this.zoomSpeed;
+            const currentDist = this.targetPosition.distanceTo(this.targetLookAt);
+            let newDist = currentDist * Math.pow(0.95, delta * 10);
+            newDist = clamp(newDist, this.minZoom, this.maxZoom);
+
+            const zoomFactor = (newDist - currentDist) / currentDist;
+
+            // Zoom towards mouse pointer projected onto the lookAt plane
+            const mouseWorldPos = this._getLookAtPlaneIntersection(event.clientX, event.clientY);
+
+            if (mouseWorldPos) {
+                const zoomTargetVec = mouseWorldPos.clone().sub(this.targetPosition);
+                this.targetPosition.addScaledVector(zoomTargetVec, zoomFactor);
+                // Keep lookAt the same unless zooming very close? Or zoom lookAt too?
+                // this.targetLookAt.addScaledVector(zoomTargetVec, zoomFactor); // Option: Zoom lookAt point as well
+            } else {
+                // Fallback: Zoom along camera direction if intersection fails
+                const dir = new THREE.Vector3();
+                this.camera.getWorldDirection(dir);
+                this.targetPosition.addScaledVector(dir, newDist - currentDist);
+            }
+        }
+
+        moveTo(x, y, z, duration = 0.7, lookAtTarget = null) {
+            const targetPos = new THREE.Vector3(x, y, z);
+            const targetLook = lookAtTarget ? lookAtTarget.clone() : new THREE.Vector3(x, y, 0);
+
+            if (this.gsap) {
+                this.gsap.to(this.targetPosition, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: duration, ease: "power3.out", overwrite: true });
+                this.gsap.to(this.targetLookAt, { x: targetLook.x, y: targetLook.y, z: targetLook.z, duration: duration, ease: "power3.out", overwrite: true });
+            } else {
+                this.targetPosition.copy(targetPos);
+                this.targetLookAt.copy(targetLook);
+            }
+        }
+
+        update = () => { // Use arrow function to preserve 'this' in requestAnimationFrame
+            const delta = this.targetPosition.distanceTo(this.camera.position) + this.targetLookAt.distanceTo(this.currentLookAt);
+
+            if (delta > 0.01 || this.isPanning) { // Only lerp if moving or panning
+                this.camera.position.lerp(this.targetPosition, this.dampingFactor);
+                this.currentLookAt.lerp(this.targetLookAt, this.dampingFactor);
+                this.camera.lookAt(this.currentLookAt);
+            } else { // Snap to final position if close enough and not interacting
+                this.camera.position.copy(this.targetPosition);
+                this.currentLookAt.copy(this.targetLookAt);
+                this.camera.lookAt(this.currentLookAt);
+            }
+            this.animationFrameId = requestAnimationFrame(this.update);
+        }
+
+        dispose() {
+            if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+            // Remove event listeners if needed (though window listeners might persist)
+        }
+
+        _getLookAtPlaneIntersection(screenX, screenY) {
+            const vec = new THREE.Vector3((screenX / window.innerWidth) * 2 - 1, -(screenY / window.innerHeight) * 2 + 1, 0.5);
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(vec, this.camera);
+            // Plane passing through targetLookAt, perpendicular to camera direction
+            const camDir = new THREE.Vector3();
+            this.camera.getWorldDirection(camDir);
+            const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, this.targetLookAt);
+            const intersectPoint = new THREE.Vector3();
+            return raycaster.ray.intersectPlane(plane, intersectPoint) ? intersectPoint : null;
+        }
+    }
+
+    class ForceLayout {
+        nodes = [];
+        edges = [];
+        velocities = new Map();
+        fixedNodes = new Set();
+        tempAttractions = []; // { nodeA, nodeB, strength, duration }
+        isRunning = false;
+        animationFrameId = null;
+
+        // Tunable parameters
+        settings = {
+            repulsion: 8000,
+            attraction: 0.03,
+            idealEdgeLength: 200,
+            centerStrength: 0.001,
+            damping: 0.9,
+            minEnergyThreshold: 0.05,
+            gravityCenter: new THREE.Vector3(0, 0, 0),
+            zSpreadFactor: 0.1 // How much repulsion/attraction affects Z
+        };
+
+        constructor(mindMap) {
+            this.mindMap = mindMap;
+        }
+
+        addNode(node) { if (!this.velocities.has(node.id)) { this.nodes.push(node); this.velocities.set(node.id, new THREE.Vector3()); } }
+        removeNode(node) { this.nodes = this.nodes.filter(n => n !== node); this.velocities.delete(node.id); this.fixedNodes.delete(node); this.tempAttractions = this.tempAttractions.filter(a => a.nodeA !== node && a.nodeB !== node); }
+        addEdge(edge) { if (!this.edges.includes(edge)) this.edges.push(edge); }
+        removeEdge(edge) { this.edges = this.edges.filter(e => e !== edge); }
+        fixNode(node) { this.fixedNodes.add(node); this.velocities.get(node.id)?.set(0, 0, 0); }
+        releaseNode(node) { this.fixedNodes.delete(node); }
+        addTemporaryAttraction(nodeA, nodeB, strength, duration = 60) { this.tempAttractions.push({ nodeA, nodeB, strength, duration }); }
+
+        run(steps = 100) {
+            console.log(`Running layout simulation for ${steps} steps...`);
+            this.isRunning = true;
+            for (let i = 0; i < steps; i++) {
+                if (this._calculateStep() < this.settings.minEnergyThreshold) break;
+            }
+            this.isRunning = false;
+            console.log("Layout simulation finished.");
+        }
+
+        startContinuous() {
+            if (this.animationFrameId) return;
+            this.isRunning = true;
+            const loop = () => {
+                if (!this.isRunning) return;
+                this._calculateStep();
+                this.animationFrameId = requestAnimationFrame(loop);
+            };
+            this.animationFrameId = requestAnimationFrame(loop);
+        }
+
+        stopContinuous() {
+            this.isRunning = false;
+            if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+
+        kick(intensity = 1) {
+            this.nodes.forEach(node => {
+                if (!this.fixedNodes.has(node)) {
+                    this.velocities.get(node.id)?.add(
+                        new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * this.settings.zSpreadFactor)
+                            .multiplyScalar(intensity * 5) // Increased kick intensity
+                    );
+                }
+            });
+            if (!this.isRunning) this.startContinuous(); // Start if not running
+            // Auto-stop after a while if kicked?
+            // setTimeout(() => this.stopContinuous(), 5000);
+        }
+
+        _calculateStep() {
+            if (this.nodes.length < 2) return 0;
+            let totalEnergy = 0;
+            const forces = new Map(this.nodes.map(node => [node.id, new THREE.Vector3()]));
+            const { repulsion, attraction, idealEdgeLength, centerStrength, gravityCenter, zSpreadFactor } = this.settings;
+
+            // Repulsion
+            for (let i = 0; i < this.nodes.length; i++) {
+                const nodeA = this.nodes[i];
+                for (let j = i + 1; j < this.nodes.length; j++) {
+                    const nodeB = this.nodes[j];
+                    const delta = nodeB.position.clone().sub(nodeA.position);
+                    const distSq = delta.lengthSq();
+                    if (distSq < 1) delta.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(); // Avoid division by zero
+                    const dist = Math.sqrt(distSq);
+                    const nodeSizeFactor = (nodeA.size.width + nodeA.size.height + nodeB.size.width + nodeB.size.height) * 0.25; // Avg dimension
+                    const minSafeDist = nodeSizeFactor * 1.2; // Keep nodes slightly apart based on size
+                    const effectiveRepulsion = repulsion * (nodeSizeFactor / 100); // Scale repulsion by size
+
+                    const forceMag = -effectiveRepulsion / Math.max(distSq, minSafeDist * minSafeDist * 0.5); // Push away, stronger for larger nodes
+                    const forceVec = delta.normalize().multiplyScalar(forceMag);
+                    forceVec.z *= zSpreadFactor; // Reduce Z force
+
+                    forces.get(nodeA.id).add(forceVec);
+                    forces.get(nodeB.id).sub(forceVec);
+                }
+            }
+
+            // Attraction (Edges)
+            this.edges.forEach(edge => {
+                const { source, target } = edge;
+                const delta = target.position.clone().sub(source.position);
+                const dist = delta.length();
+                if (dist < 0.1) return;
+                const displacement = dist - idealEdgeLength;
+                const forceMag = attraction * displacement; // Pull/Push towards ideal length
+                const forceVec = delta.normalize().multiplyScalar(forceMag);
+                forceVec.z *= zSpreadFactor;
+
+                forces.get(source.id).add(forceVec);
+                forces.get(target.id).sub(forceVec);
+            });
+
+            // Temporary Attractions
+            this.tempAttractions = this.tempAttractions.filter(attr => {
+                const delta = attr.nodeB.position.clone().sub(attr.nodeA.position);
+                const forceVec = delta.multiplyScalar(attr.strength); // Simple linear attraction
+                forceVec.z *= zSpreadFactor;
+                forces.get(attr.nodeA.id).add(forceVec);
+                forces.get(attr.nodeB.id).sub(forceVec);
+                attr.duration--;
+                return attr.duration > 0;
+            });
+
+            // Center Gravity
+            if (centerStrength > 0) {
+                this.nodes.forEach(node => {
+                    const forceVec = gravityCenter.clone().sub(node.position).multiplyScalar(centerStrength);
+                    forceVec.z *= zSpreadFactor * 0.5; // Less Z gravity
+                    forces.get(node.id).add(forceVec);
+                });
+            }
+
+            // Apply forces
+            this.nodes.forEach(node => {
+                if (this.fixedNodes.has(node)) return;
+                const force = forces.get(node.id);
+                const velocity = this.velocities.get(node.id);
+                velocity.add(force).multiplyScalar(this.settings.damping);
+                node.position.add(velocity);
+                totalEnergy += velocity.lengthSq();
+            });
+
+            return totalEnergy;
+        }
+    }
+
+    // --- Initialization ---
+    function initializeNeuroWeaver() {
+        const container = $('#mindmap-container');
+        const statusIndicator = $('#status-indicator');
+        if (!container) throw new Error("Mind map container not found!");
+
+        const mindMap = new MindMap(container);
+        const uiManager = new UIManager(mindMap);
+        const cameraController = new CameraController(mindMap.camera, mindMap.container); // Use main container for camera controls
+        const forceLayout = new ForceLayout(mindMap);
+
+        mindMap.uiManager = uiManager;
+        mindMap.cameraController = cameraController;
+        mindMap.layoutEngine = forceLayout;
+
+        loadExampleMindMap(mindMap);
+
+        forceLayout.run(150); // Initial layout settling
+        mindMap.centerView(null, 0); // Center immediately after layout
+        forceLayout.startContinuous(); // Keep layout subtly active
+
+        function animate() {
+            // Layout step is handled by forceLayout.startContinuous()
+            mindMap.update(); // Update node/edge visuals based on positions
+            // Camera update is handled by cameraController.update() internally
+            mindMap.render();
+            requestAnimationFrame(animate);
+        }
+
+        animate(); // Start main render loop
+
+        statusIndicator.textContent = 'NeuroWeaver Ready ✨';
+        setTimeout(() => statusIndicator.classList.add('hidden'), 1500);
+    }
+
+    function loadExampleMindMap(mindMap) {
+        const n1 = mindMap.addNode(new NoteNode({ x: 0, y: 0, z: 0 }, { content: "<h1>🚀 NeuroWeaver 🧠</h1><p>A 3D Mind Mapping Experience</p>✨" }));
+        n1.setSize(280, 100);
+
+        const n2 = mindMap.addNode(new NoteNode({ x: 300, y: 100, z: 20 }, { content: "<h2>Features 💡</h2><ul><li>Full 3D Canvas (Three.js)</li><li>HTML Notes via CSS3D</li><li>Zooming UI (ZUI)</li><li>Force-Directed Layout</li><li>Context Menus</li><li>Node Resizing</li><li>Linking & Deleting</li></ul>" }));
+        n2.setSize(220, 200);
+
+        const n3 = mindMap.addNode(new NoteNode({ x: -250, y: 150, z: -10 }, { content: "<h2>Technology 💻</h2><p><code>HTML</code>, <code>CSS</code>, <code>JavaScript (ESM)</code></p><p><b>Three.js</b> (WebGL + CSS3D)</p><p><i>(No external frameworks needed!)</i></p>" }));
+        n3.setSize(240, 140);
+
+        const n4 = mindMap.addNode(new NoteNode({ x: 0, y: -250, z: 0 }, { content: "<h2>UX Principles 🧑‍🎨</h2><p>✨ Intuitive Interaction</p><p>🌑 Dark High-Tech Theme</p><p>🔎 Progressive Disclosure</p><p>💨 Subtle Animations</p>" }));
+        n4.setSize(230, 140);
+
+        const n5 = mindMap.addNode(new NoteNode({ x: 350, y: -150, z: -30 }, { content: "<h2>Next Steps? 🤔</h2><ul><li>Extensible Node/Edge Menus</li></ul><ul><li>More Node Types: Images, URLs, IFrame, Video) 🖼️</li><li>Search / Filtering 🔍</li></ul>" }));
+        n5.setSize(220, 150);
+
+        mindMap.addEdge(n1, n2);
+        mindMap.addEdge(n1, n3);
+        mindMap.addEdge(n1, n4);
+        mindMap.addEdge(n2, n5);
+        mindMap.addEdge(n4, n5);
+        mindMap.addEdge(n3, n2); // Cross link
+    }
+
+    // --- Start the App ---
+    try {
+        console.log("🧠 NeuroWeaver Initializing...");
+        initializeNeuroWeaver();
+    } catch (error) {
+        console.error("NeuroWeaver Initialization Failed:", error);
+        $('#status-indicator').textContent = `Error: ${error.message}`;
+        $('#status-indicator').style.backgroundColor = 'var(--delete-button-bg)';
+        $('#status-indicator').style.transition = 'none';
+        $('#status-indicator').classList.remove('hidden');
+    }
 
 </script>
 </body>

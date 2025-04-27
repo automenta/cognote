@@ -1,6 +1,9 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.*;
+import dumb.cognote.Events;
+import dumb.cognote.Logic;
+import dumb.cognote.Plugin;
+import dumb.cognote.Truths;
 
 import static dumb.cognote.Log.message;
 

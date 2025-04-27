@@ -3,7 +3,6 @@ package dumb.cognote.tool;
 
 import dumb.cognote.Log;
 import dumb.cognote.Tool;
-import org.json.JSONObject;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;

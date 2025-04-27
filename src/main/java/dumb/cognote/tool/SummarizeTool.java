@@ -40,23 +40,23 @@ public class SummarizeTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Summarizing note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
-            var systemMessage = SystemMessage.from("""
-                    You are a summarization expert. Your task is to provide a concise summary of the provided text.
-                    Focus on the main points and key information.
-                    Output ONLY the summary text, nothing else.
-                    """);
+                    var systemMessage = SystemMessage.from("""
+                            You are a summarization expert. Your task is to provide a concise summary of the provided text.
+                            Focus on the main points and key information.
+                            Output ONLY the summary text, nothing else.
+                            """);
 
-            var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text);
 
-            List<ChatMessage> history = new ArrayList<>();
-            history.add(systemMessage);
-            history.add(userMessage);
+                    List<ChatMessage> history = new ArrayList<>();
+                    history.add(systemMessage);
+                    history.add(userMessage);
 
-            return cog.lm.llmAsync(taskId, history, "Summarization", noteId).join();
+                    return cog.lm.llmAsync(taskId, history, "Summarization", noteId).join();
 
-        }, cog.events.exe)
+                }, cog.events.exe)
                 .thenApply(AiMessage::text)
                 .thenApply(summaryText -> {
                     message("Summarization result for note '" + noteId + "': " + summaryText);

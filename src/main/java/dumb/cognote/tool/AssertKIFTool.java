@@ -4,9 +4,7 @@ import dumb.cognote.Cog;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import static dumb.cognote.Log.error;

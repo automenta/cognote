@@ -9,10 +9,9 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.*;
+import static dumb.cognote.Log.error;
 import static dumb.cognote.Logic.AssertionType.GROUND;
 import static dumb.cognote.Logic.AssertionType.SKOLEMIZED;
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.warning;
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
