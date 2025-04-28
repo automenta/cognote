@@ -1,39 +1,52 @@
-# netention
+# Netention
 
 Organize, prioritize, and grow thoughts into actionable results with real-time communication, matching, and analysis.
 
-## Features
-
-### Notes
+## Notes
 
 - **Thought Evolution:** `Note`s describe thoughts and ideas, allowing them to evolve agentically.
 - **Shared Notes:** Create, prioritize, and manage data collaboratively as `Note`s.
 - **Privacy by Default:** All `Note`s are private unless explicitly shared.
 
-### Search and Match
+## Search and Match
 
 - **Persistent Queries:** `Note`s can act as ongoing search interests.
 - **Semantic Matching:** `Note`s capture meaning and intent.
 - **Notifications:** The app receives matches to shared `Note`s as replies.
+- **Real vs. Imaginary:** Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary things - effecting the realization of imagination.
 
-### P2P Network
+## Components
 
-- **Decentralized**
-- **Secure**
-    - End-to-end encryption protects private data.
-    - Crypto-signing ensures `Note` integrity and provenance.
+### Logic engine
+- Prolog-based logic and reasoning
+- Coordinates system proceses and manages prioritizable resources
+- Develops and executes plans
+- Notes comprise a 'surface' level interface, controlling dependent internal activity
+- Framework managing notifications and events, used in implementing app features
 
-## UI
-
-### TODO List
+### TODO List (App)
 - Conventional "TODO List" editor
-- Semantic fields/forms: inserted by menu, or suggested
+- Semantic Ontology: fields/forms/templates inserted by menu, or suggested
 - WYSIWYG editor
 - List: Sort, Search, Filter
 
-### Mind Map
+### Mind Map (App)
 - Free-form Note editor and organization tool
 - Node/Edge Graph editing
+
+### Semantic Simulator (Plugin)
+- Narrates real-world simulated community interactions
+- Semi-supervised tool for developing ontology, matching heuristics, and performance testing
+
+### P2P Network (Plugin)
+- **Decentralized**
+- **Secure**
+  - End-to-end encryption protects private data.
+  - Crypto-signing ensures `Note` integrity and provenance.
+- Networks:
+  1. Nostr
+  2. LibP2P
+  3. etc...
 
 ----
 
