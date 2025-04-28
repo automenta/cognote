@@ -18,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class SummarizeTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public SummarizeTool(Cog cog) {
+    public SummarizeTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -40,7 +40,7 @@ public class SummarizeTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Summarizing note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
                     var systemMessage = SystemMessage.from("""
                             You are a summarization expert. Your task is to provide a concise summary of the provided text.

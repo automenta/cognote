@@ -1,6 +1,6 @@
 package dumb.cognote;
 
-public class ProtocolConstants {
+public class Protocol {
 
     // Signal Types
     public static final String SIGNAL_TYPE_COMMAND = "command";

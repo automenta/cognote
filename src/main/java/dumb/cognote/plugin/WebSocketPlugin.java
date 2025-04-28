@@ -21,7 +21,7 @@ import java.util.function.BiConsumer;
 import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
-import static dumb.cognote.ProtocolConstants.*;
+import static dumb.cognote.Protocol.*;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
@@ -98,7 +98,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         events.on(Cog.CogEvent.class, this::broadcastEvent);
 
         // Listen for UI Action assertions to broadcast them
-        context.events.on(new Term.Lst(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
+        cog.events.on(new Term.Lst(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
     }
 
     @Override
@@ -118,9 +118,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void handleMessage(WebSocket conn, String message) {
         JSONObject signal;
         String id = null;
-        String type = null;
-        JSONObject payload = null;
-        String inReplyToId = null;
+        String type;
+        JSONObject payload;
+        String inReplyToId;
 
         try {
             signal = new JSONObject(new JSONTokener(message));
@@ -211,7 +211,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        cog.dialogueManager.handleDialogueResponse(dialogueId, responseData)
+        cog.dialogue.handleResponse(dialogueId, responseData)
                 .ifPresentOrElse(
                         future -> sendSuccessResponse(conn, responseId, null, "Dialogue response processed."),
                         () -> sendErrorResponse(conn, responseId, "No pending dialogue request found for ID: " + dialogueId)
@@ -242,7 +242,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 .put("id", UUID.randomUUID().toString())
                 .put("payload", new JSONObject()
                         .put("systemStatus", new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount()).toJson())
-                        .put("configuration", new Cog.Configuration(cog).toJson())
+                        .put("configuration", new CogNote.Configuration(cog).toJson())
                         .put("notes", new JSONArray(cog.getAllNotes().stream().map(Note::toJson).toList()))
                         .put("assertions", new JSONArray(cog.context.truth.getAllActiveAssertions().stream().map(Assertion::toJson).toList()))
                         .put("rules", new JSONArray(cog.context.rules().stream().map(Rule::toJson).toList()))
@@ -294,7 +294,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
 
-        JSONObject uiActionData = null;
+        JSONObject uiActionData;
         try {
             // Attempt to parse the data atom's value as JSON
             uiActionData = new JSONObject(new JSONTokener(value1));
@@ -476,7 +476,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
         if (cog.updateConfig(configJsonText)) {
-            sendSuccessResponse(conn, commandId, new Cog.Configuration(cog).toJson(), "Configuration updated.");
+            sendSuccessResponse(conn, commandId, new CogNote.Configuration(cog).toJson(), "Configuration updated.");
         } else {
             sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
         }

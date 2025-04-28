@@ -27,7 +27,7 @@ public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
 
-    public record Reasoning(Logic.Cognition ctx, Events events, DialogueManager dialogueManager) {
+    public record Reasoning(Logic.Cognition ctx, Events events, Dialogue dialogue) {
         Knowledge getKb(@Nullable String noteId) {
             return ctx.kb(noteId);
         }
@@ -36,8 +36,8 @@ public class Reason {
             return ctx.rules();
         }
 
-        Cog.Configuration getConfig() {
-            return new Cog.Configuration(ctx.cog);
+        CogNote.Configuration getConfig() {
+            return new CogNote.Configuration(ctx.cog);
         }
 
         Truths getTMS() {
@@ -55,12 +55,12 @@ public class Reason {
         private final List<Plugin.ReasonerPlugin> plugins = new CopyOnWriteArrayList<>();
         private final AtomicBoolean initialized = new AtomicBoolean(false);
 
-        ReasonerManager(Events events, Logic.Cognition ctx, DialogueManager dialogueManager) {
+        ReasonerManager(Events events, Logic.Cognition ctx, Dialogue dialogue) {
             this.events = events;
-            this.reasoning = new Reasoning(ctx, events, dialogueManager);
+            this.reasoning = new Reasoning(ctx, events, dialogue);
         }
 
-        public void loadPlugin(Plugin.ReasonerPlugin plugin) {
+        public void add(Plugin.ReasonerPlugin plugin) {
             if (initialized.get()) {
                 error("Cannot load reasoner plugin " + plugin.id() + " after initialization.");
                 return;
@@ -229,8 +229,6 @@ public class Reason {
             return Set.of();
         }
 
-        protected record DerivedAssertionProperties(boolean isNeg, boolean isEq, boolean isOriented, AssertionType type) {}
-
         protected DerivedAssertionProperties getDerivedAssertionProperties(Term.Lst derivedTerm) {
             var o = derivedTerm.op();
             var isNeg = o.filter(KIF_OP_NOT::equals).isPresent();
@@ -238,6 +236,10 @@ public class Reason {
             var isOriented = isEq && derivedTerm.size() == 3 && derivedTerm.get(1).weight() > derivedTerm.get(2).weight();
             var type = derivedTerm.containsSkolemTerm() ? AssertionType.SKOLEMIZED : AssertionType.GROUND;
             return new DerivedAssertionProperties(isNeg, isEq, isOriented, type);
+        }
+
+        protected record DerivedAssertionProperties(boolean isNeg, boolean isEq, boolean isOriented,
+                                                    AssertionType type) {
         }
     }
 
@@ -610,8 +612,10 @@ public class Reason {
                 if (opOpt.isPresent()) {
                     var op = opOpt.get();
                     switch (op) {
-                        case KIF_OP_AND -> resultStream = goalList.size() > 1 ? proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack) : Stream.of(bindings);
-                        case KIF_OP_OR -> resultStream = goalList.size() > 1 ? goalList.terms.stream().skip(1).flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack))) : Stream.empty();
+                        case KIF_OP_AND ->
+                                resultStream = goalList.size() > 1 ? proveAntecedents(goalList.terms.stream().skip(1).toList(), kbId, bindings, depth, proofStack) : Stream.of(bindings);
+                        case KIF_OP_OR ->
+                                resultStream = goalList.size() > 1 ? goalList.terms.stream().skip(1).flatMap(orClause -> prove(orClause, kbId, bindings, depth, new HashSet<>(proofStack))) : Stream.empty();
                         case KIF_OP_NOT -> {
                             if (goalList.size() == 2) {
                                 var negatedGoal = goalList.get(1);
@@ -622,8 +626,7 @@ public class Reason {
                                 resultStream = Stream.empty();
                             }
                         }
-                        default ->
-                        {
+                        default -> {
                             Function<Operator, Stream<Map<Var, Term>>> f = opInstance -> {
                                 try {
                                     var opResultFuture = opInstance.exe(goalList, context);
@@ -631,8 +634,7 @@ public class Reason {
 
                                     if (opResult == null) return Stream.empty();
 
-                                    if (opResult instanceof Term.Atom atomResult) {
-                                        String value = atomResult.value();
+                                    if (opResult instanceof Term.Atom(String value)) {
                                         if ("true".equals(value)) return Stream.of(bindings);
                                         if ("false".equals(value)) return Stream.empty();
                                     }
@@ -656,8 +658,6 @@ public class Reason {
             }
 
             if (resultStream.findAny().isEmpty()) {
-                resultStream = Stream.empty();
-
                 var factBindingsStream = getCogNoteContext().findAssertionsAcrossActiveKbs(currentGoal, Assertion::isActive)
                         .flatMap(fact -> ofNullable(Unifier.unify(currentGoal, fact.kif(), bindings)).stream());
 

@@ -153,13 +153,13 @@ abstract class AbstractTest {
             throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
         }
         var typeTerm = retractTargetList.get(0);
-        if (!(typeTerm instanceof Term.Atom typeAtom)) {
+        if (!(typeTerm instanceof Term.Atom(String value))) {
             throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
         try {
-            RetractionType.valueOf(typeAtom.value().toUpperCase());
+            RetractionType.valueOf(value.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid retraction type: " + typeAtom.value() + ". Must be BY_KIF or BY_ID.");
+            throw new IllegalArgumentException("Invalid retraction type: " + value + ". Must be BY_KIF or BY_ID.");
         }
 
         return new TestAction("retract", retractTargetList, new HashMap<>());
@@ -537,18 +537,19 @@ abstract class AbstractTest {
     }
 
     private Object executeRetractAction(TestAction action) {
-        if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom typeAtom)) {
+        if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom(
+                String value
+        ))) {
             throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET). Found: " + (action.payload == null ? "null" : action.payload.toKif()));
         }
-        var rtype = typeAtom.value();
         var target = retractTargetList.get(1);
         String targetStr;
         RetractionType retractionType;
 
         try {
-            retractionType = RetractionType.valueOf(rtype.toUpperCase());
+            retractionType = RetractionType.valueOf(value.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid retraction type: " + rtype + ". Must be BY_KIF or BY_ID.");
+            throw new IllegalArgumentException("Invalid retraction type: " + value + ". Must be BY_KIF or BY_ID.");
         }
 
         if (retractionType == RetractionType.BY_KIF) {
@@ -557,15 +558,14 @@ abstract class AbstractTest {
             }
             targetStr = list.toKif();
         } else if (retractionType == RetractionType.BY_ID) {
-            if (!(target instanceof Term.Atom atom)) {
+            if (!(target instanceof Term.Atom(String v)))
                 throw new IllegalArgumentException("Invalid target for retract BY_ID: Expected Atom (ID). Found: " + target.getClass().getSimpleName() + ". Term: " + target.toKif());
-            }
-            targetStr = atom.value();
+            targetStr = v;
         } else {
-            throw new IllegalArgumentException("Unsupported retraction type: " + rtype);
+            throw new IllegalArgumentException("Unsupported retraction type: " + value);
         }
 
-        context.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
+        cog.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
         return targetStr;
     }
 
@@ -862,7 +862,7 @@ abstract class AbstractTest {
             return;
         }
 
-        Object actionResult = null;
+        Object actionResult;
         try {
             executeActionList(setup);
             actionResult = executeActionList(action);

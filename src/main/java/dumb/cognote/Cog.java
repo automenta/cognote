@@ -15,8 +15,6 @@ import java.util.function.Consumer;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.RetractionType;
-import static java.util.Objects.requireNonNull;
-import static java.util.Optional.ofNullable;
 
 public class Cog {
 
@@ -32,7 +30,6 @@ public class Cog {
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
-    static final String NOTES_FILE = "cognote_notes.json";
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
@@ -41,28 +38,23 @@ public class Cog {
     private static final int PORT = 8080;
     public final Events events;
 
-    public final LM lm;
     public final Tools tools;
 
     public final ScheduledExecutorService mainExecutor =
             Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
 
-    public final DialogueManager dialogueManager;
     final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
     public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
-    protected Reason.ReasonerManager reasonerManager;
+
 
     public Cog() {
         this.events = new Events(mainExecutor);
         Log.setEvents(this.events);
         this.tools = new Tools();
-        this.lm = new LM(this);
-        this.dialogueManager = new DialogueManager(this);
-        this.reasonerManager = null;
     }
 
     public static String id(String prefix) {
@@ -103,8 +95,6 @@ public class Cog {
         }
         paused.set(true);
         status("Initializing");
-        reasonerManager.initializeAll();
-        lm.reconfigure();
     }
 
     public void stop() {
@@ -115,10 +105,7 @@ public class Cog {
         synchronized (pauseLock) {
             pauseLock.notifyAll();
         }
-        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
-        lm.activeLlmTasks.clear();
-        dialogueManager.clear();
-        reasonerManager.shutdownAll();
+
         shutdownExecutor(mainExecutor, "Main Executor");
         events.shutdown();
         status("Stopped");
@@ -207,8 +194,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent answerEvent && answerEvent.result().query().equals(queryID)) {
-                answerFuture.complete(answerEvent.result());
+            if (e instanceof Answer.AnswerEvent(Answer result) && result.query().equals(queryID)) {
+                answerFuture.complete(result);
             }
         };
         @SuppressWarnings("unchecked")
@@ -278,10 +265,6 @@ public class Cog {
     }
 
     public record AssertedEvent(Assertion assertion, String kbId) implements AssertionEvent {
-        public AssertedEvent {
-            requireNonNull(assertion);
-            requireNonNull(kbId);
-        }
 
         @Override
         public String assocNote() {
@@ -299,11 +282,6 @@ public class Cog {
     }
 
     public record RetractedEvent(Assertion assertion, String kbId, String reason) implements AssertionEvent {
-        public RetractedEvent {
-            requireNonNull(assertion);
-            requireNonNull(kbId);
-            requireNonNull(reason);
-        }
 
         @Override
         public String assocNote() {
@@ -322,11 +300,6 @@ public class Cog {
     }
 
     public record AssertionEvictedEvent(Assertion assertion, String kbId) implements AssertionEvent {
-        public AssertionEvictedEvent {
-            requireNonNull(assertion);
-            requireNonNull(kbId);
-        }
-
         @Override
         public String assocNote() {
             return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
@@ -343,15 +316,7 @@ public class Cog {
     }
 
     public record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements CogEvent {
-        public AssertionStateEvent {
-            requireNonNull(assertionId);
-            requireNonNull(kbId);
-        }
 
-        @Override
-        public String assocNote() {
-            return null;
-        }
 
         public JSONObject toJson() {
             return new JSONObject()
@@ -362,15 +327,10 @@ public class Cog {
                             .put("isActive", isActive)
                             .put("kbId", kbId));
         }
-        }
+    }
 
     public record TemporaryAssertionEvent(Term.Lst temporaryAssertion, Map<Term.Var, Term> bindings,
                                           String noteId) implements NoteIDEvent {
-        public TemporaryAssertionEvent {
-            requireNonNull(temporaryAssertion);
-            requireNonNull(bindings);
-            requireNonNull(noteId);
-        }
 
         public JSONObject toJson() {
             var jsonBindings = new JSONObject();
@@ -386,9 +346,6 @@ public class Cog {
     }
 
     public record RuleAddedEvent(Rule rule) implements CogEvent {
-        public RuleAddedEvent {
-            requireNonNull(rule);
-        }
 
         @Override
         public String assocNote() {
@@ -405,9 +362,6 @@ public class Cog {
     }
 
     public record RuleRemovedEvent(Rule rule) implements CogEvent {
-        public RuleRemovedEvent {
-            requireNonNull(rule);
-        }
 
         @Override
         public String assocNote() {
@@ -424,16 +378,6 @@ public class Cog {
     }
 
     public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
-        public TaskUpdateEvent {
-            requireNonNull(taskId);
-            requireNonNull(status);
-            requireNonNull(content);
-        }
-
-        @Override
-        public String assocNote() {
-            return null;
-        }
 
         public JSONObject toJson() {
             return new JSONObject()
@@ -448,9 +392,6 @@ public class Cog {
 
     public record SystemStatusEvent(String statusMessage, int kbCount, int kbCapacity, int taskQueueSize,
                                     int ruleCount) implements CogEvent {
-        public SystemStatusEvent {
-            requireNonNull(statusMessage);
-        }
 
         public JSONObject toJson() {
             return new JSONObject()
@@ -466,9 +407,6 @@ public class Cog {
     }
 
     public record AddedEvent(Note note) implements NoteEvent {
-        public AddedEvent {
-            requireNonNull(note);
-        }
 
         public JSONObject toJson() {
             return new JSONObject()
@@ -480,9 +418,6 @@ public class Cog {
     }
 
     public record RemovedEvent(Note note) implements NoteEvent {
-        public RemovedEvent {
-            requireNonNull(note);
-        }
 
         public JSONObject toJson() {
             return new JSONObject()
@@ -494,10 +429,6 @@ public class Cog {
     }
 
     public record ExternalInputEvent(Term term, String sourceId, @Nullable String noteId) implements NoteIDEvent {
-        public ExternalInputEvent {
-            requireNonNull(term);
-            requireNonNull(sourceId);
-        }
 
         public JSONObject toJson() {
             var json = new JSONObject()
@@ -514,11 +445,6 @@ public class Cog {
 
     public record RetractionRequestEvent(String target, RetractionType type, String sourceId,
                                          @Nullable String noteId) implements NoteIDEvent {
-        public RetractionRequestEvent {
-            requireNonNull(target);
-            requireNonNull(type);
-            requireNonNull(sourceId);
-        }
 
         public JSONObject toJson() {
             var json = new JSONObject()
@@ -533,58 +459,4 @@ public class Cog {
         }
     }
 
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options,
-                                       JSONObject context) implements CogEvent {
-        public DialogueRequestEvent {
-            requireNonNull(dialogueId);
-            requireNonNull(requestType);
-            requireNonNull(prompt);
-            requireNonNull(options);
-            requireNonNull(context);
-        }
-
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "DialogueRequestEvent")
-                    .put("eventData", new JSONObject()
-                            .put("dialogueId", dialogueId)
-                            .put("requestType", requestType)
-                            .put("prompt", prompt)
-                            .put("options", options)
-                            .put("context", context));
-        }
-    }
-
-    public record Configuration(Cog cog) {
-        String llmApiUrl() {
-            return cog.lm.llmApiUrl;
-        }
-
-        String llmModel() {
-            return cog.lm.llmModel;
-        }
-
-        int globalKbCapacity() {
-            return cog.globalKbCapacity;
-        }
-
-        int reasoningDepthLimit() {
-            return cog.reasoningDepthLimit;
-        }
-
-        boolean broadcastInputAssertions() {
-            return cog.broadcastInputAssertions;
-        }
-
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "configuration")
-                    .put("llmApiUrl", llmApiUrl())
-                    .put("llmModel", llmModel())
-                    .put("globalKbCapacity", globalKbCapacity())
-                    .put("reasoningDepthLimit", reasoningDepthLimit())
-                    .put("broadcastInputAssertions", broadcastInputAssertions());
-        }
-    }
 }

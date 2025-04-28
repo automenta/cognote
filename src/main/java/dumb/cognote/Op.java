@@ -12,8 +12,8 @@ import java.util.function.DoubleBinaryOperator;
 import java.util.function.Function;
 
 import static dumb.cognote.Log.message;
-import static dumb.cognote.ProtocolConstants.DIALOGUE_RESPONSE_KEY_TEXT;
-import static dumb.cognote.ProtocolConstants.DIALOGUE_TYPE_TEXT_INPUT;
+import static dumb.cognote.Protocol.DIALOGUE_RESPONSE_KEY_TEXT;
+import static dumb.cognote.Protocol.DIALOGUE_TYPE_TEXT_INPUT;
 import static java.util.Optional.ofNullable;
 
 public class Op {
@@ -75,7 +75,7 @@ public class Op {
             add(new Op.BasicOperator(Atom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
 
             // Add the new (ask-user ?Prompt) operator
-            add(new DialogueOperator(Atom.of(ProtocolConstants.OP_ASK_USER)));
+            add(new DialogueOperator(Atom.of(Protocol.OP_ASK_USER)));
         }
     }
 
@@ -144,7 +144,7 @@ public class Op {
             var dialogueContext = new JSONObject(); // Add context if needed, e.g., related assertion IDs
 
             // Request dialogue from the UI via DialogueManager
-            return context.dialogueManager().requestDialogue(dialogueId, DIALOGUE_TYPE_TEXT_INPUT, value, options, dialogueContext)
+            return context.dialogue().request(dialogueId, DIALOGUE_TYPE_TEXT_INPUT, value, options, dialogueContext)
                     .thenApply(responseJson -> {
                         // Process the response from the UI
                         var responseText = responseJson.optString(DIALOGUE_RESPONSE_KEY_TEXT, null);

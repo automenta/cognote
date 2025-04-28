@@ -9,7 +9,7 @@ public interface Plugin {
     String id();
 
     default void start(Logic.Cognition c) {
-        start(c.events, c);
+        start(c.cog.events, c);
     }
 
     void start(Events e, Logic.Cognition c);
@@ -49,16 +49,12 @@ public interface Plugin {
             this.cog = ctx.cog; // Initialize cog field
         }
 
-        protected void publish(Cog.CogEvent event) {
+        protected void emit(Cog.CogEvent event) {
             if (events != null) events.emit(event);
         }
 
         protected Knowledge getKb(@Nullable String noteId) {
             return context.kb(noteId);
-        }
-
-        protected Cog cog() {
-            return context.cog;
         }
 
         protected void log(String message) {

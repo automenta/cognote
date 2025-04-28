@@ -19,9 +19,9 @@ import static dumb.cognote.Log.message;
 
 public class TextToKifTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public TextToKifTool(Cog cog) {
+    public TextToKifTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -41,7 +41,7 @@ public class TextToKifTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
                     var systemMessage = SystemMessage.from("""
                             You are a KIF conversion expert. Your task is to read the provided text and convert the factual statements and relationships into KIF expressions.

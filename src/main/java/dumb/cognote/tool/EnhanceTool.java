@@ -18,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class EnhanceTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public EnhanceTool(Cog cog) {
+    public EnhanceTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -40,7 +40,7 @@ public class EnhanceTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Enhancing note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
                     var systemMessage = SystemMessage.from("""
                             You are a text enhancement expert. Your task is to read the provided text and enhance it by adding relevant details, expanding on ideas, or improving clarity.
@@ -61,7 +61,7 @@ public class EnhanceTool implements Tool {
                     message("Enhancement result for note '" + noteId + "': " + enhancedText);
 
                     // Update the note's text with the enhanced version
-                    ((CogNote) cog).updateNoteText(noteId, enhancedText);
+                    cog.updateNoteText(noteId, enhancedText);
 
                     // Optionally, assert a fact about the enhancement
                     var enhancementKif = new dumb.cognote.Term.Lst(

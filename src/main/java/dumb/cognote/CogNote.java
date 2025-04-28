@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static dumb.cognote.Log.error;
@@ -26,38 +25,32 @@ import static java.util.Optional.ofNullable;
 
 public class CogNote extends Cog {
 
+    private static final String NOTES_FILE = "cognote_notes.json";
     public final Cognition context;
+    public final LM lm;
+    public final Dialogue dialogue;
+    protected final Reason.ReasonerManager reasoner;
     final Plugins plugins;
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
 
     public CogNote() {
         super();
-        // Initialize executors and events first
-        // mainExecutor is initialized in Cog constructor
-        // events is initialized in Cog constructor, using mainExecutor
-        // dialogueManager is initialized in Cog constructor, using mainExecutor
 
-        // Load notes and config
-        load();
+        this.context = new Cognition(globalKbCapacity,
+                new Truths.BasicTMS(events),
+                this);
 
-        // Initialize TMS and OperatorRegistry
-        var tms = new Truths.BasicTMS(events);
-        var operatorRegistry = new Op.Operators();
-
-        // Initialize Cognition context
-        // Pass dialogueManager to Cognition context
-        this.context = new Cognition(globalKbCapacity, events, tms, operatorRegistry, this);
-
-        // Initialize ReasonerManager and Plugins
-        // Pass dialogueManager to ReasonerManager
-        this.reasonerManager = new Reason.ReasonerManager(events, context, dialogueManager);
+        this.dialogue = new Dialogue(this);
+        this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
         this.plugins = new Plugins(events, context);
 
+        this.lm = new LM(this);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
 
         initPlugins();
 
-        // Add shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+        load();
     }
 
     public static void main(String[] args) {
@@ -80,7 +73,7 @@ public class CogNote extends Cog {
         try {
             var c = new CogNote();
             // WebSocketPlugin needs the port, so it's registered here after parsing args
-            c.plugins.loadPlugin(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
+            c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
 
             c.start();
 
@@ -152,7 +145,7 @@ public class CogNote extends Cog {
                             json.optString("text", ""), // Handle missing text field
                             Note.Status.valueOf(json.optString("status", Note.Status.IDLE.name())) // Handle missing status
                     ))
-                    .collect(Collectors.toList());
+                    .toList();
         } catch (IOException | org.json.JSONException e) {
             error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
             e.printStackTrace();
@@ -160,43 +153,34 @@ public class CogNote extends Cog {
         }
     }
 
-    /**
-     * Setup default plugins, reasoners, and tools
-     */
     protected void initPlugins() {
-        // Add core plugins
-        plugins.loadPlugin(new InputPlugin());
-        plugins.loadPlugin(new RetractionPlugin());
-        plugins.loadPlugin(new TmsPlugin());
-        plugins.loadPlugin(new UserFeedbackPlugin()); // Register the new feedback plugin
+        plugins.add(new InputPlugin());
+        plugins.add(new RetractionPlugin());
+        plugins.add(new TmsPlugin());
+        plugins.add(new UserFeedbackPlugin());
 
-        // Add task/goal plugins
-        plugins.loadPlugin(new TaskDecomposePlugin());
+        plugins.add(new TaskDecomposePlugin());
 
-        // Add UI/Protocol plugins (WebSocketPlugin is registered in main)
-        //plugins.loadPlugin(new StatusUpdaterPlugin());
+        //plugins.add(new StatusUpdaterPlugin());
 
-        // Add reasoner plugins
-        reasonerManager.loadPlugin(new Reason.ForwardChainingReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.RewriteRuleReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.UniversalInstantiationReasonerPlugin());
-        reasonerManager.loadPlugin(new Reason.BackwardChainingReasonerPlugin());
+        reasoner.add(new Reason.ForwardChainingReasonerPlugin());
+        reasoner.add(new Reason.RewriteRuleReasonerPlugin());
+        reasoner.add(new Reason.UniversalInstantiationReasonerPlugin());
+        reasoner.add(new Reason.BackwardChainingReasonerPlugin());
 
-        // Add tools
-        tools.register(new AssertKIFTool(this));
-        tools.register(new GetNoteTextTool(this));
-        tools.register(new FindAssertionsTool(this));
-        tools.register(new RetractTool(this));
-        tools.register(new QueryTool(this));
-        tools.register(new LogMessageTool(this)); // Pass cog to LogMessageTool
+        tools.add(new AssertKIFTool(this));
+        tools.add(new GetNoteTextTool(this));
+        tools.add(new FindAssertionsTool(this));
+        tools.add(new RetractTool(this));
+        tools.add(new QueryTool(this));
+        tools.add(new LogMessageTool(this));
 
-        // Add LLM-based tools
-        tools.register(new SummarizeTool(this));
-        tools.register(new IdentifyConceptsTool(this));
-        tools.register(new GenerateQuestionsTool(this));
-        tools.register(new TextToKifTool(this));
-        tools.register(new DecomposeGoalTool(this));
-        tools.register(new EnhanceTool(this)); // Register the new EnhanceTool
+        tools.add(new SummarizeTool(this));
+        tools.add(new IdentifyConceptsTool(this));
+        tools.add(new GenerateQuestionsTool(this));
+        tools.add(new TextToKifTool(this));
+        tools.add(new DecomposeGoalTool(this));
+        tools.add(new EnhanceTool(this));
     }
 
     @Override
@@ -219,7 +203,7 @@ public class CogNote extends Cog {
             save();
             message("Added note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
         } else {
             message("Note with ID " + note.id + " already exists.");
         }
@@ -238,7 +222,7 @@ public class CogNote extends Cog {
             save();
             message("Removed note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
         });
     }
 
@@ -363,7 +347,7 @@ public class CogNote extends Cog {
         // Emit status event reflecting the cleared state
         events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
         // Signal UI to update note list
-        assertUiAction(ProtocolConstants.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
     }
 
     public boolean updateConfig(String newConfigJsonText) {
@@ -440,24 +424,21 @@ public class CogNote extends Cog {
      * @param actionData A JSONObject containing data for the UI action.
      */
     public void assertUiAction(String actionType, JSONObject actionData) {
-        var uiActionTerm = new Term.Lst(
-                Term.Atom.of(ProtocolConstants.PRED_UI_ACTION),
-                Term.Atom.of(actionType),
-                Term.Atom.of(actionData.toString()) // Store JSON string in an atom
-        );
-
-        var potentialAssertion = new Assertion.PotentialAssertion(
-                uiActionTerm,
+        context.tryCommit(new Assertion.PotentialAssertion(
+                new Term.Lst(
+                        Term.Atom.of(Protocol.PRED_UI_ACTION),
+                        Term.Atom.of(actionType),
+                        Term.Atom.of(actionData.toString()) // Store JSON string in an atom
+                ),
                 Cog.INPUT_ASSERTION_BASE_PRIORITY, // Use a base priority
                 java.util.Set.of(), // No justifications needed for a UI action
                 "backend:ui-action", // Source
                 false, false, false, // Not equality, not negated
-                ProtocolConstants.KB_UI_ACTIONS, // Target KB for UI actions
+                Protocol.KB_UI_ACTIONS, // Target KB for UI actions
                 Logic.AssertionType.GROUND, // UI actions are ground facts
                 List.of(), // No quantified variables
                 0 // Derivation depth 0
-        );
-        context.tryCommit(potentialAssertion, "backend:ui-action");
+        ), "backend:ui-action");
     }
 
 
@@ -465,7 +446,11 @@ public class CogNote extends Cog {
     public void start() {
         super.start();
 
+        lm.reconfigure();
+
         plugins.initializeAll();
+
+        reasoner.initializeAll();
 
         // Add notes that were loaded as ACTIVE to the active context
         notes.values().stream()
@@ -477,8 +462,18 @@ public class CogNote extends Cog {
 
     @Override
     public void stop() {
+
+        dialogue.clear();
+
+        reasoner.shutdownAll();
+
+        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
+        lm.activeLlmTasks.clear();
+
         save();
+
         plugins.shutdownAll();
+
         super.stop();
     }
 
@@ -501,6 +496,38 @@ public class CogNote extends Cog {
                             .put("note", note.toJson())
                             .put("oldStatus", oldStatus.name())
                             .put("newStatus", newStatus.name()));
+        }
+    }
+
+    public record Configuration(CogNote cog) {
+        String llmApiUrl() {
+            return cog.lm.llmApiUrl;
+        }
+
+        String llmModel() {
+            return cog.lm.llmModel;
+        }
+
+        int globalKbCapacity() {
+            return cog.globalKbCapacity;
+        }
+
+        int reasoningDepthLimit() {
+            return cog.reasoningDepthLimit;
+        }
+
+        boolean broadcastInputAssertions() {
+            return cog.broadcastInputAssertions;
+        }
+
+        public JSONObject toJson() {
+            return new JSONObject()
+                    .put("type", "configuration")
+                    .put("llmApiUrl", llmApiUrl())
+                    .put("llmModel", llmModel())
+                    .put("globalKbCapacity", globalKbCapacity())
+                    .put("reasoningDepthLimit", reasoningDepthLimit())
+                    .put("broadcastInputAssertions", broadcastInputAssertions());
         }
     }
 }

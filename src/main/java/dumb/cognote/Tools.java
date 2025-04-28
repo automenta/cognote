@@ -12,7 +12,7 @@ import static dumb.cognote.Log.message;
 public class Tools {
     private final Map<String, Tool> tools = new ConcurrentHashMap<>();
 
-    public void register(Tool tool) {
+    public void add(Tool tool) {
         var n = tool.name();
         if (tools.containsKey(n))
             throw new IllegalArgumentException("Tool with name '" + n + "' already registered.");

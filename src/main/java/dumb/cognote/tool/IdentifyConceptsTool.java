@@ -19,9 +19,9 @@ import static dumb.cognote.Log.message;
 
 public class IdentifyConceptsTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public IdentifyConceptsTool(Cog cog) {
+    public IdentifyConceptsTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -41,7 +41,7 @@ public class IdentifyConceptsTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
                     var systemMessage = SystemMessage.from("""
                             You are a concept extraction assistant. Your task is to read the provided text and identify the most important concepts, entities, or topics mentioned.

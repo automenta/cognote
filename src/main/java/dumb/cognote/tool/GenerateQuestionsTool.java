@@ -19,9 +19,9 @@ import static dumb.cognote.Log.message;
 
 public class GenerateQuestionsTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public GenerateQuestionsTool(Cog cog) {
+    public GenerateQuestionsTool(CogNote cog) {
         this.cog = cog;
     }
 
@@ -41,7 +41,7 @@ public class GenerateQuestionsTool implements Tool {
         cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
-                    var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+                    var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
 
                     var systemMessage = SystemMessage.from("""
                             You are a question generation assistant. Your task is to read the provided text and generate a list of insightful questions that could be answered based on the text, or that the text prompts you to ask.

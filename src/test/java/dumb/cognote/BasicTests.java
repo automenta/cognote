@@ -104,7 +104,7 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void runLogMessageTool() {
-        cog.tools.register(new Tool() {
+        cog.tools.add(new Tool() {
             @Override
             public String name() {
                 return "log_message2";
@@ -136,7 +136,7 @@ public class BasicTests extends AbstractTest {
 
     @Test
     void runGetNoteTextTool() {
-        cog.tools.register(new Tool() {
+        cog.tools.add(new Tool() {
             @Override
             public String name() {
                 return "get_note_text2";
@@ -391,14 +391,14 @@ public class BasicTests extends AbstractTest {
     })
     void actionErrorParsing(String actionKif) {
         assertThrows(AssertionFailedError.class, () ->
-            runKifTest(String.format("""
-                    (test "Action Error Parsing: %s"
-                      (setup)
-                      (action %s)
-                      (expected (expectedResult false))
-                      (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)),
-            "Action '" + actionKif + "' was expected to fail during parsing.");
+                        runKifTest(String.format("""
+                                (test "Action Error Parsing: %s"
+                                  (setup)
+                                  (action %s)
+                                  (expected (expectedResult false))
+                                  (teardown))
+                                """, actionKif.replace("\"", "\\\""), actionKif)),
+                "Action '" + actionKif + "' was expected to fail during parsing.");
     }
 
     @ParameterizedTest
@@ -409,14 +409,14 @@ public class BasicTests extends AbstractTest {
     })
     void actionErrorExecution(String actionKif) {
         assertThrows(RuntimeException.class, () ->
-            runKifTest(String.format("""
-                    (test "Action Error Execution: %s"
-                      (setup)
-                      (action %s)
-                      (expected (expectedResult false))
-                      (teardown))
-                    """, actionKif.replace("\"", "\\\""), actionKif)),
-            "Action '" + actionKif + "' was expected to fail during execution.");
+                        runKifTest(String.format("""
+                                (test "Action Error Execution: %s"
+                                  (setup)
+                                  (action %s)
+                                  (expected (expectedResult false))
+                                  (teardown))
+                                """, actionKif.replace("\"", "\\\""), actionKif)),
+                "Action '" + actionKif + "' was expected to fail during execution.");
     }
 
     @Test
@@ -468,13 +468,13 @@ public class BasicTests extends AbstractTest {
     })
     void expectationErrorParsing(String expectationKif) {
         assertThrows(AssertionFailedError.class, () ->
-            runKifTest(String.format("""
-                    (test "Expectation Error Parsing: %s"
-                      (setup)
-                      (action (query (a)))
-                      (expected %s)
-                      (teardown))
-                    """, expectationKif.replace("\"", "\\\""), expectationKif)),
-            "Expectation '" + expectationKif + "' was expected to fail during parsing.");
+                        runKifTest(String.format("""
+                                (test "Expectation Error Parsing: %s"
+                                  (setup)
+                                  (action (query (a)))
+                                  (expected %s)
+                                  (teardown))
+                                """, expectationKif.replace("\"", "\\\""), expectationKif)),
+                "Expectation '" + expectationKif + "' was expected to fail during parsing.");
     }
 }

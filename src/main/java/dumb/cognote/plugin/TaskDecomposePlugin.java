@@ -41,7 +41,7 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
         // For now, sticking with Option 1 as requested, but the ACHIEVE_GOAL type is added.
 
         // Use the DecomposeGoalTool
-        cog().tools.get("decompose_goal").ifPresentOrElse(tool -> {
+        cog.tools.get("decompose_goal").ifPresentOrElse(tool -> {
             Map<String, Object> params = new java.util.HashMap<>();
             params.put("goal_description", goalDescription);
             if (noteId != null) {
@@ -57,7 +57,7 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
                 } else {
                     System.out.println("DecomposeGoalTool execution completed for goal '" + goalDescription + "'. Result: " + result);
                 }
-            }, cog().events.exe); // Use the Cog's event executor
+            }, cog.events.exe); // Use the Cog's event executor
 
         }, () -> System.err.println("TaskDecompositionPlugin: DecomposeGoalTool not found in registry."));
     }

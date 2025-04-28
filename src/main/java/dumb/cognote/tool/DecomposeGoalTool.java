@@ -5,6 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
+import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
@@ -17,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class DecomposeGoalTool implements Tool {
 
-    private final Cog cog;
+    private final CogNote cog;
 
-    public DecomposeGoalTool(Cog cog) {
+    public DecomposeGoalTool(CogNote cog) {
         this.cog = cog;
     }
 

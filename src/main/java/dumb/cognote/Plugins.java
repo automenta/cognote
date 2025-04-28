@@ -18,7 +18,7 @@ public class Plugins {
         this.context = context;
     }
 
-    public void loadPlugin(Plugin plugin) {
+    public void add(Plugin plugin) {
         if (initialized.get()) {
             error("Cannot load plugin " + plugin.id() + " after initialization.");
             return;

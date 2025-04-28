@@ -13,7 +13,6 @@ import static dumb.cognote.Cog.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Logic.AssertionType.GROUND;
 import static dumb.cognote.Logic.AssertionType.SKOLEMIZED;
-import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.Optional.ofNullable;
 
@@ -353,21 +352,22 @@ public class Logic {
     }
 
     public static class Cognition {
+        public final CogNote cog;
+
         public final Truths truth;
         public final Op.Operators operators;
         public final Set<String> activeNoteIds = ConcurrentHashMap.newKeySet();
-        public final Events events;
-        public final CogNote cog;
+
         private final ConcurrentMap<String, Knowledge> noteKbs = new ConcurrentHashMap<>();
         private final Knowledge globalKb;
+
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
 
-        Cognition(int globalKbCapacity, Events events, Truths truth, Op.Operators operators, CogNote cog) {
+        Cognition(int globalKbCapacity, Truths truth, CogNote cog) {
             this.cog = cog;
-            this.events = requireNonNull(events);
-            this.truth = requireNonNull(truth);
-            this.operators = requireNonNull(operators);
-            this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, events, truth);
+            this.truth = truth;
+            this.operators = new Op.Operators();
+            this.globalKb = new Knowledge(GLOBAL_KB_NOTE_ID, globalKbCapacity, cog.events, truth);
             activeNoteIds.add(GLOBAL_KB_NOTE_ID);
         }
 
@@ -401,7 +401,7 @@ public class Logic {
         }
 
         public Knowledge kb(@Nullable String noteId) {
-            return (noteId == null || GLOBAL_KB_NOTE_ID.equals(noteId)) ? globalKb : noteKbs.computeIfAbsent(noteId, id -> new Knowledge(id, globalKb.capacity, events, truth));
+            return (noteId == null || GLOBAL_KB_NOTE_ID.equals(noteId)) ? globalKb : noteKbs.computeIfAbsent(noteId, id -> new Knowledge(id, globalKb.capacity, cog.events, truth));
         }
 
         public Knowledge kbGlobal() {
@@ -434,13 +434,13 @@ public class Logic {
 
         public boolean addRule(Rule rule) {
             var added = rules.add(rule);
-            if (added) events.emit(new RuleAddedEvent(rule));
+            if (added) cog.events.emit(new RuleAddedEvent(rule));
             return added;
         }
 
         public boolean removeRule(Rule rule) {
             var removed = rules.remove(rule);
-            if (removed) events.emit(new RuleRemovedEvent(rule));
+            if (removed) cog.events.emit(new RuleRemovedEvent(rule));
             return removed;
         }
 
@@ -481,7 +481,7 @@ public class Logic {
         }
 
         public Stream<Assertion> getAllActiveAssertionsAcrossActiveKbs() {
-             Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
+            Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
                     .filter(kb -> activeNoteIds.contains(kb.id));
 
             return kbsToSearch

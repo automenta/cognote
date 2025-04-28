@@ -37,8 +37,8 @@ public class LogMessageTool implements Tool {
         // For simplicity, we'll just put it directly into a JSON object and convert that to a string atom.
         var uiActionData = new JSONObject().put("message", message).toString();
         var uiActionTerm = new Term.Lst(
-                Term.Atom.of(ProtocolConstants.PRED_UI_ACTION),
-                Term.Atom.of(ProtocolConstants.UI_ACTION_DISPLAY_MESSAGE),
+                Term.Atom.of(Protocol.PRED_UI_ACTION),
+                Term.Atom.of(Protocol.UI_ACTION_DISPLAY_MESSAGE),
                 Term.Atom.of(uiActionData) // Store JSON string in an atom
         );
 
@@ -49,7 +49,7 @@ public class LogMessageTool implements Tool {
                 java.util.Set.of(), // No justifications needed for a UI action
                 "tool:log_message", // Source
                 false, false, false, // Not equality, not negated
-                ProtocolConstants.KB_UI_ACTIONS, // Target KB for UI actions
+                Protocol.KB_UI_ACTIONS, // Target KB for UI actions
                 dumb.cognote.Logic.AssertionType.GROUND, // UI actions are ground facts
                 List.of(), // No quantified variables
                 0 // Derivation depth 0
