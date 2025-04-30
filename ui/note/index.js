@@ -1,24 +1,7 @@
+import { websocketClient } from './client.js'; // Import the websocketClient
+
+// Utility functions (assuming these are defined elsewhere or inline)
 const Utils = {
-    debounce(func, wait) {
-        let t;
-        return (...a) => {
-            clearTimeout(t);
-            t = setTimeout(() => func.apply(this, a), wait);
-        };
-    },
-    timeAgo(ts) {
-        const s = Math.floor((Date.now() - ts) / 1e3);
-        if (s < 5) return "just now";
-        const i = [{l: 'y', s: 31536e3}, {l: 'm', s: 2592e3}, {l: 'd', s: 86400}, {l: 'h', s: 3600}, {
-            l: 'm',
-            s: 60
-        }, {l: 's', s: 1}];
-        for (const {l, s: v} of i) {
-            const c = Math.floor(s / v);
-            if (c >= 1) return `${c}${l} ago`;
-        }
-        return "just now";
-    },
     sanitizeHTML: (s) => {
         const div = document.createElement('div');
         div.textContent = s;
@@ -27,17 +10,27 @@ const Utils = {
     extractText: (html) => {
         const div = document.createElement('div');
         div.innerHTML = html;
-        return div.textContent || "";
+        return div.textContent || div.innerText || '';
+    },
+    debounce: (func, delay) => {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                func.apply(this, args);
+            }, delay);
+        };
     }
 };
 
+// Notifier (assuming this is defined elsewhere or inline)
 const Notifier = {
-    success: (m) => console.log(`SUCCESS: ${m}`),
-    info: (m) => console.log(`INFO: ${m}`),
-    warning: (m) => console.warn(`WARNING: ${m}`),
-    error: (m) => console.error(`ERROR: ${m}`)
+    info: (msg) => console.log(`[INFO] ${msg}`),
+    error: (msg) => console.error(`[ERROR] ${msg}`),
+    warning: (msg) => console.warn(`[WARN] ${msg}`)
 };
 
+// Base Component class
 class Component {
     constructor(app, elSelector) {
         this.app = app;
@@ -48,16 +41,16 @@ class Component {
     render() {}
     bindEvents() {}
 
-    destroy() {
-        if (this.el) {
-            this.el.innerHTML = '';
-            const newEl = this.el.cloneNode(true);
-            this.el.parentNode.replaceChild(newEl, this.el);
-            this.el = newEl;
-        }
+    show() {
+        this.el?.classList.add('visible');
+    }
+
+    hide() {
+        this.el?.classList.remove('visible');
     }
 }
 
+// NoteItem component for the list
 class NoteItem {
     constructor(app, note) {
         this.app = app;
@@ -68,20 +61,21 @@ class NoteItem {
 
     createMarkup() {
         const preview = Utils.extractText(this.note.content).substring(0, 80) + (Utils.extractText(this.note.content).length > 80 ? '...' : '');
-        const div = document.createElement('div');
-        div.classList.add('note-item');
-        div.dataset.id = this.note.id;
-        div.style.borderLeftColor = this.note.color || '#ccc';
-        div.innerHTML = `
-            <h4>${Utils.sanitizeHTML(this.note.title || 'Untitled Note')}</h4>
-            <div class="meta">Cr: ${new Date(this.note.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(this.note.updated)} | St: ${this.note.state} | P: ${this.note.priority || 0}</div>
-            <div class="preview">${Utils.sanitizeHTML(preview)}</div>
-            <div class="note-priority-controls">
-                <button class="priority-inc" title="Increase Priority">+</button>
-                <button class="priority-dec" title="Decrease Priority">-</button>
+        const el = document.createElement('div');
+        el.classList.add('note-item');
+        el.dataset.noteId = this.note.id;
+        el.style.borderColor = this.note.color || ''; // Apply color
+        el.innerHTML = `
+            <div class="note-title">${Utils.sanitizeHTML(this.note.title)}</div>
+            <div class="note-preview">${Utils.sanitizeHTML(preview)}</div>
+            <div class="note-meta">
+                <span class="note-status status-${this.note.state.status.toLowerCase()}">${this.note.state.status}</span>
+                <span class="note-priority">Pri: ${this.note.pri}</span>
+                <button class="priority-inc">+</button>
+                <button class="priority-dec">-</button>
             </div>
         `;
-        return div;
+        return el;
     }
 
     bindEvents() {
@@ -98,22 +92,21 @@ class NoteItem {
 
     update(note) {
         this.note = note;
-        const preview = Utils.extractText(note.content).substring(0, 80) + (Utils.extractText(note.content).length > 80 ? '...' : '');
-        this.el.querySelector('h4').textContent = Utils.sanitizeHTML(note.title || 'Untitled Note');
-        this.el.querySelector('.meta').textContent = `Cr: ${new Date(note.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(note.updated)} | St: ${note.state} | P: ${note.priority || 0}`;
-        this.el.querySelector('.preview').textContent = Utils.sanitizeHTML(preview);
-        this.el.style.borderLeftColor = note.color || '#ccc';
+        const preview = Utils.extractText(this.note.content).substring(0, 80) + (Utils.extractText(this.note.content).length > 80 ? '...' : '');
+        this.el.querySelector('.note-title').innerHTML = Utils.sanitizeHTML(this.note.title);
+        this.el.querySelector('.note-preview').innerHTML = Utils.sanitizeHTML(preview);
+        this.el.querySelector('.note-status').textContent = this.note.state.status;
+        this.el.querySelector('.note-status').className = `note-status status-${this.note.state.status.toLowerCase()}`;
+        this.el.querySelector('.note-priority').textContent = `Pri: ${this.note.pri}`;
+        this.el.style.borderColor = this.note.color || ''; // Update color
     }
 
     setActive(isActive) {
         this.el.classList.toggle('selected', isActive);
     }
-
-    remove() {
-        this.el.remove();
-    }
 }
 
+// NoteList component for the sidebar
 class NoteList extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
@@ -124,22 +117,33 @@ class NoteList extends Component {
         this.el.innerHTML = '';
         this.items = {};
         notes?.length ?
-            notes.forEach(n => {
-                const i = new NoteItem(this.app, n);
-                this.items[n.id] = i;
-                this.el.appendChild(i.el);
-                n.id === currentId && i.setActive(true);
+            notes.forEach(note => {
+                const item = new NoteItem(this.app, note);
+                this.items[note.id] = item;
+                this.el.appendChild(item.el);
+                if (note.id === currentId) {
+                    item.setActive(true);
+                }
             }) :
-            this.el.innerHTML = '<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>';
+            this.el.innerHTML = '<div class="no-notes">No notes found.</div>';
+
+        if (currentId && this.items[currentId]) {
+             this.scrollToActive(currentId);
+        }
     }
 
-    updateItem(note) {
-        this.items[note.id]?.update(note);
+    updateNote(note) {
+        if (this.items[note.id]) {
+            this.items[note.id].update(note);
+        } else {
+            // If note is new or wasn't in the filtered list, re-render the whole list
+            this.app.sortAndFilter();
+        }
     }
 
-    removeItem(noteId) {
+    removeNote(noteId) {
         if (this.items[noteId]) {
-            this.items[noteId].remove();
+            this.items[noteId].el.remove();
             delete this.items[noteId];
         }
     }
@@ -148,39 +152,54 @@ class NoteList extends Component {
         Object.values(this.items).forEach(i => i.setActive(false));
         if (id && this.items[id]) {
             this.items[id].setActive(true);
-            const itemEl = this.items[id].el;
-            const container = this.el;
+            this.scrollToActive(id);
+        }
+    }
+
+    scrollToActive(id) {
+        const itemEl = this.items[id]?.el;
+        const container = this.el;
+        if (itemEl && container) {
             const itemTop = itemEl.offsetTop;
             const itemBottom = itemTop + itemEl.offsetHeight;
-            (itemTop < container.scrollTop || itemBottom > container.scrollTop + container.clientHeight) &&
-                (container.scrollTop = itemTop - container.clientHeight / 2 + itemEl.offsetHeight / 2);
+            // Scroll only if the item is not fully visible
+            if (itemTop < container.scrollTop || itemBottom > container.scrollTop + container.clientHeight) {
+                container.scrollTop = itemTop - container.clientHeight / 2 + itemEl.offsetHeight / 2;
+            }
         }
     }
 }
 
+// Sidebar component
 class Sidebar extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
         this.noteList = null;
         this.render();
         this.bindEvents();
+        this.noteList = new NoteList(app, '#note-list');
     }
 
     render() {
         this.el.innerHTML = `
+            <div class="sidebar-header">
+                <h2>Notes</h2>
+                <button id="add-note-btn">+</button>
+            </div>
             <div class="sidebar-controls">
-                <button id="add-note-btn" title="Create New Note">+</button>
+                <input type="text" id="search-notes" placeholder="Search...">
                 <select id="sort-notes">
-                    <option value="priority">Sort: Priority</option>
-                    <option value="updated">Sort: Updated</option>
-                    <option value="created">Sort: Created</option>
-                    <option value="title">Sort: Title</option>
+                    <option value="updated-desc">Last Updated</option>
+                    <option value="priority-desc">Priority (High to Low)</option>
+                    <option value="priority-asc">Priority (Low to High)</option>
+                    <option value="title-asc">Title (A-Z)</option>
+                    <option value="title-desc">Title (Z-A)</option>
                 </select>
             </div>
-            <input type="search" id="search-notes" placeholder="Filter/Search Notes...">
-            <div class="note-list-container" id="note-list"></div>
+            <div id="note-list" class="note-list">
+                <!-- Note items will be rendered here by NoteList component -->
+            </div>
         `;
-        this.noteList = new NoteList(this.app, '#note-list');
     }
 
     bindEvents() {
@@ -189,134 +208,111 @@ class Sidebar extends Component {
         this.el.querySelector('#search-notes').addEventListener('input', Utils.debounce(() => this.app.sortAndFilter(), 300));
     }
 
-    renderNotes(n, c) {
-        this.noteList.render(n, c);
+    renderNotes(notes, currentId) {
+        this.noteList.render(notes, currentId);
     }
 
-    updateNote(n) {
-        this.noteList.updateItem(n);
+    updateNote(note) {
+        this.noteList.updateNote(note);
     }
 
     removeNote(noteId) {
-        this.noteList.removeItem(noteId);
+        this.noteList.removeNote(noteId);
     }
 
     setActive(id) {
         this.noteList.setActive(id);
     }
 
-    getSort() {
+    getSortBy() {
         return this.el.querySelector('#sort-notes').value;
     }
 
-    getSearch() {
-        return this.el.querySelector('#search-notes').value;
+    getSearchTerm() {
+        return this.el.querySelector('#search-notes').value.toLowerCase();
     }
 }
 
+// Editor component
 class Editor extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
-        this.save = Utils.debounce(() => this.app.saveCurrentNote(), 1e3);
+        this.currentNoteId = null;
+        this.save = Utils.debounce(() => this.app.saveCurrentNote(), 1000);
         this.render();
+        this.contentEl = this.el.querySelector('.editor-content');
+        this.titleEl = this.el.querySelector('.editor-title');
         this.bindEvents();
     }
 
     render() {
         this.el.innerHTML = `
-            <div class="editor-header">
-                <input type="text" class="editor-title" id="note-title" placeholder="Note Title">
-                <div class="editor-meta" id="note-meta">Select or create a note</div>
-                <span id="save-status" class="save-status"></span>
-            </div>
             <div class="editor-toolbar">
-                <button data-command="bold" class="icon" title="Bold">B</button>
-                <button data-command="italic" class="icon" title="Italic">I</button>
-                <button data-command="underline" class="icon" title="Underline">U</button>
-                <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button>
-                <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button>
-                <button data-action="insert-field" class="icon" title="Insert Field">+</button>
+                <button data-command="bold">B</button>
+                <button data-command="italic">I</button>
+                <button data-command="underline">U</button>
+                <button data-command="insertUnorderedList">UL</button>
+                <button data-command="insertOrderedList">OL</button>
+                <button data-command="createLink">Link</button>
+                <button data-action="insert-field">Insert Field</button>
+                <button data-action="delete-note" class="delete-button">Delete Note</button>
+                <button data-action="clone-note" class="clone-button">Clone Note</button>
             </div>
-            <div class="editor-content-wrapper">
-                <div class="editor-content" id="note-content" contenteditable="false" placeholder="Start writing..."></div>
-            </div>
+            <input type="text" class="editor-title" placeholder="Note Title">
+            <div class="editor-content" contenteditable="true" placeholder="Write your note here..."></div>
         `;
-        this.titleEl = this.el.querySelector('#note-title');
-        this.metaEl = this.el.querySelector('#note-meta');
-        this.contentEl = this.el.querySelector('#note-content');
-        this.saveStatusEl = this.el.querySelector('#save-status');
     }
 
     bindEvents() {
         this.el.querySelectorAll('.editor-toolbar button[data-command]').forEach(button => {
             button.addEventListener('click', (e) => {
                 document.execCommand(e.currentTarget.dataset.command, false, null);
-                this.contentEl.dispatchEvent(new Event('input'));
-                this.contentEl.focus();
+                this.contentEl.dispatchEvent(new Event('input')); // Trigger input event after command
+                this.contentEl.focus(); // Keep focus on content
             });
         });
+
         this.el.querySelector('.editor-toolbar button[data-action="insert-field"]').addEventListener('click', () => this.insertField());
-        this.contentEl.addEventListener('input', () => this.save());
+        this.el.querySelector('.editor-toolbar button[data-action="delete-note"]').addEventListener('click', () => this.app.deleteNote(this.currentNoteId));
+        this.el.querySelector('.editor-toolbar button[data-action="clone-note"]').addEventListener('click', () => this.app.cloneNote(this.currentNoteId));
+
         this.titleEl.addEventListener('input', () => this.save());
-        this.contentEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Tab' && !e.shiftKey && this.contentEl.isContentEditable) {
-                e.preventDefault();
-                document.execCommand('insertHTML', false, '&#009;');
-            } else if (e.key === 'Tab' && e.shiftKey && this.contentEl.isContentEditable) {
-                e.preventDefault();
-            }
-        });
+        this.contentEl.addEventListener('input', () => this.save());
     }
 
-    load(n) {
-        if (n) {
-            this.titleEl.value = n.title || '';
-            this.titleEl.disabled = false;
-            this.contentEl.innerHTML = n.content || '';
-            this.contentEl.contentEditable = true;
-            this.updateMeta(n);
-            this.saveStatusEl.textContent = '';
-        } else this.clear();
-    }
-
-    updateMeta(n) {
-        this.metaEl.textContent = `Cr: ${new Date(n.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(n.updated)} | St: ${n.state} | P: ${n.priority || 0}`;
+    loadNote(note) {
+        this.currentNoteId = note.id;
+        this.titleEl.value = note.title;
+        this.contentEl.innerHTML = note.text; // Use innerHTML for rich text
+        this.el.classList.add('visible');
     }
 
     clear() {
+        this.currentNoteId = null;
         this.titleEl.value = '';
-        this.titleEl.disabled = true;
         this.contentEl.innerHTML = '';
-        this.contentEl.contentEditable = false;
-        this.metaEl.textContent = 'Select or create a note';
-        this.saveStatusEl.textContent = '';
+        this.el.classList.remove('visible');
     }
 
-    getData() {
-        return {title: this.titleEl.value, content: this.contentEl.innerHTML};
-    }
-
-    focusTitle() {
-        this.titleEl.focus();
+    getNoteContent() {
+        return {
+            id: this.currentNoteId,
+            title: this.titleEl.value,
+            text: this.contentEl.innerHTML // Get rich text content
+        };
     }
 
     insertField() {
-        const name = prompt("Field name (e.g., Cost):");
-        if (name) {
-            const value = prompt(`Value for ${name} (e.g., < $20):`);
-            const html = ` <span class='field'><span class='field-label'>${Utils.sanitizeHTML(name)}:</span><span class='field-value' contenteditable='true'>${Utils.sanitizeHTML(value || '')}</span></span> `;
-            document.execCommand('insertHTML', false, html);
-            this.contentEl.dispatchEvent(new Event('input'));
-            this.contentEl.focus();
+        const fieldName = prompt("Enter field name:");
+        if (fieldName) {
+            const fieldMarkup = `{{${fieldName}}}`;
+            document.execCommand('insertText', false, fieldMarkup);
+            this.contentEl.dispatchEvent(new Event('input')); // Trigger save
         }
-    }
-
-    setSaveStatus(status) {
-        this.saveStatusEl.textContent = status;
-        status === 'Saved' && setTimeout(() => this.saveStatusEl.textContent = '', 2000);
     }
 }
 
+// MenuBar component
 class MenuBar extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
@@ -327,26 +323,16 @@ class MenuBar extends Component {
     render() {
         this.el.innerHTML = `
             <div class="group">
-                <span data-action="undo" title="Undo last action">Undo</span>
-                <span data-action="redo" title="Redo last action">Redo</span>
-                <span data-action="clone" title="Create a copy of the current note">Clone</span>
+                <span data-action="show-settings">Settings</span>
+                <span data-action="clear-all">Clear All</span>
+                <span data-action="save-state">Save State</span>
+                <span data-action="load-state">Load State</span>
             </div>
             <div class="group">
-                <span data-action="insert" title="Insert structured data field">Insert Field</span>
-            </div>
-            <div class="group">
-                <span data-action="publish" title="Publish note to P2P network">Publish</span>
-                <span data-action="set-private" title="Make note Private">Set Private</span>
-            </div>
-            <div class="group">
-                <span>Tools:</span>
-                <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span>
-                <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span>
-            </div>
-            <div class="group">
-                <span data-action="delete" title="Delete current note">Delete</span>
-                <span data-action="view-source" title="View raw note data">View source</span>
-                <span data-action="settings" title="Open application settings">Settings</span>
+                 <span id="system-status">Status: Unknown</span>
+                 <span id="kb-status">KB: 0/0</span>
+                 <span id="llm-status">LLM: 0</span>
+                 <span id="rules-status">Rules: 0</span>
             </div>
         `;
     }
@@ -356,8 +342,16 @@ class MenuBar extends Component {
             span.addEventListener('click', (e) => this.app.handleMenu(e.currentTarget.dataset.action));
         });
     }
+
+    updateStatus(status) {
+        this.el.querySelector('#system-status').textContent = `Status: ${status.status}`;
+        this.el.querySelector('#kb-status').textContent = `KB: ${status.kbCount}/${status.kbTotalCapacity}`;
+        this.el.querySelector('#llm-status').textContent = `LLM: ${status.activeLlmTasks}`;
+        this.el.querySelector('#rules-status').textContent = `Rules: ${status.ruleCount}`;
+    }
 }
 
+// ActionIcon component (for the floating action area)
 class ActionIcon {
     constructor(app, parentEl, data) {
         this.app = app;
@@ -369,107 +363,102 @@ class ActionIcon {
     }
 
     createMarkup() {
-        const div = document.createElement('div');
-        div.classList.add('action-icon');
-        this.data.urgent && div.classList.add('urgent');
-        div.dataset.type = this.data.type;
-        div.title = `${this.data.type}: ${this.data.details}`;
-        div.innerHTML = `
-            ${this.data.symbol || this.data.type[0]}
-            <span class="hide-btn" title="Hide this icon">x</span>
-            <span class="tooltip">${this.data.type}: ${this.data.details}</span>
+        const el = document.createElement('div');
+        el.classList.add('action-icon');
+        el.innerHTML = `
+            <span class="icon">${this.data.icon}</span>
+            <span class="label">${this.data.label}</span>
+            <button class="hide-btn">x</button>
         `;
-        return div;
+        return el;
     }
 
     bindEvents() {
         this.el.addEventListener('click', (e) => {
-            e.target.classList.contains('hide-btn') ? this.hide() : this.app.showDock(this.data);
+            // Check if the click was on the hide button
+            if (e.target.classList.contains('hide-btn')) {
+                this.hide();
+            } else {
+                this.app.showDock(this.data);
+            }
         });
     }
 
     hide() {
-        this.el.style.transition = 'opacity 0.3s ease';
-        this.el.style.opacity = '0';
-        this.el.addEventListener('transitionend', () => this.el.remove());
+        this.el.style.display = 'none'; // Or remove from DOM
     }
 }
 
+// ActionArea component (the floating area containing icons)
 class ActionArea extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
         this.icons = [];
+        this.dockEl = null; // Placeholder for the dock element
         this.render();
         this.bindEvents();
     }
 
     render() {
         this.el.innerHTML = `
-            <div class="action-icons-container" id="action-icons"></div>
-            <div class="action-area-description">Action Dock: Matches, Questions, Alerts etc.</div>
-            <div class="action-dock" id="action-dock">
-                <div id="action-dock-content"></div>
+            <div id="action-icons" class="action-icons">
+                <!-- Icons will be added here -->
+            </div>
+            <div id="action-dock" class="action-dock">
+                <div class="dock-header">
+                    <span class="dock-title"></span>
+                    <button class="close-dock">x</button>
+                </div>
+                <div class="dock-content">
+                    <!-- Content loaded dynamically -->
+                </div>
             </div>
         `;
         this.iconsEl = this.el.querySelector('#action-icons');
         this.dockEl = this.el.querySelector('#action-dock');
-        this.dockContentEl = this.el.querySelector('#action-dock-content');
+        this.dockTitleEl = this.dockEl.querySelector('.dock-title');
+        this.dockContentEl = this.dockEl.querySelector('.dock-content');
+        this.closeDockButton = this.dockEl.querySelector('.close-dock');
     }
 
     bindEvents() {
+        this.closeDockButton.addEventListener('click', () => this.hideDock());
+        // Close dock when clicking outside
         document.addEventListener('click', (e) => {
-            !this.el.contains(e.target) && this.dockEl.classList.contains('visible') && this.hideDock();
+            // Check if the click is outside the action area and the dock is visible
+            if (!this.el.contains(e.target) && this.dockEl.classList.contains('visible')) {
+                 this.hideDock();
+            }
         });
     }
 
-    renderIcons(actionDataArray) {
-        this.clearIcons();
-        actionDataArray?.length && actionDataArray.forEach(d => this.icons.push(new ActionIcon(this.app, this.iconsEl, d)));
-    }
-
-    clearIcons() {
-        this.icons.forEach(i => i.el.remove());
-        this.icons = [];
-        this.hideDock();
+    addIcon(data) {
+        const icon = new ActionIcon(this.app, this.iconsEl, data);
+        this.icons.push(icon);
     }
 
     showDock(data) {
-        let html = `<h5>${Utils.sanitizeHTML(data.type)} Details</h5><ul>`;
-        Array.isArray(data.details) ?
-            data.details.forEach(detail => html += `<li>${Utils.sanitizeHTML(detail)}</li>`) :
-            html += `<li>${Utils.sanitizeHTML(data.details)}</li>`;
-
-        if (data.actions && Array.isArray(data.actions)) {
-             html += `</ul><h5>Actions</h5><ul>`;
-             data.actions.forEach(action => {
-                 html += `<li><button class="dock-action-button" data-command="${Utils.sanitizeHTML(action.command)}" data-params='${JSON.stringify(action.params)}'>${Utils.sanitizeHTML(action.label)}</button></li>`;
-             });
-        }
-
-        html += `</ul>`;
-        this.dockContentEl.innerHTML = html;
+        this.dockTitleEl.textContent = data.label;
+        this.dockContentEl.innerHTML = data.content; // Load content
         this.dockEl.classList.add('visible');
-
-        this.dockContentEl.querySelectorAll('.dock-action-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const cmd = e.currentTarget.dataset.command;
-                const params = JSON.parse(e.currentTarget.dataset.params);
-                console.log(`Dock action: ${cmd} with params`, params);
-                this.app.sendCommand(cmd, params);
-                this.hideDock();
-            });
-        });
     }
 
     hideDock() {
         this.dockEl.classList.remove('visible');
+        this.dockContentEl.innerHTML = ''; // Clear content
     }
 }
 
+// Settings Modal component
 class SettingsModal extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
         this.render();
+        this.closeButton = this.el.querySelector('.close-button');
+        this.cancelButton = this.el.querySelector('.cancel-button');
+        this.saveButton = this.el.querySelector('.save-button');
+        this.tabsEl = this.el.querySelector('.settings-tabs');
+        this.tabContentEl = this.el.querySelector('.settings-tab-content');
         this.bindEvents();
     }
 
@@ -477,58 +466,53 @@ class SettingsModal extends Component {
         this.el.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
-                    <h4>Settings</h4>
-                    <span class="modal-close" id="settings-modal-close" title="Close">×</span>
+                    <h2>Settings</h2>
+                    <span class="close-button">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <ul class="modal-tabs" id="settings-tabs">
-                        <li class="active" data-tab="general">General</li>
-                        <li data-tab="network">Network</li>
-                        <li data-tab="ontology">Ontology</li>
-                        <li data-tab="llm">LLM Tools</li>
-                        <li data-tab="appearance">Appearance</li>
+                    <ul class="settings-tabs">
+                        <li data-tab="general" class="active">General</li>
+                        <li data-tab="llm">LLM</li>
+                        <li data-tab="advanced">Advanced</li>
                     </ul>
-                    <div class="modal-tab-content active" id="tab-general">
-                        <h5>General</h5>
-                        <label for="setting-default-state">Default Note State:</label>
-                        <select id="setting-default-state"><option value="Private">Private</option><option value="Published">Published</option></select>
-                    </div>
-                    <div class="modal-tab-content" id="tab-network">
-                        <h5>Network (P2P)</h5>
-                        <label for="setting-nostr-relays">Nostr Relays (one per line):</label>
-                        <textarea id="setting-nostr-relays" rows="4"></textarea>
-                        <p style="font-size:.9em;color:var(--text-muted)">Configure relays for P2P publishing.</p>
-                    </div>
-                    <div class="modal-tab-content" id="tab-ontology">
-                        <h5>Ontology</h5>
-                        <button disabled>Import (Stub)</button>
-                        <button disabled>Export (Stub)</button>
-                        <p style="margin-top:15px;font-size:.9em;color:var(--text-muted)">Manage types/fields (future).</p>
-                    </div>
-                    <div class="modal-tab-content" id="tab-llm">
-                        <h5>LLM Tools</h5>
-                        <label for="setting-llm-provider">Provider:</label>
-                        <select id="setting-llm-provider"><option>OpenAI (Stub)</option><option>Local (Stub)</option></select>
-                        <label for="setting-llm-apikey">API Key:</label>
-                        <input type="password" id="setting-llm-apikey">
-                    </div>
-                    <div class="modal-tab-content" id="tab-appearance">
-                        <h5>Appearance</h5>
-                        <label for="setting-theme">Theme:</label>
-                        <select id="setting-theme"><option>Light</option><option disabled>Dark (Stub)</option></select>
+                    <div class="settings-tab-content">
+                        <div id="settings-tab-general" class="tab-pane active">
+                            <h3>General Settings</h3>
+                            <label for="setting-usePersistence">Use Persistence:</label>
+                            <input type="checkbox" id="setting-usePersistence"><br>
+                            <label for="setting-serpApiKey">SerpAPI Key:</label>
+                            <input type="text" id="setting-serpApiKey"><br>
+                        </div>
+                        <div id="settings-tab-llm" class="tab-pane">
+                            <h3>LLM Settings</h3>
+                            <label for="setting-apiKey">API Key:</label>
+                            <input type="text" id="setting-apiKey"><br>
+                            <label for="setting-modelName">Model Name:</label>
+                            <input type="text" id="setting-modelName"><br>
+                            <label for="setting-temperature">Temperature:</label>
+                            <input type="number" id="setting-temperature" step="0.1" min="0" max="2"><br>
+                            <label for="setting-concurrency">Concurrency:</label>
+                            <input type="number" id="setting-concurrency" min="1"><br>
+                        </div>
+                         <div id="settings-tab-advanced" class="tab-pane">
+                            <h3>Advanced Settings</h3>
+                            <label for="setting-llmApiUrl">LLM API URL:</label>
+                            <input type="text" id="setting-llmApiUrl"><br>
+                            <label for="setting-globalKbCapacity">Global KB Capacity:</label>
+                            <input type="number" id="setting-globalKbCapacity" min="1024"><br>
+                            <label for="setting-reasoningDepthLimit">Reasoning Depth Limit:</label>
+                            <input type="number" id="setting-reasoningDepthLimit" min="1"><br>
+                            <label for="setting-broadcastInputAssertions">Broadcast Input Assertions:</label>
+                            <input type="checkbox" id="setting-broadcastInputAssertions"><br>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="settings-cancel-btn">Cancel</button>
-                    <button id="settings-save-btn">Save</button>
+                    <button class="cancel-button">Cancel</button>
+                    <button class="save-button">Save</button>
                 </div>
             </div>
         `;
-        this.modalContentEl = this.el.querySelector('.modal-content');
-        this.closeButton = this.el.querySelector('#settings-modal-close');
-        this.cancelButton = this.el.querySelector('#settings-cancel-btn');
-        this.saveButton = this.el.querySelector('#settings-save-btn');
-        this.tabsEl = this.el.querySelector('#settings-tabs');
     }
 
     bindEvents() {
@@ -538,78 +522,100 @@ class SettingsModal extends Component {
         this.tabsEl.querySelectorAll('li').forEach(tab => {
             tab.addEventListener('click', (e) => this.switchTab(e.currentTarget));
         });
+        // Close modal when clicking outside the content
         this.el.addEventListener('click', (e) => {
-            e.target === this.el && this.hide();
+            if (e.target === this.el) {
+                this.hide();
+            }
         });
     }
 
-    switchTab(tabEl) {
-        const id = tabEl.dataset.tab;
-        this.tabsEl.querySelectorAll('li').forEach(li => li.classList.remove('active'));
-        this.modalContentEl.querySelectorAll('.modal-tab-content').forEach(content => content.classList.remove('active'));
-        tabEl.classList.add('active');
-        this.modalContentEl.querySelector(`#tab-${id}`).classList.add('active');
+    loadSettings(settings) {
+        // Assuming settings object matches input IDs
+        for (const key in settings) {
+            const input = this.el.querySelector(`#setting-${key}`);
+            if (input) {
+                if (input.type === 'checkbox') {
+                    input.checked = settings[key];
+                } else {
+                    input.value = settings[key];
+                }
+            }
+        }
     }
 
-    loadSettings(settings) {
-        this.el.querySelector('#setting-default-state').value = settings.defaultState || 'Private';
-        this.el.querySelector('#setting-nostr-relays').value = settings.nostrRelays || '';
-        this.el.querySelector('#setting-llm-provider').value = settings.llmProvider || 'OpenAI (Stub)';
-        this.el.querySelector('#setting-llm-apikey').value = settings.llmApiKey || '';
-        this.el.querySelector('#setting-theme').value = settings.theme || 'Light';
+    getSettings() {
+        const settings = {};
+        this.el.querySelectorAll('.tab-pane input').forEach(input => {
+            const key = input.id.replace('setting-', '');
+            if (input.type === 'checkbox') {
+                settings[key] = input.checked;
+            } else if (input.type === 'number') {
+                 settings[key] = parseFloat(input.value);
+                 if (isNaN(settings[key])) settings[key] = 0; // Handle potential NaN
+            }
+            else {
+                settings[key] = input.value;
+            }
+        });
+        return settings;
     }
 
     save() {
-        const settings = {
-            defaultState: this.el.querySelector('#setting-default-state').value,
-            nostrRelays: this.el.querySelector('#setting-nostr-relays').value,
-            llmProvider: this.el.querySelector('#setting-llm-provider').value,
-            llmApiKey: this.el.querySelector('#setting-llm-apikey').value,
-            theme: this.el.querySelector('#setting-theme').value
-        };
-        this.app.updateSettings(settings);
-        Notifier.success('Settings saved.');
+        const settings = this.getSettings();
+        // Basic validation (can be expanded)
+        if (settings.apiKey === '') {
+             Notifier.warning("API Key is empty. LLM features may not work.");
+        }
+         if (settings.serpApiKey === '') {
+             Notifier.warning("SerpAPI Key is empty. Search features may not work.");
+        }
+
+        this.app.saveSettings(settings);
         this.hide();
     }
 
-    show() {
-        this.el.classList.add('visible');
-    }
+    switchTab(clickedTab) {
+        this.tabsEl.querySelectorAll('li').forEach(tab => tab.classList.remove('active'));
+        clickedTab.classList.add('active');
 
-    hide() {
-        this.el.classList.remove('visible');
+        this.tabContentEl.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+        const targetTabId = clickedTab.dataset.tab;
+        this.tabContentEl.querySelector(`#settings-tab-${targetTabId}`).classList.add('active');
     }
 }
 
+// Dialogue Modal component
 class DialogueManager extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
-        this.modalEl = this.el;
+        this.modalEl = this.el; // The modal overlay element
+        this.currentDialogueId = null;
+        this.resolvePromise = null;
+        this.rejectPromise = null;
         this.render();
         this.promptEl = this.el.querySelector('#dialogue-prompt');
         this.inputEl = this.el.querySelector('#dialogue-input');
         this.sendButton = this.el.querySelector('#dialogue-send-button');
         this.cancelButton = this.el.querySelector('#dialogue-cancel-button');
         this.closeButton = this.el.querySelector('#dialogue-modal-close');
-        this.currentDialogueId = null;
-
         this.bindEvents();
     }
 
     render() {
         this.el.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h4>Dialogue Request</h4>
-                    <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
+            <div class="dialogue-modal-content">
+                <div class="dialogue-modal-header">
+                    <h3 id="dialogue-title">Dialogue Required</h3>
+                    <span id="dialogue-modal-close" class="close-button">&times;</span>
                 </div>
-                <div class="modal-body">
+                <div class="dialogue-modal-body">
                     <p id="dialogue-prompt"></p>
                     <input type="text" id="dialogue-input" placeholder="Enter your response...">
                 </div>
-                <div class="modal-footer">
-                    <button id="dialogue-cancel-button">Cancel</button>
-                    <button id="dialogue-send-button">Send Response</button>
+                <div class="dialogue-modal-footer">
+                    <button id="dialogue-cancel-button" class="cancel-button">Cancel</button>
+                    <button id="dialogue-send-button" class="send-button">Send</button>
                 </div>
             </div>
         `;
@@ -620,52 +626,51 @@ class DialogueManager extends Component {
         this.cancelButton?.addEventListener('click', () => this.cancelDialogue());
         this.closeButton?.addEventListener('click', () => this.cancelDialogue());
         this.inputEl?.addEventListener('keypress', (e) => {
-            e.key === 'Enter' && (e.preventDefault(), this.sendResponse());
+            // Check if Enter key was pressed and it's not a shift+enter for newline
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // Prevent default form submission or newline
+                this.sendResponse();
+            }
         });
+        // Close modal when clicking outside the content
         this.modalEl?.addEventListener('click', (e) => {
-            e.target === this.modalEl && this.cancelDialogue();
+            if (e.target === this.modalEl) {
+                this.cancelDialogue();
+            }
         });
     }
 
-    show(dialogueRequest) {
-        if (this.currentDialogueId) {
-            console.warn(`Received new dialogue request (${dialogueRequest.dialogueId}) while another is active (${this.currentDialogueId}). Cancelling the old one.`);
-            this.cancelDialogue();
-        }
-
-        if (dialogueRequest.requestType !== 'text_input') {
-            console.warn(`Received unsupported dialogue request type: ${dialogueRequest.requestType}. Cancelling.`);
-            this.app.cancelDialogue(dialogueRequest.dialogueId);
-            return;
-        }
-
-        this.currentDialogueId = dialogueRequest.dialogueId;
-        this.promptEl && (this.promptEl.textContent = dialogueRequest.prompt);
-        if (this.inputEl) {
-            this.inputEl.value = '';
-            this.inputEl.focus();
-        }
-        this.modalEl && this.modalEl.classList.add('visible');
-    }
-
-    hide() {
-        this.modalEl?.classList.remove('visible');
-        this.currentDialogueId = null;
-        this.promptEl && (this.promptEl.textContent = '');
-        this.inputEl && (this.inputEl.value = '');
+    showDialogue(dialogueId, prompt, title = 'Dialogue Required') {
+        this.currentDialogueId = dialogueId;
+        this.el.querySelector('#dialogue-title').textContent = title;
+        this.promptEl.textContent = prompt;
+        this.inputEl.value = ''; // Clear previous input
+        this.show();
+        this.inputEl.focus(); // Focus the input field
     }
 
     sendResponse() {
-        if (!this.currentDialogueId || !this.inputEl) return;
+        if (!this.currentDialogueId) return;
 
-        const responseText = this.inputEl.value.trim();
-        websocketClient.sendRequest('dialogueResponse', {
-            dialogueId: this.currentDialogueId,
-            responseData: { text: responseText }
-        })
-            .catch(err => (console.error('Failed to send dialogue response:', err), Notifier.error('Failed to send dialogue response.')));
-
-        this.hide();
+        const response = this.inputEl.value.trim();
+        if (response) {
+            websocketClient.sendRequest('dialogueResponse', {
+                dialogueId: this.currentDialogueId,
+                responseData: { text: response } // Wrap response in an object
+            })
+            .then(() => {
+                Notifier.info(`Response sent for dialogue ${this.currentDialogueId}`);
+                this.hide();
+            })
+            .catch(err => {
+                console.error('Failed to send dialogueResponse command:', err);
+                Notifier.error('Failed to send response.');
+                // Decide whether to hide or keep modal open on error
+                this.hide(); // Hide on error for now
+            });
+        } else {
+            Notifier.warning("Please enter a response.");
+        }
     }
 
     cancelDialogue() {
@@ -677,47 +682,39 @@ class DialogueManager extends Component {
         this.hide();
     }
 
-    handleWsDisconnected() {
-        if (this.currentDialogueId) {
-            console.warn('WS disconnected, cancelling active dialogue.');
-            this.hide();
-            Notifier.warning('Dialogue cancelled due to disconnection.');
-        }
+    hide() {
+        super.hide();
+        this.currentDialogueId = null;
+        this.promptEl.textContent = '';
+        this.inputEl.value = '';
     }
 }
 
+
+// Main Application class
 class App {
     constructor(elSelector) {
         this.el = document.querySelector(elSelector);
         this.notes = [];
         this.currentId = null;
-        this.settings = {};
+        this.settings = {}; // Client-side settings (like UI preferences, API keys)
+        this.systemConfig = {}; // Backend system configuration
         this.initComps();
         this.bindWebSocketEvents();
         console.log("Netention Note App Ready");
-
-        websocketClient.isConnected ?
-            this.requestInitialState().catch(err => (console.error('Failed to request initial state on ready WS:', err), Notifier.error('Failed to load initial state.'))) :
-            console.log('WS not connected, waiting for connection...');
     }
 
     initComps() {
-        this.el.innerHTML = `
-            <aside class="sidebar" id="sidebar-container"></aside>
-            <main class="main-content">
-                <nav class="menu-bar" id="menu-bar-container"></nav>
-                <div class="editor-area" id="editor-container"></div>
-                <div class="action-area" id="action-area-container"></div>
-            </main>
-            <div id="settings-modal" class="modal"></div>
-            <div id="dialogue-modal" class="modal"></div>
-        `;
-        this.sidebar = new Sidebar(this, '#sidebar-container');
-        this.editor = new Editor(this, '#editor-container');
-        this.menuBar = new MenuBar(this, '#menu-bar-container');
-        this.actionArea = new ActionArea(this, '#action-area-container');
+        this.sidebar = new Sidebar(this, '#sidebar');
+        this.editor = new Editor(this, '#editor');
+        this.menuBar = new MenuBar(this, '#menu-bar');
+        this.actionArea = new ActionArea(this, '#action-area');
         this.settingsModal = new SettingsModal(this, '#settings-modal');
         this.dialogueManager = new DialogueManager(this, '#dialogue-modal');
+
+        // Example action icons (can be dynamic based on backend capabilities)
+        this.actionArea.addIcon({ label: 'REPL', icon: '⌨️', content: '<div id="repl-container"></div>' }); // Placeholder for REPL
+        // this.actionArea.addIcon({ label: 'Graph', icon: '🕸️', content: 'Graph visualization coming soon...' });
     }
 
     bindWebSocketEvents() {
@@ -729,325 +726,452 @@ class App {
         websocketClient.on('disconnected', (e) => {
             console.warn('WS Disconnected', e);
             Notifier.error('Disconnected from backend.');
-            this.notes = [];
+            this.notes = []; // Clear notes on disconnect
             this.currentId = null;
-            this.sortAndFilter();
+            this.sidebar.renderNotes([], null);
             this.editor.clear();
-            this.actionArea.clearIcons();
-            this.editor.metaEl.textContent = 'Disconnected. Attempting to reconnect...';
-            this.dialogueManager.handleWsDisconnected();
-        });
-
-        websocketClient.on('reconnectFailed', () => {
-            Notifier.error('Failed to connect to backend.');
-            this.editor.metaEl.textContent = 'Connection failed.';
+            this.menuBar.updateStatus({ status: 'Disconnected', kbCount: 0, kbTotalCapacity: 0, activeLlmTasks: 0, ruleCount: 0 });
         });
 
         websocketClient.on('error', (e) => {
             console.error('WS Error', e);
-            Notifier.error('WebSocket error occurred.');
+            Notifier.error('WebSocket error.');
         });
 
-        websocketClient.on('initialState', (state) => this.handleInitialState(state));
-        websocketClient.on('NoteStatusEvent', (event) => this.handleNoteStatusEvent(event));
-        websocketClient.on('NoteUpdatedEvent', (event) => this.handleNoteUpdatedEvent(event));
-        websocketClient.on('NoteDeletedEvent', (event) => this.handleNoteDeletedEvent(event));
-        websocketClient.on('AddedEvent', (event) => this.handleNoteAddedEvent(event));
-        websocketClient.on('dialogueRequest', (request) => this.dialogueManager.show(request));
+        websocketClient.on('initialState', (payload) => {
+            console.log('Received initial state:', payload);
+            this.notes = payload.notes || [];
+            this.systemConfig = payload.configuration || {};
+            // Load client-side settings from local storage or defaults
+            this.loadClientSettings();
+            this.sortAndFilter();
+            this.menuBar.updateStatus(payload.systemStatus);
+            // Note: Assertions and Rules from initial state are not currently used in the UI
+        });
+
+        websocketClient.on('event', (payload) => {
+            // console.log('Received event:', payload);
+            switch (payload.eventType) {
+                case 'NoteAddedEvent':
+                    this.handleNoteAdded(payload.note);
+                    break;
+                case 'NoteUpdatedEvent':
+                    this.handleNoteUpdated(payload.note);
+                    break;
+                case 'NoteDeletedEvent':
+                    this.handleNoteDeleted(payload.noteId);
+                    break;
+                case 'SystemStatusEvent':
+                    this.menuBar.updateStatus(payload);
+                    break;
+                case 'LogMessageEvent':
+                    // Handle log messages if needed, e.g., show in a console/log area
+                    console.log(`[BACKEND] [${payload.level.toUpperCase()}] ${payload.message}`);
+                    break;
+                // Add handlers for other event types (AssertionAddedEvent, RuleAddedEvent, etc.)
+            }
+        });
+
+        websocketClient.on('dialogueRequest', (payload) => {
+             console.log('Received dialogue request:', payload);
+             this.dialogueManager.showDialogue(payload.dialogueId, payload.prompt, payload.title);
+        });
     }
 
     requestInitialState() {
-        return websocketClient.sendRequest('initialStateRequest', {});
+        return websocketClient.sendRequest('getInitialState');
     }
 
-    handleInitialState(state) {
-        if (state?.notes) {
-            this.notes = state.notes;
-            this.settings = state.configuration || {};
-            this.settingsModal.loadSettings(this.settings);
+    handleNoteAdded(note) {
+        // Add note if it doesn't exist, or update if it does (shouldn't happen for 'Added')
+        if (!this.notes.find(n => n.id === note.id)) {
+            this.notes.push(note);
+            this.sortAndFilter(); // Re-sort and filter the list
+            Notifier.info(`Note added: ${note.title}`);
+        }
+    }
 
-            this.sortAndFilter();
-            const sorted = this.getSortedFiltered();
-            if (sorted.length) {
-                const noteToSelect = this.currentId ? this.notes.find(n => n.id === this.currentId) : sorted[0];
-                this.selectNote(noteToSelect ? noteToSelect.id : sorted[0].id);
-            } else {
-                this.currentId = null;
-                this.editor.clear();
-                this.sidebar.setActive(null);
-                this.actionArea.clearIcons();
+    handleNoteUpdated(note) {
+        const index = this.notes.findIndex(n => n.id === note.id);
+        if (index !== -1) {
+            this.notes[index] = note;
+            this.sidebar.updateNote(note); // Update the specific item in the list
+            if (this.currentId === note.id) {
+                // If the updated note is the one currently in the editor, update the editor
+                // Note: This might overwrite user's unsaved changes if not careful.
+                // A better approach might be to only update if the editor is not dirty,
+                // or prompt the user. For now, we'll just update the sidebar item.
+                // If the update came from the editor itself (via saveCurrentNote),
+                // this event handler might be redundant or need logic to prevent loops.
+                // Let's assume for now the editor handles its own state and this updates the list view.
             }
-        } else {
-            console.warn('Initial state received without notes data or notes array is empty.');
-            this.notes = [];
+             // If status or priority changed, re-sort might be needed
             this.sortAndFilter();
-            this.currentId = null;
-            this.editor.clear();
-            this.sidebar.setActive(null);
-            this.actionArea.clearIcons();
+            // Notifier.info(`Note updated: ${note.title}`); // Can be noisy
+        } else {
+             // This might happen if a note outside the current filter/sort is updated
+             // We could fetch the note or just ignore if it's not in the current view
+             // For now, we'll just log a warning.
+             console.warn(`Received update for unknown or filtered note ID: ${note.id}`);
         }
     }
 
-    handleNoteStatusEvent(event) {
-        const updatedNote = event.note;
-        if (!updatedNote?.id) {
-             console.warn('NoteStatusEvent received without valid note data.');
-             return;
-        }
-
-        const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id);
-        if (noteIndex !== -1) {
-            Object.assign(this.notes[noteIndex], updatedNote);
-            this.sidebar.updateItem(this.notes[noteIndex]);
-            this.notes[noteIndex].id === this.currentId && this.editor.updateMeta(this.notes[noteIndex]);
-            this.sortAndFilter();
-        } else {
-            console.warn('NoteStatusEvent for unknown note ID:', updatedNote.id);
-            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteStatusEvent:', err));
-        }
-    }
-
-    handleNoteUpdatedEvent(event) {
-        const updatedNote = event.updatedNote;
-         if (!updatedNote?.id) {
-             console.warn('NoteUpdatedEvent received without valid note data.');
-             return;
-         }
-
-        const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id);
-        if (noteIndex !== -1) {
-            Object.assign(this.notes[noteIndex], updatedNote);
-            this.sidebar.updateItem(this.notes[noteIndex]);
-            this.notes[noteIndex].id === this.currentId && this.editor.load(this.notes[noteIndex]);
-            this.sortAndFilter();
-            this.actionArea.renderIcons(this.notes[noteIndex].actions);
-        } else {
-            console.warn('NoteUpdatedEvent for unknown note ID:', updatedNote.id);
-            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteUpdatedEvent:', err));
-        }
-    }
-
-    handleNoteDeletedEvent(event) {
-        const noteId = event.noteId;
-        if (!noteId) {
-             console.warn('NoteDeletedEvent received without noteId.');
-             return;
-        }
-
-        const noteIndex = this.notes.findIndex(n => n.id === noteId);
-        if (noteIndex !== -1) {
-            const deletedNoteTitle = this.notes[noteIndex].title || 'Untitled';
-            this.notes.splice(noteIndex, 1);
-            this.sidebar.removeItem(noteId);
-
-            if (noteId === this.currentId) {
-                this.currentId = null;
+    handleNoteDeleted(noteId) {
+        const index = this.notes.findIndex(n => n.id === noteId);
+        if (index !== -1) {
+            const deletedNote = this.notes.splice(index, 1)[0];
+            this.sidebar.removeNote(noteId);
+            if (this.currentId === noteId) {
                 this.editor.clear();
-                this.sidebar.setActive(null);
-                this.actionArea.clearIcons();
+                this.currentId = null;
             }
-            this.sortAndFilter();
-            Notifier.success(`Note "${deletedNoteTitle}" deleted.`);
-        } else {
-            console.warn('NoteDeletedEvent for unknown note ID:', noteId);
-            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteDeletedEvent:', err));
+            Notifier.info(`Note deleted: ${deletedNote.title}`);
         }
     }
 
-    handleNoteAddedEvent(event) {
-        const newNote = event.note;
-        if (!newNote?.id) {
-             console.warn('AddedEvent received without valid note data.');
-             return;
-        }
+    createNewNote() {
+        const newNote = {
+            id: `client-${Date.now()}`, // Temporary client-side ID
+            title: 'New Note',
+            text: '',
+            state: { status: 'IDLE' },
+            pri: 0,
+            color: null,
+            created: Date.now(),
+            updated: Date.now()
+        };
+        // Add to client list immediately for responsiveness
+        this.notes.unshift(newNote); // Add to the beginning
+        this.sortAndFilter();
+        this.selectNote(newNote.id);
 
-        if (!this.notes.some(n => n.id === newNote.id)) {
-            this.notes.unshift(newNote);
-            this.sortAndFilter();
-            this.selectNote(newNote.id);
-            this.editor.focusTitle();
-            Notifier.success(`New note "${newNote.title || 'Untitled'}" created.`);
-        } else {
-             this.currentId !== newNote.id && this.selectNote(newNote.id);
-        }
-    }
-
-    getSortedFiltered() {
-        const sort = this.sidebar.getSort(), search = this.sidebar.getSearch().toLowerCase();
-        let filtered = this.notes.filter(n => (n.title || '').toLowerCase().includes(search) || Utils.extractText(n.content).toLowerCase().includes(search));
-        return filtered.sort((a, b) => {
-            switch (sort) {
-                case 'priority': return (b.priority || 0) - (a.priority || 0);
-                case 'updated': return b.updated - a.updated;
-                case 'created': return b.created - a.created;
-                case 'title': return (a.title || '').localeCompare(b.title || '');
-                default: return (b.priority || 0) - (a.priority || 0);
+        // Send request to backend to create the note
+        websocketClient.sendRequest('addNote', {
+            title: newNote.title,
+            content: newNote.text,
+            state: newNote.state.status,
+            priority: newNote.pri,
+            color: newNote.color
+        })
+        .then(response => {
+            // Backend will send a NoteAddedEvent with the final backend ID
+            // The event handler will update the note in the list
+            console.log('Backend addNote response:', response);
+            // We might need to map the temporary client ID to the backend ID here
+            // if the backend doesn't send the temporary ID back in the event.
+            // A better approach might be to wait for the backend event before adding to the list.
+            // For now, we rely on the event handler to update the list correctly.
+        })
+        .catch(err => {
+            console.error('Failed to add note to backend:', err);
+            Notifier.error('Failed to create note on backend.');
+            // Remove the temporary note if backend creation failed
+            this.handleNoteDeleted(newNote.id);
+            if (this.currentId === newNote.id) {
+                 this.editor.clear();
+                 this.currentId = null;
             }
         });
     }
 
-    sortAndFilter() {
-        this.sidebar.renderNotes(this.getSortedFiltered(), this.currentId);
-    }
-
     selectNote(id) {
-        this.currentId !== null && this.currentId !== id && this.saveCurrentNote();
-        if (id === this.currentId && id !== null) return;
+        if (this.currentId === id) return; // Already selected
 
-        const n = this.notes.find(n => n.id === id);
-        if (n) {
-            this.currentId = id;
-            this.editor.load(n);
+        // Save current note before switching
+        if (this.currentId) {
+            this.saveCurrentNote();
+        }
+
+        this.currentId = id;
+        const note = this.notes.find(n => n.id === id);
+        if (note) {
+            this.editor.loadNote(note);
             this.sidebar.setActive(id);
-            this.actionArea.renderIcons(n.actions);
         } else {
-            console.error(`Note ${id} not found in local state.`);
-            this.currentId = null;
+            console.error("Attempted to select unknown note ID:", id);
             this.editor.clear();
             this.sidebar.setActive(null);
-            this.actionArea.clearIcons();
-            Notifier.warning(`Note ${id} not found.`);
-            this.requestInitialState().catch(err => console.error('Failed to request initial state after selecting unknown note:', err));
+            this.currentId = null;
         }
     }
 
     saveCurrentNote() {
-        if (this.currentId === null) return false;
-        const n = this.notes.find(n => n.id === this.currentId);
-        if (n) {
-            const d = this.editor.getData();
-            const changed = n.title !== d.title || n.content !== d.content;
+        if (!this.currentId) return;
 
-            if (changed) {
-                this.editor.setSaveStatus('Saving...');
+        const editorContent = this.editor.getNoteContent();
+        const note = this.notes.find(n => n.id === this.currentId);
+
+        if (note) {
+            // Check if content or title actually changed
+            if (note.title !== editorContent.title || note.text !== editorContent.text) {
+                 // Update client-side note immediately for responsiveness
+                note.title = editorContent.title;
+                note.text = editorContent.text;
+                note.updated = Date.now(); // Update timestamp client-side
+                this.sidebar.updateNote(note); // Update sidebar item
+
+                // Send update to backend
                 websocketClient.sendRequest('updateNote', {
-                    noteId: n.id,
-                    title: d.title,
-                    content: d.content,
-                    state: n.state,
-                    priority: n.priority,
-                    color: n.color
-                }).then(() => {
-                    this.editor.setSaveStatus('Saved');
-                }).catch(err => {
-                    console.error(`Failed to send update for ${n.id}:`, err);
-                    this.editor.setSaveStatus('Save Failed');
-                    Notifier.error(`Failed to save note "${n.title || 'Untitled'}".`);
+                    noteId: note.id,
+                    title: note.title,
+                    content: note.text
+                })
+                .then(() => {
+                    // Backend will send a NoteUpdatedEvent which will re-update the note in the list
+                    // This ensures consistency with the backend's state, including the updated timestamp.
+                    // Notifier.info(`Note saved: ${note.title}`); // Can be noisy
+                })
+                .catch(err => {
+                    console.error('Failed to save note to backend:', err);
+                    Notifier.error('Failed to save note.');
+                    // TODO: Handle save failure - maybe mark note as unsaved?
                 });
-                return true;
-            } else {
-                this.editor.setSaveStatus('');
             }
-        }
-        return false;
-    }
-
-    createNewNote() {
-        this.saveCurrentNote();
-
-        const newNoteData = {
-            title: "Untitled Note",
-            content: "",
-            state: this.settings.defaultState || 'Private',
-            color: `hsl(${Math.random() * 360}, 60%, 85%)`
-        };
-
-        this.editor.clear();
-        this.currentId = null;
-        this.sidebar.setActive(null);
-        this.actionArea.clearIcons();
-        this.editor.metaEl.textContent = 'Requesting new note...';
-
-        websocketClient.sendRequest('addNote', newNoteData)
-            .then(() => Notifier.info("New note creation requested."))
-            .catch(err => (console.error('Failed to send new note command:', err), Notifier.error("Failed to create new note."), this.editor.metaEl.textContent = 'Failed to create new note. Select or create a note.'));
-    }
-
-    updateNotePriority(id, delta) {
-        const n = this.notes.find(n => n.id === id);
-        if (n) {
-            const newPriority = (n.priority || 0) + delta;
-            websocketClient.sendRequest('updateNote', { noteId: id, priority: newPriority })
-                .catch(err => (console.error(`Failed to send priority update for ${id}:`, err), Notifier.error(`Failed to update priority for "${n.title || 'Untitled'}".`)));
-            Notifier.info(`Priority update requested for "${n.title || 'Untitled'}"`);
         } else {
-            console.warn(`Attempted to update priority for unknown note ID: ${id}`);
-            Notifier.warning(`Cannot update priority for unknown note.`);
+            console.error("Attempted to save unknown note ID:", this.currentId);
         }
+    }
+
+    deleteNote(noteId) {
+        if (!noteId) return;
+
+        if (confirm(`Are you sure you want to delete this note?`)) {
+            // Clear editor immediately if it's the current note
+            if (this.currentId === noteId) {
+                this.editor.clear();
+                this.currentId = null;
+            }
+            // Remove from client list immediately for responsiveness
+            this.handleNoteDeleted(noteId); // This also updates the sidebar
+
+            // Send delete request to backend
+            websocketClient.sendRequest('deleteNote', { noteId: noteId })
+                .then(() => {
+                    // Backend will send a NoteDeletedEvent which confirms the deletion
+                    console.log(`Backend deleteNote response for ${noteId}: success`);
+                })
+                .catch(err => {
+                    console.error(`Failed to delete note ${noteId} on backend:`, err);
+                    Notifier.error('Failed to delete note.');
+                    // TODO: Handle delete failure - maybe re-add the note to the list?
+                });
+        }
+    }
+
+    cloneNote(noteId) {
+         if (!noteId) return;
+
+         websocketClient.sendRequest('cloneNote', { noteId: noteId })
+            .then(response => {
+                // Backend will send a NoteAddedEvent for the new cloned note
+                console.log(`Backend cloneNote response for ${noteId}:`, response);
+                Notifier.info('Note cloning requested.');
+            })
+            .catch(err => {
+                console.error(`Failed to clone note ${noteId} on backend:`, err);
+                Notifier.error('Failed to clone note.');
+            });
+    }
+
+    updateNotePriority(noteId, delta) {
+        const note = this.notes.find(n => n.id === noteId);
+        if (note) {
+            const newPriority = note.pri + delta;
+            // Update client-side immediately
+            note.pri = newPriority;
+            note.updated = Date.now(); // Update timestamp
+            this.sidebar.updateNote(note); // Update sidebar item
+            this.sortAndFilter(); // Re-sort the list
+
+            // Send update to backend
+            websocketClient.sendRequest('updateNote', {
+                noteId: note.id,
+                priority: newPriority
+            })
+            .then(() => {
+                 // Backend will send a NoteUpdatedEvent
+                 console.log(`Backend updateNote priority response for ${noteId}: success`);
+            })
+            .catch(err => {
+                console.error(`Failed to update priority for note ${noteId} on backend:`, err);
+                Notifier.error('Failed to update note priority.');
+                // TODO: Handle failure - revert client-side change?
+            });
+        }
+    }
+
+    sortAndFilter() {
+        const sortBy = this.sidebar.getSortBy();
+        const searchTerm = this.sidebar.getSearchTerm();
+
+        let filteredNotes = this.notes;
+
+        // Apply filter
+        if (searchTerm) {
+            filteredNotes = this.notes.filter(note =>
+                note.title.toLowerCase().includes(searchTerm) ||
+                Utils.extractText(note.text).toLowerCase().includes(searchTerm)
+            );
+        }
+
+        // Apply sort
+        filteredNotes.sort((a, b) => {
+            switch (sortBy) {
+                case 'updated-desc': return b.updated - a.updated;
+                case 'priority-desc': return b.pri - a.pri;
+                case 'priority-asc': return a.pri - b.pri;
+                case 'title-asc': return a.title.localeCompare(b.title);
+                case 'title-desc': return b.title.localeCompare(a.title);
+                default: return 0;
+            }
+        });
+
+        this.sidebar.renderNotes(filteredNotes, this.currentId);
     }
 
     handleMenu(action) {
-        this.saveCurrentNote();
-        const n = this.currentId ? this.notes.find(n => n.id === this.currentId) : null;
-
+        console.log("Menu action:", action);
         switch (action) {
-            case 'undo':
-                this.currentId && this.editor.contentEl.isContentEditable ? document.execCommand('undo') : Notifier.warning('Select a note and focus the editor to undo.');
+            case 'show-settings':
+                this.showSettings();
                 break;
-            case 'redo':
-                this.currentId && this.editor.contentEl.isContentEditable ? document.execCommand('redo') : Notifier.warning('Select a note and focus the editor to redo.');
+            case 'clear-all':
+                this.clearAll();
                 break;
-            case 'clone':
-                n ? websocketClient.sendRequest('cloneNote', {noteId: n.id})
-                        .then(() => Notifier.info('Note cloning requested.'))
-                        .catch(err => (console.error('Failed to send clone note command:', err), Notifier.error('Failed to clone note.')))
-                    : Notifier.warning('Select note to clone.');
+            case 'save-state':
+                this.saveState();
                 break;
-            case 'insert':
-                this.currentId && this.editor.contentEl.isContentEditable ? this.editor.insertField() : Notifier.warning('Select a note and focus the editor to insert a field.');
+            case 'load-state':
+                this.loadState();
                 break;
-            case 'publish': this.updateNoteState(n, 'ACTIVE'); break;
-            case 'set-private': this.updateNoteState(n, 'IDLE'); break;
-            case 'enhance':
-            case 'summary':
-                n ? websocketClient.sendRequest('runTool', {name: action, parameters: { note_id: n.id }})
-                    : Notifier.warning(`Select note to run ${action} tool.`);
-                break;
-            case 'delete':
-                n && confirm(`Delete "${n.title || 'Untitled Note'}"?`) ?
-                    websocketClient.sendRequest('deleteNote', {noteId: n.id})
-                        .then(() => Notifier.success('Note deletion requested.'))
-                        .catch(err => (console.error('Failed to send delete note command:', err), Notifier.error('Failed to delete note.')))
-                    : !n && Notifier.warning('Select note to delete.');
-                break;
-            case 'view-source':
-                n ? alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\nCreated: ${new Date(n.created).toLocaleString()}\nUpdated: ${new Date(n.updated).toLocaleString()}\n\nContent:\n${n.content}`) : Notifier.warning('Select note to view source.');
-                break;
-            case 'settings': this.settingsModal.show(); break;
-            default: console.warn(`Unknown menu action: ${action}`);
+            default:
+                console.warn("Unknown menu action:", action);
         }
     }
 
-    updateNoteState(note, newState) {
-        note ?
-            (websocketClient.sendRequest('updateNote', { noteId: note.id, state: newState })
-                .catch(err => (console.error(`Failed to send state update for ${note.id}:`, err), Notifier.error(`Failed to set note state to ${newState}.`))),
-             Notifier.info(`Note "${note.title || 'Untitled'}" set to ${newState}.`))
-            : Notifier.warning(`Select a note to set ${newState}.`);
+    showSettings() {
+        // Load current system config into the modal
+        this.settingsModal.loadSettings({
+            llmApiUrl: this.systemConfig.llmApiUrl,
+            llmModel: this.systemConfig.llmModel,
+            globalKbCapacity: this.systemConfig.globalKbCapacity,
+            reasoningDepthLimit: this.systemConfig.reasoningDepthLimit,
+            broadcastInputAssertions: this.systemConfig.broadcastInputAssertions,
+            // Load client-side settings (if any)
+            usePersistence: this.settings.usePersistence ?? true, // Default client setting
+            serpApiKey: this.settings.serpApiKey ?? '' // Default client setting
+        });
+        this.settingsModal.show();
     }
 
-    updateSettings(settings) {
-        this.settings = settings;
-        websocketClient.sendRequest('updateSettings', {settings: settings})
-            .catch(err => (console.error('Failed to send settings update command:', err), Notifier.error('Failed to save settings.')));
+    saveSettings(settings) {
+        // Separate backend config from client settings
+        const backendConfig = {
+            llmApiUrl: settings.llmApiUrl,
+            llmModel: settings.llmModel,
+            globalKbCapacity: settings.globalKbCapacity,
+            reasoningDepthLimit: settings.reasoningDepthLimit,
+            broadcastInputAssertions: settings.broadcastInputAssertions
+        };
+
+        // Save client-side settings locally
+        this.settings = {
+            usePersistence: settings.usePersistence,
+            serpApiKey: settings.serpApiKey
+        };
+        localStorage.setItem('clientSettings', JSON.stringify(this.settings));
+        Notifier.info('Client settings saved.');
+
+        // Send backend config to backend
+        websocketClient.sendRequest('updateSettings', { settings: backendConfig })
+            .then(() => {
+                Notifier.info('Backend settings updated.');
+                // Backend will send SystemStatusEvent with updated config
+            })
+            .catch(err => {
+                console.error('Failed to update backend settings:', err);
+                Notifier.error('Failed to update backend settings.');
+            });
     }
 
-    showDock(d) {
-        this.actionArea.showDock(d);
+    loadClientSettings() {
+        try {
+            const savedSettings = localStorage.getItem('clientSettings');
+            if (savedSettings) {
+                this.settings = JSON.parse(savedSettings);
+                console.log('Loaded client settings:', this.settings);
+            } else {
+                this.settings = { usePersistence: true, serpApiKey: '' }; // Default settings
+                console.log('No client settings found, using defaults:', this.settings);
+            }
+        } catch (e) {
+            console.error('Failed to load client settings from local storage:', e);
+            this.settings = { usePersistence: true, serpApiKey: '' }; // Fallback to defaults
+        }
     }
 
-    sendCommand(commandName, parameters = {}) {
-        websocketClient.sendRequest(commandName, parameters)
-            .then(() => Notifier.info(`Command '${commandName}' requested.`))
-            .catch(err => (console.error(`Failed to run command '${commandName}'.`), Notifier.error(`Failed to run command '${commandName}'.`)));
+
+    clearAll() {
+        if (confirm("Are you sure you want to clear ALL notes and knowledge? This cannot be undone.")) {
+            websocketClient.sendRequest('clearAll')
+                .then(() => {
+                    Notifier.info('System clear initiated.');
+                    // Backend will send events for deleted notes and updated status
+                })
+                .catch(err => {
+                    console.error('Failed to send clearAll command:', err);
+                    Notifier.error('Failed to clear system.');
+                });
+        }
     }
 
-    cancelDialogue(dialogueId) {
-        websocketClient.sendRequest('cancelDialogue', {dialogueId: dialogueId})
-            .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));
+    saveState() {
+         websocketClient.sendRequest('saveState') // Assuming a backend command for this
+            .then(() => {
+                Notifier.info('System state save requested.');
+            })
+            .catch(err => {
+                console.error('Failed to send saveState command:', err);
+                Notifier.error('Failed to request state save.');
+            });
     }
+
+    loadState() {
+         if (confirm("Are you sure you want to load the last saved state? This will overwrite the current state.")) {
+             websocketClient.sendRequest('loadState') // Assuming a backend command for this
+                .then(() => {
+                    Notifier.info('System state load requested.');
+                    // Backend should send initialState event after loading
+                })
+                .catch(err => {
+                    console.error('Failed to send loadState command:', err);
+                    Notifier.error('Failed to request state load.');
+                });
+         }
+    }
+
+    // Dialogue handling methods called by DialogueManager
+    // These are now handled directly by DialogueManager using websocketClient
+    // but kept here for clarity if App needed to orchestrate them.
+    // cancelDialogue(dialogueId) {
+    //     websocketClient.sendRequest('cancelDialogue', {dialogueId: dialogueId})
+    //         .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));
+    // }
 }
 
+// Initialize the app when the DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new App('#app-container');
+    const app = new App('#app');
+
+    // Initialize REPL if the container exists
+    const replContainer = document.getElementById('repl-container');
+    if (replContainer) {
+        // Assuming repl.js exports an init function
+        import('./repl/index.js').then(repl => {
+            repl.init(replContainer, websocketClient);
+        }).catch(err => {
+            console.error('Failed to load REPL:', err);
+            replContainer.innerHTML = '<p style="color: red;">Failed to load REPL.</p>';
+        });
+    }
 });
