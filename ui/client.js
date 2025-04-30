@@ -360,7 +360,7 @@ class WebSocketClient {
 
 // Export a singleton instance for simplicity in this application structure
 // The port should ideally be configurable, but hardcoding for now based on typical setup
-const WS_PORT = 8080; // Default port from Cog.main
+const WS_PORT = 8081; // Default port from Cog.main
 const WS_URL = `ws://localhost:${WS_PORT}`;
 
 export const websocketClient = new WebSocketClient(WS_URL);
