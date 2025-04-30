@@ -695,6 +695,13 @@ class DialogueManager extends Component {
 class App {
     constructor(elSelector) {
         this.el = document.querySelector(elSelector);
+        // Check if the element was found
+        if (!this.el) {
+            console.error(`App failed to find root element: ${elSelector}`);
+            // Optionally, display an error message on the page
+            document.body.innerHTML = `<div style="color: red; padding: 20px;">Error: Could not find root element "${elSelector}". Please check the HTML structure.</div>`;
+            return; // Stop initialization if root element is not found
+        }
         this.notes = [];
         this.currentId = null;
         this.settings = {}; // Client-side settings (like UI preferences, API keys)
@@ -705,12 +712,38 @@ class App {
     }
 
     initComps() {
-        this.sidebar = new Sidebar(this, '#sidebar');
-        this.editor = new Editor(this, '#editor');
-        this.menuBar = new MenuBar(this, '#menu-bar');
-        this.actionArea = new ActionArea(this, '#action-area');
+        // Render the basic layout structure into the root element
+        this.el.innerHTML = `
+            <div class="sidebar">
+                <!-- Sidebar content rendered by Sidebar component -->
+            </div>
+            <div class="main-content">
+                <div class="menu-bar">
+                    <!-- MenuBar content rendered by MenuBar component -->
+                </div>
+                <div class="editor-area">
+                    <!-- Editor content rendered by Editor component -->
+                </div>
+                <div class="action-area">
+                    <!-- ActionArea content rendered by ActionArea component -->
+                </div>
+                <div id="settings-modal" class="modal">
+                    <!-- Settings Modal content rendered by SettingsModal component -->
+                </div>
+                 <div id="dialogue-modal" class="modal">
+                    <!-- Dialogue Modal content rendered by DialogueManager component -->
+                </div>
+            </div>
+        `;
+
+        // Initialize components using selectors relative to the root element
+        this.sidebar = new Sidebar(this, '.sidebar');
+        this.editor = new Editor(this, '.editor-area');
+        this.menuBar = new MenuBar(this, '.menu-bar');
+        this.actionArea = new ActionArea(this, '.action-area');
         this.settingsModal = new SettingsModal(this, '#settings-modal');
         this.dialogueManager = new DialogueManager(this, '#dialogue-modal');
+
 
         // Example action icons (can be dynamic based on backend capabilities)
         this.actionArea.addIcon({ label: 'REPL', icon: '⌨️', content: '<div id="repl-container"></div>' }); // Placeholder for REPL
@@ -1161,9 +1194,15 @@ class App {
 
 // Initialize the app when the DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    const app = new App('#app');
+    // Correct the selector to match the HTML
+    const app = new App('#app-container');
 
     // Initialize REPL if the container exists
+    // Note: The REPL container needs to be added to the DOM by the App's initComps
+    // before this code runs. The current initComps adds it as innerHTML of action-dock,
+    // which is not visible initially. This REPL initialization might need adjustment
+    // depending on where the REPL is intended to live.
+    // For now, assuming the REPL container will be available somewhere in the DOM.
     const replContainer = document.getElementById('repl-container');
     if (replContainer) {
         // Assuming repl.js exports an init function
