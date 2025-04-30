@@ -8,6 +8,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 public final class Note {
     private final String id;
     public String text;
+    public float pri;
+    public String color;
+    public long updated;
     String title;
     Status status;
 

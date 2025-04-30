@@ -12,6 +12,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 
+import static java.util.Objects.requireNonNull;
+
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.EXISTING_PROPERTY,
@@ -36,9 +38,9 @@ import java.util.Map;
         @Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"),
         @Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"),
         @Type(value = Query.QueryEvent.class, name = "QueryEvent"),
-        @Type(value = Cog.NoteStatusEvent.class, name = "NoteStatusEvent"),
-        @Type(value = Cog.NoteUpdatedEvent.class, name = "NoteUpdatedEvent"), // Added
-        @Type(value = Cog.NoteDeletedEvent.class, name = "NoteDeletedEvent") // Added
+        @Type(value = Event.NoteStatusEvent.class, name = "NoteStatusEvent"),
+        @Type(value = Event.NoteUpdatedEvent.class, name = "NoteUpdatedEvent"), // Added
+        @Type(value = Event.NoteDeletedEvent.class, name = "NoteDeletedEvent") // Added
 })
 public interface Event {
 
@@ -233,6 +235,52 @@ public interface Event {
         @Override
         public String getEventType() {
             return "RetractionRequestEvent";
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record NoteStatusEvent(Note note, Note.Status oldStatus,
+                           Note.Status newStatus) implements NoteEvent {
+        public NoteStatusEvent {
+            requireNonNull(note);
+            requireNonNull(oldStatus);
+            requireNonNull(newStatus);
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteStatusEvent";
+        }
+    }
+
+    // Added NoteUpdatedEvent
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record NoteUpdatedEvent(Note updatedNote) implements NoteEvent {
+        public NoteUpdatedEvent {
+            requireNonNull(updatedNote);
+        }
+
+        @Override
+        public Note note() {
+            return updatedNote;
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteUpdatedEvent";
+        }
+    }
+
+    // Added NoteDeletedEvent
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record NoteDeletedEvent(String noteId) implements NoteIDEvent {
+        public NoteDeletedEvent {
+            requireNonNull(noteId);
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteDeletedEvent";
         }
     }
 }

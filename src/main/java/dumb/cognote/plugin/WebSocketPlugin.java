@@ -18,16 +18,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.INPUT_ASSERTION_BASE_PRIORITY;
 import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Protocol.*;
 import static dumb.cognote.Term.Lst;
-import static dumb.cognote.util.Log.error;
-import static dumb.cognote.util.Log.message;
-import static dumb.cognote.util.Log.warning;
+import static dumb.cognote.util.Log.*;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
@@ -122,8 +118,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             }
 
             if (!signalType.equals(SIGNAL_TYPE_REQUEST)) {
-                 sendErrorResponse(conn, signalId, "Unknown signal type: " + signalType + ". Expected '" + SIGNAL_TYPE_REQUEST + "'.");
-                 return;
+                sendErrorResponse(conn, signalId, "Unknown signal type: " + signalType + ". Expected '" + SIGNAL_TYPE_REQUEST + "'.");
+                return;
             }
 
             // Handle REQUEST signal
@@ -147,7 +143,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private void handleRequest(WebSocket conn, String requestId, String command, JsonNode parameters) {
+    private void handleRequest(WebSocket conn, String requestId, String command, JsonNode parameters) throws JsonProcessingException {
         try {
             String sourceId = "client:" + conn.getRemoteSocketAddress().toString();
 
@@ -241,7 +237,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     // This bypasses the old KB_CLIENT_INPUT mechanism for direct assertions
                     var targetKb = noteId != null ? noteId : Cog.GLOBAL_KB_NOTE_ID; // Default to global KB if no noteId
                     var potentialAssertion = new Assertion.PotentialAssertion(
-                            term, // Assert the parsed term directly
+                            (Lst) term, // Assert the parsed term directly
                             INPUT_ASSERTION_BASE_PRIORITY,
                             Set.of(),
                             sourceId,
@@ -270,7 +266,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private void handleRunToolRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) {
+    private void handleRunToolRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) throws JsonProcessingException {
         var toolNameNode = parameters.get("name");
         var toolParamsNode = parameters.get("parameters"); // Expecting a JSON object
 
@@ -280,9 +276,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         var toolName = toolNameNode.asText();
-        // Convert JsonNode parameters to Map<String, Object>
-        Map<String, Object> toolParams = Json.obj(Json.str(toolParamsNode), Map.class);
 
+        Map<String, Object> toolParams = Json.obj(Json.str(toolParamsNode), Map.class);
 
         cog.tools.get(toolName).ifPresentOrElse(tool -> {
             tool.execute(toolParams).whenCompleteAsync((result, ex) -> {
@@ -301,14 +296,14 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }, () -> sendFailureResponse(conn, requestId, "Tool not found: " + toolName));
     }
 
-    private void handleRunQueryRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) {
+    private void handleRunQueryRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) throws JsonProcessingException {
         var queryTypeNode = parameters.get("queryType");
         var patternStringNode = parameters.get("pattern");
         var targetKbIdNode = parameters.get("targetKbId");
         var queryParamsNode = parameters.get("parameters"); // Expecting a JSON object
 
         if (queryTypeNode == null || !queryTypeNode.isTextual() || queryTypeNode.asText().isBlank() ||
-            patternStringNode == null || !patternStringNode.isTextual() || patternStringNode.asText().isBlank()) {
+                patternStringNode == null || !patternStringNode.isTextual() || patternStringNode.asText().isBlank()) {
             sendFailureResponse(conn, requestId, "Invalid parameters for '" + COMMAND_RUN_QUERY + "': missing 'queryType' (string) or 'pattern' (string).");
             return;
         }
@@ -348,7 +343,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private void handleWaitRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) {
+    private void handleWaitRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) throws JsonProcessingException {
         // Wait command is typically handled by asserting a request that a plugin processes.
         // With direct commands, we could implement a blocking wait here, but that's generally
         // bad for a WebSocket server. A better approach is to assert a temporary goal
@@ -402,7 +397,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var noteIdNode = parameters.get("noteId"); // Optional note context
 
         if (typeNode == null || !typeNode.isTextual() || typeNode.asText().isBlank() ||
-            targetNode == null || !targetNode.isTextual() || targetNode.asText().isBlank()) {
+                targetNode == null || !targetNode.isTextual() || targetNode.asText().isBlank()) {
             sendFailureResponse(conn, requestId, "Invalid parameters for '" + COMMAND_RETRACT + "': missing 'type' (string) or 'target' (string).");
             return;
         }
@@ -478,17 +473,19 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var content = contentNode != null && contentNode.isTextual() ? contentNode.asText() : "";
         Note.Status state = Note.Status.IDLE;
         if (stateNode != null && stateNode.isTextual()) {
-             try {
-                 state = Note.Status.valueOf(stateNode.asText().toUpperCase());
-             } catch (IllegalArgumentException e) {
-                 warning("Invalid 'state' value for '" + COMMAND_ADD_NOTE + "': " + stateNode.asText() + ". Defaulting to IDLE.");
-             }
+            try {
+                state = Note.Status.valueOf(stateNode.asText().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                warning("Invalid 'state' value for '" + COMMAND_ADD_NOTE + "': " + stateNode.asText() + ". Defaulting to IDLE.");
+            }
         }
         var priority = priorityNode != null && priorityNode.isInt() ? priorityNode.asInt() : 0;
         var color = colorNode != null && colorNode.isTextual() ? colorNode.asText() : null;
 
 
-        var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, content, state, priority, color);
+        var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, content, state);
+        newNote.pri = priority;
+        newNote.color = color;
         cog.addNote(newNote); // addNote emits AddedEvent
 
         message("Processed AddNote request: " + title + " (request " + requestId + ")");
@@ -524,8 +521,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var color = colorNode != null && colorNode.isTextual() ? colorNode.asText() : null;
 
 
+        Note.Status STATE = state;
         cog.note(noteId).ifPresentOrElse(note -> {
-            cog.updateNote(noteId, title, content, state, priority, color); // updateNote emits NoteUpdatedEvent/NoteStatusEvent
+            cog.updateNote(noteId, title, content, STATE, priority, color); // updateNote emits NoteUpdatedEvent/NoteStatusEvent
             message("Processed UpdateNote request for ID: " + noteId + " (request " + requestId + ")");
             sendSuccessResponse(conn, requestId, null, "Note updated.");
         }, () -> sendFailureResponse(conn, requestId, "Note not found: " + noteId));

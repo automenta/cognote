@@ -9,6 +9,7 @@ import dumb.cognote.tool.*;
 import dumb.cognote.util.Events;
 import dumb.cognote.util.Json;
 import dumb.cognote.util.KifParser;
+import dumb.cognote.util.Log;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -23,7 +24,6 @@ import java.util.function.Consumer;
 import static dumb.cognote.Note.Status.IDLE;
 import static dumb.cognote.util.Log.error;
 import static dumb.cognote.util.Log.message;
-import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public class Cog {
@@ -251,7 +251,7 @@ public class Cog {
                     case IDLE, PAUSED, COMPLETED -> context.removeActiveNote(noteId);
                 }
 
-                events.emit(new NoteStatusEvent(note, oldStatus, newStatus));
+                events.emit(new Event.NoteStatusEvent(note, oldStatus, newStatus));
                 message("Updated note status for [" + note.id() + "] to " + newStatus);
 
                 if (newStatus == Note.Status.ACTIVE) {
@@ -324,8 +324,8 @@ public class Cog {
 
     public void updateNotePriority(String noteId, int newPriority) {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
-            if (note.priority != newPriority) {
-                note.priority = newPriority;
+            if (note.pri != newPriority) {
+                note.pri = newPriority;
                 note.updated = System.currentTimeMillis(); // Update timestamp on priority change
                 events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
                 message("Updated priority for note [" + note.id() + "] to " + newPriority);
@@ -359,8 +359,8 @@ public class Cog {
                 updateNoteStatus(noteId, state); // Use existing status update logic
                 // updateNoteStatus emits its own event, no need to set changed = true here for NoteUpdatedEvent
             }
-            if (priority != null && note.priority != priority) {
-                note.priority = priority;
+            if (priority != null && note.pri != priority) {
+                note.pri = priority;
                 changed = true;
             }
             if (color != null && !Objects.equals(note.color, color)) {
@@ -382,17 +382,19 @@ public class Cog {
 
 
     public void cloneNote(String noteId) {
-        ofNullable(notes.get(noteId)).ifPresentOrElse(originalNote -> {
-            var clonedNote = new Note(
+        var n = notes.get(noteId);
+        ofNullable(n).ifPresentOrElse(originalNote -> {
+            var c = new Note(
                     Cog.id(Cog.ID_PREFIX_NOTE),
                     "Clone of " + originalNote.title(),
                     originalNote.text(),
-                    Note.Status.IDLE, // Cloned notes start as IDLE
-                    originalNote.priority(),
-                    originalNote.color() // Keep original color
+                    Note.Status.IDLE // Cloned notes start as IDLE
             );
-            addNote(clonedNote); // addNote emits AddedEvent
-            message("Cloned note [" + noteId + "] to [" + clonedNote.id() + "]");
+            c.pri = n.pri;
+            c.color = n.color;
+            c.updated = System.currentTimeMillis();
+            addNote(c); // addNote emits AddedEvent
+            message("Cloned note [" + noteId + "] to [" + c.id() + "]");
         }, () -> error("Attempted to clone unknown note ID: " + noteId));
     }
 
@@ -669,52 +671,6 @@ public class Cog {
     @FunctionalInterface
     interface DoubleDoublePredicate {
         boolean test(double a, double b);
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record NoteStatusEvent(Note note, Note.Status oldStatus,
-                                  Note.Status newStatus) implements Event.NoteEvent {
-        public NoteStatusEvent {
-            requireNonNull(note);
-            requireNonNull(oldStatus);
-            requireNonNull(newStatus);
-        }
-
-        @Override
-        public String getEventType() {
-            return "NoteStatusEvent";
-        }
-    }
-
-    // Added NoteUpdatedEvent
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record NoteUpdatedEvent(Note updatedNote) implements Event.NoteEvent {
-        public NoteUpdatedEvent {
-            requireNonNull(updatedNote);
-        }
-
-        @Override
-        public Note note() {
-            return updatedNote;
-        }
-
-        @Override
-        public String getEventType() {
-            return "NoteUpdatedEvent";
-        }
-    }
-
-    // Added NoteDeletedEvent
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record NoteDeletedEvent(String noteId) implements Event.NoteIDEvent {
-        public NoteDeletedEvent {
-            requireNonNull(noteId);
-        }
-
-        @Override
-        public String getEventType() {
-            return "NoteDeletedEvent";
-        }
     }
 
 

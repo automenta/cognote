@@ -1,23 +1,16 @@
 package dumb.cognote.plugin;
 
 import dumb.cognote.*;
-import dumb.cognote.Term.Var;
 import dumb.cognote.util.Events;
 import dumb.cognote.util.Json;
-import dumb.cognote.util.KifParser;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Protocol.*;
 import static dumb.cognote.Term.Atom;
 import static dumb.cognote.Term.Lst;
-import static dumb.cognote.Term.Var.of;
 import static dumb.cognote.util.Log.error;
-import static dumb.cognote.util.Log.message;
-import static java.util.Optional.ofNullable;
 
 public class RequestProcessorPlugin extends Plugin.BasePlugin {
 
