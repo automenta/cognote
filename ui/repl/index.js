@@ -35,6 +35,11 @@ websocketClient.on('connected', () => {
     appendOutput(`${formatTimestamp()} [STATUS] Connected to WebSocket.`, 'status');
     sendButton.disabled = false;
     clearButton.disabled = false;
+    // Request initial state upon connection
+    websocketClient.sendRequest('initialStateRequest', {})
+        .catch(err => {
+            appendOutput(`${formatTimestamp()} [ERROR] Failed to request initial state: ${err.message}`, 'response-error');
+        });
 });
 
 websocketClient.on('disconnected', (event) => {
@@ -55,7 +60,7 @@ websocketClient.on('error', (event) => {
     appendOutput(`${formatTimestamp()} [STATUS] WebSocket Error: ${event.message || event}`, 'response-error');
 });
 
-// Handle incoming events
+// Handle incoming events (wrapped in update signals with updateType: 'event')
 websocketClient.on('event', (eventPayload) => {
     // Filter out LogMessageEvent here to handle them separately with specific styling
     if (eventPayload.eventType === 'LogMessageEvent') {
@@ -67,27 +72,32 @@ websocketClient.on('event', (eventPayload) => {
     }
 });
 
-// Handle incoming responses
+// Handle incoming responses (wrapped in update signals with updateType: 'response')
+// These are responses to specific requests sent via sendRequest
 websocketClient.on('response', (responsePayload) => {
-    const status = responsePayload.payload?.status || 'unknown';
+    // The responsePayload here is the 'payload' part of the update signal
+    const status = responsePayload?.status || 'unknown';
     const className = status === 'success' ? 'response-success' : (status === 'failure' ? 'response-failure' : 'response-error');
-    let responseText = `${formatTimestamp()} [RESPONSE:${status.toUpperCase()}] In Reply To: ${responsePayload.inReplyToId}\n`;
+    // The inReplyToId is now part of the update signal itself, not the payload
+    // We don't have direct access to the update signal's inReplyToId here in the listener payload
+    // If needed, the client._handleResponse could emit a more structured response event
+    // For now, we'll just indicate it's a response.
+    let responseText = `${formatTimestamp()} [RESPONSE:${status.toUpperCase()}]\n`;
 
-    if (responsePayload.payload?.message) {
-        responseText += `Message: ${responsePayload.payload.message}\n`;
+    if (responsePayload?.message) {
+        responseText += `Message: ${responsePayload.message}\n`;
     }
-    if (responsePayload.payload?.result !== undefined) {
-         responseText += `Result: ${JSON.stringify(responsePayload.payload.result, null, 2)}\n`;
-    } else if (responsePayload.payload) {
+    if (responsePayload?.result !== undefined) {
+         responseText += `Result: ${JSON.stringify(responsePayload.result, null, 2)}\n`;
+    } else if (responsePayload) {
          // If no specific result/message, show the whole payload
-         responseText += `Payload: ${JSON.stringify(responsePayload.payload, null, 2)}\n`;
+         responseText += `Payload: ${JSON.stringify(responsePayload, null, 2)}\n`;
     }
-
 
     appendOutput(responseText, className);
 });
 
-// Handle incoming initial state snapshot
+// Handle incoming initial state snapshot (wrapped in update signals with updateType: 'initialState')
 websocketClient.on('initialState', (statePayload) => {
     appendOutput(`${formatTimestamp()} [INITIAL STATE] Received system snapshot.`, 'status');
     if (statePayload) {
@@ -114,7 +124,7 @@ websocketClient.on('initialState', (statePayload) => {
 });
 
 
-// Handle dialogue requests
+// Handle dialogue requests (wrapped in update signals with updateType: 'dialogueRequest')
 websocketClient.on('dialogueRequest', (requestPayload) => {
     appendOutput(`${formatTimestamp()} [DIALOGUE REQUEST] ID: ${requestPayload.dialogueId}, Type: ${requestPayload.requestType}\nPrompt: ${requestPayload.prompt}\nContext: ${JSON.stringify(requestPayload.context, null, 2)}`, 'event');
 
@@ -126,8 +136,8 @@ websocketClient.on('dialogueRequest', (requestPayload) => {
         showDialogueModal();
     } else {
         console.warn(`Received unsupported dialogue request type: ${requestPayload.requestType}. Cancelling.`);
-        // Automatically cancel unsupported types
-         websocketClient.sendCommand('cancelDialogue', { dialogueId: requestPayload.dialogueId })
+        // Automatically cancel unsupported types using the command
+         websocketClient.sendRequest('cancelDialogue', { dialogueId: requestPayload.dialogueId })
              .then(() => appendOutput(`${formatTimestamp()} [SENT] Cancelled dialogue ${requestPayload.dialogueId} (unsupported type)`, 'sent'))
              .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to send cancelDialogue command: ${err.message}`, 'response-error'));
     }
@@ -158,7 +168,11 @@ function sendDialogueResponse() {
 
     appendOutput(`${formatTimestamp()} [SENT] Dialogue response for ${currentDialogueId}: "${responseText}"`, 'sent');
 
-    websocketClient.sendDialogueResponse(currentDialogueId, responseData)
+    // Use sendRequest for dialogueResponse command
+    websocketClient.sendRequest('dialogueResponse', {
+        dialogueId: currentDialogueId,
+        responseData: responseData
+    })
         .then(() => {
             // Response handled by generic 'response' listener
         })
@@ -174,7 +188,8 @@ function cancelDialogue() {
 
     appendOutput(`${formatTimestamp()} [SENT] Cancelling dialogue ${currentDialogueId}`, 'sent');
 
-    websocketClient.sendCommand('cancelDialogue', { dialogueId: currentDialogueId })
+    // Use sendRequest for cancelDialogue command
+    websocketClient.sendRequest('cancelDialogue', { dialogueId: currentDialogueId })
         .then(() => {
             // Response handled by generic 'response' listener
         })
@@ -236,9 +251,10 @@ function sendInput() {
             return;
         }
 
-        appendOutput(`${formatTimestamp()} [SENT] Sending input signal with KIF:\n${kifStrings.join('\n')}`, 'sent');
+        appendOutput(`${formatTimestamp()} [SENT] Sending assertKif command with KIF:\n${kifStrings.join('\n')}`, 'sent');
 
-        websocketClient.sendInput(kifStrings, 'repl-ui')
+        // Use sendRequest for assertKif command
+        websocketClient.sendRequest('assertKif', { kifStrings: kifStrings })
             .then(response => { /* Handled by generic response listener */ })
             .catch(error => { /* Handled by generic response listener */ });
     }
@@ -252,111 +268,82 @@ function handleCommand(commandString) {
     appendOutput(`${formatTimestamp()} [COMMAND] Executing: /${command} ${args}`, 'sent');
 
     try {
+        let backendCommand = null;
+        let parameters = {};
+        let rawArgs = args; // Keep raw args for parsing
+
+        // Attempt to parse arguments as KIF list followed by optional JSON params
+        const kifMatch = rawArgs.match(/^\s*(\(.*\))\s*(\{.*\})?\s*$/);
+        if (kifMatch) {
+            rawArgs = kifMatch[1]; // The KIF part
+            try {
+                 if (kifMatch[2]) parameters = JSON.parse(kifMatch[2]);
+            } catch (e) {
+                 throw new Error(`Invalid JSON parameters: ${e.message}`);
+            }
+        }
+
         switch (command) {
             case 'assert':
-            case 'rule':
-                // Send as input signal (backend handles parsing KIF into assertions/rules)
+            case 'rule': // Rules are just assertions
                 if (!args) throw new Error(`Usage: /${command} <kif_string>`);
-                websocketClient.sendInput([args], 'repl-ui')
-                    .then(response => { /* Handled by generic response listener */ })
-                    .catch(error => { /* Handled by generic response listener */ });
+                backendCommand = 'assertKif';
+                parameters.kifStrings = [args];
                 break;
 
             case 'query':
-            case 'tool':
-            case 'wait':
-            case 'retract': // Add retract command
-                 // These map to backend commands
-                if (!args) throw new Error(`Usage: /${command} <arguments>`);
-
-                let commandName, parameters = {};
-                let argKif = args; // Default: treat args as KIF string
-
-                // Attempt to parse arguments as KIF list followed by optional JSON params
-                const kifMatch = args.match(/^\s*(\(.*\))\s*(\{.*\})?\s*$/);
-                if (kifMatch) {
-                    argKif = kifMatch[1];
-                    try {
-                         if (kifMatch[2]) parameters = JSON.parse(kifMatch[2]);
-                    } catch (e) {
-                         throw new Error(`Invalid JSON parameters: ${e.message}`);
-                    }
-                } else {
-                    // If not a KIF list, maybe it's just a tool name or ID?
-                    // Simple case: /tool tool_name {params}
-                    // Complex case: /query (pattern) {params}
-                    // Let's assume the backend command handlers expect specific parameter structures.
-                    // For simplicity here, we'll just pass the raw args string for now,
-                    // or try to parse simple cases like tool name + JSON.
-                    // A more robust REPL would need a KIF parser client-side.
-
-                    // Simple parsing for /tool <name> {params}
-                    if (command === 'tool') {
-                         const toolNameMatch = args.match(/^([a-zA-Z0-9_-]+)\s*(\{.*\})?$/);
-                         if (toolNameMatch) {
-                             commandName = 'runTool'; // Backend command name
-                             parameters.name = toolNameMatch[1];
-                             try {
-                                 if (toolNameMatch[2]) parameters = { ...parameters, ...JSON.parse(toolNameMatch[2]) };
-                             } catch (e) {
-                                 throw new Error(`Invalid JSON parameters for /tool: ${e.message}`);
-                             }
-                         } else {
-                             throw new Error(`Usage: /tool <tool_name> [{json_params}]`);
-                         }
-                    } else if (command === 'retract') {
-                         // Simple parsing for /retract <BY_KIF|BY_ID> <target>
-                         const retractMatch = args.match(/^(BY_KIF|BY_ID)\s+(\(.*\)|[a-zA-Z0-9_-]+)$/);
-                         if (retractMatch) {
-                             commandName = 'retract'; // Backend command name
-                             parameters.type = retractMatch[1];
-                             parameters.target = retractMatch[2]; // KIF string or ID string
-                         } else {
-                             throw new Error(`Usage: /retract <BY_KIF|BY_ID> <target_kif_or_id>`);
-                         }
-                    }
-                    // For /query and /wait, we'll stick to the KIF pattern + optional JSON for now
-                    // A client-side KIF parser would be needed for more flexible command args.
-                }
-
-
-                if (!commandName) {
-                    // Map REPL command to backend command name if not handled above
-                    commandName = command; // Assume command name matches backend command type
-                    // For query/wait, the pattern is the main argument
-                    if (command === 'query' || command === 'wait') {
-                         parameters.pattern = argKif; // Pass the KIF string as 'pattern' parameter
-                    }
-                }
-
-
-                // NOTE: Sending these as 'command' signals. If the backend WebSocketPlugin
-                // does not handle 'command' signals, this will fail.
-                // The backend WebSocketPlugin needs to be updated to receive SIGNAL_TYPE_COMMAND
-                // and route it to the RequestProcessorPlugin or appropriate handler.
-                // The REPL's /query, /tool, /wait, /retract commands are currently
-                // handled by the RequestProcessorPlugin which listens for assertions
-                // in kb://client-input. This handler is for future direct commands.
-                websocketClient.sendCommand(commandName, parameters)
-                    .then(response => { /* Handled by generic response listener */ })
-                    .catch(error => { /* Handled by generic response listener */ });
-
+                if (!rawArgs) throw new Error(`Usage: /query <pattern> [{json_params}]`);
+                backendCommand = 'query';
+                parameters.pattern = rawArgs; // Send KIF string pattern
+                // parameters already contains JSON params if parsed
                 break;
 
+            case 'tool':
+                const toolNameMatch = args.match(/^([a-zA-Z0-9_-]+)\s*(\{.*\})?$/);
+                 if (!toolNameMatch) throw new Error(`Usage: /tool <tool_name> [{json_params}]`);
+                backendCommand = 'runTool';
+                parameters.name = toolNameMatch[1];
+                try {
+                    if (toolNameMatch[2]) parameters.parameters = JSON.parse(toolNameMatch[2]); // Nested parameters for tool
+                } catch (e) {
+                    throw new Error(`Invalid JSON parameters for /tool: ${e.message}`);
+                }
+                break;
+
+            case 'wait':
+                if (!rawArgs) throw new Error(`Usage: /wait <condition> [{json_params}]`);
+                backendCommand = 'wait';
+                parameters.condition = rawArgs; // Send KIF string condition
+                // parameters already contains JSON params if parsed
+                break;
+
+            case 'retract':
+                 // Simple parsing for /retract <BY_KIF|BY_ID> <target>
+                 const retractMatch = args.match(/^(BY_KIF|BY_ID)\s+(\(.*\)|[a-zA-Z0-9_-]+)$/);
+                 if (!retractMatch) throw new Error(`Usage: /retract <BY_KIF|BY_ID> <target_kif_or_id>`);
+                 backendCommand = 'retract';
+                 parameters.type = retractMatch[1];
+                 parameters.target = retractMatch[2]; // KIF string or ID string
+                 break;
+
             case 'clear':
-                outputDiv.innerHTML = '';
-                appendOutput(`${formatTimestamp()} [STATUS] Output cleared by command.`, 'status');
+                backendCommand = 'clearAll';
                 break;
 
             case 'state':
-                websocketClient.sendInitialStateRequest()
-                    .then(state => { /* Handled by initialState listener */ })
-                    .catch(err => { /* Handled by generic response listener */ });
+                backendCommand = 'initialStateRequest';
                 break;
 
             default:
                 appendOutput(`${formatTimestamp()} [ERROR] Unknown command: /${command}`, 'response-error');
+                return; // Stop processing if command is unknown
         }
+
+        // Send the command as a request
+        websocketClient.sendRequest(backendCommand, parameters)
+            .then(response => { /* Handled by generic response listener */ })
+            .catch(error => { /* Handled by generic response listener */ });
+
     } catch (e) {
         appendOutput(`${formatTimestamp()} [ERROR] Command failed: ${e.message}`, 'response-error');
         console.error(`Command /${command} failed:`, e);
@@ -370,7 +357,7 @@ function createExampleNotes() {
         {
             id: 'example-note-1',
             title: 'Getting Started: Facts & Queries',
-            text: `This note contains basic facts about animals.
+            content: `This note contains basic facts about animals.
 (instance MyCat Cat)
 (instance YourCat Cat)
 (instance MyDog Dog)
@@ -381,12 +368,12 @@ Try querying the system in the REPL input below:
 /query (instance ?Y Mammal)
 /query (instance MyCat ?Type)
 `,
-            status: 'ACTIVE'
+            state: 'ACTIVE'
         },
         {
             id: 'example-note-2',
             title: 'Reasoning: Rules & Derivations',
-            text: `This note defines a simple rule and a fact that should trigger it.
+            content: `This note defines a simple rule and a fact that should trigger it.
 (=> (instance ?X Dog) (attribute ?X Canine))
 
 The fact below should cause the rule to derive (attribute MyDog Canine):
@@ -395,12 +382,12 @@ The fact below should cause the rule to derive (attribute MyDog Canine):
 You can query for the derived fact:
 /query (attribute MyDog Canine)
 `,
-            status: 'ACTIVE'
+            state: 'ACTIVE'
         },
         {
             id: 'example-note-3',
             title: 'LLM Tools: Summarize & Enhance',
-            text: `This note has some text that might be useful for LLM tools.
+            content: `This note has some text that might be useful for LLM tools.
 
 Here is a long paragraph about the benefits of agentic systems. Agentic systems, often powered by large language models and symbolic reasoning engines, promise a new era of intelligent automation. They can process information, make decisions, take actions, and even learn and adapt over time. Unlike traditional software, which follows explicit instructions, agentic systems can operate autonomously towards a goal, handling unforeseen circumstances and integrating information from diverse sources. This capability is particularly valuable in complex, dynamic environments where pre-programmed solutions are insufficient. Potential applications range from advanced personal assistants and automated research agents to sophisticated control systems and creative collaborators. However, developing robust and reliable agentic systems presents significant challenges, including ensuring safety, interpretability, and preventing unintended consequences.
 
@@ -413,12 +400,12 @@ Try running tools from the REPL:
 /tool identifyConcepts { "note_id": "example-note-3" }
 /tool generateQuestions { "note_id": "example-note-3" }
 `,
-            status: 'ACTIVE'
+            state: 'ACTIVE'
         },
         {
             id: 'example-note-4',
             title: 'Dialogue & Interaction',
-            text: `This note contains a KIF term that uses the (ask-user ...) operator.
+            content: `This note contains a KIF term that uses the (ask-user ...) operator.
 (ask-user "What is your favorite color?")
 
 Running this query in the REPL should trigger a dialogue modal asking for your input.
@@ -426,21 +413,20 @@ Running this query in the REPL should trigger a dialogue modal asking for your i
 
 The response you provide will be returned as the result of the query.
 `,
-            status: 'ACTIVE'
+            state: 'ACTIVE'
         }
     ];
 
-    // Use sendUiAction for note management operations
-    // NOTE: The backend RequestProcessorPlugin (or similar) needs to be updated
-    // to listen for uiAction assertions in kb://ui-actions and call the
-    // appropriate Cog methods (addNote, updateNoteText, updateNoteStatus).
-    // The Note UI relies on NoteAddedEvent, NoteUpdatedEvent, NoteStatusEvent etc.
-    // being emitted by the backend after these actions are processed.
+    // Use sendRequest for note management commands
     exampleNotes.forEach(noteData => {
         // Send actions sequentially for each note
-        websocketClient.sendUiAction('addNote', { noteId: noteData.id, title: noteData.title })
-            .then(() => websocketClient.sendUiAction('updateNoteText', { noteId: noteData.id, newText: noteData.text }))
-            .then(() => websocketClient.sendUiAction('updateNoteStatus', { noteId: noteData.id, newStatus: noteData.status }))
+        // Note: Backend addNote command now takes title, content, state directly
+        websocketClient.sendRequest('addNote', {
+            title: noteData.title,
+            content: noteData.content,
+            state: noteData.state,
+            // id and other fields like created/updated/priority/color are handled by backend
+        })
             .then(() => appendOutput(`${formatTimestamp()} [STATUS] Created example note: "${noteData.title}"`, 'status'))
             .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to create example note "${noteData.title}": ${err.message}`, 'response-error'));
     });
@@ -451,16 +437,5 @@ The response you provide will be returned as the result of the query.
 sendButton.disabled = !websocketClient.isConnected;
 clearButton.disabled = !websocketClient.isConnected;
 
-// Request initial state when the client is ready (might already be connected)
-// This is now handled automatically by the client on 'connected' event
-// if (websocketClient.isConnected) {
-//      websocketClient.sendInitialStateRequest()
-//         .then(state => {
-//             appendOutput(`${formatTimestamp()} [INITIAL STATE] Received system snapshot.`, 'status');
-//             // Optionally display parts of the state, e.g., note titles
-//             // appendOutput(JSON.stringify(state, null, 2), 'event'); // Too verbose usually
-//         })
-//         .catch(err => {
-//             appendOutput(`${formatTimestamp()} [ERROR] Failed to request initial state: ${err.message}`, 'response-error');
-//         });
-// }
+// Initial state request is now handled by the 'connected' event listener
+

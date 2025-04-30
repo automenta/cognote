@@ -2,7 +2,7 @@
 
 /**
  * WebSocket Client for connecting to the Cognote backend.
- * Provides methods for sending signals and subscribing to events.
+ * Provides methods for sending requests and subscribing to updates/events.
  */
 class WebSocketClient {
     constructor(url, reconnectDelay = 3000, maxReconnectAttempts = 10) {
@@ -18,10 +18,15 @@ class WebSocketClient {
         this.signalIdCounter = 0;
         this.responseTimeout = 15000; // Timeout for waiting for a specific response (ms)
 
-        // Dedicated handler for the initial state request promise
-        this._initialStateRequestPromise = null;
-        this._initialStateRequestTimeoutId = null;
+        // Unified signal types
+        this.SIGNAL_TYPE_REQUEST = 'request';
+        this.SIGNAL_TYPE_UPDATE = 'update';
 
+        // Update types
+        this.UPDATE_TYPE_RESPONSE = 'response';
+        this.UPDATE_TYPE_EVENT = 'event';
+        this.UPDATE_TYPE_INITIAL_STATE = 'initialState';
+        this.UPDATE_TYPE_DIALOGUE_REQUEST = 'dialogueRequest';
 
         this._connect();
     }
@@ -47,7 +52,7 @@ class WebSocketClient {
         this.reconnectAttempts = 0;
         this._flushQueue();
         this._emit('connected');
-        // Removed: this.sendInitialStateRequest(); // Rely on backend sending it automatically
+        // Initial state is now requested by the UI components upon connection
     }
 
     _onMessage(event) {
@@ -55,40 +60,41 @@ class WebSocketClient {
             const signal = JSON.parse(event.data);
             // console.debug("WS received:", signal);
 
-            if (!signal || typeof signal !== 'object' || !signal.type) {
-                console.warn("Received invalid signal format:", signal);
+            if (!signal || typeof signal !== 'object' || signal.type !== this.SIGNAL_TYPE_UPDATE) {
+                console.warn("Received invalid or non-update signal format:", signal);
                 return;
             }
 
-            switch (signal.type) {
-                case 'event':
-                    if (signal.payload && signal.payload.eventType) {
-                        this._emit(signal.payload.eventType, signal.payload);
+            const updateType = signal.updateType;
+            const payload = signal.payload;
+            const inReplyToId = signal.inReplyToId;
+
+            if (!updateType || !payload) {
+                 console.warn("Received update signal without updateType or payload:", signal);
+                 return;
+            }
+
+            switch (updateType) {
+                case this.UPDATE_TYPE_RESPONSE:
+                    this._handleResponse(signal.id, inReplyToId, payload);
+                    break;
+                case this.UPDATE_TYPE_EVENT:
+                    if (payload.eventType) {
+                        this._emit(payload.eventType, payload);
                         // Also emit a generic 'event' for listeners interested in all events
-                        this._emit('event', signal.payload);
+                        this._emit('event', payload);
                     } else {
-                        console.warn("Received event signal without payload or eventType:", signal);
+                        console.warn("Received event update without eventType:", signal);
                     }
                     break;
-                case 'response':
-                    this._handleResponse(signal);
+                case this.UPDATE_TYPE_INITIAL_STATE:
+                    this._emit('initialState', payload);
                     break;
-                case 'initial_state':
-                    // Handle initial_state specifically to resolve the pending promise
-                    if (this._initialStateRequestPromise) {
-                         clearTimeout(this._initialStateRequestTimeoutId);
-                         this._initialStateRequestPromise.resolve(signal.payload);
-                         this._initialStateRequestPromise = null;
-                         this._initialStateRequestTimeoutId = null;
-                    }
-                    // Still emit as a generic event for other listeners
-                    this._emit('initialState', signal.payload);
-                    break;
-                case 'dialogue_request':
-                    this._emit('dialogueRequest', signal.payload);
+                case this.UPDATE_TYPE_DIALOGUE_REQUEST:
+                    this._emit('dialogueRequest', payload);
                     break;
                 default:
-                    console.warn(`Received unknown signal type: ${signal.type}`, signal);
+                    console.warn(`Received unknown update type: ${updateType}`, signal);
             }
 
         } catch (error) {
@@ -109,18 +115,9 @@ class WebSocketClient {
         // Reject any pending responses
         this.responseListeners.forEach(({reject, timeoutId}, signalId) => {
             clearTimeout(timeoutId);
-            reject(new Error(`WebSocket closed before response received for signal ${signalId}`));
+            reject(new Error(`WebSocket closed before response received for request ${signalId}`));
         });
         this.responseListeners.clear();
-
-        // Reject pending initial state request
-        if (this._initialStateRequestPromise) {
-            clearTimeout(this._initialStateRequestTimeoutId);
-            this._initialStateRequestPromise.reject(new Error(`WebSocket closed before initial state received`));
-            this._initialStateRequestPromise = null;
-            this._initialStateRequestTimeoutId = null;
-        }
-
 
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -155,206 +152,106 @@ class WebSocketClient {
     }
 
     /**
-     * Sends a signal to the backend.
-     * @param {string} type - The signal type (e.g., 'input', 'command').
-     * @param {object} payload - The payload for the signal.
-     * @param {string} [inReplyToId] - Optional ID of the signal this is a response to.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload if type is a request expecting a response, otherwise resolves immediately.
+     * Sends a request signal to the backend and returns a Promise for the response.
+     * @param {string} command - The command name (e.g., 'addNote', 'runTool', 'query').
+     * @param {object} [parameters] - Optional parameters for the command.
+     * @returns {Promise<object>} A promise that resolves with the response payload on success or rejects on failure/error/timeout.
      */
-    sendSignal(type, payload = {}, inReplyToId = null) {
+    sendRequest(command, parameters = {}) {
+        const signalId = this._generateSignalId();
         const signal = {
-            id: this._generateSignalId(),
-            type: type,
-            payload: payload,
+            id: signalId,
+            type: this.SIGNAL_TYPE_REQUEST,
+            payload: {
+                command: command,
+                parameters: parameters,
+            },
         };
-        if (inReplyToId) {
-            signal.inReplyToId = inReplyToId;
-        }
 
-        // Based on Protocol.java, 'response' signals are sent in reply to 'input', 'command', 'initial_state_request', 'dialogue_response'.
-        // 'initial_state' is a special case handled directly by _onMessage.
-        // UI_ACTION also expects a response according to WebSocketPlugin.java
-        const expectsResponse = ['input', 'command', 'dialogue_response', 'ui_action'].includes(type);
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                this.responseListeners.delete(signalId);
+                reject(new Error(`Response timeout for request ${signalId} (command: ${command})`));
+            }, this.responseTimeout);
 
-
-        if (expectsResponse) {
-            return new Promise((resolve, reject) => {
-                const timeoutId = setTimeout(() => {
-                    this.responseListeners.delete(signal.id);
-                    reject(new Error(`Response timeout for signal ${signal.id} (${type})`));
-                }, this.responseTimeout);
-
-                this.responseListeners.set(signal.id, {resolve, reject, timeoutId});
-                this._send(signal);
-            });
-        } else if (type === 'initial_state_request') {
-             // Handle initial_state_request specially
-             return new Promise((resolve, reject) => {
-                 // Clear any previous pending initial state request
-                 if (this._initialStateRequestPromise) {
-                     clearTimeout(this._initialStateRequestTimeoutId);
-                     this._initialStateRequestPromise.reject(new Error("New initial state request sent before previous one completed."));
-                 }
-
-                 this._initialStateRequestPromise = { resolve, reject };
-                 this._initialStateRequestTimeoutId = setTimeout(() => {
-                     this._initialStateRequestPromise = null;
-                     this._initialStateRequestTimeoutId = null;
-                     reject(new Error(`Response timeout for signal ${signal.id} (${type})`));
-                 }, this.responseTimeout);
-
-                 this._send(signal);
-             });
-        }
-        else {
+            this.responseListeners.set(signalId, {resolve, reject, timeoutId});
             this._send(signal);
-            return Promise.resolve(); // No specific response expected
-        }
+        });
     }
 
-    _handleResponse(responseSignal) {
-        const signalId = responseSignal.inReplyToId;
-        if (signalId && this.responseListeners.has(signalId)) {
-            const {resolve, reject, timeoutId} = this.responseListeners.get(signalId);
+    _handleResponse(signalId, inReplyToId, payload) {
+        // The inReplyToId for a response update is the ID of the original request signal
+        const requestId = inReplyToId;
+        if (requestId && this.responseListeners.has(requestId)) {
+            const {resolve, reject, timeoutId} = this.responseListeners.get(requestId);
             clearTimeout(timeoutId);
-            this.responseListeners.delete(signalId);
+            this.responseListeners.delete(requestId);
 
-            if (responseSignal.payload && responseSignal.payload.status === 'success') {
-                // Resolve with result, message, or the whole payload if they are missing
-                resolve(responseSignal.payload.result ?? responseSignal.payload.message ?? responseSignal.payload);
+            if (payload && payload.status === 'success') {
+                // Resolve with the result or the whole payload if no specific result
+                resolve(payload.result ?? payload);
             } else {
                 // Reject with an error containing status and message
-                const errorMsg = `Signal ${signalId} failed: Status=${responseSignal.payload?.status}, Message=${responseSignal.payload?.message}`;
+                const errorMsg = `Request ${requestId} failed: Status=${payload?.status}, Message=${payload?.message}`;
                 reject(new Error(errorMsg));
             }
         } else {
-            console.warn(`Received response for unknown or expired signal ID: ${signalId}`, responseSignal);
-            // Still emit as a generic response event
-            this._emit('response', responseSignal);
+            console.warn(`Received response update for unknown or expired request ID: ${requestId}`, {signalId, inReplyToId, payload});
+            // Still emit as a generic response event if needed, though the new protocol
+            // aims to handle responses via promises primarily.
+            // this._emit('response', { signalId, inReplyToId, payload });
         }
     }
 
+
     /**
-     * Subscribes a listener function to a specific event type.
-     * @param {string} eventType - The type of event (e.g., 'AssertedEvent', 'TaskUpdateEvent', 'connected', 'disconnected', 'error', 'initialState', 'dialogueRequest', 'response', 'NoteStatusEvent', 'NoteAddedEvent', 'NoteUpdatedEvent', 'NoteDeletedEvent').
-     * @param {function} listener - The function to call when the event occurs.
+     * Subscribes a listener function to a specific update/event type.
+     * @param {string} type - The type of update/event (e.g., 'connected', 'disconnected', 'error', 'initialState', 'dialogueRequest', 'event', 'AssertedEvent', 'NoteUpdatedEvent').
+     * @param {function} listener - The function to call when the update/event occurs.
      */
-    on(eventType, listener) {
-        if (!this.eventListeners.has(eventType)) {
-            this.eventListeners.set(eventType, new Set());
+    on(type, listener) {
+        if (!this.eventListeners.has(type)) {
+            this.eventListeners.set(type, new Set());
         }
-        this.eventListeners.get(eventType).add(listener);
+        this.eventListeners.get(type).add(listener);
     }
 
     /**
-     * Unsubscribes a listener function from a specific event type.
-     * @param {string} eventType - The type of event.
+     * Unsubscribes a listener function from a specific update/event type.
+     * @param {string} type - The type of update/event.
      * @param {function} listener - The listener function to remove.
      */
-    off(eventType, listener) {
-        if (this.eventListeners.has(eventType)) {
-            this.eventListeners.get(eventType).delete(listener);
-            if (this.eventListeners.get(eventType).size === 0) {
-                this.eventListeners.delete(eventType);
+    off(type, listener) {
+        if (this.eventListeners.has(type)) {
+            this.eventListeners.get(type).delete(listener);
+            if (this.eventListeners.get(type).size === 0) {
+                this.eventListeners.delete(type);
             }
         }
     }
 
-    _emit(eventType, data) {
-        if (this.eventListeners.has(eventType)) {
+    _emit(type, data) {
+        if (this.eventListeners.has(type)) {
             // Use a copy of the set to avoid issues if listeners modify the set during iteration
-            [...this.eventListeners.get(eventType)].forEach(listener => {
+            [...this.eventListeners.get(type)].forEach(listener => {
                 try {
                     listener(data);
                 } catch (error) {
-                    console.error(`Error in listener for event type "${eventType}":`, error);
+                    console.error(`Error in listener for type "${type}":`, error);
                 }
             });
         }
     }
 
-    /**
-     * Sends an 'input' signal to assert KIF expressions.
-     * @param {string[]} kifStrings - An array of KIF strings to assert.
-     * @param {string} [sourceId] - Optional source identifier.
-     * @param {string} [noteId] - Optional note ID context.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload.
-     */
-    sendInput(kifStrings, sourceId = null, noteId = null) {
-        const payload = {
-            kifStrings: Array.isArray(kifStrings) ? kifStrings : [kifStrings],
-        };
-        if (sourceId) payload.sourceId = sourceId;
-        if (noteId) payload.noteId = noteId;
-        return this.sendSignal('input', payload);
-    }
-
-    /**
-     * Sends an 'initial_state_request' signal.
-     * @returns {Promise<object|void>} A promise that resolves with the initial state payload.
-     */
-    sendInitialStateRequest() {
-        // This is handled specially in sendSignal to await the 'initial_state' signal type
-        return this.sendSignal('initial_state_request', {});
-    }
-
-    /**
-     * Sends a 'dialogue_response' signal.
-     * @param {string} dialogueId - The ID of the dialogue request being responded to.
-     * @param {object} responseData - The response data payload.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload.
-     */
-    sendDialogueResponse(dialogueId, responseData) {
-        const payload = {
-            dialogueId: dialogueId,
-            responseData: responseData,
-        };
-        return this.sendSignal('dialogue_response', payload, dialogueId); // Use dialogueId as inReplyToId
-    }
-
-    /**
-     * Sends a generic 'command' signal.
-     * @param {string} commandName - The name of the command.
-     * @param {object} [parameters] - Optional command parameters.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload.
-     */
-    sendCommand(commandName, parameters = {}) {
-        const payload = {
-            command: commandName,
-            parameters: parameters,
-        };
-        return this.sendSignal('command', payload);
-    }
-
-    /**
-     * Sends a 'ui_action' signal.
-     * @param {string} actionType - The type of UI action.
-     * @param {object} [actionData] - Optional action data.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload.
-     */
-    sendUiAction(actionType, actionData = {}) {
-        const payload = {
-            actionType: actionType,
-            actionData: actionData,
-        };
-        // UI Actions are expected to get a response from the backend
-        return this.sendSignal('ui_action', payload);
-    }
-
-    /**
-     * Sends an 'interaction_feedback' signal.
-     * @param {string} feedbackType - The type of feedback.
-     * @param {object} [feedbackData] - Optional feedback data.
-     * @returns {Promise<object|void>} A promise that resolves with the response payload.
-     */
-    sendInteractionFeedback(feedbackType, feedbackData = {}) {
-        const payload = {
-            feedbackType: feedbackType,
-            feedbackData: feedbackData,
-        };
-        // Assuming interaction feedback might also get an acknowledgement
-        return this.sendSignal('interaction_feedback', payload);
-    }
+    // Deprecated specific send methods, replaced by sendRequest
+    /*
+    sendInput(kifStrings, sourceId = null, noteId = null) { ... }
+    sendInitialStateRequest() { ... }
+    sendDialogueResponse(dialogueId, responseData) { ... }
+    sendCommand(commandName, parameters = {}) { ... }
+    sendUiAction(actionType, actionData = {}) { ... }
+    sendInteractionFeedback(feedbackType, feedbackData = {}) { ... }
+    */
 
     close() {
         if (this.ws) {

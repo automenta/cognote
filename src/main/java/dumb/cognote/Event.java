@@ -28,7 +28,7 @@ import java.util.Map;
         @Type(value = Event.TaskUpdateEvent.class, name = "TaskUpdateEvent"),
         @Type(value = Event.SystemStatusEvent.class, name = "SystemStatusEvent"),
         @Type(value = Event.AddedEvent.class, name = "AddedEvent"),
-        @Type(value = Event.RemovedEvent.class, name = "RemovedEvent"),
+        @Type(value = Event.RemovedEvent.class, name = "RemovedEvent"), // Deprecated, use NoteDeletedEvent
         @Type(value = Event.ExternalInputEvent.class, name = "ExternalInputEvent"),
         @Type(value = Event.RetractionRequestEvent.class, name = "RetractionRequestEvent"),
         @Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"),
@@ -36,7 +36,9 @@ import java.util.Map;
         @Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"),
         @Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"),
         @Type(value = Query.QueryEvent.class, name = "QueryEvent"),
-        @Type(value = Cog.NoteStatusEvent.class, name = "NoteStatusEvent")
+        @Type(value = Cog.NoteStatusEvent.class, name = "NoteStatusEvent"),
+        @Type(value = Cog.NoteUpdatedEvent.class, name = "NoteUpdatedEvent"), // Added
+        @Type(value = Cog.NoteDeletedEvent.class, name = "NoteDeletedEvent") // Added
 })
 public interface Event {
 
@@ -199,6 +201,7 @@ public interface Event {
         }
     }
 
+    // Deprecated: Use NoteDeletedEvent instead
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record RemovedEvent(Note note) implements NoteEvent {
 

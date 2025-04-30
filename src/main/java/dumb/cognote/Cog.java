@@ -9,7 +9,7 @@ import dumb.cognote.tool.*;
 import dumb.cognote.util.Events;
 import dumb.cognote.util.Json;
 import dumb.cognote.util.KifParser;
-import dumb.cognote.util.Log;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -175,7 +175,7 @@ public class Cog {
         plugins.add(new RetractionPlugin());
         plugins.add(new TmsPlugin());
         plugins.add(new UserFeedbackPlugin());
-        plugins.add(new RequestProcessorPlugin());
+        plugins.add(new RequestProcessorPlugin()); // Keep for now, but its role in client requests is removed
 
         plugins.add(new TaskDecomposePlugin());
 
@@ -216,7 +216,7 @@ public class Cog {
         if (notes.putIfAbsent(note.id(), note) == null) {
             events.emit(new Event.AddedEvent(note));
             message("Added note: " + note.title() + " [" + note.id() + "]");
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+            // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
         } else {
             message("Note with ID " + note.id() + " already exists.");
         }
@@ -230,11 +230,12 @@ public class Cog {
 
         ofNullable(notes.remove(noteId)).ifPresent(note -> {
             events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
-            events.emit(new Event.RemovedEvent(note));
+            events.emit(new Event.RemovedEvent(note)); // Deprecated, will be replaced by NoteDeletedEvent
+            events.emit(new Event.NoteDeletedEvent(noteId)); // New event for deletion
             context.removeNoteKb(noteId, "CogNote-Remove");
             context.removeActiveNote(noteId);
             message("Removed note: " + note.title() + " [" + note.id() + "]");
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+            // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
         });
     }
 
@@ -243,6 +244,7 @@ public class Cog {
             if (note.status() != newStatus) {
                 var oldStatus = note.status();
                 note.status = newStatus;
+                note.updated = System.currentTimeMillis(); // Update timestamp on status change
 
                 switch (newStatus) {
                     case ACTIVE -> context.addActiveNote(noteId);
@@ -302,6 +304,8 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.text.equals(newText)) {
                 note.text = newText;
+                note.updated = System.currentTimeMillis(); // Update timestamp on text change
+                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
                 message("Updated text for note [" + note.id() + "]");
             }
         });
@@ -311,10 +315,87 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.title.equals(newTitle)) {
                 note.title = newTitle;
+                note.updated = System.currentTimeMillis(); // Update timestamp on title change
+                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
                 message("Updated title for note [" + note.id() + "]");
             }
         });
     }
+
+    public void updateNotePriority(String noteId, int newPriority) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.priority != newPriority) {
+                note.priority = newPriority;
+                note.updated = System.currentTimeMillis(); // Update timestamp on priority change
+                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                message("Updated priority for note [" + note.id() + "] to " + newPriority);
+            }
+        });
+    }
+
+    public void updateNoteColor(String noteId, String newColor) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (!Objects.equals(note.color, newColor)) {
+                note.color = newColor;
+                note.updated = System.currentTimeMillis(); // Update timestamp on color change
+                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                message("Updated color for note [" + note.id() + "] to " + newColor);
+            }
+        });
+    }
+
+    public void updateNote(String noteId, @Nullable String title, @Nullable String content, @Nullable Note.Status state, @Nullable Integer priority, @Nullable String color) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            boolean changed = false;
+            if (title != null && !note.title.equals(title)) {
+                note.title = title;
+                changed = true;
+            }
+            if (content != null && !note.text.equals(content)) {
+                note.text = content;
+                changed = true;
+            }
+            if (state != null && note.status() != state) {
+                updateNoteStatus(noteId, state); // Use existing status update logic
+                // updateNoteStatus emits its own event, no need to set changed = true here for NoteUpdatedEvent
+            }
+            if (priority != null && note.priority != priority) {
+                note.priority = priority;
+                changed = true;
+            }
+            if (color != null && !Objects.equals(note.color, color)) {
+                note.color = color;
+                changed = true;
+            }
+
+            // Only emit NoteUpdatedEvent if fields other than status changed,
+            // as updateNoteStatus already emits NoteStatusEvent.
+            // Or, emit NoteUpdatedEvent always with the latest state if any field changed.
+            // Let's emit NoteUpdatedEvent if title, content, priority, or color changed.
+            if (changed) {
+                note.updated = System.currentTimeMillis(); // Update timestamp if any field changed
+                events.emit(new Event.NoteUpdatedEvent(note));
+                message("Updated note [" + note.id() + "]");
+            }
+        });
+    }
+
+
+    public void cloneNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresentOrElse(originalNote -> {
+            var clonedNote = new Note(
+                    Cog.id(Cog.ID_PREFIX_NOTE),
+                    "Clone of " + originalNote.title(),
+                    originalNote.text(),
+                    Note.Status.IDLE, // Cloned notes start as IDLE
+                    originalNote.priority(),
+                    originalNote.color() // Keep original color
+            );
+            addNote(clonedNote); // addNote emits AddedEvent
+            message("Cloned note [" + noteId + "] to [" + clonedNote.id() + "]");
+        }, () -> error("Attempted to clone unknown note ID: " + noteId));
+    }
+
 
     public synchronized void clear() {
         message("Clearing all knowledge...");
@@ -346,7 +427,7 @@ public class Cog {
         setPaused(false);
         message("Knowledge cleared.");
         events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
-        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+        // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
     }
 
     public boolean updateConfig(String newConfigJsonText) {
@@ -355,6 +436,8 @@ public class Cog {
             applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = Json.str(newConfig);
+                note.updated = System.currentTimeMillis(); // Update timestamp on config change
+                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event for config note
                 message("Configuration updated.");
             });
             lm.reconfigure();
@@ -380,11 +463,14 @@ public class Cog {
                 globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
     }
 
+    // assertUiAction is likely deprecated with the new protocol,
+    // as UI updates should come from events wrapped in 'update' signals.
+    // Keeping it for now but marking for review.
     public void assertUiAction(String actionType, JsonNode actionData) {
         var uiActionTerm = new Term.Lst(
                 Term.Atom.of(Protocol.PRED_UI_ACTION),
                 Term.Atom.of(actionType),
-                Term.Atom.of(Json.str(actionData))
+                Term.Atom.of(Json.str(actionData)) // Storing JSON as a string atom
         );
 
         context.tryCommit(new Assertion.PotentialAssertion(
@@ -599,6 +685,38 @@ public class Cog {
             return "NoteStatusEvent";
         }
     }
+
+    // Added NoteUpdatedEvent
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record NoteUpdatedEvent(Note updatedNote) implements Event.NoteEvent {
+        public NoteUpdatedEvent {
+            requireNonNull(updatedNote);
+        }
+
+        @Override
+        public Note note() {
+            return updatedNote;
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteUpdatedEvent";
+        }
+    }
+
+    // Added NoteDeletedEvent
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record NoteDeletedEvent(String noteId) implements Event.NoteIDEvent {
+        public NoteDeletedEvent {
+            requireNonNull(noteId);
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteDeletedEvent";
+        }
+    }
+
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Configuration(
