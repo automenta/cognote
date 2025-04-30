@@ -344,7 +344,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var typeTerm = kif.get(1);
         var dataTerm = kif.get(2);
 
-        if (!(typeTerm instanceof Term.Atom(String value)) || !(dataTerm instanceof Term.Atom(String value1))) {
+        // Corrected: Renamed the second 'value' variable
+        if (!(typeTerm instanceof Term.Atom(String typeValueString)) || !(dataTerm instanceof Term.Atom(String dataValueString))) {
             logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
             return;
         }
@@ -352,19 +353,19 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         JsonNode uiActionDataNode;
         try {
             // Attempt to parse the data atom's value as JSON
-            uiActionDataNode = JsonUtil.fromJsonString(value1, JsonNode.class);
+            uiActionDataNode = JsonUtil.fromJsonString(dataValueString, JsonNode.class);
             if (uiActionDataNode == null || uiActionDataNode.isNull()) {
                  // If parsing results in null/empty, treat it as a simple string value
-                 uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", value1);
+                 uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
             }
         } catch (JsonProcessingException e) {
-            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + value1 + ". Treating as simple string value. Error: " + e.getMessage());
+            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataValueString + ". Treating as simple string value. Error: " + e.getMessage());
             // If data is not valid JSON, send it as a string instead
-            uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", value1);
+            uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
         }
 
         ObjectNode payload = JsonUtil.getMapper().createObjectNode()
-                .put("uiActionType", value)
+                .put("uiActionType", typeValueString) // Use the corrected variable name
                 .set("uiActionData", uiActionDataNode); // Use set for JsonNode
 
         ObjectNode signal = JsonUtil.getMapper().createObjectNode()
