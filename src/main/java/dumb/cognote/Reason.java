@@ -274,10 +274,10 @@ public class Reason {
                     }));
         }
 
-        private Stream<MatchResult> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Var, Term> bindings, Set<String> support, String currentKbId) {
+        private Stream<Map<Var, Term>> findMatchesRecursive(Rule rule, List<Term> remaining, Map<Var, Term> bindings, Set<String> support, String currentKbId) {
             if (getCogNoteContext().calculateDerivedDepth(support) + 1 > getDerivationDepthMax())
                 return Stream.empty();
-            if (remaining.isEmpty()) return Stream.of(new MatchResult(rule.id(), bindings, support));
+            if (remaining.isEmpty()) return Stream.of(bindings);
 
             var clause = Logic.Unifier.substFully(remaining.getFirst(), bindings);
             var nextRemaining = remaining.subList(1, remaining.size());

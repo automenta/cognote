@@ -345,7 +345,7 @@ public class Cog {
         status("Cleared");
         setPaused(false);
         message("Knowledge cleared.");
-        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
+        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
         assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
     }
 

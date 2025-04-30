@@ -29,7 +29,7 @@ public class Operators {
                     var value2 = ((Term.Atom) args.get(2)).value();
                     return Optional.of(Term.Atom.of(String.valueOf(op.applyAsDouble(Double.parseDouble(value1), Double.parseDouble(value2)))));
                 } catch (NumberFormatException e) {
-                    // Ignore if parsing fails
+                    return Optional.empty();
                 }
             }
             return Optional.empty();
@@ -41,7 +41,7 @@ public class Operators {
                     var value2 = ((Term.Atom) args.get(2)).value();
                     return Optional.of(Term.Atom.of(op.test(Double.parseDouble(value1), Double.parseDouble(value2)) ? "true" : "false"));
                 } catch (NumberFormatException e) {
-                    // Ignore if parsing fails
+                    return Optional.empty();
                 }
             }
             return Optional.empty();
