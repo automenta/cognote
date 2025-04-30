@@ -56,7 +56,7 @@ public class Cog {
     public final Events events;
     public final Tools tools;
     public final ScheduledExecutorService mainExecutor =
-            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
+            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessators(), Thread.ofVirtual().factory());
     protected final Reason.ReasonerManager reasoner;
     final Plugins plugins;
     final AtomicBoolean running = new AtomicBoolean(true);
@@ -535,7 +535,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<Event> listener = e -> {
-            if (e instanceof Answer.AnswerEvent(Answer result)) {
+            if (e instanceof Answer.AnswerEvent) {
+                var result = ((Answer.AnswerEvent) e).result();
                 if (result.queryId().equals(queryID)) {
                     answerFuture.complete(result);
                 }
