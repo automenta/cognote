@@ -1,7 +1,9 @@
 package dumb.cognote.tool;
 
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import dumb.cognote.CogNote;
+import dumb.cognote.JsonUtil;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
@@ -38,11 +40,14 @@ public class FindAssertionsTool implements Tool {
                     throw new ToolExecutionException("Pattern must be a single KIF list.");
                 }
 
-                var matchingAssertions = cog.context.kb(targetKbId).findInstancesOf(pattern)
+                var matchingAssertionIds = cog.context.kb(targetKbId).findInstancesOf(pattern)
                         .map(dumb.cognote.Assertion::id)
                         .collect(Collectors.toList());
 
-                return new JSONArray(matchingAssertions).toString();
+                ArrayNode jsonArray = JsonUtil.getMapper().createArrayNode();
+                matchingAssertionIds.forEach(jsonArray::add);
+
+                return JsonUtil.toJsonString(jsonArray);
 
             } catch (KifParser.ParseException e) {
                 error("FindAssertionsTool parse error: " + e.getMessage());

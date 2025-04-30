@@ -2,7 +2,7 @@ package dumb.cognote.tool;
 
 
 import dumb.cognote.*;
-import org.json.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.List;
 import java.util.Map;
@@ -35,11 +35,14 @@ public class LogMessageTool implements Tool {
         // Also assert a UI action to display the message in the UI
         // The message content needs to be JSON-escaped if it contains quotes or other special characters
         // For simplicity, we'll just put it directly into a JSON object and convert that to a string atom.
-        var uiActionData = new JSONObject().put("message", message).toString();
+        ObjectNode uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("message", message);
+        String uiActionDataString = JsonUtil.toJsonString(uiActionDataNode);
+
+
         var uiActionTerm = new Term.Lst(
                 Term.Atom.of(Protocol.PRED_UI_ACTION),
                 Term.Atom.of(Protocol.UI_ACTION_DISPLAY_MESSAGE),
-                Term.Atom.of(uiActionData) // Store JSON string in an atom
+                Term.Atom.of(uiActionDataString) // Store JSON string in an atom
         );
 
         // Assert the UI action into the dedicated KB

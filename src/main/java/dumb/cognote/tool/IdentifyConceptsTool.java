@@ -1,18 +1,23 @@
 package dumb.cognote.tool;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.CogNote;
+import dumb.cognote.JsonUtil;
 import dumb.cognote.Tool;
-import org.json.JSONArray;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
@@ -62,22 +67,30 @@ public class IdentifyConceptsTool implements Tool {
                 .thenApply(AiMessage::text)
                 .thenApply(jsonString -> {
                     try {
-                        var jsonArray = new JSONArray(jsonString);
-                        for (var i = 0; i < jsonArray.length(); i++) {
-                            if (!(jsonArray.get(i) instanceof String)) {
+                        JsonNode jsonNode = JsonUtil.fromJsonString(jsonString, JsonNode.class);
+
+                        if (jsonNode == null || !jsonNode.isArray()) {
+                             throw new ToolExecutionException("LLM returned invalid JSON format (not an array): " + jsonString);
+                        }
+
+                        ArrayNode jsonArray = (ArrayNode) jsonNode;
+                        List<String> concepts = new ArrayList<>();
+
+                        for (JsonNode element : jsonArray) {
+                            if (!element.isTextual()) {
                                 throw new ToolExecutionException("LLM returned JSON array containing non-string elements.");
                             }
+                            concepts.add(element.asText());
                         }
+
                         message("Concept identification result for note '" + noteId + "': " + jsonString);
 
-                        jsonArray.toList().stream()
-                                .filter(String.class::isInstance)
-                                .map(String.class::cast)
+                        concepts.stream()
                                 .map(c -> new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_CONCEPT), dumb.cognote.Term.Atom.of(c)))
                                 .forEach(kif -> cog.events.emit(new Cog.ExternalInputEvent(kif, "tool:identify_concepts", noteId)));
 
-                        return jsonString;
-                    } catch (org.json.JSONException e) {
+                        return jsonString; // Return the original JSON string from LLM
+                    } catch (JsonProcessingException e) {
                         error("LLM returned invalid JSON for concept identification: " + jsonString + " Error: " + e.getMessage());
                         throw new ToolExecutionException("LLM failed to return valid JSON array: " + e.getMessage());
                     }
