@@ -98,7 +98,7 @@ public class Cog {
 
     public static void main(String[] args) {
         String rulesFile = null;
-        var port = 8081;
+        var port = 8082;
         String staticDir = "ui"; // Directory containing static files
 
         for (var i = 0; i < args.length; i++) {
@@ -120,6 +120,7 @@ public class Cog {
             // WARNING: This will likely cause a BindException when the WebSocketPlugin tries to bind to the same port.
             // A proper solution requires a server framework that supports both HTTP and WS on the same port.
             HttpServer httpServer = HttpServer.create(new InetSocketAddress(port), 0);
+            String STATIC = staticDir;
             httpServer.createContext("/", new HttpHandler() {
                 @Override
                 public void handle(HttpExchange exchange) throws IOException {
@@ -128,10 +129,10 @@ public class Cog {
                         requestPath = "/index.html"; // Serve index.html for root
                     }
 
-                    java.nio.file.Path filePath = Paths.get(staticDir, requestPath).normalize();
+                    java.nio.file.Path filePath = Paths.get(STATIC, requestPath).normalize();
 
                     // Basic security check: prevent directory traversal
-                    if (!filePath.startsWith(Paths.get(staticDir).normalize())) {
+                    if (!filePath.startsWith(Paths.get(STATIC).normalize())) {
                         exchange.sendResponseHeaders(403, -1); // Forbidden
                         return;
                     }
@@ -547,7 +548,24 @@ public class Cog {
         status("Stopped");
         message("System stopped.");
     }
+    public void save() {
+        persistenceManager.save(STATE_FILE);
+    }
 
+    public boolean isPaused() {
+        return paused.get();
+    }
+
+    public void setPaused(boolean pause) {
+        if (paused.get() == pause || !running.get()) return;
+        paused.set(pause);
+        status(pause ? "Paused" : "Running");
+        if (!pause) {
+            synchronized (pauseLock) {
+                pauseLock.notifyAll();
+            }
+        }
+    }
     public void loadRules(String filename) throws IOException {
         message("Loading expressions from: " + filename);
         var path = Paths.get(filename);
@@ -559,7 +577,7 @@ public class Cog {
         try (var reader = Files.newBufferedReader(path)) {
             String line;
             var parenDepth = 0;
-            while ((line = reader.readLine() != null)) {
+            while ((line = reader.readLine()) != null) {
                 counts[0]++;
                 var commentStart = line.indexOf(';');
                 if (commentStart != -1) line = line.substring(0, commentStart);
