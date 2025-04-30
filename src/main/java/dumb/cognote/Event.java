@@ -16,19 +16,19 @@ import java.util.Map;
         property = "eventType",
         visible = true)
 @JsonSubTypes({
-        @Type(value = CogEvent.AssertedEvent.class, name = "AssertedEvent"),
-        @Type(value = CogEvent.RetractedEvent.class, name = "RetractedEvent"),
-        @Type(value = CogEvent.AssertionEvictedEvent.class, name = "AssertionEvictedEvent"),
-        @Type(value = CogEvent.AssertionStateEvent.class, name = "AssertionStateEvent"),
-        @Type(value = CogEvent.TemporaryAssertionEvent.class, name = "TemporaryAssertionEvent"),
-        @Type(value = CogEvent.RuleAddedEvent.class, name = "RuleAddedEvent"),
-        @Type(value = CogEvent.RuleRemovedEvent.class, name = "RuleRemovedEvent"),
-        @Type(value = CogEvent.TaskUpdateEvent.class, name = "TaskUpdateEvent"),
-        @Type(value = CogEvent.SystemStatusEvent.class, name = "SystemStatusEvent"),
-        @Type(value = CogEvent.AddedEvent.class, name = "AddedEvent"),
-        @Type(value = CogEvent.RemovedEvent.class, name = "RemovedEvent"),
-        @Type(value = CogEvent.ExternalInputEvent.class, name = "ExternalInputEvent"),
-        @Type(value = CogEvent.RetractionRequestEvent.class, name = "RetractionRequestEvent"),
+        @Type(value = Event.AssertedEvent.class, name = "AssertedEvent"),
+        @Type(value = Event.RetractedEvent.class, name = "RetractedEvent"),
+        @Type(value = Event.AssertionEvictedEvent.class, name = "AssertionEvictedEvent"),
+        @Type(value = Event.AssertionStateEvent.class, name = "AssertionStateEvent"),
+        @Type(value = Event.TemporaryAssertionEvent.class, name = "TemporaryAssertionEvent"),
+        @Type(value = Event.RuleAddedEvent.class, name = "RuleAddedEvent"),
+        @Type(value = Event.RuleRemovedEvent.class, name = "RuleRemovedEvent"),
+        @Type(value = Event.TaskUpdateEvent.class, name = "TaskUpdateEvent"),
+        @Type(value = Event.SystemStatusEvent.class, name = "SystemStatusEvent"),
+        @Type(value = Event.AddedEvent.class, name = "AddedEvent"),
+        @Type(value = Event.RemovedEvent.class, name = "RemovedEvent"),
+        @Type(value = Event.ExternalInputEvent.class, name = "ExternalInputEvent"),
+        @Type(value = Event.RetractionRequestEvent.class, name = "RetractionRequestEvent"),
         @Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"),
         @Type(value = Events.DialogueRequestEvent.class, name = "DialogueRequestEvent"),
         @Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"),
@@ -36,7 +36,7 @@ import java.util.Map;
         @Type(value = Query.QueryEvent.class, name = "QueryEvent"),
         @Type(value = Cog.NoteStatusEvent.class, name = "NoteStatusEvent")
 })
-public interface CogEvent {
+public interface Event {
 
     default String assocNote() {
         return null;
@@ -48,7 +48,7 @@ public interface CogEvent {
 
     String getEventType();
 
-    interface NoteEvent extends CogEvent {
+    interface NoteEvent extends Event {
         Note note();
 
         @Override
@@ -57,7 +57,7 @@ public interface CogEvent {
         }
     }
 
-    interface NoteIDEvent extends CogEvent {
+    interface NoteIDEvent extends Event {
         String noteId();
 
         @Override
@@ -66,7 +66,7 @@ public interface CogEvent {
         }
     }
 
-    interface AssertionEvent extends CogEvent {
+    interface AssertionEvent extends Event {
         Assertion assertion();
 
         @Override
@@ -117,7 +117,7 @@ public interface CogEvent {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements CogEvent {
+    record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements Event {
 
         @Override
         public String getEventType() {
@@ -142,7 +142,7 @@ public interface CogEvent {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record RuleAddedEvent(Rule rule) implements CogEvent {
+    record RuleAddedEvent(Rule rule) implements Event {
 
         @Override
         public String assocNote() {
@@ -156,7 +156,7 @@ public interface CogEvent {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record RuleRemovedEvent(Rule rule) implements CogEvent {
+    record RuleRemovedEvent(Rule rule) implements Event {
 
         @Override
         public String assocNote() {
@@ -170,7 +170,7 @@ public interface CogEvent {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record TaskUpdateEvent(String taskId, Cog.TaskStatus status, String content) implements CogEvent {
+    record TaskUpdateEvent(String taskId, Cog.TaskStatus status, String content) implements Event {
 
         @Override
         public String getEventType() {
@@ -180,7 +180,7 @@ public interface CogEvent {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record SystemStatusEvent(String statusMessage, int kbCount, int kbCapacity, int taskQueueSize,
-                             int ruleCount) implements CogEvent {
+                             int ruleCount) implements Event {
 
         @Override
         public String getEventType() {

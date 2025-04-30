@@ -50,7 +50,7 @@ public class Logic {
 
     public enum RetractionType {BY_ID, BY_NOTE, BY_RULE_FORM, BY_KIF}
 
-    enum Unifier {
+    public enum Unifier {
         ;
 
         private static final int MAX_SUBST_DEPTH = 50;
@@ -61,7 +61,7 @@ public class Logic {
         }
 
         @Nullable
-        static Map<Term.Var, Term> match(Term pattern, Term term, Map<Term.Var, Term> bindings) {
+        public static Map<Term.Var, Term> match(Term pattern, Term term, Map<Term.Var, Term> bindings) {
             return matchRecursive(pattern, term, bindings, 0);
         }
 
@@ -436,13 +436,13 @@ public class Logic {
 
         public boolean addRule(Rule rule) {
             var added = rules.add(rule);
-            if (added) cog.events.emit(new CogEvent.RuleAddedEvent(rule));
+            if (added) cog.events.emit(new Event.RuleAddedEvent(rule));
             return added;
         }
 
         public boolean removeRule(Rule rule) {
             var removed = rules.remove(rule);
-            if (removed) cog.events.emit(new CogEvent.RuleRemovedEvent(rule));
+            if (removed) cog.events.emit(new Event.RuleRemovedEvent(rule));
             return removed;
         }
 

@@ -183,7 +183,7 @@ public class Reason {
             this.context = ctx;
         }
 
-        protected void publish(CogEvent event) {
+        protected void publish(Event event) {
             if (context != null && context.events() != null) context.events().emit(event);
         }
 
@@ -245,7 +245,7 @@ public class Reason {
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(Event.AssertedEvent.class, this::handleAssertionAdded);
         }
 
         @Override
@@ -253,7 +253,7 @@ public class Reason {
             return Set.of(Feature.FORWARD_CHAINING);
         }
 
-        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
+        private void handleAssertionAdded(Event.AssertedEvent event) {
             var newAssertion = event.assertion();
             var sourceKbId = event.kbId();
             if (!isActiveContext(sourceKbId) && !isActiveContext(newAssertion.sourceNoteId())) return;
@@ -407,10 +407,10 @@ public class Reason {
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(Event.AssertedEvent.class, this::handleAssertionAdded);
         }
 
-        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
+        private void handleAssertionAdded(Event.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
@@ -483,7 +483,7 @@ public class Reason {
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(Event.AssertedEvent.class, this::handleAssertionAdded);
         }
 
         @Override
@@ -491,7 +491,7 @@ public class Reason {
             return Set.of(Feature.UNIVERSAL_INSTANTIATION);
         }
 
-        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
+        private void handleAssertionAdded(Event.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;

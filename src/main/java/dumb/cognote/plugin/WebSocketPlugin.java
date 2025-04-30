@@ -27,11 +27,21 @@ import static dumb.cognote.Term.Lst;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
+    public static final String COMMAND_ADD_NOTE = "add_note";
+    public static final String COMMAND_REMOVE_NOTE = "remove_note";
+    public static final String COMMAND_START_NOTE = "start_note";
+    public static final String COMMAND_PAUSE_NOTE = "pause_note";
+    public static final String COMMAND_COMPLETE_NOTE = "complete_note";
+    public static final String COMMAND_RUN_TOOL = "run_tool";
+    public static final String COMMAND_RUN_QUERY = "run_query";
+    public static final String COMMAND_CLEAR_ALL = "clear_all";
+    public static final String COMMAND_SET_CONFIG = "set_config";
+    public static final String COMMAND_GET_INITIAL_STATE = "get_initial_state";
+    public static final String COMMAND_SAVE_NOTES = "save_notes";
     private final InetSocketAddress address;
     private final Set<WebSocket> clients = new CopyOnWriteArraySet<>();
     private final Map<String, BiConsumer<WebSocket, JsonNode>> feedbackHandlers = new ConcurrentHashMap<>();
     private WebSocketServer server;
-
     public WebSocketPlugin(InetSocketAddress address, Cog cog) {
         this.address = address;
         this.cog = cog;
@@ -81,9 +91,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         };
         server.start();
 
-        events.on(CogEvent.class, this::broadcastEvent);
+        events.on(Event.class, this::broadcastEvent);
         events.on(Answer.AnswerEvent.class, this::broadcastAnswerEvent);
-        events.on(CogEvent.TaskUpdateEvent.class, this::broadcastTaskUpdateEvent);
+        events.on(Event.TaskUpdateEvent.class, this::broadcastTaskUpdateEvent);
         events.on(Events.DialogueRequestEvent.class, this::broadcastDialogueRequestEvent);
 
         cog.events.on(new Lst(Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
@@ -162,8 +172,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var parametersNode = payload.get("parameters");
 
         if (commandTypeNode == null || !commandTypeNode.isTextual() || commandTypeNode.asText().isBlank()) {
-             sendFailureResponse(conn, commandId, "Invalid command format: missing commandType (string).");
-             return;
+            sendFailureResponse(conn, commandId, "Invalid command format: missing commandType (string).");
+            return;
         }
         var commandType = commandTypeNode.asText();
 
@@ -187,7 +197,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 0
         );
 
-        context.kb(KB_CLIENT_INPUT).tryCommit(potentialAssertion, "client:" + conn.getRemoteSocketAddress().toString());
+        context.kb(KB_CLIENT_INPUT).commit(potentialAssertion, "client:" + conn.getRemoteSocketAddress().toString());
 
         sendSuccessResponse(conn, commandId, null, "Command received and queued for processing.");
     }
@@ -202,28 +212,28 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             }
             case COMMAND_REMOVE_NOTE -> {
                 var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
-                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for remove_note.");
+                if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for remove_note.");
                 requestPayload = new Lst(Atom.of(REQUEST_REMOVE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
             }
             case COMMAND_START_NOTE -> {
                 var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
-                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for start_note.");
+                if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for start_note.");
                 requestPayload = new Lst(Atom.of(REQUEST_START_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
             }
             case COMMAND_PAUSE_NOTE -> {
                 var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
-                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for pause_note.");
+                if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for pause_note.");
                 requestPayload = new Lst(Atom.of(REQUEST_PAUSE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
             }
             case COMMAND_COMPLETE_NOTE -> {
                 var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
-                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for complete_note.");
+                if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for complete_note.");
                 requestPayload = new Lst(Atom.of(REQUEST_COMPLETE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
             }
             case COMMAND_RUN_TOOL -> {
                 var toolName = parametersNode != null && parametersNode.has("toolName") ? parametersNode.get("toolName").asText("") : "";
                 var toolParamsJson = parametersNode != null && parametersNode.has("parameters") ? parametersNode.get("parameters") : Json.node();
-                 if (toolName.isBlank()) throw new IllegalArgumentException("toolName is required for run_tool.");
+                if (toolName.isBlank()) throw new IllegalArgumentException("toolName is required for run_tool.");
                 Lst toolParamsKif = new Lst(Atom.of("params"));
                 if (toolParamsJson.isObject()) {
                     toolParamsJson.fields().forEachRemaining(entry -> {
@@ -239,23 +249,25 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 var patternString = parametersNode != null && parametersNode.has("patternString") ? parametersNode.get("patternString").asText("") : "";
                 var targetKbId = parametersNode != null && parametersNode.has("targetKbId") ? parametersNode.get("targetKbId").asText("") : "";
                 var queryParamsJson = parametersNode != null && parametersNode.has("parameters") ? parametersNode.get("parameters") : Json.node();
-                 if (queryType.isBlank() || patternString.isBlank()) throw new IllegalArgumentException("queryType and patternString are required for run_query.");
+                if (queryType.isBlank() || patternString.isBlank())
+                    throw new IllegalArgumentException("queryType and patternString are required for run_query.");
 
-                 Lst queryParamsKif = new Lst(Atom.of("params"));
-                 if (queryParamsJson.isObject()) {
-                     queryParamsJson.fields().forEachRemaining(entry -> {
-                         var key = entry.getKey();
-                         var valueNode = entry.getValue();
-                         queryParamsKif.terms.add(new Lst(Atom.of(key), Atom.of(valueNode.asText())));
-                     });
-                 }
+                Lst queryParamsKif = new Lst(Atom.of("params"));
+                if (queryParamsJson.isObject()) {
+                    queryParamsJson.fields().forEachRemaining(entry -> {
+                        var key = entry.getKey();
+                        var valueNode = entry.getValue();
+                        queryParamsKif.terms.add(new Lst(Atom.of(key), Atom.of(valueNode.asText())));
+                    });
+                }
 
                 requestPayload = new Lst(Atom.of(REQUEST_RUN_QUERY), new Lst(Atom.of("queryType"), Atom.of(queryType)), new Lst(Atom.of("patternString"), Atom.of(patternString)), new Lst(Atom.of("targetKbId"), Atom.of(targetKbId)), new Lst(Atom.of("parameters"), queryParamsKif));
             }
             case COMMAND_CLEAR_ALL -> requestPayload = new Lst(Atom.of(REQUEST_CLEAR_ALL));
             case COMMAND_SET_CONFIG -> {
                 var configJsonText = parametersNode != null && parametersNode.has("configJsonText") ? parametersNode.get("configJsonText").asText("") : "";
-                 if (configJsonText.isBlank()) throw new IllegalArgumentException("configJsonText is required for set_config.");
+                if (configJsonText.isBlank())
+                    throw new IllegalArgumentException("configJsonText is required for set_config.");
                 requestPayload = new Lst(Atom.of(REQUEST_SET_CONFIG), new Lst(Atom.of("configJsonText"), Atom.of(configJsonText)));
             }
             case COMMAND_GET_INITIAL_STATE -> requestPayload = new Lst(Atom.of(REQUEST_GET_INITIAL_STATE));
@@ -308,8 +320,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
 
-    private void broadcastEvent(CogEvent event) {
-        if (event instanceof Events.LogMessageEvent || event instanceof Answer.AnswerEvent || event instanceof CogEvent.TaskUpdateEvent || event instanceof Events.DialogueRequestEvent) {
+    private void broadcastEvent(Event event) {
+        if (event instanceof Events.LogMessageEvent || event instanceof Answer.AnswerEvent || event instanceof Event.TaskUpdateEvent || event instanceof Events.DialogueRequestEvent) {
             return;
         }
 
@@ -337,7 +349,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         broadcast(Json.str(signal));
     }
 
-    private void broadcastTaskUpdateEvent(CogEvent.TaskUpdateEvent event) {
+    private void broadcastTaskUpdateEvent(Event.TaskUpdateEvent event) {
         var taskJson = Json.node(event);
         ObjectNode signal = Json.node()
                 .put("type", SIGNAL_TYPE_EVENT)
@@ -347,12 +359,12 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void broadcastDialogueRequestEvent(Events.DialogueRequestEvent event) {
-         var dialogueJson = Json.node(event);
-         ObjectNode signal = Json.node()
-                 .put("type", SIGNAL_TYPE_DIALOGUE_REQUEST)
-                 .put("id", UUID.randomUUID().toString())
-                 .set("payload", dialogueJson);
-         broadcast(Json.str(signal));
+        var dialogueJson = Json.node(event);
+        ObjectNode signal = Json.node()
+                .put("type", SIGNAL_TYPE_DIALOGUE_REQUEST)
+                .put("id", UUID.randomUUID().toString())
+                .set("payload", dialogueJson);
+        broadcast(Json.str(signal));
     }
 
 
@@ -365,7 +377,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void sendInitialState(WebSocket conn) {
         var payload = Json.node();
 
-        payload.set("systemStatus", Json.node(new CogEvent.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
+        payload.set("systemStatus", Json.node(new Event.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
         payload.set("configuration", Json.node(new Cog.Configuration(cog)));
 
         var notesArray = Json.the.createArrayNode();
@@ -421,8 +433,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         sendResponse(conn, inReplyToId, RESPONSE_STATUS_ERROR, null, message);
     }
 
-    private void handleUiActionAssertion(CogEvent event, Map<Term.Var, Term> bindings) {
-        if (!(event instanceof CogEvent.AssertedEvent assertedEvent)) return;
+    private void handleUiActionAssertion(Event event, Map<Term.Var, Term> bindings) {
+        if (!(event instanceof Event.AssertedEvent assertedEvent)) return;
         var assertion = assertedEvent.assertion();
         if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
 
@@ -492,10 +504,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 sendFailureResponse(conn, feedbackId, "No KIF terms parsed from input.");
                 return;
             }
-            terms.forEach(term -> events.emit(new CogEvent.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
+            terms.forEach(term -> events.emit(new Event.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
 
             var feedbackTerm = new Lst(Atom.of(PRED_USER_ASSERTED_KIF), Atom.of(noteId), Atom.of(kifString));
-            context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+            context.kb(KB_USER_FEEDBACK).commit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
             sendSuccessResponse(conn, feedbackId, null, "KIF asserted.");
 
@@ -530,7 +542,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         cog.updateNoteText(noteId, text);
 
         var feedbackTerm = new Lst(Atom.of(PRED_USER_EDITED_NOTE_TEXT), Atom.of(noteId), Atom.of(text));
-        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        context.kb(KB_USER_FEEDBACK).commit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "Note text updated.");
     }
@@ -557,7 +569,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         cog.updateNoteTitle(noteId, title);
 
         var feedbackTerm = new Lst(Atom.of(PRED_USER_EDITED_NOTE_TITLE), Atom.of(noteId), Atom.of(title));
-        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        context.kb(KB_USER_FEEDBACK).commit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "Note title updated.");
     }
@@ -580,7 +592,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var elementId = elementIdNode.asText();
 
         var feedbackTerm = new Lst(Atom.of(PRED_USER_CLICKED), Atom.of(elementId));
-        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        context.kb(KB_USER_FEEDBACK).commit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "User clicked feedback processed.");
     }

@@ -36,7 +36,7 @@ public record Answer(@JsonProperty("queryId") String queryId, Cog.QueryStatus st
         return Json.node(this);
     }
 
-    public record AnswerEvent(Answer result) implements CogEvent {
+    public record AnswerEvent(Answer result) implements Event {
         public AnswerEvent {
             requireNonNull(result);
         }

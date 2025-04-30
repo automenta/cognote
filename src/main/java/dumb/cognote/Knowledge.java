@@ -38,8 +38,8 @@ public class Knowledge {
                                 comparing(id -> truth.get(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
                         .thenComparingLong(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
 
-        events.on(CogEvent.AssertionStateEvent.class, this::handleAssertionStateChange);
-        events.on(CogEvent.RetractedEvent.class, this::handleAssertionRetracted);
+        events.on(Event.AssertionStateEvent.class, this::handleAssertionStateChange);
+        events.on(Event.RetractedEvent.class, this::handleAssertionRetracted);
     }
 
     public int getAssertionCount() {
@@ -58,7 +58,8 @@ public class Knowledge {
         return truth.getAllActiveAssertions().stream().filter(a -> a.kb().equals(id)).toList();
     }
 
-    @Nullable Assertion commit(Assertion.PotentialAssertion pa, String source) {
+    @Nullable
+    public Assertion commit(Assertion.PotentialAssertion pa, String source) {
         var k = pa.kif();
         if (k instanceof Term.Lst kl && Logic.isTrivial(kl)) return null;
         lock.writeLock().lock();
@@ -86,7 +87,7 @@ public class Knowledge {
             if (addedAssertion == null || !addedAssertion.isActive()) return null;
 
             checkResourceThresholds();
-            events.emit(new CogEvent.AssertedEvent(addedAssertion, id));
+            events.emit(new Event.AssertedEvent(addedAssertion, id));
             return addedAssertion;
         } finally {
             lock.writeLock().unlock();
@@ -143,7 +144,7 @@ public class Knowledge {
                     .filter(a -> Logic.groundOrSkolemized(a) && a.kb().equals(id))
                     .ifPresent(toEvict -> {
                         truth.remove(toEvict.id(), source + "-evict");
-                        events.emit(new CogEvent.AssertionEvictedEvent(toEvict, id));
+                        events.emit(new Event.AssertionEvictedEvent(toEvict, id));
                     });
         }
     }
@@ -158,7 +159,7 @@ public class Knowledge {
             warning(String.format("KB WARNING (KB: %s): Size %d/%d (%.1f%%)", id, currentSize, capacity, 100.0 * currentSize / capacity));
     }
 
-    private void handleAssertionStateChange(CogEvent.AssertionStateEvent event) {
+    private void handleAssertionStateChange(Event.AssertionStateEvent event) {
         if (!event.kbId().equals(this.id)) return;
         lock.writeLock().lock();
         try {
@@ -172,7 +173,7 @@ public class Knowledge {
         }
     }
 
-    private void handleAssertionRetracted(CogEvent.RetractedEvent event) {
+    private void handleAssertionRetracted(Event.RetractedEvent event) {
         if (!event.kbId().equals(this.id)) return;
         lock.writeLock().lock();
         try {

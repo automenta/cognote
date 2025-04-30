@@ -16,12 +16,11 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
         ev.on(new Term.Lst(Term.Atom.of("goal"), Term.Var.of("?_")), this::handleGoalAssertion);
     }
 
-    private void handleGoalAssertion(CogEvent event, java.util.Map<Term.Var, Term> bindings) {
+    private void handleGoalAssertion(Event event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof CogEvent.ExternalInputEvent)) {
-             return; // Should not happen with correct registration, but defensive
+        if (!(event instanceof Event.ExternalInputEvent externalInputEvent)) {
+            return; // Should not happen with correct registration, but defensive
         }
-        CogEvent.ExternalInputEvent externalInputEvent = (CogEvent.ExternalInputEvent) event;
         Term term = externalInputEvent.term();
         String sourceId = externalInputEvent.sourceId();
         String noteId = externalInputEvent.noteId();

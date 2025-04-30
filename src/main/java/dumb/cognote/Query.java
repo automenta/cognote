@@ -24,7 +24,7 @@ public record Query(String id, @JsonProperty("queryType") Cog.QueryType type,
         return Json.node(this);
     }
 
-    public record QueryEvent(Query query) implements CogEvent {
+    public record QueryEvent(Query query) implements Event {
         public QueryEvent {
             requireNonNull(query);
         }

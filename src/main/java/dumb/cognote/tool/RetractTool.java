@@ -1,7 +1,7 @@
 package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
-import dumb.cognote.CogEvent;
+import dumb.cognote.Event;
 import dumb.cognote.Logic;
 import dumb.cognote.Tool;
 
@@ -34,7 +34,7 @@ public class RetractTool implements Tool {
             if (assertionId == null || assertionId.isBlank()) {
                 throw new ToolExecutionException("Assertion ID is required.");
             }
-            cog.events.emit(new CogEvent.RetractionRequestEvent(assertionId, Logic.RetractionType.BY_ID, "tool:retract_assertion", null));
+            cog.events.emit(new Event.RetractionRequestEvent(assertionId, Logic.RetractionType.BY_ID, "tool:retract_assertion", null));
             return "Retraction requested for assertion ID: " + assertionId;
         }, cog.events.exe);
     }

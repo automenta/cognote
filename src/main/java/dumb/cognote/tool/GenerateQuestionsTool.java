@@ -8,7 +8,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.CogEvent;
+import dumb.cognote.Event;
 import dumb.cognote.Json;
 import dumb.cognote.Tool;
 
@@ -41,7 +41,7 @@ public class GenerateQuestionsTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Generates a list of questions based on the content of a note. Returns a JSON array of question strings.")
     public CompletableFuture<String> generateQuestions(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
+        cog.events.emit(new Event.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Generating questions for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
                     var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
@@ -85,7 +85,7 @@ public class GenerateQuestionsTool implements Tool {
 
                         questions.stream()
                                 .map(q -> new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_QUESTION), dumb.cognote.Term.Atom.of(q)))
-                                .forEach(kif -> cog.events.emit(new CogEvent.ExternalInputEvent(kif, "tool:generate_questions", noteId)));
+                                .forEach(kif -> cog.events.emit(new Event.ExternalInputEvent(kif, "tool:generate_questions", noteId)));
 
                         return jsonString; // Return the original JSON string from LLM
                     } catch (JsonProcessingException e) {

@@ -1,13 +1,11 @@
 package dumb.cognote.plugin;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import dumb.cognote.*;
 import dumb.cognote.Term.Var;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Log.error;
@@ -36,11 +34,11 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
     @Override
     public void start(Events ev, Logic.Cognition ctx) {
         super.start(ev, ctx);
-        events.on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
+        events.on(Event.AssertedEvent.class, this::handleAssertionAdded);
         log("RequestProcessorPlugin started.");
     }
 
-    private void handleAssertionAdded(CogEvent.AssertedEvent event) {
+    private void handleAssertionAdded(Event.AssertedEvent event) {
         var assertion = event.assertion();
         if (!assertion.kb().equals(KB_CLIENT_INPUT) || !assertion.isActive()) {
             return;
@@ -159,12 +157,13 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
                 return;
             }
         } else if (parametersTerm != null) {
-             assertError("RunTool request failed: Invalid 'parameters' format. Expected (params (...)).");
-             return;
+            assertError("RunTool request failed: Invalid 'parameters' format. Expected (params (...)).");
+            return;
         }
 
+        Map<String, Object> p = paramMap;
         cog.tools.get(toolName).ifPresentOrElse(tool -> {
-            tool.execute(paramMap).whenCompleteAsync((result, ex) -> {
+            tool.execute(p).whenCompleteAsync((result, ex) -> {
                 if (ex != null) {
                     error("Error executing tool '" + toolName + "': " + ex.getMessage());
                     ex.printStackTrace();
@@ -185,7 +184,11 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
         var targetKbIdTerm = bindings.get(of("?targetKbId"));
         var parametersTerm = bindings.get(of("?parameters"));
 
-        if (!(queryTypeTerm instanceof Atom(var queryTypeStr)) || queryTypeStr.isBlank() || !(patternStringTerm instanceof Atom(var patternString)) || patternString.isBlank()) {
+        if (!(queryTypeTerm instanceof Atom(
+                var queryTypeStr
+        )) || queryTypeStr.isBlank() || !(patternStringTerm instanceof Atom(
+                var patternString
+        )) || patternString.isBlank()) {
             assertError("RunQuery request failed: Missing or invalid 'queryType' or 'patternString' parameters.");
             return;
         }
@@ -193,7 +196,7 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
         var targetKbId = targetKbIdTerm instanceof Atom(var kbId) ? kbId : null;
 
         Map<String, Object> paramMap = Map.of();
-         if (parametersTerm instanceof Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
+        if (parametersTerm instanceof Lst paramsList && paramsList.op().filter("params"::equals).isPresent()) {
             try {
                 paramMap = paramsList.terms.stream().skip(1)
                         .filter(t -> t instanceof Lst pair && pair.size() == 2 && pair.get(0) instanceof Atom)
@@ -206,8 +209,8 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
                 return;
             }
         } else if (parametersTerm != null) {
-             assertError("RunQuery request failed: Invalid 'parameters' format. Expected (params (...)).");
-             return;
+            assertError("RunQuery request failed: Invalid 'parameters' format. Expected (params (...)).");
+            return;
         }
 
 
@@ -260,7 +263,7 @@ public class RequestProcessorPlugin extends Plugin.BasePlugin {
         message("Processed SaveNotes request.");
     }
 
-     private void processGetInitialStateRequest(Map<Var, Term> bindings) {
+    private void processGetInitialStateRequest(Map<Var, Term> bindings) {
         logWarning("Received GetInitialState request via KIF assertion. This request type is usually handled directly by the WebSocket connection.");
     }
 

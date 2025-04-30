@@ -565,7 +565,7 @@ abstract class AbstractTest {
             throw new IllegalArgumentException("Unsupported retraction type: " + value);
         }
 
-        cog.events.emit(new CogEvent.RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
+        cog.events.emit(new Event.RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
         return targetStr;
     }
 

@@ -3,7 +3,6 @@ package dumb.cognote;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
@@ -43,10 +42,10 @@ public class Cog {
     public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     public static final int MAX_WS_PARSE_PREVIEW = 100;
     public static final double DEFAULT_RULE_PRIORITY = 1;
+    public static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
     static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90;
     static final int KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
-    static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
@@ -65,7 +64,7 @@ public class Cog {
     final Plugins plugins;
     final AtomicBoolean running = new AtomicBoolean(true);
     final AtomicBoolean paused = new AtomicBoolean(true);
-    private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
+    final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
     private final Object pauseLock = new Object();
     private final PersistenceManager persistenceManager;
     public volatile String status = "Initializing";
@@ -151,6 +150,10 @@ public class Cog {
         )), Note.Status.IDLE);
     }
 
+    public static String id(String prefix) {
+        return prefix + id.incrementAndGet();
+    }
+
     private static void shutdownExecutor(ExecutorService executor, String name) {
         if (executor == null || executor.isShutdown()) return;
         executor.shutdown();
@@ -199,7 +202,7 @@ public class Cog {
 
     public void status(String status) {
         this.status = status;
-        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
+        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
     public Optional<Note> note(String id) {
@@ -212,7 +215,7 @@ public class Cog {
 
     public void addNote(Note note) {
         if (notes.putIfAbsent(note.id(), note) == null) {
-            events.emit(new CogEvent.AddedEvent(note));
+            events.emit(new Event.AddedEvent(note));
             message("Added note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         } else {
@@ -227,8 +230,8 @@ public class Cog {
         }
 
         ofNullable(notes.remove(noteId)).ifPresent(note -> {
-            events.emit(new CogEvent.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
-            events.emit(new CogEvent.RemovedEvent(note));
+            events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
+            events.emit(new Event.RemovedEvent(note));
             context.removeActiveNote(noteId);
             message("Removed note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
@@ -251,12 +254,12 @@ public class Cog {
 
                 if (newStatus == Note.Status.ACTIVE) {
                     context.kb(noteId).getAllAssertions().forEach(assertion ->
-                            events.emit(new CogEvent.ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
+                            events.emit(new Event.ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
                     );
                     context.rules().stream()
                             .filter(rule -> noteId.equals(rule.sourceNoteId()))
                             .toList()
-                            .forEach(rule -> events.emit(new CogEvent.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
+                            .forEach(rule -> events.emit(new Event.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
                 }
             }
         });
@@ -318,7 +321,7 @@ public class Cog {
         setPaused(true);
         context.getAllNoteIds().stream()
                 .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
-                .forEach(noteId -> events.emit(new CogEvent.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
+                .forEach(noteId -> events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
         new HashSet<>(context.rules()).forEach(context::removeRule);
 
@@ -336,13 +339,13 @@ public class Cog {
 
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
 
-        events.emit(new CogEvent.AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
-        events.emit(new CogEvent.AddedEvent(notes.get(CONFIG_NOTE_ID)));
+        events.emit(new Event.AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
+        events.emit(new Event.AddedEvent(notes.get(CONFIG_NOTE_ID)));
 
         status("Cleared");
         setPaused(false);
         message("Knowledge cleared.");
-        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
+        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
         assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
     }
 
@@ -367,7 +370,7 @@ public class Cog {
         persistenceManager.load(STATE_FILE);
     }
 
-    private void applyConfig(Configuration config) {
+    void applyConfig(Configuration config) {
         this.lm.llmApiUrl = config.llmApiUrl();
         this.lm.llmModel = config.llmModel();
         this.globalKbCapacity = config.globalKbCapacity();
@@ -423,7 +426,7 @@ public class Cog {
         setPaused(false);
         status("Running");
         message("System started.");
-        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
+        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
     public void stop() {
@@ -499,7 +502,7 @@ public class Cog {
                     if (!kifText.isEmpty()) {
                         counts[1]++;
                         try {
-                            KifParser.parseKif(kifText).forEach(term -> events.emit(new CogEvent.ExternalInputEvent(term, "file:" + filename, null)));
+                            KifParser.parseKif(kifText).forEach(term -> events.emit(new Event.ExternalInputEvent(term, "file:" + filename, null)));
                             counts[2]++;
                         } catch (Exception e) {
                             error(String.format("File Processing Error (line ~%d): %s for '%s...'", counts[0], e.getMessage(), kifText.substring(0, Math.min(kifText.length(), MAX_KIF_PARSE_PREVIEW))));
@@ -534,9 +537,8 @@ public class Cog {
     public Answer querySync(Query query) {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
-        Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent) {
-                Answer.AnswerEvent answerEvent = (Answer.AnswerEvent) e;
+        Consumer<Event> listener = e -> {
+            if (e instanceof Answer.AnswerEvent answerEvent) {
                 Answer result = answerEvent.result();
                 if (result.queryId().equals(queryID)) {
                     answerFuture.complete(result);
@@ -576,7 +578,7 @@ public class Cog {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record NoteStatusEvent(Note note, Note.Status oldStatus,
-                                  Note.Status newStatus) implements CogEvent.NoteEvent {
+                                  Note.Status newStatus) implements Event.NoteEvent {
         public NoteStatusEvent {
             requireNonNull(note);
             requireNonNull(oldStatus);

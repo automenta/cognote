@@ -49,7 +49,7 @@ public interface Plugin {
             this.cog = ctx.cog;
         }
 
-        protected void emit(CogEvent event) {
+        protected void emit(Event event) {
             if (events != null) events.emit(event);
         }
 

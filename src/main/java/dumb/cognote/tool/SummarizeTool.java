@@ -5,7 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.CogEvent;
+import dumb.cognote.Event;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
@@ -37,7 +37,7 @@ public class SummarizeTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Summarizes the content of a specific note.")
     public CompletableFuture<String> summarize(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Summarizing note: " + noteId));
+        cog.events.emit(new Event.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Summarizing note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
                     var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
@@ -62,7 +62,7 @@ public class SummarizeTool implements Tool {
                     message("Summarization result for note '" + noteId + "': " + summaryText);
 
                     var summaryKif = new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_SUMMARY), dumb.cognote.Term.Atom.of(summaryText));
-                    cog.events.emit(new CogEvent.ExternalInputEvent(summaryKif, "tool:summarize", noteId));
+                    cog.events.emit(new Event.ExternalInputEvent(summaryKif, "tool:summarize", noteId));
 
                     return summaryText;
                 })
