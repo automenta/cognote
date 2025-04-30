@@ -1,4 +1,4 @@
-import { websocketClient } from '../client.js'; // Import the websocketClient
+import { websocketClient, Protocol } from '../client.js'; // Import the websocketClient and Protocol constants
 
 // Utility functions (assuming these are defined elsewhere or inline)
 const Utils = {
@@ -654,7 +654,7 @@ class DialogueManager extends Component {
 
         const response = this.inputEl.value.trim();
         if (response) {
-            websocketClient.sendRequest('dialogueResponse', {
+            websocketClient.sendRequest(Protocol.COMMAND_DIALOGUE_RESPONSE, {
                 dialogueId: this.currentDialogueId,
                 responseData: { text: response } // Wrap response in an object
             })
@@ -676,7 +676,7 @@ class DialogueManager extends Component {
     cancelDialogue() {
         if (!this.currentDialogueId) return;
 
-        websocketClient.sendRequest('cancelDialogue', { dialogueId: this.currentDialogueId })
+        websocketClient.sendRequest(Protocol.COMMAND_CANCEL_DIALOGUE, { dialogueId: this.currentDialogueId })
             .catch(err => (console.error('Failed to send cancelDialogue command:', err), Notifier.error('Failed to cancel dialogue.')));
 
         this.hide();
@@ -771,7 +771,7 @@ class App {
             Notifier.error('WebSocket error.');
         });
 
-        websocketClient.on('initialState', (payload) => {
+        websocketClient.on(Protocol.UPDATE_TYPE_INITIAL_STATE, (payload) => {
             console.log('Received initial state:', payload);
             this.notes = payload.notes || [];
             this.systemConfig = payload.configuration || {};
@@ -782,37 +782,40 @@ class App {
             // Note: Assertions and Rules from initial state are not currently used in the UI
         });
 
-        websocketClient.on('event', (payload) => {
+        websocketClient.on(Protocol.UPDATE_TYPE_EVENT, (payload) => { // Listen for generic 'event' update type
             // console.log('Received event:', payload);
-            switch (payload.eventType) {
-                case 'NoteAddedEvent':
+            switch (payload.eventType) { // Switch on the specific eventType within the payload
+                case Protocol.EVENT_TYPE_NOTE_ADDED:
                     this.handleNoteAdded(payload.note);
                     break;
-                case 'NoteUpdatedEvent':
+                case Protocol.EVENT_TYPE_NOTE_UPDATED:
                     this.handleNoteUpdated(payload.note);
                     break;
-                case 'NoteDeletedEvent':
+                case Protocol.EVENT_TYPE_NOTE_DELETED:
                     this.handleNoteDeleted(payload.noteId);
                     break;
-                case 'SystemStatusEvent':
+                case Protocol.EVENT_TYPE_SYSTEM_STATUS:
                     this.menuBar.updateStatus(payload);
                     break;
-                case 'LogMessageEvent':
+                case Protocol.EVENT_TYPE_LOG_MESSAGE:
                     // Handle log messages if needed, e.g., show in a console/log area
                     console.log(`[BACKEND] [${payload.level.toUpperCase()}] ${payload.message}`);
                     break;
                 // Add handlers for other event types (AssertionAddedEvent, RuleAddedEvent, etc.)
+                default:
+                    // console.log(`Received unhandled event type: ${payload.eventType}`, payload);
+                    break;
             }
         });
 
-        websocketClient.on('dialogueRequest', (payload) => {
+        websocketClient.on(Protocol.UPDATE_TYPE_DIALOGUE_REQUEST, (payload) => {
              console.log('Received dialogue request:', payload);
              this.dialogueManager.showDialogue(payload.dialogueId, payload.prompt, payload.title);
         });
     }
 
     requestInitialState() {
-        return websocketClient.sendRequest('getInitialState');
+        return websocketClient.sendRequest(Protocol.COMMAND_GET_INITIAL_STATE);
     }
 
     handleNoteAdded(note) {
@@ -879,7 +882,7 @@ class App {
         this.selectNote(newNote.id);
 
         // Send request to backend to create the note
-        websocketClient.sendRequest('addNote', {
+        websocketClient.sendRequest(Protocol.COMMAND_ADD_NOTE, {
             title: newNote.title,
             content: newNote.text,
             state: newNote.state.status,
@@ -944,7 +947,7 @@ class App {
                 this.sidebar.updateNote(note); // Update sidebar item
 
                 // Send update to backend
-                websocketClient.sendRequest('updateNote', {
+                websocketClient.sendRequest(Protocol.COMMAND_UPDATE_NOTE, {
                     noteId: note.id,
                     title: note.title,
                     content: note.text
@@ -978,7 +981,7 @@ class App {
             this.handleNoteDeleted(noteId); // This also updates the sidebar
 
             // Send delete request to backend
-            websocketClient.sendRequest('deleteNote', { noteId: noteId })
+            websocketClient.sendRequest(Protocol.COMMAND_DELETE_NOTE, { noteId: noteId })
                 .then(() => {
                     // Backend will send a NoteDeletedEvent which confirms the deletion
                     console.log(`Backend deleteNote response for ${noteId}: success`);
@@ -994,7 +997,7 @@ class App {
     cloneNote(noteId) {
          if (!noteId) return;
 
-         websocketClient.sendRequest('cloneNote', { noteId: noteId })
+         websocketClient.sendRequest(Protocol.COMMAND_CLONE_NOTE, { noteId: noteId })
             .then(response => {
                 // Backend will send a NoteAddedEvent for the new cloned note
                 console.log(`Backend cloneNote response for ${noteId}:`, response);
@@ -1017,7 +1020,7 @@ class App {
             this.sortAndFilter(); // Re-sort the list
 
             // Send update to backend
-            websocketClient.sendRequest('updateNote', {
+            websocketClient.sendRequest(Protocol.COMMAND_UPDATE_NOTE, { // Re-using updateNote command for priority
                 noteId: note.id,
                 priority: newPriority
             })
@@ -1116,7 +1119,7 @@ class App {
         Notifier.info('Client settings saved.');
 
         // Send backend config to backend
-        websocketClient.sendRequest('updateSettings', { settings: backendConfig })
+        websocketClient.sendRequest(Protocol.COMMAND_UPDATE_SETTINGS, { settings: backendConfig })
             .then(() => {
                 Notifier.info('Backend settings updated.');
                 // Backend will send SystemStatusEvent with updated config
@@ -1146,7 +1149,7 @@ class App {
 
     clearAll() {
         if (confirm("Are you sure you want to clear ALL notes and knowledge? This cannot be undone.")) {
-            websocketClient.sendRequest('clearAll')
+            websocketClient.sendRequest(Protocol.COMMAND_CLEAR_ALL)
                 .then(() => {
                     Notifier.info('System clear initiated.');
                     // Backend will send events for deleted notes and updated status
@@ -1159,7 +1162,7 @@ class App {
     }
 
     saveState() {
-         websocketClient.sendRequest('saveState') // Assuming a backend command for this
+         websocketClient.sendRequest(Protocol.COMMAND_SAVE_STATE) // Using constant
             .then(() => {
                 Notifier.info('System state save requested.');
             })
@@ -1171,7 +1174,7 @@ class App {
 
     loadState() {
          if (confirm("Are you sure you want to load the last saved state? This will overwrite the current state.")) {
-             websocketClient.sendRequest('loadState') // Assuming a backend command for this
+             websocketClient.sendRequest(Protocol.COMMAND_LOAD_STATE) // Using constant
                 .then(() => {
                     Notifier.info('System state load requested.');
                     // Backend should send initialState event after loading
@@ -1187,7 +1190,7 @@ class App {
     // These are now handled directly by DialogueManager using websocketClient
     // but kept here for clarity if App needed to orchestrate them.
     // cancelDialogue(dialogueId) {
-    //     websocketClient.sendRequest('cancelDialogue', {dialogueId: dialogueId})
+    //     websocketClient.sendRequest(Protocol.COMMAND_CANCEL_DIALOGUE, {dialogueId: dialogueId})
     //         .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));
     // }
 }

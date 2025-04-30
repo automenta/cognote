@@ -39,7 +39,7 @@ class WebSocketClient {
         try {
             const signal = JSON.parse(event.data);
 
-            if (!signal || typeof signal !== 'object' || signal.type !== 'update') {
+            if (!signal || typeof signal !== 'object' || signal.type !== Protocol.SIGNAL_TYPE_UPDATE) {
                 console.warn("Received invalid or non-update signal format:", signal);
                 return;
             }
@@ -125,7 +125,7 @@ class WebSocketClient {
         const signalId = this._generateSignalId();
         const signal = {
             id: signalId,
-            type: 'request', // This type seems consistent with backend
+            type: Protocol.SIGNAL_TYPE_REQUEST,
             payload: { command, parameters },
         };
 
@@ -185,14 +185,24 @@ const WS_URL = `ws://localhost:${WS_PORT}`;
 
 // Define Protocol constants mirroring the backend Protocol.java
 export const Protocol = {
-    // Command Names (client sends these)
+    // Signal Types (client sends/receives these)
+    SIGNAL_TYPE_REQUEST: 'request',
+    SIGNAL_TYPE_UPDATE: 'update',
+
+    // Update Types (client receives these within SIGNAL_TYPE_UPDATE)
+    UPDATE_TYPE_RESPONSE: 'response',
+    UPDATE_TYPE_EVENT: 'event',
+    UPDATE_TYPE_INITIAL_STATE: 'initialState',
+    UPDATE_TYPE_DIALOGUE_REQUEST: 'dialogueRequest',
+
+    // Command Names (client sends these within SIGNAL_TYPE_REQUEST payload)
     COMMAND_ASSERT_KIF: 'assertKif',
     COMMAND_RUN_TOOL: 'runTool',
-    COMMAND_RUN_QUERY: 'query', // Note: Backend Protocol.java has 'query'
+    COMMAND_RUN_QUERY: 'query',
     COMMAND_WAIT: 'wait',
     COMMAND_RETRACT: 'retract',
     COMMAND_CANCEL_DIALOGUE: 'cancelDialogue',
-    COMMAND_GET_INITIAL_STATE: 'initialStateRequest', // Corrected based on Protocol.java
+    COMMAND_GET_INITIAL_STATE: 'initialStateRequest',
     COMMAND_ADD_NOTE: 'addNote',
     COMMAND_UPDATE_NOTE: 'updateNote',
     COMMAND_DELETE_NOTE: 'deleteNote',
@@ -200,22 +210,16 @@ export const Protocol = {
     COMMAND_CLEAR_ALL: 'clearAll',
     COMMAND_UPDATE_SETTINGS: 'updateSettings',
     COMMAND_DIALOGUE_RESPONSE: 'dialogueResponse',
-    COMMAND_SAVE_STATE: 'saveState', // Added based on ui/note/index.js usage (not in backend Protocol.java)
-    COMMAND_LOAD_STATE: 'loadState', // Added based on ui/note/index.js usage (not in backend Protocol.java)
+    COMMAND_SAVE_STATE: 'saveState', // Added based on ui/note/index.js usage
+    COMMAND_LOAD_STATE: 'loadState', // Added based on ui/note/index.js usage
 
 
-    // Update Types (client receives these)
-    UPDATE_TYPE_RESPONSE: 'response',
-    UPDATE_TYPE_EVENT: 'event',
-    UPDATE_TYPE_INITIAL_STATE: 'initialState',
-    UPDATE_TYPE_DIALOGUE_REQUEST: 'dialogueRequest',
-
-    // Response Statuses
+    // Response Statuses (client receives these within UPDATE_TYPE_RESPONSE payload)
     RESPONSE_STATUS_SUCCESS: 'success',
     RESPONSE_STATUS_FAILURE: 'failure',
     RESPONSE_STATUS_ERROR: 'error',
 
-    // Event Types (client receives these within UPDATE_TYPE_EVENT)
+    // Event Types (client receives these within UPDATE_TYPE_EVENT payload)
     // These are examples based on ui/note/index.js usage, not exhaustive, and not defined in backend Protocol.java
     EVENT_TYPE_NOTE_ADDED: 'NoteAddedEvent',
     EVENT_TYPE_NOTE_UPDATED: 'NoteUpdatedEvent',
