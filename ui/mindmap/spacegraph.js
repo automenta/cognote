@@ -1,10 +1,9 @@
 import * as THREE from 'three';
-import { CSS3DObject, CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
-// Removed CSS2DRenderer import as labels will now use CSS3DRenderer
-import { gsap } from "gsap";
+import {CSS3DObject, CSS3DRenderer} from 'three/addons/renderers/CSS3DRenderer.js';
+import {gsap} from "gsap";
 
-const $ = (selector, context) => (context||document).querySelector(selector);
-const $$ = (selector, context) => (context||document).querySelectorAll(selector);
+export const $ = (selector, context) => (context || document).querySelector(selector);
+export const $$ = (selector, context) => (context || document).querySelectorAll(selector);
 
 const Utils = {
     clamp: (v, min, max) => Math.max(min, Math.min(v, max)),
@@ -28,7 +27,7 @@ const Utils = {
     }
 };
 
-class SpaceGraph {
+export class SpaceGraph {
     nodes = new Map();
     edges = new Map();
     nodeSelected = null;
@@ -46,7 +45,7 @@ class SpaceGraph {
     css3dContainer = null;
     // Removed css2dContainer
     webglCanvas = null;
-    background = { color: 0x1a1a1d, alpha: 1.0 };
+    background = {color: 0x1a1a1d, alpha: 1.0};
 
     constructor(containerElement) {
         if (!containerElement) throw new Error("SpaceGraph requires a container element.");
@@ -72,7 +71,7 @@ class SpaceGraph {
     _setupRenderers() {
         this.webglCanvas = $('#webgl-canvas');
         if (!this.webglCanvas) throw new Error("#webgl-canvas not found.");
-        this.renderGL = new THREE.WebGLRenderer({ canvas: this.webglCanvas, antialias: true, alpha: true });
+        this.renderGL = new THREE.WebGLRenderer({canvas: this.webglCanvas, antialias: true, alpha: true});
         this.renderGL.setSize(window.innerWidth, window.innerHeight);
         this.renderGL.setPixelRatio(window.devicePixelRatio);
 
@@ -80,7 +79,14 @@ class SpaceGraph {
         this.renderCSS3D.setSize(window.innerWidth, window.innerHeight);
         this.css3dContainer = document.createElement('div');
         this.css3dContainer.id = 'css3d-container';
-        Object.assign(this.css3dContainer.style, { position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', pointerEvents: 'none' });
+        Object.assign(this.css3dContainer.style, {
+            position: 'absolute',
+            top: '0',
+            left: '0',
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none'
+        });
         this.css3dContainer.appendChild(this.renderCSS3D.domElement);
         this.container.appendChild(this.css3dContainer);
 
@@ -95,7 +101,7 @@ class SpaceGraph {
     }
 
     setBackground(color = 0x000000, alpha = 0) {
-        this.background = { color, alpha };
+        this.background = {color, alpha};
         this.renderGL.setClearColor(color, alpha);
         // Update canvas style for visual consistency if not transparent
         this.webglCanvas.style.backgroundColor = alpha === 0 ? 'transparent' : `#${color.toString(16).padStart(6, '0')}`;
@@ -269,7 +275,7 @@ class SpaceGraph {
         if (nodeIntersects.length > 0) {
             const intersectedMesh = nodeIntersects[0].object;
             const node = this.getNodeById(intersectedMesh.userData?.nodeId);
-            if (node) return { node, distance: nodeIntersects[0].distance };
+            if (node) return {node, distance: nodeIntersects[0].distance};
         }
 
         const edgeLines = [...this.edges.values()].map(e => e.line).filter(Boolean);
@@ -277,7 +283,7 @@ class SpaceGraph {
         if (edgeIntersects.length > 0) {
             const intersectedLine = edgeIntersects[0].object;
             const edge = this.getEdgeById(intersectedLine.userData?.edgeId);
-            if (edge) return { edge, distance: edgeIntersects[0].distance };
+            if (edge) return {edge, distance: edgeIntersects[0].distance};
         }
 
         return null;
@@ -325,15 +331,20 @@ class BaseNode {
     cssObject = null; // For HTML nodes
     labelObject = null; // For 3D labels on ShapeNodes
 
-    constructor(id, position = { x: 0, y: 0, z: 0 }, data = {}, mass = 1.0) {
+    constructor(id, position = {x: 0, y: 0, z: 0}, data = {}, mass = 1.0) {
         this.id = id ?? Utils.generateId('node');
         this.position.set(position.x, position.y, position.z);
         this.data = Utils.mergeDeep({}, this.getDefaultData(), data);
         this.mass = Math.max(0.1, mass);
     }
 
-    getDefaultData() { return { label: '' }; }
-    update(space) { /* Base update logic */ }
+    getDefaultData() {
+        return {label: ''};
+    }
+
+    update(space) { /* Base update logic */
+    }
+
     dispose() {
         this.mesh?.geometry?.dispose();
         this.mesh?.material?.dispose();
@@ -347,32 +358,48 @@ class BaseNode {
         this.cssObject = null;
         this.labelObject = null;
     }
-    getBoundingSphereRadius() { return 50; }
-    setSelectedStyle(selected) { /* Base selection style logic */ }
-    setPosition(x, y, z) { this.position.set(x, y, z); }
 
-    startDrag() { this.space?.layout?.fixNode(this); }
-    drag(newPosition) { this.setPosition(newPosition.x, newPosition.y, newPosition.z); }
-    endDrag() { this.space?.layout?.releaseNode(this); this.space?.layout?.kick(); }
+    getBoundingSphereRadius() {
+        return 50;
+    }
+
+    setSelectedStyle(selected) { /* Base selection style logic */
+    }
+
+    setPosition(x, y, z) {
+        this.position.set(x, y, z);
+    }
+
+    startDrag() {
+        this.space?.layout?.fixNode(this);
+    }
+
+    drag(newPosition) {
+        this.setPosition(newPosition.x, newPosition.y, newPosition.z);
+    }
+
+    endDrag() {
+        this.space?.layout?.releaseNode(this);
+        this.space?.layout?.kick();
+    }
 }
 
 // --- HTML Node (Notes, etc.) ---
 class HtmlNode extends BaseNode {
+    static MIN_SIZE = {width: 80, height: 40};
+    static CONTENT_SCALE_RANGE = {min: 0.3, max: 3.0};
     htmlElement = null; // Reference to the DOM element within cssObject
-    size = { width: 160, height: 70 };
+    size = {width: 160, height: 70};
     billboard = false;
-
-    static MIN_SIZE = { width: 80, height: 40 };
-    static CONTENT_SCALE_RANGE = { min: 0.3, max: 3.0 };
 
     constructor(id, position, data = {}, mass = 1.0) {
         super(id, position, data, mass);
         const initialWidth = this.data.width ?? 160;
         const initialHeight = this.data.height ?? 70;
-        this.size = { width: initialWidth, height: initialHeight };
+        this.size = {width: initialWidth, height: initialHeight};
         this.htmlElement = this._createElement(); // Create the element first
         this.cssObject = new CSS3DObject(this.htmlElement); // Wrap it
-        this.cssObject.userData = { nodeId: this.id, type: 'html-node' }; // Link back
+        this.cssObject.userData = {nodeId: this.id, type: 'html-node'}; // Link back
         this.update();
         this.setContentScale(this.data.contentScale ?? 1.0);
         this.setBackgroundColor(this.data.backgroundColor ?? '#333344');
@@ -421,11 +448,13 @@ class HtmlNode extends BaseNode {
             let debounceTimer;
             contentDiv.addEventListener('input', () => {
                 clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => { this.data.content = contentDiv.innerHTML; }, 300);
+                debounceTimer = setTimeout(() => {
+                    this.data.content = contentDiv.innerHTML;
+                }, 300);
             });
             // Prevent interactions within content from triggering pan/drag
             contentDiv.addEventListener('pointerdown', e => e.stopPropagation());
-            contentDiv.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+            contentDiv.addEventListener('touchstart', e => e.stopPropagation(), {passive: true});
             contentDiv.addEventListener('wheel', e => {
                 // Allow scrolling within the div if needed
                 const isScrollable = contentDiv.scrollHeight > contentDiv.clientHeight || contentDiv.scrollWidth > contentDiv.clientWidth;
@@ -434,7 +463,7 @@ class HtmlNode extends BaseNode {
                 if (isScrollable && (canScrollY || canScrollX)) {
                     e.stopPropagation(); // Stop propagation only if scrolling is possible
                 }
-            }, { passive: false });
+            }, {passive: false});
         }
     }
 
@@ -488,20 +517,29 @@ class HtmlNode extends BaseNode {
         this.htmlElement?.classList.toggle('selected', selected);
     }
 
-    startResize() { this.htmlElement?.classList.add('resizing'); this.space?.layout?.fixNode(this); }
-    resize(newWidth, newHeight) { this.setSize(newWidth, newHeight); }
-    endResize() { this.htmlElement?.classList.remove('resizing'); this.space?.layout?.releaseNode(this); }
-}
+    startResize() {
+        this.htmlElement?.classList.add('resizing');
+        this.space?.layout?.fixNode(this);
+    }
 
-class NoteNode extends HtmlNode {
-    constructor(id, pos, data = { content: '' }) {
-        // Ensure 'editable' is true for NoteNodes
-        super(id, pos, Utils.mergeDeep({ type: 'note', editable: true }, data));
+    resize(newWidth, newHeight) {
+        this.setSize(newWidth, newHeight);
+    }
+
+    endResize() {
+        this.htmlElement?.classList.remove('resizing');
+        this.space?.layout?.releaseNode(this);
     }
 }
 
-// --- 3D Shape Node ---
-class ShapeNode extends BaseNode {
+export class NoteNode extends HtmlNode {
+    constructor(id, pos, data = {content: ''}) {
+        // Ensure 'editable' is true for NoteNodes
+        super(id, pos, Utils.mergeDeep({type: 'note', editable: true}, data));
+    }
+}
+
+export class ShapeNode extends BaseNode {
     shape = 'sphere';
     size = 50;
     color = 0xffffff;
@@ -512,24 +550,29 @@ class ShapeNode extends BaseNode {
         this.size = this.data.size ?? 50;
         this.color = this.data.color ?? 0xffffff;
         this.mesh = this._createMesh();
-        this.mesh.userData = { nodeId: this.id, type: 'shape-node' }; // Link back
+        this.mesh.userData = {nodeId: this.id, type: 'shape-node'}; // Link back
         if (this.data.label) {
             this.labelObject = this._createLabel(); // Create 3D label
-            this.labelObject.userData = { nodeId: this.id, type: 'shape-label' }; // Link back
+            this.labelObject.userData = {nodeId: this.id, type: 'shape-label'}; // Link back
         }
         this.update();
     }
 
     getDefaultData() {
-        return { label: '', shape: 'sphere', size: 50, color: 0xffffff, type: 'shape' };
+        return {label: '', shape: 'sphere', size: 50, color: 0xffffff, type: 'shape'};
     }
 
     _createMesh() {
         let geometry;
         const effectiveSize = Math.max(10, this.size);
         switch (this.shape) {
-            case 'box': geometry = new THREE.BoxGeometry(effectiveSize, effectiveSize, effectiveSize); break;
-            case 'sphere': default: geometry = new THREE.SphereGeometry(effectiveSize / 2, 16, 12); break;
+            case 'box':
+                geometry = new THREE.BoxGeometry(effectiveSize, effectiveSize, effectiveSize);
+                break;
+            case 'sphere':
+            default:
+                geometry = new THREE.SphereGeometry(effectiveSize / 2, 16, 12);
+                break;
             // TODO: Add more shapes (Cone, Cylinder, Torus...)
         }
         const material = new THREE.MeshStandardMaterial({
@@ -555,9 +598,7 @@ class ShapeNode extends BaseNode {
             textAlign: 'center',
             whiteSpace: 'nowrap',
         });
-        // Use CSS3DObject for perspective scaling
-        const label = new CSS3DObject(div);
-        return label;
+        return new CSS3DObject(div);
     }
 
     update(space) {
@@ -576,8 +617,11 @@ class ShapeNode extends BaseNode {
 
     getBoundingSphereRadius() {
         switch (this.shape) {
-            case 'box': return Math.sqrt(3 * (this.size / 2) ** 2);
-            case 'sphere': default: return this.size / 2;
+            case 'box':
+                return Math.sqrt(3 * (this.size / 2) ** 2);
+            case 'sphere':
+            default:
+                return this.size / 2;
         }
     }
 
@@ -594,13 +638,17 @@ class ShapeNode extends BaseNode {
 
 // --- Edge Class ---
 class Edge {
-    line = null;
-    // Default constraint: elastic spring
-    data = { color: 0x00d0ff, thickness: 1.5, constraintType: 'elastic', constraintParams: { stiffness: 0.001, idealLength: 200 } };
-
     static HIGHLIGHT_COLOR = 0x00ffff;
     static DEFAULT_OPACITY = 0.6;
     static HIGHLIGHT_OPACITY = 1.0;
+    line = null;
+    // Default constraint: elastic spring
+    data = {
+        color: 0x00d0ff,
+        thickness: 1.5,
+        constraintType: 'elastic',
+        constraintParams: {stiffness: 0.001, idealLength: 200}
+    };
 
     constructor(id, sourceNode, targetNode, data = {}) {
         if (!sourceNode || !targetNode) throw new Error("Edge requires valid source and target nodes.");
@@ -609,7 +657,7 @@ class Edge {
         this.target = targetNode;
         const defaultData = {
             color: 0x00d0ff, thickness: 1.5, constraintType: 'elastic',
-            constraintParams: { stiffness: 0.001, idealLength: 200 }
+            constraintParams: {stiffness: 0.001, idealLength: 200}
         };
         this.data = Utils.mergeDeep({}, defaultData, data);
         this.line = this._createLine();
@@ -627,7 +675,7 @@ class Edge {
         const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
         const line = new THREE.Line(geometry, material);
         line.renderOrder = -1;
-        line.userData = { edgeId: this.id }; // Link back
+        line.userData = {edgeId: this.id}; // Link back
         return line;
     }
 
@@ -661,7 +709,7 @@ class Edge {
 }
 
 // --- UI Manager ---
-class UIManager {
+export class UIManager {
     space = null;
     container = null;
     contextMenuElement = null;
@@ -671,10 +719,18 @@ class UIManager {
     draggedNode = null;
     resizedNode = null;
     hoveredEdge = null;
-    resizeStartPos = { x: 0, y: 0 };
-    resizeStartSize = { width: 0, height: 0 };
+    resizeStartPos = {x: 0, y: 0};
+    resizeStartSize = {width: 0, height: 0};
     dragOffset = new THREE.Vector3();
-    pointerState = { down: false, primary: false, secondary: false, middle: false, potentialClick: true, lastPos: { x: 0, y: 0 }, startPos: { x: 0, y: 0 } };
+    pointerState = {
+        down: false,
+        primary: false,
+        secondary: false,
+        middle: false,
+        potentialClick: true,
+        lastPos: {x: 0, y: 0},
+        startPos: {x: 0, y: 0}
+    };
     confirmCallback = null;
 
     constructor(space, contextMenuEl, confirmDialogEl) {
@@ -687,7 +743,7 @@ class UIManager {
     }
 
     _bindEvents() {
-        const opts = { passive: false };
+        const opts = {passive: false};
         this.container.addEventListener('pointerdown', this._onPointerDown, false);
         window.addEventListener('pointermove', this._onPointerMove, false);
         window.addEventListener('pointerup', this._onPointerUp, false);
@@ -707,8 +763,8 @@ class UIManager {
         this.pointerState.middle = isDown && e.button === 1;
         if (isDown) {
             this.pointerState.potentialClick = true;
-            this.pointerState.startPos = { x: e.clientX, y: e.clientY };
-            this.pointerState.lastPos = { x: e.clientX, y: e.clientY };
+            this.pointerState.startPos = {x: e.clientX, y: e.clientY};
+            this.pointerState.lastPos = {x: e.clientX, y: e.clientY};
         }
     }
 
@@ -716,7 +772,10 @@ class UIManager {
         this._updatePointerState(e, true);
         const targetInfo = this._getTargetInfo(e);
 
-        if (this.pointerState.secondary) { e.preventDefault(); return; }
+        if (this.pointerState.secondary) {
+            e.preventDefault();
+            return;
+        }
 
         if (this.pointerState.primary) {
             if (this._handlePointerDownControls(e, targetInfo)) return;
@@ -726,19 +785,24 @@ class UIManager {
             if (this._handlePointerDownBackground(e, targetInfo)) return;
         }
 
-        if (this.pointerState.middle) { e.preventDefault(); }
+        if (this.pointerState.middle) {
+            e.preventDefault();
+        }
     }
 
     _onPointerMove = (e) => {
-        if (!this.pointerState.down) { this._handleHover(e); return; }
+        if (!this.pointerState.down) {
+            this._handleHover(e);
+            return;
+        }
 
         const dx = e.clientX - this.pointerState.lastPos.x;
         const dy = e.clientY - this.pointerState.lastPos.y;
         const totalDx = e.clientX - this.pointerState.startPos.x;
         const totalDy = e.clientY - this.pointerState.startPos.y;
 
-        if (Math.sqrt(totalDx**2 + totalDy**2) > 3) this.pointerState.potentialClick = false;
-        this.pointerState.lastPos = { x: e.clientX, y: e.clientY };
+        if (Math.sqrt(totalDx ** 2 + totalDy ** 2) > 3) this.pointerState.potentialClick = false;
+        this.pointerState.lastPos = {x: e.clientX, y: e.clientY};
 
         if (this.resizedNode) {
             e.preventDefault();
@@ -781,12 +845,20 @@ class UIManager {
     _onPointerUp = (e) => {
         this.container.style.cursor = this.space.isLinking ? 'crosshair' : 'grab';
 
-        if (this.resizedNode) { this.resizedNode.endResize(); this.resizedNode = null; }
-        else if (this.draggedNode) { this.draggedNode.endDrag(); this.draggedNode = null; }
-        else if (this.space.isLinking && e.button === 0) { this._completeLinking(e); }
-        else if (e.button === 1 && this.pointerState.potentialClick) {
-            const { node } = this._getTargetInfo(e);
-            if (node) { this.space.autoZoom(node); e.preventDefault(); }
+        if (this.resizedNode) {
+            this.resizedNode.endResize();
+            this.resizedNode = null;
+        } else if (this.draggedNode) {
+            this.draggedNode.endDrag();
+            this.draggedNode = null;
+        } else if (this.space.isLinking && e.button === 0) {
+            this._completeLinking(e);
+        } else if (e.button === 1 && this.pointerState.potentialClick) {
+            const {node} = this._getTargetInfo(e);
+            if (node) {
+                this.space.autoZoom(node);
+                e.preventDefault();
+            }
         }
 
         this.space.camera?.endPan();
@@ -850,7 +922,7 @@ class UIManager {
     _onContextMenuClick = (e) => {
         const li = e.target.closest('li[data-action]');
         if (!li) return;
-        const { action, nodeId, edgeId, position: positionData } = li.dataset;
+        const {action, nodeId, edgeId, position: positionData} = li.dataset;
         this._hideContextMenu();
 
         const actions = {
@@ -872,7 +944,11 @@ class UIManager {
             'start-link': () => this._startLinking(this.space.getNodeById(nodeId)),
             'reverse-edge': () => {
                 const edge = this.space.getEdgeById(edgeId);
-                if (edge) { [edge.source, edge.target] = [edge.target, edge.source]; edge.update(); this.space.layout?.kick(); }
+                if (edge) {
+                    [edge.source, edge.target] = [edge.target, edge.source];
+                    edge.update();
+                    this.space.layout?.kick();
+                }
             },
             'edit-edge': () => this.space.setSelectedEdge(this.space.getEdgeById(edgeId)),
             'toggle-background': () => this.space.setBackground(
@@ -887,30 +963,42 @@ class UIManager {
     _createHtmlNode(positionData, initialContent = 'New Note ✨') {
         try {
             const pos = JSON.parse(positionData);
-            const newNode = this.space.addNode(new NoteNode(null, pos, { content: initialContent }));
+            const newNode = this.space.addNode(new NoteNode(null, pos, {content: initialContent}));
             this.space.layout?.kick();
             setTimeout(() => {
                 this.space.focusOnNode(newNode, 0.6, true);
                 this.space.setSelectedNode(newNode);
                 newNode.htmlElement?.querySelector('.node-content')?.focus();
             }, 100);
-        } catch (err) { console.error("Failed to parse position for new note:", err); }
+        } catch (err) {
+            console.error("Failed to parse position for new note:", err);
+        }
     }
 
     _createShapeNode(positionData, shapeType) {
         try {
             const pos = JSON.parse(positionData);
             const label = `${shapeType.charAt(0).toUpperCase() + shapeType.slice(1)} Node`;
-            const newNode = this.space.addNode(new ShapeNode(null, pos, { label, shape: shapeType, size: 60, color: Math.random() * 0xffffff }));
+            const newNode = this.space.addNode(new ShapeNode(null, pos, {
+                label,
+                shape: shapeType,
+                size: 60,
+                color: Math.random() * 0xffffff
+            }));
             this.space.layout?.kick();
             setTimeout(() => {
                 this.space.focusOnNode(newNode, 0.6, true);
                 this.space.setSelectedNode(newNode);
             }, 100);
-        } catch (err) { console.error(`Failed to parse position for new ${shapeType} node:`, err); }
+        } catch (err) {
+            console.error(`Failed to parse position for new ${shapeType} node:`, err);
+        }
     }
 
-    _onConfirmYes = () => { this.confirmCallback?.(); this._hideConfirm(); }
+    _onConfirmYes = () => {
+        this.confirmCallback?.();
+        this._hideConfirm();
+    }
     _onConfirmNo = () => this._hideConfirm();
 
     _onKeyDown = (e) => {
@@ -923,7 +1011,8 @@ class UIManager {
         let handled = true;
 
         switch (e.key) {
-            case 'Delete': case 'Backspace':
+            case 'Delete':
+            case 'Backspace':
                 if (selectedNode) this._showConfirm(`Delete node "${selectedNode.id.substring(0, 10)}..."?`, () => this.space.removeNode(selectedNode.id));
                 else if (selectedEdge) this._showConfirm(`Delete edge "${selectedEdge.id.substring(0, 10)}..."?`, () => this.space.removeEdge(selectedEdge.id));
                 else handled = false;
@@ -933,18 +1022,22 @@ class UIManager {
                 else if (this.contextMenuElement.style.display === 'block') this._hideContextMenu();
                 else if (this.confirmDialogElement.style.display === 'block') this._hideConfirm();
                 else if (this.edgeMenuObject) this.space.setSelectedEdge(null);
-                else if (selectedNode || selectedEdge) { this.space.setSelectedNode(null); this.space.setSelectedEdge(null); }
-                else handled = false;
+                else if (selectedNode || selectedEdge) {
+                    this.space.setSelectedNode(null);
+                    this.space.setSelectedEdge(null);
+                } else handled = false;
                 break;
             case 'Enter':
                 if (selectedNode instanceof HtmlNode && selectedNode.data.editable) selectedNode.htmlElement?.querySelector('.node-content')?.focus();
                 else handled = false;
                 break;
-            case '+': case '=':
+            case '+':
+            case '=':
                 if (selectedNode instanceof HtmlNode) (e.ctrlKey || e.metaKey) ? selectedNode.adjustNodeSize(1.2) : selectedNode.adjustContentScale(1.15);
                 else handled = false;
                 break;
-            case '-': case '_':
+            case '-':
+            case '_':
                 if (selectedNode instanceof HtmlNode) (e.ctrlKey || e.metaKey) ? selectedNode.adjustNodeSize(1 / 1.2) : selectedNode.adjustContentScale(1 / 1.15);
                 else handled = false;
                 break;
@@ -957,7 +1050,8 @@ class UIManager {
                     this.space.camera?.moveTo(midPoint.x, midPoint.y, midPoint.z + dist * 0.6 + 100, 0.5, midPoint);
                 } else this.space.centerView();
                 break;
-            default: handled = false;
+            default:
+                handled = false;
         }
         if (handled) e.preventDefault();
     }
@@ -969,7 +1063,8 @@ class UIManager {
 
         if (e.ctrlKey || e.metaKey) {
             if (targetInfo.node instanceof HtmlNode) {
-                e.preventDefault(); e.stopPropagation();
+                e.preventDefault();
+                e.stopPropagation();
                 targetInfo.node.adjustContentScale(e.deltaY < 0 ? 1.1 : (1 / 1.1));
             } // Allow browser zoom otherwise
         } else {
@@ -1037,7 +1132,8 @@ class UIManager {
 
     _handlePointerDownControls(e, targetInfo) {
         if (targetInfo.nodeControls && targetInfo.node instanceof HtmlNode) {
-            e.preventDefault(); e.stopPropagation();
+            e.preventDefault();
+            e.stopPropagation();
             const button = targetInfo.nodeControls;
             // Extract action from class list more robustly
             const actionClass = [...button.classList].find(cls => cls.startsWith('node-') && !cls.includes('button'));
@@ -1059,11 +1155,12 @@ class UIManager {
 
     _handlePointerDownResize(e, targetInfo) {
         if (targetInfo.resizeHandle && targetInfo.node instanceof HtmlNode) {
-            e.preventDefault(); e.stopPropagation();
+            e.preventDefault();
+            e.stopPropagation();
             this.resizedNode = targetInfo.node;
             this.resizedNode.startResize();
-            this.resizeStartPos = { x: e.clientX, y: e.clientY }; // Store initial mouse pos
-            this.resizeStartSize = { ...this.resizedNode.size }; // Store initial node size
+            this.resizeStartPos = {x: e.clientX, y: e.clientY}; // Store initial mouse pos
+            this.resizeStartSize = {...this.resizedNode.size}; // Store initial node size
             this.container.style.cursor = 'nwse-resize';
             this._hideContextMenu();
             return true;
@@ -1120,35 +1217,42 @@ class UIManager {
 
     _getContextMenuItemsNode(node) {
         const items = [];
-        if (node instanceof HtmlNode && node.data.editable) items.push({ label: "Edit Content 📝", action: "edit-node", nodeId: node.id });
-        items.push({ label: "Start Link ✨", action: "start-link", nodeId: node.id });
-        items.push({ label: "Auto Zoom / Back 🖱️", action: "autozoom-node", nodeId: node.id });
-        items.push({ type: 'separator' });
-        items.push({ label: "Delete Node 🗑️", action: "delete-node", nodeId: node.id });
+        if (node instanceof HtmlNode && node.data.editable) items.push({
+            label: "Edit Content 📝",
+            action: "edit-node",
+            nodeId: node.id
+        });
+        items.push({label: "Start Link ✨", action: "start-link", nodeId: node.id});
+        items.push({label: "Auto Zoom / Back 🖱️", action: "autozoom-node", nodeId: node.id});
+        items.push({type: 'separator'});
+        items.push({label: "Delete Node 🗑️", action: "delete-node", nodeId: node.id});
         return items;
     }
 
     _getContextMenuItemsEdge(edge) {
         return [
-            { label: "Edit Style...", action: "edit-edge", edgeId: edge.id },
-            { label: "Reverse Direction", action: "reverse-edge", edgeId: edge.id },
-            { type: 'separator' },
-            { label: "Delete Edge 🗑️", action: "delete-edge", edgeId: edge.id },
+            {label: "Edit Style...", action: "edit-edge", edgeId: edge.id},
+            {label: "Reverse Direction", action: "reverse-edge", edgeId: edge.id},
+            {type: 'separator'},
+            {label: "Delete Edge 🗑️", action: "delete-edge", edgeId: edge.id},
         ];
     }
 
     _getContextMenuItemsBackground(worldPos) {
         const items = [];
         if (worldPos) {
-            const posStr = JSON.stringify({ x: worldPos.x, y: worldPos.y, z: worldPos.z });
-            items.push({ label: "Create Note Here 📝", action: "create-note", position: posStr });
-            items.push({ label: "Create Box Here 📦", action: "create-box", position: posStr });
-            items.push({ label: "Create Sphere Here 🌐", action: "create-sphere", position: posStr });
+            const posStr = JSON.stringify({x: worldPos.x, y: worldPos.y, z: worldPos.z});
+            items.push({label: "Create Note Here 📝", action: "create-note", position: posStr});
+            items.push({label: "Create Box Here 📦", action: "create-box", position: posStr});
+            items.push({label: "Create Sphere Here 🌐", action: "create-sphere", position: posStr});
         }
-        items.push({ type: 'separator' });
-        items.push({ label: "Center View 🧭", action: "center-view" });
-        items.push({ label: "Reset Zoom & Pan", action: "reset-view" });
-        items.push({ label: this.space.background.alpha === 0 ? "Set Dark Background" : "Set Transparent BG", action: "toggle-background" });
+        items.push({type: 'separator'});
+        items.push({label: "Center View 🧭", action: "center-view"});
+        items.push({label: "Reset Zoom & Pan", action: "reset-view"});
+        items.push({
+            label: this.space.background.alpha === 0 ? "Set Dark Background" : "Set Transparent BG",
+            action: "toggle-background"
+        });
         return items;
     }
 
@@ -1158,17 +1262,20 @@ class UIManager {
         const ul = document.createElement('ul');
         items.forEach(itemData => {
             const li = document.createElement('li');
-            if (itemData.type === 'separator') { li.className = 'separator'; }
-            else {
+            if (itemData.type === 'separator') {
+                li.className = 'separator';
+            } else {
                 li.textContent = itemData.label;
-                Object.entries(itemData).forEach(([k, v]) => { if (k !== 'label' && k !== 'type' && v != null) li.dataset[k] = String(v); });
+                Object.entries(itemData).forEach(([k, v]) => {
+                    if (k !== 'label' && k !== 'type' && v != null) li.dataset[k] = String(v);
+                });
                 if (itemData.disabled) li.classList.add('disabled');
             }
             ul.appendChild(li);
         });
         cm.appendChild(ul);
 
-        const { offsetWidth: menuWidth, offsetHeight: menuHeight } = cm;
+        const {offsetWidth: menuWidth, offsetHeight: menuHeight} = cm;
         const margin = 5;
         let finalX = (x + margin + menuWidth > window.innerWidth - margin) ? x - menuWidth - margin : x + margin;
         let finalY = (y + margin + menuHeight > window.innerHeight - margin) ? y - menuHeight - margin : y + margin;
@@ -1177,7 +1284,10 @@ class UIManager {
         cm.style.display = 'block';
     }
 
-    _hideContextMenu = () => { this.contextMenuElement.style.display = 'none'; this.contextMenuElement.innerHTML = ''; }
+    _hideContextMenu = () => {
+        this.contextMenuElement.style.display = 'none';
+        this.contextMenuElement.innerHTML = '';
+    }
 
     _showConfirm(message, onConfirm) {
         const messageEl = $('#confirm-message', this.confirmDialogElement);
@@ -1186,7 +1296,10 @@ class UIManager {
         this.confirmDialogElement.style.display = 'block';
     }
 
-    _hideConfirm = () => { this.confirmDialogElement.style.display = 'none'; this.confirmCallback = null; }
+    _hideConfirm = () => {
+        this.confirmDialogElement.style.display = 'none';
+        this.confirmCallback = null;
+    }
 
     _startLinking(sourceNode) {
         if (!sourceNode || this.space.isLinking) return;
@@ -1199,7 +1312,15 @@ class UIManager {
 
     _createTempLinkLine(sourceNode) {
         this._removeTempLinkLine();
-        const material = new THREE.LineDashedMaterial({ color: 0xffaa00, linewidth: 2, dashSize: 8, gapSize: 4, transparent: true, opacity: 0.9, depthTest: false });
+        const material = new THREE.LineDashedMaterial({
+            color: 0xffaa00,
+            linewidth: 2,
+            dashSize: 8,
+            gapSize: 4,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false
+        });
         const points = [sourceNode.position.clone(), sourceNode.position.clone()];
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
         this.space.tempLinkLine = new THREE.Line(geometry, material);
@@ -1295,11 +1416,17 @@ class UIManager {
                     currentEdge.data.constraintType = target.value;
                     // Update default params if switching type
                     if (target.value === 'rigid' && !currentEdge.data.constraintParams?.distance) {
-                        currentEdge.data.constraintParams = { distance: currentEdge.source.position.distanceTo(currentEdge.target.position), stiffness: 0.1 };
+                        currentEdge.data.constraintParams = {
+                            distance: currentEdge.source.position.distanceTo(currentEdge.target.position),
+                            stiffness: 0.1
+                        };
                     } else if (target.value === 'weld' && !currentEdge.data.constraintParams?.distance) {
-                        currentEdge.data.constraintParams = { distance: currentEdge.source.getBoundingSphereRadius() + currentEdge.target.getBoundingSphereRadius(), stiffness: 0.5 };
+                        currentEdge.data.constraintParams = {
+                            distance: currentEdge.source.getBoundingSphereRadius() + currentEdge.target.getBoundingSphereRadius(),
+                            stiffness: 0.5
+                        };
                     } else if (target.value === 'elastic' && !currentEdge.data.constraintParams?.stiffness) {
-                        currentEdge.data.constraintParams = { stiffness: 0.001, idealLength: 200 };
+                        currentEdge.data.constraintParams = {stiffness: 0.001, idealLength: 200};
                     }
                     this.space.layout?.kick();
                     break;
@@ -1336,7 +1463,7 @@ class UIManager {
 
     dispose() {
         // Remove event listeners (ensure correct options if used)
-        const opts = { passive: false };
+        const opts = {passive: false};
         this.container.removeEventListener('pointerdown', this._onPointerDown);
         window.removeEventListener('pointermove', this._onPointerMove);
         window.removeEventListener('pointerup', this._onPointerUp);
@@ -1350,8 +1477,14 @@ class UIManager {
 
         this.hideEdgeMenu(); // Clean up edge menu object
         // Clear references
-        this.space = null; this.container = null; this.contextMenuElement = null; this.confirmDialogElement = null;
-        this.draggedNode = null; this.resizedNode = null; this.hoveredEdge = null; this.confirmCallback = null;
+        this.space = null;
+        this.container = null;
+        this.contextMenuElement = null;
+        this.confirmDialogElement = null;
+        this.draggedNode = null;
+        this.resizedNode = null;
+        this.hoveredEdge = null;
+        this.confirmCallback = null;
         console.log("UIManager disposed.");
     }
 }
@@ -1392,7 +1525,7 @@ class Camera {
     setInitialState() {
         if (!this.initialState) {
             // Capture the state *after* the first centerView/focus
-            this.initialState = { position: this.targetPosition.clone(), lookAt: this.targetLookAt.clone() };
+            this.initialState = {position: this.targetPosition.clone(), lookAt: this.targetLookAt.clone()};
         }
     }
 
@@ -1434,7 +1567,10 @@ class Camera {
     }
 
     endPan = () => {
-        if (this.isPanning) { this.isPanning = false; this.domElement.classList.remove('panning'); }
+        if (this.isPanning) {
+            this.isPanning = false;
+            this.domElement.classList.remove('panning');
+        }
     }
 
     zoom(deltaY) {
@@ -1455,8 +1591,15 @@ class Camera {
         gsap.killTweensOf(this.targetPosition);
         gsap.killTweensOf(this.targetLookAt);
         const ease = "power3.out";
-        gsap.to(this.targetPosition, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration, ease, overwrite: true });
-        gsap.to(this.targetLookAt, { x: targetLook.x, y: targetLook.y, z: targetLook.z, duration, ease, overwrite: true });
+        gsap.to(this.targetPosition, {x: targetPos.x, y: targetPos.y, z: targetPos.z, duration, ease, overwrite: true});
+        gsap.to(this.targetLookAt, {
+            x: targetLook.x,
+            y: targetLook.y,
+            z: targetLook.z,
+            duration,
+            ease,
+            overwrite: true
+        });
     }
 
     resetView(duration = 0.7) {
@@ -1469,7 +1612,11 @@ class Camera {
     pushState() {
         if (this.viewHistory.length >= this.maxHistory) this.viewHistory.shift();
         // Store the *target* state, not the potentially lagging current state
-        this.viewHistory.push({ position: this.targetPosition.clone(), lookAt: this.targetLookAt.clone(), targetNodeId: this.currentTargetNodeId });
+        this.viewHistory.push({
+            position: this.targetPosition.clone(),
+            lookAt: this.targetLookAt.clone(),
+            targetNodeId: this.currentTargetNodeId
+        });
     }
 
     popState(duration = 0.6) {
@@ -1483,7 +1630,9 @@ class Camera {
     }
 
     getCurrentTargetNodeId = () => this.currentTargetNodeId;
-    setCurrentTargetNodeId = (nodeId) => { this.currentTargetNodeId = nodeId; };
+    setCurrentTargetNodeId = (nodeId) => {
+        this.currentTargetNodeId = nodeId;
+    };
 
     _startUpdateLoop = () => {
         const deltaPos = this.targetPosition.distanceTo(this._cam.position);
@@ -1510,13 +1659,15 @@ class Camera {
         if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
         gsap.killTweensOf(this.targetPosition);
         gsap.killTweensOf(this.targetLookAt);
-        this.space = null; this._cam = null; this.domElement = null; this.viewHistory = [];
+        this.space = null;
+        this._cam = null;
+        this.domElement = null;
+        this.viewHistory = [];
         console.log("Camera disposed.");
     }
 }
 
-// --- Force Layout ---
-class ForceLayout {
+export class ForceLayout {
     space = null;
     nodes = [];
     edges = [];
@@ -1544,292 +1695,236 @@ class ForceLayout {
         defaultWeldStiffness: 0.5,
     };
 
-constructor(space, config = {}) {
-    if (!space) throw new Error("ForceLayout requires a SpaceGraph instance.");
-    this.space = space;
-    this.settings = { ...this.settings, ...config };
-}
+    constructor(space, config = {}) {
+        if (!space) throw new Error("ForceLayout requires a SpaceGraph instance.");
+        this.space = space;
+        this.settings = {...this.settings, ...config};
+    }
 
-addNode(node) { if (!this.nodes.some(n => n.id === node.id)) { this.nodes.push(node); this.velocities.set(node.id, new THREE.Vector3()); this.kick(); } }
-removeNode(node) { this.nodes = this.nodes.filter(n => n !== node); this.velocities.delete(node.id); this.fixedNodes.delete(node); if (this.nodes.length < 2) this.stop(); else this.kick(); }
-addEdge(edge) { if (!this.edges.includes(edge)) { this.edges.push(edge); this.kick(); } }
-removeEdge(edge) { this.edges = this.edges.filter(e => e !== edge); this.kick(); }
-fixNode(node) { if (this.nodes.includes(node)) { this.fixedNodes.add(node); this.velocities.get(node.id)?.set(0, 0, 0); } }
-releaseNode(node) { this.fixedNodes.delete(node); /* Kick happens on drag/resize end */ }
-
-runOnce(steps = 100) {
-    console.log(`ForceLayout: Running ${steps} initial steps...`);
-    let i = 0; for (; i < steps; i++) { if (this._calculateStep() < this.settings.minEnergyThreshold) break; }
-    console.log(`ForceLayout: Initial steps completed after ${i} iterations.`);
-    this.space.updateNodesAndEdges(); // Update visuals once after settling
-}
-
-start() {
-    if (this.isRunning || this.nodes.length < 2) return;
-    console.log("ForceLayout: Starting simulation.");
-    this.isRunning = true; this.lastKickTime = Date.now();
-    const loop = () => {
-        if (!this.isRunning) return;
-        this.totalEnergy = this._calculateStep();
-        // Visual updates happen in SpaceGraph.animate loop
-        const timeSinceKick = Date.now() - this.lastKickTime;
-        if (this.totalEnergy < this.settings.minEnergyThreshold && timeSinceKick > this.settings.autoStopDelay) {
-            this.stop();
-        } else {
-            this.animationFrameId = requestAnimationFrame(loop);
+    addNode(node) {
+        if (!this.nodes.some(n => n.id === node.id)) {
+            this.nodes.push(node);
+            this.velocities.set(node.id, new THREE.Vector3());
+            this.kick();
         }
-    };
-    this.animationFrameId = requestAnimationFrame(loop);
-}
+    }
 
-stop() {
-    if (!this.isRunning) return;
-    this.isRunning = false;
-    if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
-    clearTimeout(this.autoStopTimeout);
-    this.animationFrameId = null; this.autoStopTimeout = null;
-    console.log("ForceLayout: Simulation stopped. Energy:", this.totalEnergy.toFixed(4));
-}
+    removeNode(node) {
+        this.nodes = this.nodes.filter(n => n !== node);
+        this.velocities.delete(node.id);
+        this.fixedNodes.delete(node);
+        if (this.nodes.length < 2) this.stop(); else this.kick();
+    }
 
-kick(intensity = 1) {
-    if (this.nodes.length < 1) return;
-    this.lastKickTime = Date.now(); this.totalEnergy = Infinity;
-    const impulse = new THREE.Vector3();
-    this.nodes.forEach(node => {
-        if (!this.fixedNodes.has(node)) {
-            impulse.set(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * this.settings.zSpreadFactor)
-                .normalize().multiplyScalar(intensity * (0.5 + Math.random())); // Slightly randomized intensity
-            this.velocities.get(node.id)?.add(impulse);
+    addEdge(edge) {
+        if (!this.edges.includes(edge)) {
+            this.edges.push(edge);
+            this.kick();
         }
-    });
-    if (!this.isRunning) this.start();
-    // Reset auto-stop timer
-    clearTimeout(this.autoStopTimeout);
-    this.autoStopTimeout = setTimeout(() => { if (this.isRunning && this.totalEnergy < this.settings.minEnergyThreshold) this.stop(); }, this.settings.autoStopDelay);
-}
+    }
 
-setSettings(newSettings) { this.settings = { ...this.settings, ...newSettings }; console.log("ForceLayout settings updated:", this.settings); this.kick(); }
+    removeEdge(edge) {
+        this.edges = this.edges.filter(e => e !== edge);
+        this.kick();
+    }
 
-_calculateStep() {
-    if (this.nodes.length < 2) return 0;
-    let currentTotalEnergy = 0;
-    const forces = new Map(this.nodes.map(node => [node.id, new THREE.Vector3()]));
-    const { repulsion, centerStrength, gravityCenter, zSpreadFactor, damping, nodePadding } = this.settings;
-    const tempDelta = new THREE.Vector3(); // Reusable vector
+    fixNode(node) {
+        if (this.nodes.includes(node)) {
+            this.fixedNodes.add(node);
+            this.velocities.get(node.id)?.set(0, 0, 0);
+        }
+    }
 
-    // 1. Repulsion Force (Node-Node)
-    for (let i = 0; i < this.nodes.length; i++) {
-        const nodeA = this.nodes[i];
-        for (let j = i + 1; j < this.nodes.length; j++) {
-            const nodeB = this.nodes[j];
-            tempDelta.subVectors(nodeB.position, nodeA.position);
-            let distSq = tempDelta.lengthSq();
-            if (distSq < 1e-3) { // Avoid singularity
-                distSq = 1e-3;
-                tempDelta.randomDirection().multiplyScalar(0.1); // Apply tiny random push
+    releaseNode(node) {
+        this.fixedNodes.delete(node); /* Kick happens on drag/resize end */
+    }
+
+    runOnce(steps = 100) {
+        console.log(`ForceLayout: Running ${steps} initial steps...`);
+        let i = 0;
+        for (; i < steps; i++) {
+            if (this._calculateStep() < this.settings.minEnergyThreshold) break;
+        }
+        console.log(`ForceLayout: Initial steps completed after ${i} iterations.`);
+        this.space.updateNodesAndEdges(); // Update visuals once after settling
+    }
+
+    start() {
+        if (this.isRunning || this.nodes.length < 2) return;
+        console.log("ForceLayout: Starting simulation.");
+        this.isRunning = true;
+        this.lastKickTime = Date.now();
+        const loop = () => {
+            if (!this.isRunning) return;
+            this.totalEnergy = this._calculateStep();
+            // Visual updates happen in SpaceGraph.animate loop
+            const timeSinceKick = Date.now() - this.lastKickTime;
+            if (this.totalEnergy < this.settings.minEnergyThreshold && timeSinceKick > this.settings.autoStopDelay) {
+                this.stop();
+            } else {
+                this.animationFrameId = requestAnimationFrame(loop);
             }
-            const distance = Math.sqrt(distSq);
-            // Use node's bounding sphere for consistent padding calculation
-            const radiusA = nodeA.getBoundingSphereRadius();
-            const radiusB = nodeB.getBoundingSphereRadius();
-            const combinedRadius = (radiusA + radiusB) * nodePadding;
-            // Repulsion = base inverse square + extra force if overlapping
-            let forceMag = -repulsion / distSq;
-            const overlap = combinedRadius - distance;
-            if (overlap > 0) {
-                // Stronger pushback when overlapping, proportional to overlap squared
-                forceMag -= (repulsion * overlap**2 * 0.01) / distance; // Tunable factor
+        };
+        this.animationFrameId = requestAnimationFrame(loop);
+    }
+
+    stop() {
+        if (!this.isRunning) return;
+        this.isRunning = false;
+        if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+        clearTimeout(this.autoStopTimeout);
+        this.animationFrameId = null;
+        this.autoStopTimeout = null;
+        console.log("ForceLayout: Simulation stopped. Energy:", this.totalEnergy.toFixed(4));
+    }
+
+    kick(intensity = 1) {
+        if (this.nodes.length < 1) return;
+        this.lastKickTime = Date.now();
+        this.totalEnergy = Infinity;
+        const impulse = new THREE.Vector3();
+        this.nodes.forEach(node => {
+            if (!this.fixedNodes.has(node)) {
+                impulse.set(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * this.settings.zSpreadFactor)
+                    .normalize().multiplyScalar(intensity * (0.5 + Math.random())); // Slightly randomized intensity
+                this.velocities.get(node.id)?.add(impulse);
+            }
+        });
+        if (!this.isRunning) this.start();
+        // Reset auto-stop timer
+        clearTimeout(this.autoStopTimeout);
+        this.autoStopTimeout = setTimeout(() => {
+            if (this.isRunning && this.totalEnergy < this.settings.minEnergyThreshold) this.stop();
+        }, this.settings.autoStopDelay);
+    }
+
+    setSettings(newSettings) {
+        this.settings = {...this.settings, ...newSettings};
+        console.log("ForceLayout settings updated:", this.settings);
+        this.kick();
+    }
+
+    _calculateStep() {
+        if (this.nodes.length < 2) return 0;
+        let currentTotalEnergy = 0;
+        const forces = new Map(this.nodes.map(node => [node.id, new THREE.Vector3()]));
+        const {repulsion, centerStrength, gravityCenter, zSpreadFactor, damping, nodePadding} = this.settings;
+        const tempDelta = new THREE.Vector3(); // Reusable vector
+
+        // 1. Repulsion Force (Node-Node)
+        for (let i = 0; i < this.nodes.length; i++) {
+            const nodeA = this.nodes[i];
+            for (let j = i + 1; j < this.nodes.length; j++) {
+                const nodeB = this.nodes[j];
+                tempDelta.subVectors(nodeB.position, nodeA.position);
+                let distSq = tempDelta.lengthSq();
+                if (distSq < 1e-3) { // Avoid singularity
+                    distSq = 1e-3;
+                    tempDelta.randomDirection().multiplyScalar(0.1); // Apply tiny random push
+                }
+                const distance = Math.sqrt(distSq);
+                // Use node's bounding sphere for consistent padding calculation
+                const radiusA = nodeA.getBoundingSphereRadius();
+                const radiusB = nodeB.getBoundingSphereRadius();
+                const combinedRadius = (radiusA + radiusB) * nodePadding;
+                // Repulsion = base inverse square + extra force if overlapping
+                let forceMag = -repulsion / distSq;
+                const overlap = combinedRadius - distance;
+                if (overlap > 0) {
+                    // Stronger pushback when overlapping, proportional to overlap squared
+                    forceMag -= (repulsion * overlap ** 2 * 0.01) / distance; // Tunable factor
+                }
+
+                const forceVec = tempDelta.normalize().multiplyScalar(forceMag);
+                forceVec.z *= zSpreadFactor; // Reduce Z component
+                if (!this.fixedNodes.has(nodeA)) forces.get(nodeA.id)?.add(forceVec);
+                if (!this.fixedNodes.has(nodeB)) forces.get(nodeB.id)?.sub(forceVec); // Equal and opposite
+            }
+        }
+
+        // 2. Edge Constraints
+        this.edges.forEach(edge => {
+            const {source, target, data} = edge;
+            if (!source || !target || !this.velocities.has(source.id) || !this.velocities.has(target.id)) return; // Skip if nodes removed
+            tempDelta.subVectors(target.position, source.position);
+            const distance = tempDelta.length() + 1e-6; // Add epsilon
+            let forceMag = 0;
+            const params = data.constraintParams ?? {};
+
+            switch (data.constraintType) {
+                case 'rigid':
+                    const targetDist = params.distance ?? this.settings.defaultElasticIdealLength; // Fallback to elastic length if no distance set
+                    const rStiffness = params.stiffness ?? this.settings.defaultRigidStiffness;
+                    forceMag = rStiffness * (distance - targetDist);
+                    break;
+                case 'weld':
+                    // Target distance is sum of radii, strong stiffness
+                    const weldDist = params.distance ?? (source.getBoundingSphereRadius() + target.getBoundingSphereRadius());
+                    const wStiffness = params.stiffness ?? this.settings.defaultWeldStiffness;
+                    forceMag = wStiffness * (distance - weldDist);
+                    break;
+                case 'elastic':
+                default:
+                    const idealLen = params.idealLength ?? this.settings.defaultElasticIdealLength;
+                    const eStiffness = params.stiffness ?? this.settings.defaultElasticStiffness;
+                    forceMag = eStiffness * (distance - idealLen); // Hooke's Law
+                    break;
             }
 
             const forceVec = tempDelta.normalize().multiplyScalar(forceMag);
             forceVec.z *= zSpreadFactor; // Reduce Z component
-            if (!this.fixedNodes.has(nodeA)) forces.get(nodeA.id)?.add(forceVec);
-            if (!this.fixedNodes.has(nodeB)) forces.get(nodeB.id)?.sub(forceVec); // Equal and opposite
-        }
-    }
+            if (!this.fixedNodes.has(source)) forces.get(source.id)?.add(forceVec);
+            if (!this.fixedNodes.has(target)) forces.get(target.id)?.sub(forceVec);
+        });
 
-    // 2. Edge Constraints
-    this.edges.forEach(edge => {
-        const { source, target, data } = edge;
-        if (!source || !target || !this.velocities.has(source.id) || !this.velocities.has(target.id)) return; // Skip if nodes removed
-        tempDelta.subVectors(target.position, source.position);
-        const distance = tempDelta.length() + 1e-6; // Add epsilon
-        let forceMag = 0;
-        const params = data.constraintParams ?? {};
-
-        switch (data.constraintType) {
-            case 'rigid':
-                const targetDist = params.distance ?? this.settings.defaultElasticIdealLength; // Fallback to elastic length if no distance set
-                const rStiffness = params.stiffness ?? this.settings.defaultRigidStiffness;
-                forceMag = rStiffness * (distance - targetDist);
-                break;
-            case 'weld':
-                // Target distance is sum of radii, strong stiffness
-                const weldDist = params.distance ?? (source.getBoundingSphereRadius() + target.getBoundingSphereRadius());
-                const wStiffness = params.stiffness ?? this.settings.defaultWeldStiffness;
-                forceMag = wStiffness * (distance - weldDist);
-                break;
-            case 'elastic':
-            default:
-                const idealLen = params.idealLength ?? this.settings.defaultElasticIdealLength;
-                const eStiffness = params.stiffness ?? this.settings.defaultElasticStiffness;
-                forceMag = eStiffness * (distance - idealLen); // Hooke's Law
-                break;
+        // 3. Center Gravity Force
+        if (centerStrength > 0) {
+            this.nodes.forEach(node => {
+                if (this.fixedNodes.has(node)) return;
+                const forceVec = tempDelta.subVectors(gravityCenter, node.position).multiplyScalar(centerStrength);
+                forceVec.z *= zSpreadFactor * 0.5; // Weaker Z gravity
+                forces.get(node.id)?.add(forceVec);
+            });
         }
 
-        const forceVec = tempDelta.normalize().multiplyScalar(forceMag);
-        forceVec.z *= zSpreadFactor; // Reduce Z component
-        if (!this.fixedNodes.has(source)) forces.get(source.id)?.add(forceVec);
-        if (!this.fixedNodes.has(target)) forces.get(target.id)?.sub(forceVec);
-    });
-
-    // 3. Center Gravity Force
-    if (centerStrength > 0) {
+        // 4. Apply Forces and Update Velocities/Positions
         this.nodes.forEach(node => {
             if (this.fixedNodes.has(node)) return;
-            const forceVec = tempDelta.subVectors(gravityCenter, node.position).multiplyScalar(centerStrength);
-            forceVec.z *= zSpreadFactor * 0.5; // Weaker Z gravity
-            forces.get(node.id)?.add(forceVec);
+            const force = forces.get(node.id);
+            const velocity = this.velocities.get(node.id);
+            if (!force || !velocity) return; // Should not happen
+
+            const mass = node.mass || 1.0; // Use node's mass
+            // a = F / m
+            const acceleration = tempDelta.copy(force).divideScalar(mass); // Reuse tempDelta
+            // v = (v + a) * damping
+            velocity.add(acceleration).multiplyScalar(damping);
+
+            // Limit velocity to prevent nodes escaping to infinity
+            const speed = velocity.length();
+            const maxSpeed = 100; // Tunable max speed per step
+            if (speed > maxSpeed) {
+                velocity.multiplyScalar(maxSpeed / speed);
+            }
+
+            // p = p + v
+            node.position.add(velocity);
+
+            // Accumulate kinetic energy (using mass)
+            currentTotalEnergy += 0.5 * mass * velocity.lengthSq();
         });
+
+        return currentTotalEnergy;
     }
 
-    // 4. Apply Forces and Update Velocities/Positions
-    this.nodes.forEach(node => {
-        if (this.fixedNodes.has(node)) return;
-        const force = forces.get(node.id);
-        const velocity = this.velocities.get(node.id);
-        if (!force || !velocity) return; // Should not happen
-
-        const mass = node.mass || 1.0; // Use node's mass
-        // a = F / m
-        const acceleration = tempDelta.copy(force).divideScalar(mass); // Reuse tempDelta
-        // v = (v + a) * damping
-        velocity.add(acceleration).multiplyScalar(damping);
-
-        // Limit velocity to prevent nodes escaping to infinity
-        const speed = velocity.length();
-        const maxSpeed = 100; // Tunable max speed per step
-        if (speed > maxSpeed) {
-            velocity.multiplyScalar(maxSpeed / speed);
-        }
-
-        // p = p + v
-        node.position.add(velocity);
-
-        // Accumulate kinetic energy (using mass)
-        currentTotalEnergy += 0.5 * mass * velocity.lengthSq();
-    });
-
-    return currentTotalEnergy;
-}
-
-dispose() {
-    this.stop(); this.nodes = []; this.edges = []; this.velocities.clear(); this.fixedNodes.clear(); this.space = null;
-    console.log("ForceLayout disposed.");
-}
-}
-
-// --- Initialization ---
-function init() {
-    const container = $('#space');
-    const contextMenuEl = $('#context-menu');
-    const confirmDialogEl = $('#confirm-dialog');
-
-    if (!container || !contextMenuEl || !confirmDialogEl) {
-        console.error("Initialization Failed: Missing required DOM elements (#space, #context-menu, #confirm-dialog).");
-        container.innerHTML = "<p style='color:red; padding: 20px;'>Error: Missing required HTML elements.</p>";
-        return;
-    }
-
-    try {
-        const space = new SpaceGraph(container);
-        const layout = new ForceLayout(space);
-        space.layout = layout;
-        const uiManager = new UIManager(space, contextMenuEl, confirmDialogEl);
-        space.ui = uiManager;
-
-        createExampleGraph(space);
-
-        layout.runOnce(250); // Initial settling steps
-        space.centerView(null, 0.8); // Center view smoothly
-        layout.start(); // Start continuous layout simulation
-        space.animate(); // Start render loop
-
-        window.space = space; // Expose for debugging
-        console.log("Mind Map Initialized Successfully.");
-
-    } catch (error) {
-        console.error("Initialization Failed:", error);
-        container.innerHTML = `<div style="color: red; padding: 20px;">Error initializing Mind Map: ${error.message}<br><pre>${error.stack}</pre></div>`;
+    dispose() {
+        this.stop();
+        this.nodes = [];
+        this.edges = [];
+        this.velocities.clear();
+        this.fixedNodes.clear();
+        this.space = null;
+        console.log("ForceLayout disposed.");
     }
 }
 
-function createExampleGraph(space) {
-    console.log("Creating example graph...");
-    const colors = ['#2a2a50', '#2a402a', '#402a2a', '#40402a', '#2a4040', '#402a40', '#503030'];
-    let colorIndex = 0;
-    const nextColor = () => colors[colorIndex++ % colors.length];
-
-    // Core Node (Heavier)
-    const n1 = space.addNode(new NoteNode('core', { x: 0, y: 0, z: 0 }, {
-        content: "<h1>🚀 READY 🧠</h1><p>Enhanced Mind Map</p>",
-        width: 300, height: 110, backgroundColor: nextColor()
-    }, 2.5)); // Mass = 2.5
-
-    // Features Branch
-    const n_features = space.addNode(new NoteNode('features', { x: 350, y: 100, z: 20 }, {
-        content: "<h2>Features ✨</h2><ul><li>HTML & 3D Nodes</li><li>Node Mass/Momentum</li><li>Edge Menu & Constraints</li><li>BG Toggle</li><li>3D Labels</li></ul>",
-        width: 240, height: 190, backgroundColor: nextColor()
-    }, 1.5)); // Mass = 1.5
-    space.addEdge(n1, n_features);
-
-    // Shape Nodes (Different Masses)
-    const n_box = space.addNode(new ShapeNode('box1', { x: 600, y: 150, z: 30 }, {
-        label: "Box Node 📦 (Mass 2.0)", shape: 'box', size: 70, color: 0xcc8833
-    }, 2.0)); // Mass = 2.0
-    // Rigid link example
-    space.addEdge(n_features, n_box, { constraintType: 'rigid', constraintParams: { distance: 180, stiffness: 0.08 } });
-
-    const n_sphere = space.addNode(new ShapeNode('sphere1', { x: 650, y: 0, z: -20 }, {
-        label: "Sphere Node 🌐 (Mass 1.0)", shape: 'sphere', size: 80, color: 0x33aabb
-    }, 1.0)); // Mass = 1.0
-    // Elastic link example
-    space.addEdge(n_box, n_sphere, { constraintType: 'elastic', constraintParams: { idealLength: 150, stiffness: 0.002 } });
-    space.addEdge(n_features, n_sphere); // Cross link
-
-    // Tech Branch
-    const n_tech = space.addNode(new NoteNode('tech', { x: -350, y: 100, z: -10 }, {
-        content: "<h2>Technology 💻</h2><p><code>Three.js</code> (WebGL, CSS3D)</p><p><code>GSAP</code>, <code>ES Modules</code></p>",
-        width: 250, height: 120, backgroundColor: nextColor()
-    }));
-    space.addEdge(n1, n_tech);
-
-    // Style Branch
-    const n_style = space.addNode(new NoteNode('style', { x: 0, y: -250, z: 0 }, {
-        content: "<h2>Style 🎨</h2><p>✨ Dark/Transparent BG</p><p>🎨 Node Colors</p><p>🕸️ Dot Grid BG</p>",
-        width: 220, height: 110, backgroundColor: nextColor()
-    }));
-    // Weld constraint example (strong rigid link)
-    space.addEdge(n1, n_style, { constraintType: 'weld' });
-
-    // Interactive Node Example
-    const n_interactive = space.addNode(new NoteNode('interactive', { x: 350, y: -150, z: -30 }, {
-        content: `<h2>Interactive</h2><p>Slider: <span class="slider-val">50</span></p>
-        <input type="range" min="0" max="100" value="50" style="width: 90%; pointer-events: auto; cursor: pointer;"
-               oninput="this.previousElementSibling.textContent = this.value; event.stopPropagation();"
-               onpointerdown="event.stopPropagation();">
-        <button onclick="alert('Button clicked!'); event.stopPropagation();" style="pointer-events: auto; cursor: pointer; margin-top: 5px;">Click</button>`,
-        width: 230, height: 170, backgroundColor: nextColor()
-    }));
-    space.addEdge(n_features, n_interactive);
-    space.addEdge(n_style, n_interactive, { constraintType: 'elastic', constraintParams: { idealLength: 250 } });
-
-    console.log("Example graph created:", space.nodes.size, "nodes,", space.edges.size, "edges.");
-}
-
-// --- Start the application ---
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-} else {
-    init(); // DOMContentLoaded has already fired
-}
