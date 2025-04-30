@@ -3,6 +3,9 @@ package dumb.cognote;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
 import dumb.cognote.util.Events;
@@ -12,6 +15,9 @@ import dumb.cognote.util.Log;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
@@ -93,12 +99,14 @@ public class Cog {
     public static void main(String[] args) {
         String rulesFile = null;
         var port = 8081;
+        String staticDir = "ui"; // Directory containing static files
 
         for (var i = 0; i < args.length; i++) {
             try {
                 switch (args[i]) {
                     case "-r", "--rules" -> rulesFile = args[++i];
                     case "-p", "--port" -> port = Integer.parseInt(args[++i]);
+                    case "-s", "--static-dir" -> staticDir = args[++i];
                     default -> Log.warning("Unknown option: " + args[i] + ". Config via JSON.");
                 }
             } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
@@ -108,7 +116,48 @@ public class Cog {
         }
 
         try {
+            // Start HTTP Server for static files
+            // WARNING: This will likely cause a BindException when the WebSocketPlugin tries to bind to the same port.
+            // A proper solution requires a server framework that supports both HTTP and WS on the same port.
+            HttpServer httpServer = HttpServer.create(new InetSocketAddress(port), 0);
+            httpServer.createContext("/", new HttpHandler() {
+                @Override
+                public void handle(HttpExchange exchange) throws IOException {
+                    String requestPath = exchange.getRequestURI().getPath();
+                    if (requestPath.equals("/")) {
+                        requestPath = "/index.html"; // Serve index.html for root
+                    }
+
+                    java.nio.file.Path filePath = Paths.get(staticDir, requestPath).normalize();
+
+                    // Basic security check: prevent directory traversal
+                    if (!filePath.startsWith(Paths.get(staticDir).normalize())) {
+                        exchange.sendResponseHeaders(403, -1); // Forbidden
+                        return;
+                    }
+
+                    if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
+                        String contentType = URLConnection.guessContentTypeFromName(filePath.toString());
+                        if (contentType == null) {
+                            contentType = "application/octet-stream"; // Default if unknown
+                        }
+                        exchange.getResponseHeaders().set("Content-Type", contentType);
+                        exchange.sendResponseHeaders(200, Files.size(filePath));
+                        try (OutputStream os = exchange.getResponseBody()) {
+                            Files.copy(filePath, os);
+                        }
+                    } else {
+                        exchange.sendResponseHeaders(404, -1); // Not Found
+                    }
+                }
+            });
+            httpServer.setExecutor(null); // Use default executor
+            httpServer.start();
+            Log.message("HTTP server started on port " + port + ", serving from '" + staticDir + "'");
+
+
             var c = new Cog();
+            // This will attempt to start a WebSocket server on the *same* port, likely causing a BindException.
             c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
 
             c.start();
@@ -118,10 +167,15 @@ public class Cog {
             }
 
             try {
+                // Keep the main thread alive while servers run
                 Thread.currentThread().join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 error("Main thread interrupted.");
+            } finally {
+                 // Ensure HTTP server is stopped on shutdown
+                 httpServer.stop(0); // Stop immediately
+                 Log.message("HTTP server stopped.");
             }
         } catch (Exception e) {
             error("Initialization/Startup failed: " + e.getMessage());
@@ -131,7 +185,7 @@ public class Cog {
     }
 
     private static void printUsageAndExit() {
-        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
+        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif] [-s static_directory]%n", Cog.class.getName());
         System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + STATE_FILE);
         System.exit(1);
     }
@@ -494,25 +548,6 @@ public class Cog {
         message("System stopped.");
     }
 
-    public void save() {
-        persistenceManager.save(STATE_FILE);
-    }
-
-    public boolean isPaused() {
-        return paused.get();
-    }
-
-    public void setPaused(boolean pause) {
-        if (paused.get() == pause || !running.get()) return;
-        paused.set(pause);
-        status(pause ? "Paused" : "Running");
-        if (!pause) {
-            synchronized (pauseLock) {
-                pauseLock.notifyAll();
-            }
-        }
-    }
-
     public void loadRules(String filename) throws IOException {
         message("Loading expressions from: " + filename);
         var path = Paths.get(filename);
@@ -524,7 +559,7 @@ public class Cog {
         try (var reader = Files.newBufferedReader(path)) {
             String line;
             var parenDepth = 0;
-            while ((line = reader.readLine()) != null) {
+            while ((line = reader.readLine() != null)) {
                 counts[0]++;
                 var commentStart = line.indexOf(';');
                 if (commentStart != -1) line = line.substring(0, commentStart);
