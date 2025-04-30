@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognote REPL</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div id="repl-container">
+        <div id="output">
+            <div class="status">Connecting...</div>
+        </div>
+        <div id="input-area">
+            <textarea id="input" placeholder="Enter KIF or command..."></textarea>
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <!-- Import the WebSocket client -->
+    <script type="module" src="../client.js"></script>
+    <!-- Import the REPL logic -->
+    <script type="module" src="index.js"></script>
+</body>
+</html>
