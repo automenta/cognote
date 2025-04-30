@@ -182,6 +182,57 @@ public interface Truths {
             }
         }
 
+        // Method to get all assertions (active or not) for persistence
+        Collection<Assertion> getAllAssertionsInternal() {
+            lock.readLock().lock();
+            try {
+                return assertions.values();
+            } finally {
+                lock.readLock().unlock();
+            }
+        }
+
+        // Method to add assertions directly during load, without full TMS logic
+        void addInternal(Assertion assertion) {
+            lock.writeLock().lock();
+            try {
+                assertions.put(assertion.id(), assertion);
+                justifications.put(assertion.id(), Set.copyOf(assertion.justificationIds()));
+                assertion.justificationIds().forEach(supporterId -> dependents.computeIfAbsent(supporterId, k -> ConcurrentHashMap.newKeySet()).add(assertion.id()));
+            } finally {
+                lock.writeLock().unlock();
+            }
+        }
+
+        // Method to clear internal state for loading
+        void clearInternal() {
+            lock.writeLock().lock();
+            try {
+                assertions.clear();
+                justifications.clear();
+                dependents.clear();
+            } finally {
+                lock.writeLock().unlock();
+            }
+        }
+
+        // Method to rebuild active status and indices after loading
+        void rebuildIndicesAndStatus() {
+            lock.writeLock().lock();
+            try {
+                // Re-calculate active status for all assertions
+                var visited = new HashSet<String>();
+                assertions.values().forEach(a -> updateStatus(a.id(), visited));
+
+                // Re-add active assertions to KB indices (handled by Knowledge.handleExternalStatusChange via events)
+                // Re-check contradictions for newly active assertions (handled by updateStatus)
+
+            } finally {
+                lock.writeLock().unlock();
+            }
+        }
+
+
         private void checkForContradictions(Assertion newlyActive) {
             if (!newlyActive.isActive()) return;
             var oppositeForm = newlyActive.negated() ? newlyActive.getEffectiveTerm() : new Term.Lst(Term.Atom.of(Logic.KIF_OP_NOT), newlyActive.kif());

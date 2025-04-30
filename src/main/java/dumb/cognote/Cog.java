@@ -50,7 +50,7 @@ public class Cog {
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
-    private static final String NOTES_FILE = "cognote_notes.json";
+    private static final String STATE_FILE = "cognote_state.json";
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
     private static final int PORT = 8080;
@@ -67,6 +67,7 @@ public class Cog {
     final AtomicBoolean paused = new AtomicBoolean(true);
     private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
     private final Object pauseLock = new Object();
+    private final PersistenceManager persistenceManager;
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
@@ -77,21 +78,19 @@ public class Cog {
         Log.setEvents(this.events);
         this.tools = new Tools();
 
-        this.context = new Cognition(globalKbCapacity,
-                new Truths.BasicTMS(events),
-                this);
+        var tms = new Truths.BasicTMS(events);
+        this.context = new Cognition(globalKbCapacity, tms, this);
 
         this.dialogue = new Dialogue(this);
         this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
         this.plugins = new Plugins(events, context);
+        this.persistenceManager = new PersistenceManager(this, context, tms);
 
         this.lm = new LM(this);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
 
         initPlugins();
-
-        load();
     }
 
     public static void main(String[] args) {
@@ -138,47 +137,18 @@ public class Cog {
 
     private static void printUsageAndExit() {
         System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
-        System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + NOTES_FILE);
+        System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + STATE_FILE);
         System.exit(1);
     }
 
-    private static synchronized void saveNotesToFile(List<Note> notes) {
-
-        var toSave = notes.stream()
-                .filter(note -> !note.id().equals(GLOBAL_KB_NOTE_ID))
-                .toList();
-
-        if (toSave.stream().noneMatch(n -> n.id().equals(CONFIG_NOTE_ID))) {
-            toSave = new ArrayList<>(toSave);
-            toSave.add(createDefaultConfigNote());
-        }
-
-        try {
-            Json.the.writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
-            message("Notes saved to " + NOTES_FILE);
-        } catch (IOException e) {
-            error("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
-        }
-    }
-
-    private static List<Note> loadNotesFromFile() {
-        var path = Paths.get(NOTES_FILE);
-        if (!Files.exists(path) || !Files.isReadable(path)) {
-            message("Notes file not found or not readable: " + NOTES_FILE + ". Starting with defaults.");
-            return new ArrayList<>();
-        }
-        try {
-            return Json.the.readValue(path.toFile(), new TypeReference<>() {
-            });
-        } catch (IOException e) {
-            error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
-            e.printStackTrace();
-            return new ArrayList<>();
-        }
-    }
-
-    public static String id(String prefix) {
-        return prefix + id.incrementAndGet();
+    static Note createDefaultConfigNote() {
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, Json.str(new Configuration(
+                LM.DEFAULT_LLM_URL,
+                LM.DEFAULT_LLM_MODEL,
+                DEFAULT_KB_CAPACITY,
+                DEFAULT_REASONING_DEPTH,
+                DEFAULT_BROADCAST_INPUT
+        )), Note.Status.IDLE);
     }
 
     private static void shutdownExecutor(ExecutorService executor, String name) {
@@ -196,16 +166,6 @@ public class Cog {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-    }
-
-    static Note createDefaultConfigNote() {
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, Json.str(new Configuration(
-                LM.DEFAULT_LLM_URL,
-                LM.DEFAULT_LLM_MODEL,
-                DEFAULT_KB_CAPACITY,
-                DEFAULT_REASONING_DEPTH,
-                DEFAULT_BROADCAST_INPUT
-        )), Note.Status.IDLE);
     }
 
     protected void initPlugins() {
@@ -252,7 +212,6 @@ public class Cog {
     public void addNote(Note note) {
         if (notes.putIfAbsent(note.id(), note) == null) {
             events.emit(new CogEvent.AddedEvent(note));
-            save();
             message("Added note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         } else {
@@ -270,7 +229,6 @@ public class Cog {
             events.emit(new CogEvent.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
             events.emit(new CogEvent.RemovedEvent(note));
             context.removeActiveNote(noteId);
-            save();
             message("Removed note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         });
@@ -288,7 +246,6 @@ public class Cog {
                 }
 
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus));
-                save();
                 message("Updated note status for [" + note.id() + "] to " + newStatus);
 
                 if (newStatus == Note.Status.ACTIVE) {
@@ -297,6 +254,7 @@ public class Cog {
                     );
                     context.rules().stream()
                             .filter(rule -> noteId.equals(rule.sourceNoteId()))
+                            .toList() // Collect to avoid concurrent modification
                             .forEach(rule -> events.emit(new CogEvent.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
                 }
             }
@@ -340,7 +298,6 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.text.equals(newText)) {
                 note.text = newText;
-                save();
                 message("Updated text for note [" + note.id() + "]");
             }
         });
@@ -350,7 +307,6 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.title.equals(newTitle)) {
                 note.title = newTitle;
-                save();
                 message("Updated title for note [" + note.id() + "]");
             }
         });
@@ -382,8 +338,6 @@ public class Cog {
         events.emit(new CogEvent.AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new CogEvent.AddedEvent(notes.get(CONFIG_NOTE_ID)));
 
-        save();
-
         status("Cleared");
         setPaused(false);
         message("Knowledge cleared.");
@@ -397,8 +351,7 @@ public class Cog {
             applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = Json.str(newConfig);
-                save();
-                message("Configuration updated and saved.");
+                message("Configuration updated.");
             });
             lm.reconfigure();
             return true;
@@ -410,36 +363,7 @@ public class Cog {
     }
 
     private void load() {
-        var loadedNotes = loadNotesFromFile();
-        loadedNotes.forEach(note -> notes.put(note.id(), note));
-
-        var configNoteOpt = note(CONFIG_NOTE_ID);
-        Configuration config;
-        if (configNoteOpt.isPresent()) {
-            try {
-                config = Json.obj(configNoteOpt.get().text(), Configuration.class);
-                message("Configuration note found and parsed.");
-            } catch (Exception e) {
-                error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
-                e.printStackTrace();
-                config = new Configuration();
-                var configNote = createDefaultConfigNote();
-                notes.put(CONFIG_NOTE_ID, configNote);
-                save();
-            }
-        } else {
-            message("Configuration note not found, using defaults and creating one.");
-            config = new Configuration();
-            var configNote = createDefaultConfigNote();
-            notes.put(CONFIG_NOTE_ID, configNote);
-            save();
-        }
-        applyConfig(config);
-
-
-        if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
-            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", IDLE));
-        }
+        persistenceManager.load(STATE_FILE);
     }
 
     private void applyConfig(Configuration config) {
@@ -481,6 +405,8 @@ public class Cog {
             status("Initializing");
         }
 
+        load(); // Load state before initializing plugins/reasoners that might depend on it
+
         lm.reconfigure();
 
         plugins.initializeAll();
@@ -492,6 +418,11 @@ public class Cog {
                 .forEach(note -> context.addActiveNote(note.id()));
 
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
+
+        setPaused(false);
+        status("Running");
+        message("System started.");
+        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
     }
 
     public void stop() {
@@ -522,7 +453,7 @@ public class Cog {
     }
 
     public void save() {
-        saveNotesToFile(getAllNotes());
+        persistenceManager.save(STATE_FILE);
     }
 
     public boolean isPaused() {
@@ -691,7 +622,7 @@ public class Cog {
         }
 
         public Configuration(Cog cog) {
-            this();
+            this(cog.lm.llmApiUrl, cog.lm.llmModel, cog.globalKbCapacity, cog.reasoningDepthLimit, cog.broadcastInputAssertions);
         }
     }
 }
