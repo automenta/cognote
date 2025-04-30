@@ -330,6 +330,10 @@ function handleCommand(commandString) {
                 }
 
 
+                // NOTE: Sending these as 'command' signals. If the backend WebSocketPlugin
+                // does not handle 'command' signals, this will fail.
+                // The backend WebSocketPlugin needs to be updated to receive SIGNAL_TYPE_COMMAND
+                // and route it to the RequestProcessorPlugin or appropriate handler.
                 websocketClient.sendCommand(commandName, parameters)
                     .then(response => { /* Handled by generic response listener */ })
                     .catch(error => { /* Handled by generic response listener */ });
@@ -365,7 +369,8 @@ function createExampleNotes() {
             title: 'Getting Started: Facts & Queries',
             text: `This note contains basic facts about animals.
 (instance MyCat Cat)
-(instance YourDog Dog)
+(instance YourCat Cat)
+(instance MyDog Dog)
 (instance MyCat Mammal)
 
 Try querying the system in the REPL input below:
@@ -422,11 +427,14 @@ The response you provide will be returned as the result of the query.
         }
     ];
 
+    // Use sendUiAction for note management operations
+    // NOTE: The backend RequestProcessorPlugin (or similar) needs to be updated
+    // to listen for uiAction assertions in kb://ui-actions and call the
+    // appropriate Cog methods (addNote, updateNoteText, updateNoteStatus).
     exampleNotes.forEach(noteData => {
-        // Send commands sequentially for each note
-        websocketClient.sendCommand('addNote', { noteId: noteData.id, title: noteData.title })
-            .then(() => websocketClient.sendCommand('updateNoteText', { noteId: noteData.id, newText: noteData.text }))
-            .then(() => websocketClient.sendCommand('updateNoteStatus', { noteId: noteData.id, newStatus: noteData.status }))
+        websocketClient.sendUiAction('addNote', { noteId: noteData.id, title: noteData.title })
+            .then(() => websocketClient.sendUiAction('updateNoteText', { noteId: noteData.id, newText: noteData.text }))
+            .then(() => websocketClient.sendUiAction('updateNoteStatus', { noteId: noteData.id, newStatus: noteData.status }))
             .then(() => appendOutput(`${formatTimestamp()} [STATUS] Created example note: "${noteData.title}"`, 'status'))
             .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to create example note "${noteData.title}": ${err.message}`, 'response-error'));
     });
