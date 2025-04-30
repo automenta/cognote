@@ -132,7 +132,7 @@ public class Logic {
                     var changed = new boolean[]{false};
                     var newTerms = list.terms.stream().map(sub -> {
                         var subSubst = substRecursive(sub, bindings, depth + 1, fully);
-                        if (subSubst != sub) changed[0] = true;
+                        if (!subSubst.equals(sub)) changed[0] = true;
                         return subSubst;
                     }).toList();
                     yield changed[0] ? new Term.Lst(newTerms) : list;
@@ -215,20 +215,20 @@ public class Logic {
         }
     }
 
-    static class Path {
+    public static class Path {
 
-        static class PathNode {
+        public static class PathNode {
             static final Class<Term.Var> VAR_MARKER = Term.Var.class;
             static final Object LIST_MARKER = new Object();
             final ConcurrentMap<Object, PathNode> children = new ConcurrentHashMap<>();
             final Set<String> assertionIdsHere = ConcurrentHashMap.newKeySet();
         }
 
-        static class PathIndex {
+        public static class PathIndex {
             private final PathNode root = new PathNode();
             private final Truths tms;
 
-            PathIndex(Truths tms) {
+            public PathIndex(Truths tms) {
                 this.tms = tms;
             }
 
@@ -314,29 +314,29 @@ public class Logic {
                 });
             }
 
-            void add(Assertion assertion) {
+            public void add(Assertion assertion) {
                 if (tms.isActive(assertion.id())) addPathsRecursive(assertion.kif(), assertion.id(), root);
             }
 
-            void remove(Assertion assertion) {
+            public void remove(Assertion assertion) {
                 removePathsRecursive(assertion.kif(), assertion.id(), root);
             }
 
-            void clear() {
+            public void clear() {
                 root.children.clear();
                 root.assertionIdsHere.clear();
             }
 
-            Stream<Assertion> findUnifiableAssertions(Term queryTerm) {
+            public Stream<Assertion> findUnifiableAssertions(Term queryTerm) {
                 return findCandidates(queryTerm, PathIndex::findUnifiableRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
             }
 
-            Stream<Assertion> findInstancesOf(Term queryPattern) {
+            public Stream<Assertion> findInstancesOf(Term queryPattern) {
                 var neg = (queryPattern instanceof Term.Lst ql && ql.op().filter(Logic.KIF_OP_NOT::equals).isPresent());
                 return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated() == neg).filter(a -> Logic.Unifier.match(queryPattern, a.kif(), Map.of()) != null);
             }
 
-            Stream<Assertion> findGeneralizationsOf(Term queryTerm) {
+            public Stream<Assertion> findGeneralizationsOf(Term queryTerm) {
                 return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
             }
 

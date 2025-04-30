@@ -182,7 +182,6 @@ public interface Truths {
             }
         }
 
-        // Method to get all assertions (active or not) for persistence
         Collection<Assertion> getAllAssertionsInternal() {
             lock.readLock().lock();
             try {
@@ -192,7 +191,6 @@ public interface Truths {
             }
         }
 
-        // Method to add assertions directly during load, without full TMS logic
         void addInternal(Assertion assertion) {
             lock.writeLock().lock();
             try {
@@ -204,7 +202,6 @@ public interface Truths {
             }
         }
 
-        // Method to clear internal state for loading
         void clearInternal() {
             lock.writeLock().lock();
             try {
@@ -216,17 +213,11 @@ public interface Truths {
             }
         }
 
-        // Method to rebuild active status and indices after loading
         void rebuildIndicesAndStatus() {
             lock.writeLock().lock();
             try {
-                // Re-calculate active status for all assertions
                 var visited = new HashSet<String>();
                 assertions.values().forEach(a -> updateStatus(a.id(), visited));
-
-                // Re-add active assertions to KB indices (handled by Knowledge.handleExternalStatusChange via events)
-                // Re-check contradictions for newly active assertions (handled by updateStatus)
-
             } finally {
                 lock.writeLock().unlock();
             }
