@@ -47,7 +47,7 @@ public class EnhanceTool implements Tool {
                             Output ONLY the enhanced text, nothing else.
                             """);
 
-                    var userMessage = UserMessage.from("Text to enhance:\n" + note.text);
+                    var userMessage = UserMessage.from("Text to enhance:\n" + note.text());
 
                     List<ChatMessage> history = new ArrayList<>();
                     history.add(systemMessage);

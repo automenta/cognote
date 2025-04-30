@@ -507,7 +507,7 @@ public class Reason {
                         .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getDerivationDepthMax())
                         .filter(u -> isActiveContext(u.sourceNoteId()))
                         .filter(u -> u.getReferencedPredicates().contains(pred))
-                        .forEach(this::tryInstantiate);
+                        .forEach(x -> tryInstantiate(x, newA));
             } else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getDerivationDepthMax()) {
                 if (!isActiveContext(newA.sourceNoteId())) return;
 
@@ -634,8 +634,7 @@ public class Reason {
 
                                     if (opResult == null) return Stream.empty();
 
-                                    if (opResult instanceof Term.Atom atomResult) {
-                                        String value = atomResult.value();
+                                    if (opResult instanceof Term.Atom(String value)) {
                                         if ("true".equals(value)) return Stream.of(bindings);
                                         if ("false".equals(value)) return Stream.empty();
                                     }

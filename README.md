@@ -20,11 +20,12 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 
 ### Logic engine
 
-- Prolog-based logic and reasoning
-- Coordinates system proceses and manages prioritizable resources
+- Prolog-like logic and reasoning
+- Coordinates system proceses
+- Manages prioritizable resources
+- Manages notifications and events, used in implementing app features and interacting with users
 - Develops and executes plans
-- Notes comprise a 'surface' level interface, controlling dependent internal activity
-- Framework managing notifications and events, used in implementing app features
+- System activity guided by user's Note editing
 
 ### TODO List (App)
 

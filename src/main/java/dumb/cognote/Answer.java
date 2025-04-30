@@ -11,7 +11,8 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Answer(@JsonProperty("queryId") String queryId, Cog.QueryStatus status, @JsonProperty("bindingsJson") List<Map<Term.Var, Term>> bindings,
+public record Answer(@JsonProperty("queryId") String queryId, Cog.QueryStatus status,
+                     @JsonProperty("bindingsJson") List<Map<Term.Var, Term>> bindings,
                      @Nullable Logic.Explanation explanation) {
     public Answer {
         requireNonNull(queryId);

@@ -10,7 +10,6 @@ import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -55,7 +54,7 @@ public class TextToKifTool implements Tool {
 
                     var userMessage = UserMessage.from("Text:\n" + note.text);
 
-                    List<ChatMessage> history = new ArrayList<>();
+                    var history = new ArrayList<ChatMessage>();
                     history.add(systemMessage);
                     history.add(userMessage);
 

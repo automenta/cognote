@@ -199,8 +199,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent answerEvent && answerEvent.result().queryId().equals(queryID)) {
-                answerFuture.complete(answerEvent.result());
+            if (e instanceof Answer.AnswerEvent(Answer result) && result.queryId().equals(queryID)) {
+                answerFuture.complete(result);
             }
         };
         @SuppressWarnings("unchecked")
@@ -275,7 +275,7 @@ public class Cog {
 
         @Override
         default String assocNote() {
-            return note().id;
+            return note().id();
         }
     }
 
@@ -364,7 +364,8 @@ public class Cog {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record TemporaryAssertionEvent(@JsonProperty("temporaryAssertionJson") Term.Lst temporaryAssertion, @JsonProperty("bindingsJson") Map<Term.Var, Term> bindings,
+    public record TemporaryAssertionEvent(@JsonProperty("temporaryAssertionJson") Term.Lst temporaryAssertion,
+                                          @JsonProperty("bindingsJson") Map<Term.Var, Term> bindings,
                                           String noteId) implements NoteIDEvent {
 
         @JsonProperty("temporaryAssertionString")
@@ -472,7 +473,8 @@ public class Cog {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record ExternalInputEvent(@JsonProperty("termJson") Term term, String sourceId, @Nullable String noteId) implements NoteIDEvent {
+    public record ExternalInputEvent(@JsonProperty("termJson") Term term, String sourceId,
+                                     @Nullable String noteId) implements NoteIDEvent {
 
         @JsonProperty("termString")
         public String termString() {

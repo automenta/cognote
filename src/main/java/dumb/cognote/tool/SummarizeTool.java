@@ -48,7 +48,7 @@ public class SummarizeTool implements Tool {
                             Output ONLY the summary text, nothing else.
                             """);
 
-                    var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text());
 
                     List<ChatMessage> history = new ArrayList<>();
                     history.add(systemMessage);

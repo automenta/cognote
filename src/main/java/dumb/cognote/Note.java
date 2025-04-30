@@ -2,19 +2,20 @@ package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.JsonNode;
-
-import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record Note(String id, String title, String text, Status status) {
+public final class Note {
+    private final String id;
+    public String text;
+    String title;
+    Status status;
 
-    public Note {
-        requireNonNull(id);
-        requireNonNull(title);
-        requireNonNull(text);
-        requireNonNull(status);
+    public Note(String id, String title, String text, Status status) {
+        this.id = id;
+        this.title = title;
+        this.text = text;
+        this.status = status;
     }
 
     public Note(String id, String title, String text) {
@@ -23,10 +24,6 @@ public record Note(String id, String title, String text, Status status) {
 
     public Note withStatus(Status newStatus) {
         return new Note(this.id, this.title, this.text, newStatus);
-    }
-
-    public JsonNode toJson() {
-        return Json.node(this);
     }
 
     @Override
@@ -43,6 +40,23 @@ public record Note(String id, String title, String text, Status status) {
     public int hashCode() {
         return id.hashCode();
     }
+
+    public String id() {
+        return id;
+    }
+
+    public String title() {
+        return title;
+    }
+
+    public String text() {
+        return text;
+    }
+
+    public Status status() {
+        return status;
+    }
+
 
     public enum Status {
         IDLE, ACTIVE, PAUSED, COMPLETED

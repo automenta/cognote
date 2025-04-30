@@ -70,7 +70,7 @@ public class InputPlugin extends Plugin.BasePlugin {
 
                             // Check for query_type parameter
                             if (parameters.containsKey("query_type") && parameters.get("query_type") instanceof Term.Atom(
-                                    String value
+                                    var value
                             )) {
                                 queryTypeStr = value;
                                 parameters = new java.util.HashMap<>(parameters);

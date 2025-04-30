@@ -1,7 +1,6 @@
 package dumb.cognote.tool;
 
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import dumb.cognote.CogNote;
 import dumb.cognote.Json;
 import dumb.cognote.KifParser;
@@ -43,7 +42,7 @@ public class FindAssertionsTool implements Tool {
                         .map(dumb.cognote.Assertion::id)
                         .toList();
 
-                ArrayNode jsonArray = Json.the.createArrayNode();
+                var jsonArray = Json.the.createArrayNode();
                 matchingAssertionIds.forEach(jsonArray::add);
 
                 return Json.str(jsonArray);

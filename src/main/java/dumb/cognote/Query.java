@@ -2,7 +2,7 @@ package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.databind.JsonNode;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
@@ -10,14 +10,9 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Query(String id, @JsonProperty("queryType") Cog.QueryType type, @JsonProperty("patternJson") Term pattern, @Nullable String targetKbId,
+public record Query(String id, @JsonProperty("queryType") Cog.QueryType type, @JsonProperty("patternJson") Term pattern,
+                    @Nullable String targetKbId,
                     Map<String, Object> parameters) {
-    public Query {
-        requireNonNull(id);
-        requireNonNull(type);
-        requireNonNull(pattern);
-        requireNonNull(parameters);
-    }
 
     @JsonProperty("patternString")
     public String patternString() {

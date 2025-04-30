@@ -18,10 +18,10 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import static dumb.cognote.Cog.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.Cognition;
+import static dumb.cognote.Note.Status.IDLE;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
@@ -57,7 +57,7 @@ public class CogNote extends Cog {
 
     public static void main(String[] args) {
         String rulesFile = null;
-        int port = 8080;
+        var port = 8080;
 
         for (var i = 0; i < args.length; i++) {
             try {
@@ -106,10 +106,10 @@ public class CogNote extends Cog {
     private static synchronized void saveNotesToFile(List<Note> notes) {
 
         var toSave = notes.stream()
-                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
+                .filter(note -> !note.id().equals(GLOBAL_KB_NOTE_ID))
                 .toList();
 
-        if (toSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
+        if (toSave.stream().noneMatch(n -> n.id().equals(CONFIG_NOTE_ID))) {
             toSave = new ArrayList<>(toSave);
             toSave.add(createDefaultConfigNote());
         }
@@ -181,13 +181,13 @@ public class CogNote extends Cog {
     }
 
     public void addNote(Note note) {
-        if (notes.putIfAbsent(note.id, note) == null) {
+        if (notes.putIfAbsent(note.id(), note) == null) {
             events.emit(new AddedEvent(note));
             save();
-            message("Added note: " + note.title + " [" + note.id + "]");
+            message("Added note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         } else {
-            message("Note with ID " + note.id + " already exists.");
+            message("Note with ID " + note.id() + " already exists.");
         }
     }
 
@@ -202,15 +202,15 @@ public class CogNote extends Cog {
             events.emit(new RemovedEvent(note));
             context.removeActiveNote(noteId);
             save();
-            message("Removed note: " + note.title + " [" + note.id + "]");
+            message("Removed note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         });
     }
 
     public void updateNoteStatus(String noteId, Note.Status newStatus) {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
-            if (note.status != newStatus) {
-                var oldStatus = note.status;
+            if (note.status() != newStatus) {
+                var oldStatus = note.status();
                 note.status = newStatus;
 
                 switch (newStatus) {
@@ -220,7 +220,7 @@ public class CogNote extends Cog {
 
                 events.emit(new NoteStatusEvent(note, oldStatus, newStatus));
                 save();
-                message("Updated note status for [" + note.id + "] to " + newStatus);
+                message("Updated note status for [" + note.id() + "] to " + newStatus);
 
                 if (newStatus == Note.Status.ACTIVE) {
                     context.kb(noteId).getAllAssertions().forEach(assertion ->
@@ -236,33 +236,33 @@ public class CogNote extends Cog {
 
     public void startNote(String noteId) {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
-            if (note.status == Note.Status.IDLE || note.status == Note.Status.PAUSED) {
-                message("Starting note: " + note.title + " [" + note.id + "]");
+            if (note.status() == IDLE || note.status() == Note.Status.PAUSED) {
+                message("Starting note: " + note.title() + " [" + note.id() + "]");
                 updateNoteStatus(noteId, Note.Status.ACTIVE);
             } else {
-                message("Note " + note.title + " [" + note.id + "] is already " + note.status + ". Cannot start.");
+                message("Note " + note.title() + " [" + note.id() + "] is already " + note.status() + ". Cannot start.");
             }
         });
     }
 
     public void pauseNote(String noteId) {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
-            if (note.status == Note.Status.ACTIVE) {
-                message("Pausing note: " + note.title + " [" + note.id + "]");
+            if (note.status() == Note.Status.ACTIVE) {
+                message("Pausing note: " + note.title() + " [" + note.id() + "]");
                 updateNoteStatus(noteId, Note.Status.PAUSED);
             } else {
-                message("Note " + note.title + " [" + note.id + "] is not ACTIVE. Cannot pause.");
+                message("Note " + note.title() + " [" + note.id() + "] is not ACTIVE. Cannot pause.");
             }
         });
     }
 
     public void completeNote(String noteId) {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
-            if (note.status == Note.Status.ACTIVE || note.status == Note.Status.PAUSED) {
-                message("Completing note: " + note.title + " [" + note.id + "]");
+            if (note.status() == Note.Status.ACTIVE || note.status() == Note.Status.PAUSED) {
+                message("Completing note: " + note.title() + " [" + note.id() + "]");
                 updateNoteStatus(noteId, Note.Status.COMPLETED);
             } else {
-                message("Note " + note.title + " [" + note.id + "] is already " + note.status + ". Cannot complete.");
+                message("Note " + note.title() + " [" + note.id() + "] is already " + note.status() + ". Cannot complete.");
             }
         });
     }
@@ -272,7 +272,7 @@ public class CogNote extends Cog {
             if (!note.text.equals(newText)) {
                 note.text = newText;
                 save();
-                message("Updated text for note [" + note.id + "]");
+                message("Updated text for note [" + note.id() + "]");
             }
         });
     }
@@ -282,7 +282,7 @@ public class CogNote extends Cog {
             if (!note.title.equals(newTitle)) {
                 note.title = newTitle;
                 save();
-                message("Updated title for note [" + note.id + "]");
+                message("Updated title for note [" + note.id() + "]");
             }
         });
     }
@@ -302,8 +302,11 @@ public class CogNote extends Cog {
         var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
 
         notes.clear();
-        notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
-        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
+
+        globalKbNote.status = configNote.status = IDLE;
+
+        notes.put(CONFIG_NOTE_ID, configNote);
+        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote);
 
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
 
@@ -340,14 +343,14 @@ public class CogNote extends Cog {
     private void load() {
         var loadedNotes = loadNotesFromFile();
         loadedNotes.forEach(note -> {
-            notes.put(note.id, note);
+            notes.put(note.id(), note);
         });
 
         var configNoteOpt = note(CONFIG_NOTE_ID);
         Configuration config;
         if (configNoteOpt.isPresent()) {
             try {
-                config = Json.obj(configNoteOpt.get().text, Configuration.class);
+                config = Json.obj(configNoteOpt.get().text(), Configuration.class);
                 message("Configuration note found and parsed.");
             } catch (Exception e) {
                 error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
@@ -368,7 +371,7 @@ public class CogNote extends Cog {
 
 
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
-            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
+            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", IDLE));
         }
     }
 
@@ -414,8 +417,8 @@ public class CogNote extends Cog {
         reasoner.initializeAll();
 
         notes.values().stream()
-                .filter(note -> note.status == Note.Status.ACTIVE)
-                .forEach(note -> context.addActiveNote(note.id));
+                .filter(note -> note.status() == Note.Status.ACTIVE)
+                .forEach(note -> context.addActiveNote(note.id()));
 
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
     }

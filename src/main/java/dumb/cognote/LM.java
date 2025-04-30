@@ -88,7 +88,7 @@ public class LM {
 
         var conversationHistory = new ArrayList<>(history);
 
-        CompletableFuture<AiMessage> taskFuture = CompletableFuture.supplyAsync(() -> {
+        var taskFuture = CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
             cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service..."));
 

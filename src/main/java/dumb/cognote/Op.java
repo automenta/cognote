@@ -157,11 +157,10 @@ public class Op {
 
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
-            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom promptAtom)) {
+            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom(String value))) {
                 Log.error("Invalid arguments for (ask-user): Expected (ask-user \"Prompt string\"). Found: " + arguments.toKif());
                 return CompletableFuture.completedFuture(null);
             }
-            String value = promptAtom.value();
 
 
             var dialogueId = Cog.id("dialogue_");

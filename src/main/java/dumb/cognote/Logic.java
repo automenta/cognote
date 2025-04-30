@@ -472,7 +472,7 @@ public class Logic {
         }
 
         public Stream<Assertion> findAssertionsAcrossActiveKbs(Term pattern, Predicate<Assertion> filter) {
-            Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
+            var kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
                     .filter(kb -> activeNoteIds.contains(kb.id));
 
             return kbsToSearch
@@ -483,7 +483,7 @@ public class Logic {
         }
 
         public Stream<Assertion> getAllActiveAssertionsAcrossActiveKbs() {
-            Stream<Knowledge> kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
+            var kbsToSearch = Stream.concat(Stream.of(globalKb), noteKbs.values().stream())
                     .filter(kb -> activeNoteIds.contains(kb.id));
 
             return kbsToSearch

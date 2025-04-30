@@ -2,7 +2,6 @@ package dumb.cognote.plugin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dumb.cognote.*;
 import org.java_websocket.WebSocket;
@@ -244,7 +243,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         // Assuming CogEvent has a method to get its data as a serializable object or JsonNode
         // If not, we might need to add one or serialize the event object itself.
         // Let's assume we serialize the event object directly.
-        JsonNode eventJson = Json.node(event);
+        var eventJson = Json.node(event);
         if (eventJson == null || eventJson.isNull()) {
             error("Failed to serialize CogEvent to JSON: " + event.getClass().getName());
             return;
@@ -265,19 +264,19 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void sendInitialState(WebSocket conn) {
-        ObjectNode payload = Json.node();
+        var payload = Json.node();
 
         // Serialize various state components to JsonNode
         payload.set("systemStatus", Json.node(new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
         payload.set("configuration", Json.node(new CogNote.Configuration(cog)));
 
-        ArrayNode notesArray = Json.the.createArrayNode();
+        var notesArray = Json.the.createArrayNode();
         cog.getAllNotes().stream().map(Json::node).forEach(notesArray::add); // Assuming Note has toJsonNode()
 
-        ArrayNode assertionsArray = Json.the.createArrayNode();
+        var assertionsArray = Json.the.createArrayNode();
         cog.context.truth.getAllActiveAssertions().stream().map(Json::node).forEach(assertionsArray::add); // Assuming Assertion has toJsonNode()
 
-        ArrayNode rulesArray = Json.the.createArrayNode();
+        var rulesArray = Json.the.createArrayNode();
         cog.context.rules().stream().map(Json::node).forEach(rulesArray::add); // Assuming Rule has toJsonNode()
 
         payload.set("notes", notesArray);
@@ -294,7 +293,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JsonNode result, @Nullable String message) {
-        ObjectNode payload = Json.node()
+        var payload = Json.node()
                 .put("status", status);
         if (result != null) {
             payload.set("result", result);
@@ -340,8 +339,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var dataTerm = kif.get(2);
 
         // Check if both are Atoms and extract values within the successful branch
-        if (typeTerm instanceof Term.Atom(String typeValueString) && dataTerm instanceof Term.Atom(
-                String dataValueString
+        if (typeTerm instanceof Term.Atom(var typeValueString) && dataTerm instanceof Term.Atom(
+                var dataValueString
         )) {
             // Now typeValueString and dataValueString are in scope
 
@@ -480,7 +479,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     sendErrorResponse(conn, commandId, "Error executing tool: " + ex.getMessage());
                 } else {
                     // Convert tool result to JsonNode
-                    JsonNode resultJson = Json.node(result);
+                    var resultJson = Json.node(result);
                     sendSuccessResponse(conn, commandId, resultJson, "Tool executed successfully.");
                 }
             }, cog.events.exe); // Use events executor for tool result handling

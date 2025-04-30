@@ -28,10 +28,10 @@ public class Knowledge {
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     Knowledge(String kbId, int capacity, Events events, Truths truth) {
-        this.id = requireNonNull(kbId);
+        this.id = kbId;
         this.capacity = capacity;
-        this.events = requireNonNull(events);
-        this.truth = requireNonNull(truth);
+        this.events = events;
+        this.truth = truth;
         this.paths = new Logic.Path.PathIndex(truth);
         this.groundEvictionQueue = new PriorityBlockingQueue<>(1024,
                 Comparator.<String, Double>

@@ -153,7 +153,7 @@ abstract class AbstractTest {
             throw new IllegalArgumentException("retract target list must be size 2 (TYPE TARGET). Found size: " + retractTargetList.size() + ". Term: " + actionList.toKif());
         }
         var typeTerm = retractTargetList.get(0);
-        if (!(typeTerm instanceof Term.Atom(String value))) {
+        if (!(typeTerm instanceof Term.Atom(var value))) {
             throw new IllegalArgumentException("retract target list's first element must be an Atom (TYPE). Found: " + typeTerm.getClass().getSimpleName() + ". Term: " + actionList.toKif());
         }
         try {
@@ -538,7 +538,7 @@ abstract class AbstractTest {
 
     private Object executeRetractAction(TestAction action) {
         if (!(action.payload instanceof Term.Lst retractTargetList) || retractTargetList.size() != 2 || !(retractTargetList.get(0) instanceof Term.Atom(
-                String value
+                var value
         ))) {
             throw new IllegalArgumentException("Invalid payload for retract: Expected (TYPE TARGET). Found: " + (action.payload == null ? "null" : action.payload.toKif()));
         }
@@ -558,7 +558,7 @@ abstract class AbstractTest {
             }
             targetStr = list.toKif();
         } else if (retractionType == RetractionType.BY_ID) {
-            if (!(target instanceof Term.Atom(String v)))
+            if (!(target instanceof Term.Atom(var v)))
                 throw new IllegalArgumentException("Invalid target for retract BY_ID: Expected Atom (ID). Found: " + target.getClass().getSimpleName() + ". Term: " + target.toKif());
             targetStr = v;
         } else {

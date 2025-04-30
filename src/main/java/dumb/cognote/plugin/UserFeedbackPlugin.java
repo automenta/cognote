@@ -40,7 +40,7 @@ public class UserFeedbackPlugin extends Plugin.BasePlugin {
                 // Re-processing it here would cause a loop.
                 // We could add additional logic here if needed, but for now, just acknowledge.
                 if (feedbackList.size() == 3 && feedbackList.get(1) instanceof Term.Atom && feedbackList.get(2) instanceof Term.Atom(
-                        String v
+                        var v
                 )) {
                     message("UserFeedbackPlugin: Received user asserted KIF in note [" + v + "]: " + v);
                 } else {
@@ -49,7 +49,7 @@ public class UserFeedbackPlugin extends Plugin.BasePlugin {
                 break;
             case PRED_USER_EDITED_NOTE_TEXT:
                 // Already handled by WebSocketPlugin
-                if (feedbackList.size() == 3 && feedbackList.get(1) instanceof Term.Atom(String value)) {
+                if (feedbackList.size() == 3 && feedbackList.get(1) instanceof Term.Atom(var value)) {
                     message("UserFeedbackPlugin: Received user edited note text for note [" + value + "]");
                 } else {
                     logWarning("UserFeedbackPlugin: Invalid format for userEditedNoteText feedback: " + kif.toKif());
@@ -57,14 +57,14 @@ public class UserFeedbackPlugin extends Plugin.BasePlugin {
                 break;
             case PRED_USER_EDITED_NOTE_TITLE:
                 // Already handled by WebSocketPlugin
-                if (feedbackList.size() == 3 && feedbackList.get(1) instanceof Term.Atom(String value)) {
+                if (feedbackList.size() == 3 && feedbackList.get(1) instanceof Term.Atom(var value)) {
                     message("UserFeedbackPlugin: Received user edited note title for note [" + value + "]");
                 } else {
                     logWarning("UserFeedbackPlugin: Invalid format for userEditedNoteTitle feedback: " + kif.toKif());
                 }
                 break;
             case PRED_USER_CLICKED:
-                if (feedbackList.size() == 2 && feedbackList.get(1) instanceof Term.Atom(String value)) {
+                if (feedbackList.size() == 2 && feedbackList.get(1) instanceof Term.Atom(var value)) {
                     message("UserFeedbackPlugin: Received user click on element: " + value);
                     // Example backend action: Trigger a query or tool based on the clicked element ID
                     // This is where you'd add logic like:

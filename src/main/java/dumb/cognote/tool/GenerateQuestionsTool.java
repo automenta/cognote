@@ -53,7 +53,7 @@ public class GenerateQuestionsTool implements Tool {
                             Output ONLY the JSON array, nothing else.
                             """);
 
-                    var userMessage = UserMessage.from("Text:\n" + note.text);
+                    var userMessage = UserMessage.from("Text:\n" + note.text());
 
                     List<ChatMessage> history = new ArrayList<>();
                     history.add(systemMessage);
@@ -65,16 +65,16 @@ public class GenerateQuestionsTool implements Tool {
                 .thenApply(AiMessage::text)
                 .thenApply(jsonString -> {
                     try {
-                        JsonNode jsonNode = Json.obj(jsonString, JsonNode.class);
+                        var jsonNode = Json.obj(jsonString, JsonNode.class);
 
                         if (jsonNode == null || !jsonNode.isArray()) {
                             throw new ToolExecutionException("LLM returned invalid JSON format (not an array): " + jsonString);
                         }
 
-                        ArrayNode jsonArray = (ArrayNode) jsonNode;
+                        var jsonArray = (ArrayNode) jsonNode;
                         List<String> questions = new ArrayList<>();
 
-                        for (JsonNode element : jsonArray) {
+                        for (var element : jsonArray) {
                             if (!element.isTextual()) {
                                 throw new ToolExecutionException("LLM returned JSON array containing non-string elements.");
                             }
