@@ -614,6 +614,8 @@ class DialogueManager extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
         this.modalEl = this.el;
+        this.render(); // Call render to add HTML content
+        // Get element references *after* rendering
         this.promptEl = this.el.querySelector('#dialogue-prompt');
         this.inputEl = this.el.querySelector('#dialogue-input');
         this.sendButton = this.el.querySelector('#dialogue-send-button');
@@ -624,21 +626,46 @@ class DialogueManager extends Component {
         this.bindEvents();
     }
 
+    render() {
+        // Add the HTML structure for the dialogue modal content
+        this.el.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4>Dialogue Request</h4>
+                    <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
+                </div>
+                <div class="modal-body">
+                    <p id="dialogue-prompt"></p>
+                    <input type="text" id="dialogue-input" placeholder="Enter your response...">
+                </div>
+                <div class="modal-footer">
+                    <button id="dialogue-cancel-button">Cancel</button>
+                    <button id="dialogue-send-button">Send Response</button>
+                </div>
+            </div>
+        `;
+    }
+
     bindEvents() {
-        this.sendButton.addEventListener('click', () => this.sendResponse());
-        this.cancelButton.addEventListener('click', () => this.cancelDialogue());
-        this.closeButton.addEventListener('click', () => this.cancelDialogue());
-        this.inputEl.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.sendResponse();
-            }
-        });
-        this.modalEl.addEventListener('click', (e) => {
-            if (e.target === this.modalEl) {
-                this.cancelDialogue();
-            }
-        });
+        // Ensure elements exist before adding listeners
+        if (this.sendButton) this.sendButton.addEventListener('click', () => this.sendResponse());
+        if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.cancelDialogue());
+        if (this.closeButton) this.closeButton.addEventListener('click', () => this.cancelDialogue());
+        if (this.inputEl) {
+            this.inputEl.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.sendResponse();
+                }
+            });
+        }
+        if (this.modalEl) {
+            this.modalEl.addEventListener('click', (e) => {
+                if (e.target === this.modalEl) {
+                    this.cancelDialogue();
+                }
+            });
+        }
     }
 
     show(dialogueRequest) {
@@ -654,21 +681,23 @@ class DialogueManager extends Component {
         }
 
         this.currentDialogueId = dialogueRequest.dialogueId;
-        this.promptEl.textContent = dialogueRequest.prompt;
-        this.inputEl.value = '';
-        this.modalEl.classList.add('visible');
-        this.inputEl.focus();
+        if (this.promptEl) this.promptEl.textContent = dialogueRequest.prompt;
+        if (this.inputEl) {
+            this.inputEl.value = '';
+            this.inputEl.focus();
+        }
+        if (this.modalEl) this.modalEl.classList.add('visible');
     }
 
     hide() {
-        this.modalEl.classList.remove('visible');
+        if (this.modalEl) this.modalEl.classList.remove('visible');
         this.currentDialogueId = null;
-        this.promptEl.textContent = '';
-        this.inputEl.value = '';
+        if (this.promptEl) this.promptEl.textContent = '';
+        if (this.inputEl) this.inputEl.value = '';
     }
 
     sendResponse() {
-        if (!this.currentDialogueId) return;
+        if (!this.currentDialogueId || !this.inputEl) return;
 
         const responseText = this.inputEl.value.trim();
 
