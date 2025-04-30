@@ -52,22 +52,22 @@ class WebSocketClient {
             }
 
             switch (updateType) {
-                case 'response':
+                case Protocol.UPDATE_TYPE_RESPONSE:
                     this._handleResponse(signal.id, inReplyToId, payload);
                     break;
-                case 'event':
+                case Protocol.UPDATE_TYPE_EVENT:
                     if (payload.eventType) {
                         this._emit(payload.eventType, payload);
-                        this._emit('event', payload);
+                        this._emit('event', payload); // Also emit a generic 'event'
                     } else {
                         console.warn("Received event update without eventType:", signal);
                     }
                     break;
-                case 'initialState':
-                    this._emit('initialState', payload);
+                case Protocol.UPDATE_TYPE_INITIAL_STATE:
+                    this._emit(Protocol.UPDATE_TYPE_INITIAL_STATE, payload);
                     break;
-                case 'dialogueRequest':
-                    this._emit('dialogueRequest', payload);
+                case Protocol.UPDATE_TYPE_DIALOGUE_REQUEST:
+                    this._emit(Protocol.UPDATE_TYPE_DIALOGUE_REQUEST, payload);
                     break;
                 default:
                     console.warn(`Received unknown update type: ${updateType}`, signal);
@@ -125,7 +125,7 @@ class WebSocketClient {
         const signalId = this._generateSignalId();
         const signal = {
             id: signalId,
-            type: 'request',
+            type: 'request', // This type seems consistent with backend
             payload: { command, parameters },
         };
 
@@ -147,7 +147,9 @@ class WebSocketClient {
             clearTimeout(timeoutId);
             this.responseListeners.delete(requestId);
 
-            payload?.status === 'success' ? resolve(payload.result ?? payload) :
+            // Backend sends status in payload
+            payload?.status === Protocol.RESPONSE_STATUS_SUCCESS ?
+                resolve(payload.result ?? payload) : // Resolve with result or the whole payload if no result
                 reject(new Error(`Request ${requestId} failed: Status=${payload?.status}, Message=${payload?.message}`));
         } else {
             console.warn(`Received response update for unknown or expired request ID: ${requestId}`, {signalId, inReplyToId, payload});
@@ -180,5 +182,48 @@ class WebSocketClient {
 // Update WS_PORT to match the new default WebSocket port in the backend
 const WS_PORT = 8081;
 const WS_URL = `ws://localhost:${WS_PORT}`;
+
+// Define Protocol constants mirroring the backend Protocol.java
+export const Protocol = {
+    // Command Names (client sends these)
+    COMMAND_ASSERT_KIF: 'assertKif',
+    COMMAND_RUN_TOOL: 'runTool',
+    COMMAND_RUN_QUERY: 'query', // Note: Backend Protocol.java has 'query'
+    COMMAND_WAIT: 'wait',
+    COMMAND_RETRACT: 'retract',
+    COMMAND_CANCEL_DIALOGUE: 'cancelDialogue',
+    COMMAND_GET_INITIAL_STATE: 'initialStateRequest', // Corrected based on Protocol.java
+    COMMAND_ADD_NOTE: 'addNote',
+    COMMAND_UPDATE_NOTE: 'updateNote',
+    COMMAND_DELETE_NOTE: 'deleteNote',
+    COMMAND_CLONE_NOTE: 'cloneNote',
+    COMMAND_CLEAR_ALL: 'clearAll',
+    COMMAND_UPDATE_SETTINGS: 'updateSettings',
+    COMMAND_DIALOGUE_RESPONSE: 'dialogueResponse',
+    COMMAND_SAVE_STATE: 'saveState', // Added based on ui/note/index.js usage (not in backend Protocol.java)
+    COMMAND_LOAD_STATE: 'loadState', // Added based on ui/note/index.js usage (not in backend Protocol.java)
+
+
+    // Update Types (client receives these)
+    UPDATE_TYPE_RESPONSE: 'response',
+    UPDATE_TYPE_EVENT: 'event',
+    UPDATE_TYPE_INITIAL_STATE: 'initialState',
+    UPDATE_TYPE_DIALOGUE_REQUEST: 'dialogueRequest',
+
+    // Response Statuses
+    RESPONSE_STATUS_SUCCESS: 'success',
+    RESPONSE_STATUS_FAILURE: 'failure',
+    RESPONSE_STATUS_ERROR: 'error',
+
+    // Event Types (client receives these within UPDATE_TYPE_EVENT)
+    // These are examples based on ui/note/index.js usage, not exhaustive, and not defined in backend Protocol.java
+    EVENT_TYPE_NOTE_ADDED: 'NoteAddedEvent',
+    EVENT_TYPE_NOTE_UPDATED: 'NoteUpdatedEvent',
+    EVENT_TYPE_NOTE_DELETED: 'NoteDeletedEvent',
+    EVENT_TYPE_SYSTEM_STATUS: 'SystemStatusEvent',
+    EVENT_TYPE_LOG_MESSAGE: 'LogMessageEvent',
+    // ... potentially others like AssertionAddedEvent, RuleAddedEvent, etc.
+};
+
 
 export const websocketClient = new WebSocketClient(WS_URL);
