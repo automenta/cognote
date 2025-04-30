@@ -49,14 +49,13 @@ public class Cog {
     private static final String STATE_FILE = "cognote_state.json";
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    private static final int PORT = 8080;
     public final Cognition context;
     public final LM lm;
     public final Dialogue dialogue;
     public final Events events;
     public final Tools tools;
     public final ScheduledExecutorService mainExecutor =
-            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessators(), Thread.ofVirtual().factory());
+            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
     protected final Reason.ReasonerManager reasoner;
     final Plugins plugins;
     final AtomicBoolean running = new AtomicBoolean(true);

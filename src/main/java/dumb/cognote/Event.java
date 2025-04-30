@@ -10,8 +10,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 
-import static java.util.Objects.requireNonNull;
-
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.EXISTING_PROPERTY,
