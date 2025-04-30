@@ -18,6 +18,11 @@ class WebSocketClient {
         this.signalIdCounter = 0;
         this.responseTimeout = 15000; // Timeout for waiting for a specific response (ms)
 
+        // Dedicated handler for the initial state request promise
+        this._initialStateRequestPromise = null;
+        this._initialStateRequestTimeoutId = null;
+
+
         this._connect();
     }
 
@@ -69,6 +74,14 @@ class WebSocketClient {
                     this._handleResponse(signal);
                     break;
                 case 'initial_state':
+                    // Handle initial_state specifically to resolve the pending promise
+                    if (this._initialStateRequestPromise) {
+                         clearTimeout(this._initialStateRequestTimeoutId);
+                         this._initialStateRequestPromise.resolve(signal.payload);
+                         this._initialStateRequestPromise = null;
+                         this._initialStateRequestTimeoutId = null;
+                    }
+                    // Still emit as a generic event for other listeners
                     this._emit('initialState', signal.payload);
                     break;
                 case 'dialogue_request':
@@ -99,6 +112,15 @@ class WebSocketClient {
             reject(new Error(`WebSocket closed before response received for signal ${signalId}`));
         });
         this.responseListeners.clear();
+
+        // Reject pending initial state request
+        if (this._initialStateRequestPromise) {
+            clearTimeout(this._initialStateRequestTimeoutId);
+            this._initialStateRequestPromise.reject(new Error(`WebSocket closed before initial state received`));
+            this._initialStateRequestPromise = null;
+            this._initialStateRequestTimeoutId = null;
+        }
+
 
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -149,12 +171,9 @@ class WebSocketClient {
             signal.inReplyToId = inReplyToId;
         }
 
-        // Some signal types might expect a specific response signal with matching inReplyToId
-        // For now, we'll assume any signal *could* get a 'response' signal back,
-        // but the primary use case for the promise is likely 'command' or specific requests.
         // Based on Protocol.java, 'response' signals are sent in reply to 'input', 'command', 'initial_state_request', 'dialogue_response'.
-        // Let's make it promise-based for 'input', 'command', 'initial_state_request', 'dialogue_response'.
-        const expectsResponse = ['input', 'command', 'initial_state_request', 'dialogue_response'].includes(type);
+        // 'initial_state' is a special case handled directly by _onMessage.
+        const expectsResponse = ['input', 'command', 'dialogue_response'].includes(type);
 
         if (expectsResponse) {
             return new Promise((resolve, reject) => {
@@ -166,7 +185,26 @@ class WebSocketClient {
                 this.responseListeners.set(signal.id, {resolve, reject, timeoutId});
                 this._send(signal);
             });
-        } else {
+        } else if (type === 'initial_state_request') {
+             // Handle initial_state_request specially
+             return new Promise((resolve, reject) => {
+                 // Clear any previous pending initial state request
+                 if (this._initialStateRequestPromise) {
+                     clearTimeout(this._initialStateRequestTimeoutId);
+                     this._initialStateRequestPromise.reject(new Error("New initial state request sent before previous one completed."));
+                 }
+
+                 this._initialStateRequestPromise = { resolve, reject };
+                 this._initialStateRequestTimeoutId = setTimeout(() => {
+                     this._initialStateRequestPromise = null;
+                     this._initialStateRequestTimeoutId = null;
+                     reject(new Error(`Response timeout for signal ${signal.id} (${type})`));
+                 }, this.responseTimeout);
+
+                 this._send(signal);
+             });
+        }
+        else {
             this._send(signal);
             return Promise.resolve(); // No specific response expected
         }
@@ -253,6 +291,7 @@ class WebSocketClient {
      * @returns {Promise<object|void>} A promise that resolves with the initial state payload.
      */
     sendInitialStateRequest() {
+        // This is handled specially in sendSignal to await the 'initial_state' signal type
         return this.sendSignal('initial_state_request', {});
     }
 
