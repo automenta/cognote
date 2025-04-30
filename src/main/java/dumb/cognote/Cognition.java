@@ -34,8 +34,8 @@ public class Cognition {
         activeNoteIds.add(GLOBAL_KB_NOTE_ID);
     }
 
-    public static Term.Lst performSkolemization(Term.Lst existentialFormula, Collection<Term.Var> existentialVars, Map<Term.Var, Term> contextBindings) {
-        return Logic.Skolemizer.skolemize(existentialFormula, existentialVars, contextBindings);
+    public static Term.Lst performSkolemization(Term.Lst existentialFormula, Map<Term.Var, Term> contextBindings) {
+        return Logic.Skolemizer.skolemize(existentialFormula, contextBindings);
     }
 
     public static Term.Lst simplifyLogicalTerm(Term.Lst term) {

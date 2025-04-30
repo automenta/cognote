@@ -373,7 +373,7 @@ public class Reason {
             var depth = getCogNoteContext().calculateDerivedDepth(result.supportIds()) + 1;
             if (depth > getDerivationDepthMax()) return;
 
-            var skolemBody = Cognition.performSkolemization(exists, vars, result.bindings());
+            var skolemBody = Cognition.performSkolemization(exists, result.bindings());
             var props = getDerivedAssertionProperties(skolemBody);
             var pa = new Assertion.PotentialAssertion(skolemBody, getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri()), result.supportIds(), rule.id(), props.isEq(), props.isNeg(), props.isOriented(), targetNoteId, props.type(), List.of(), depth);
             tryCommit(pa, rule.id());
