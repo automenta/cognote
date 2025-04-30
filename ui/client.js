@@ -12,14 +12,6 @@ class WebSocketClient {
         this.signalIdCounter = 0;
         this.responseTimeout = 15000;
 
-        this.SIGNAL_TYPE_REQUEST = 'request';
-        this.SIGNAL_TYPE_UPDATE = 'update';
-
-        this.UPDATE_TYPE_RESPONSE = 'response';
-        this.UPDATE_TYPE_EVENT = 'event';
-        this.UPDATE_TYPE_INITIAL_STATE = 'initialState';
-        this.UPDATE_TYPE_DIALOGUE_REQUEST = 'dialogueRequest';
-
         this._connect();
     }
 
@@ -47,7 +39,7 @@ class WebSocketClient {
         try {
             const signal = JSON.parse(event.data);
 
-            if (!signal || typeof signal !== 'object' || signal.type !== this.SIGNAL_TYPE_UPDATE) {
+            if (!signal || typeof signal !== 'object' || signal.type !== 'update') {
                 console.warn("Received invalid or non-update signal format:", signal);
                 return;
             }
@@ -60,10 +52,10 @@ class WebSocketClient {
             }
 
             switch (updateType) {
-                case this.UPDATE_TYPE_RESPONSE:
+                case 'response':
                     this._handleResponse(signal.id, inReplyToId, payload);
                     break;
-                case this.UPDATE_TYPE_EVENT:
+                case 'event':
                     if (payload.eventType) {
                         this._emit(payload.eventType, payload);
                         this._emit('event', payload);
@@ -71,10 +63,10 @@ class WebSocketClient {
                         console.warn("Received event update without eventType:", signal);
                     }
                     break;
-                case this.UPDATE_TYPE_INITIAL_STATE:
+                case 'initialState':
                     this._emit('initialState', payload);
                     break;
-                case this.UPDATE_TYPE_DIALOGUE_REQUEST:
+                case 'dialogueRequest':
                     this._emit('dialogueRequest', payload);
                     break;
                 default:
@@ -133,7 +125,7 @@ class WebSocketClient {
         const signalId = this._generateSignalId();
         const signal = {
             id: signalId,
-            type: this.SIGNAL_TYPE_REQUEST,
+            type: 'request',
             payload: { command, parameters },
         };
 

@@ -659,13 +659,10 @@ class DialogueManager extends Component {
         if (!this.currentDialogueId || !this.inputEl) return;
 
         const responseText = this.inputEl.value.trim();
-        console.log(`Sending dialogue response for ${this.currentDialogueId}: "${responseText}"`);
-
         websocketClient.sendRequest('dialogueResponse', {
             dialogueId: this.currentDialogueId,
             responseData: { text: responseText }
         })
-            .then(response => console.log('Dialogue response acknowledged by backend:', response))
             .catch(err => (console.error('Failed to send dialogue response:', err), Notifier.error('Failed to send dialogue response.')));
 
         this.hide();
@@ -674,9 +671,7 @@ class DialogueManager extends Component {
     cancelDialogue() {
         if (!this.currentDialogueId) return;
 
-        console.log(`Cancelling dialogue ${this.currentDialogueId}`);
         websocketClient.sendRequest('cancelDialogue', { dialogueId: this.currentDialogueId })
-            .then(response => console.log('Dialogue cancellation acknowledged by backend:', response))
             .catch(err => (console.error('Failed to send cancelDialogue command:', err), Notifier.error('Failed to cancel dialogue.')));
 
         this.hide();
@@ -702,7 +697,7 @@ class App {
         console.log("Netention Note App Ready");
 
         websocketClient.isConnected ?
-            (console.log('WS already connected, requesting initial state...'), this.requestInitialState().catch(err => (console.error('Failed to request initial state on ready WS:', err), Notifier.error('Failed to load initial state.')))) :
+            this.requestInitialState().catch(err => (console.error('Failed to request initial state on ready WS:', err), Notifier.error('Failed to load initial state.'))) :
             console.log('WS not connected, waiting for connection...');
     }
 
@@ -727,7 +722,6 @@ class App {
 
     bindWebSocketEvents() {
         websocketClient.on('connected', () => {
-            console.log('WS Connected');
             Notifier.info('Connected to backend.');
             this.requestInitialState().catch(err => (console.error('Failed to request initial state:', err), Notifier.error('Failed to load initial state.')));
         });
@@ -767,7 +761,6 @@ class App {
     }
 
     handleInitialState(state) {
-        console.log('Received initial state:', state);
         if (state?.notes) {
             this.notes = state.notes;
             this.settings = state.configuration || {};
@@ -796,7 +789,6 @@ class App {
     }
 
     handleNoteStatusEvent(event) {
-        console.log('Received NoteStatusEvent:', event);
         const updatedNote = event.note;
         if (!updatedNote?.id) {
              console.warn('NoteStatusEvent received without valid note data.');
@@ -816,7 +808,6 @@ class App {
     }
 
     handleNoteUpdatedEvent(event) {
-        console.log('Received NoteUpdatedEvent:', event);
         const updatedNote = event.updatedNote;
          if (!updatedNote?.id) {
              console.warn('NoteUpdatedEvent received without valid note data.');
@@ -837,7 +828,6 @@ class App {
     }
 
     handleNoteDeletedEvent(event) {
-        console.log('Received NoteDeletedEvent:', event);
         const noteId = event.noteId;
         if (!noteId) {
              console.warn('NoteDeletedEvent received without noteId.');
@@ -865,7 +855,6 @@ class App {
     }
 
     handleNoteAddedEvent(event) {
-        console.log('Received AddedEvent:', event);
         const newNote = event.note;
         if (!newNote?.id) {
              console.warn('AddedEvent received without valid note data.');
@@ -873,7 +862,6 @@ class App {
         }
 
         if (!this.notes.some(n => n.id === newNote.id)) {
-            console.log('Adding new note to local state:', newNote.id);
             this.notes.unshift(newNote);
             this.sortAndFilter();
             this.selectNote(newNote.id);
@@ -939,15 +927,13 @@ class App {
                     state: n.state,
                     priority: n.priority,
                     color: n.color
-                }).then(response => {
-                    console.log(`Backend acknowledged update for ${n.id}:`, response);
+                }).then(() => {
                     this.editor.setSaveStatus('Saved');
                 }).catch(err => {
                     console.error(`Failed to send update for ${n.id}:`, err);
                     this.editor.setSaveStatus('Save Failed');
                     Notifier.error(`Failed to save note "${n.title || 'Untitled'}".`);
                 });
-                console.log(`Attempted save for ${n.id}`);
                 return true;
             } else {
                 this.editor.setSaveStatus('');
@@ -973,7 +959,7 @@ class App {
         this.editor.metaEl.textContent = 'Requesting new note...';
 
         websocketClient.sendRequest('addNote', newNoteData)
-            .then(response => (console.log('Backend acknowledged new note creation:', response), Notifier.info("New note creation requested.")))
+            .then(() => Notifier.info("New note creation requested."))
             .catch(err => (console.error('Failed to send new note command:', err), Notifier.error("Failed to create new note."), this.editor.metaEl.textContent = 'Failed to create new note. Select or create a note.'));
     }
 
@@ -982,7 +968,6 @@ class App {
         if (n) {
             const newPriority = (n.priority || 0) + delta;
             websocketClient.sendRequest('updateNote', { noteId: id, priority: newPriority })
-                .then(response => console.log(`Backend acknowledged priority update for ${id}:`, response))
                 .catch(err => (console.error(`Failed to send priority update for ${id}:`, err), Notifier.error(`Failed to update priority for "${n.title || 'Untitled'}".`)));
             Notifier.info(`Priority update requested for "${n.title || 'Untitled'}"`);
         } else {
@@ -1004,7 +989,7 @@ class App {
                 break;
             case 'clone':
                 n ? websocketClient.sendRequest('cloneNote', {noteId: n.id})
-                        .then(response => (console.log('Backend acknowledged note clone:', response), Notifier.info('Note cloning requested.')))
+                        .then(() => Notifier.info('Note cloning requested.'))
                         .catch(err => (console.error('Failed to send clone note command:', err), Notifier.error('Failed to clone note.')))
                     : Notifier.warning('Select note to clone.');
                 break;
@@ -1021,7 +1006,7 @@ class App {
             case 'delete':
                 n && confirm(`Delete "${n.title || 'Untitled Note'}"?`) ?
                     websocketClient.sendRequest('deleteNote', {noteId: n.id})
-                        .then(response => (console.log('Backend acknowledged note deletion:', response), Notifier.success('Note deletion requested.')))
+                        .then(() => Notifier.success('Note deletion requested.'))
                         .catch(err => (console.error('Failed to send delete note command:', err), Notifier.error('Failed to delete note.')))
                     : !n && Notifier.warning('Select note to delete.');
                 break;
@@ -1036,7 +1021,6 @@ class App {
     updateNoteState(note, newState) {
         note ?
             (websocketClient.sendRequest('updateNote', { noteId: note.id, state: newState })
-                .then(response => console.log(`Backend acknowledged state update for ${note.id}:`, response))
                 .catch(err => (console.error(`Failed to send state update for ${note.id}:`, err), Notifier.error(`Failed to set note state to ${newState}.`))),
              Notifier.info(`Note "${note.title || 'Untitled'}" set to ${newState}.`))
             : Notifier.warning(`Select a note to set ${newState}.`);
@@ -1045,7 +1029,6 @@ class App {
     updateSettings(settings) {
         this.settings = settings;
         websocketClient.sendRequest('updateSettings', {settings: settings})
-            .then(response => console.log('Backend acknowledged settings update:', response))
             .catch(err => (console.error('Failed to send settings update command:', err), Notifier.error('Failed to save settings.')));
     }
 
@@ -1055,13 +1038,12 @@ class App {
 
     sendCommand(commandName, parameters = {}) {
         websocketClient.sendRequest(commandName, parameters)
-            .then(response => (console.log(`Backend acknowledged command '${commandName}':`, response), Notifier.info(`Command '${commandName}' requested.`)))
+            .then(() => Notifier.info(`Command '${commandName}' requested.`))
             .catch(err => (console.error(`Failed to run command '${commandName}'.`), Notifier.error(`Failed to run command '${commandName}'.`)));
     }
 
     cancelDialogue(dialogueId) {
         websocketClient.sendRequest('cancelDialogue', {dialogueId: dialogueId})
-            .then(response => console.log(`Backend acknowledged dialogue cancellation ${dialogueId}:`, response))
             .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));
     }
 }
