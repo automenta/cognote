@@ -129,8 +129,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
             switch (type) {
                 case SIGNAL_TYPE_INPUT -> handleInputSignal(conn, id, payload);
+                case SIGNAL_TYPE_COMMAND -> handleCommandSignal(conn, id, payload); // Handle command signals
                 case SIGNAL_TYPE_INITIAL_STATE_REQUEST -> sendInitialState(conn);
                 case SIGNAL_TYPE_DIALOGUE_RESPONSE -> handleDialogueResponse(conn, id, inReplyToId, payload);
+                case SIGNAL_TYPE_UI_ACTION -> handleUiActionSignal(conn, id, payload); // Handle UI Action signal
                 default -> sendErrorResponse(conn, id, "Unknown signal type: " + type);
             }
 
@@ -214,6 +216,158 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
+    // Added handler for command signals
+    private void handleCommandSignal(WebSocket conn, String signalId, JsonNode payload) {
+        var commandNameNode = payload.get("command");
+        var parametersNode = payload.get("parameters");
+
+        if (commandNameNode == null || !commandNameNode.isTextual() || parametersNode == null || !parametersNode.isObject()) {
+            sendFailureResponse(conn, signalId, "Invalid COMMAND signal: missing 'command' (string) or 'parameters' (object).");
+            return;
+        }
+
+        var commandName = commandNameNode.asText();
+        // For now, just log and acknowledge. Actual command execution logic
+        // would need to be integrated here or routed to a command processor.
+        // The REPL's /query, /tool, /wait, /retract commands are currently
+        // handled by the RequestProcessorPlugin which listens for assertions
+        // in kb://client-input. This handler is for future direct commands.
+        message(String.format("Received COMMAND signal: %s with params %s", commandName, parametersNode.toString()));
+
+        // Example: Route to RequestProcessorPlugin by asserting into kb://client-input
+        // This is a simplified example; a proper command handler might be better.
+        // The REPL's /query, /tool, /wait, /retract commands are currently
+        // handled by the RequestProcessorPlugin which listens for assertions
+        // in kb://client-input. This handler is for future direct commands.
+        // Given the REPL code, it seems it *does* send SIGNAL_TYPE_COMMAND.
+        // So, we need to parse the command and parameters and assert the request.
+
+        try {
+            Term.Lst requestTerm = null;
+            String sourceId = "client:" + conn.getRemoteSocketAddress().toString();
+            String noteId = null; // Commands might not have a specific note context
+
+            switch (commandName) {
+                case "query":
+                    var patternNode = parametersNode.get("pattern");
+                    if (patternNode == null || !patternNode.isTextual()) throw new IllegalArgumentException("Missing 'pattern' for query command.");
+                    var pattern = KifParser.parseKif(patternNode.asText()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Invalid KIF pattern for query."));
+                    if (!(pattern instanceof Term.Lst)) throw new IllegalArgumentException("Query pattern must be a KIF list.");
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("query"), pattern, Json.node(parametersNode));
+                    break;
+                case "runTool":
+                    var toolNameNode = parametersNode.get("name");
+                     if (toolNameNode == null || !toolNameNode.isTextual()) throw new IllegalArgumentException("Missing 'name' for runTool command.");
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("runTool"), Term.Atom.of(toolNameNode.asText()), Json.node(parametersNode));
+                    break;
+                case "wait":
+                    var conditionNode = parametersNode.get("condition"); // Assuming condition is passed as a KIF string in params
+                     if (conditionNode == null || !conditionNode.isTextual()) throw new IllegalArgumentException("Missing 'condition' for wait command.");
+                    var conditionTerm = KifParser.parseKif(conditionNode.asText()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Invalid KIF condition for wait."));
+                    if (!(conditionTerm instanceof Term.Lst)) throw new IllegalArgumentException("Wait condition must be a KIF list.");
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("wait"), conditionTerm, Json.node(parametersNode));
+                    break;
+                 case "retract":
+                    var retractTypeNode = parametersNode.get("type");
+                    var retractTargetNode = parametersNode.get("target");
+                    if (retractTypeNode == null || !retractTypeNode.isTextual() || retractTargetNode == null || !retractTargetNode.isTextual()) throw new IllegalArgumentException("Missing 'type' or 'target' for retract command.");
+                    var retractType = retractTypeNode.asText();
+                    var retractTarget = retractTargetNode.asText();
+                    // Retract command is handled directly by RetractionPlugin listening for RetractionRequestEvent
+                    // We should emit that event here, not assert a request term.
+                    Logic.RetractionType typeEnum;
+                    try {
+                        typeEnum = Logic.RetractionType.valueOf(retractType.toUpperCase());
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalArgumentException("Invalid retraction type: " + retractType);
+                    }
+                    events.emit(new Event.RetractionRequestEvent(retractTarget, typeEnum, sourceId, noteId));
+                    sendSuccessResponse(conn, signalId, null, "Retraction request emitted.");
+                    return; // Handled directly, no assertion needed
+                 case "cancelDialogue":
+                    var dialogueIdNode = parametersNode.get("dialogueId");
+                    if (dialogueIdNode == null || !dialogueIdNode.isTextual()) throw new IllegalArgumentException("Missing 'dialogueId' for cancelDialogue command.");
+                    cog.dialogue.cancel(dialogueIdNode.asText());
+                    sendSuccessResponse(conn, signalId, null, "Dialogue cancellation requested.");
+                    return; // Handled directly, no assertion needed
+
+                default:
+                    throw new IllegalArgumentException("Unsupported command: " + commandName);
+            }
+
+            if (requestTerm != null) {
+                 var potentialAssertion = new Assertion.PotentialAssertion(
+                        requestTerm,
+                        INPUT_ASSERTION_BASE_PRIORITY, // Or a specific command priority
+                        Set.of(),
+                        sourceId,
+                        false, false, false,
+                        KB_CLIENT_INPUT, // Assert into the client input KB
+                        Logic.AssertionType.GROUND,
+                        List.of(),
+                        0
+                );
+                context.tryCommit(potentialAssertion, sourceId);
+                sendSuccessResponse(conn, signalId, null, "Command asserted as request: " + requestTerm.toKif());
+            } else {
+                 sendFailureResponse(conn, signalId, "Command did not result in an assertion.");
+            }
+
+
+        } catch (Exception e) {
+            error("Error processing COMMAND signal: " + e.getMessage());
+            e.printStackTrace();
+            sendErrorResponse(conn, signalId, "Error processing command: " + e.getMessage());
+        }
+    }
+
+
+    // Added handler for UI Action signals
+    private void handleUiActionSignal(WebSocket conn, String signalId, JsonNode payload) {
+        var actionTypeNode = payload.get("actionType");
+        var actionDataNode = payload.get("actionData");
+
+        if (actionTypeNode == null || !actionTypeNode.isTextual() || actionDataNode == null) {
+            sendFailureResponse(conn, signalId, "Invalid UI_ACTION signal: missing 'actionType' (string) or 'actionData'.");
+            return;
+        }
+
+        var actionType = actionTypeNode.asText();
+        var actionData = actionDataNode; // Keep as JsonNode
+
+        try {
+            // Create a KIF term representing the UI action
+            var uiActionTerm = new Term.Lst(
+                    Term.Atom.of(Protocol.PRED_UI_ACTION),
+                    Term.Atom.of(actionType),
+                    Term.Atom.of(Json.str(actionData)) // Store actionData as a JSON string atom
+            );
+
+            // Assert this term into the dedicated KB for UI actions
+            var potentialAssertion = new Assertion.PotentialAssertion(
+                    uiActionTerm,
+                    INPUT_ASSERTION_BASE_PRIORITY, // Or a specific UI action priority
+                    Set.of(),
+                    "client:" + conn.getRemoteSocketAddress().toString(),
+                    false, false, false,
+                    Protocol.KB_UI_ACTIONS, // Assert into the UI Actions KB
+                    Logic.AssertionType.GROUND,
+                    List.of(),
+                    0
+            );
+
+            context.tryCommit(potentialAssertion, "websocket-ui-action");
+
+            sendSuccessResponse(conn, signalId, null, "UI action asserted: " + uiActionTerm.toKif());
+
+        } catch (Exception e) {
+            error("Error processing UI_ACTION signal: " + e.getMessage());
+            e.printStackTrace();
+            sendErrorResponse(conn, signalId, "Error processing UI action: " + e.getMessage());
+        }
+    }
+
+
     private void handleDialogueResponse(WebSocket conn, String responseId, @Nullable String inReplyToId, JsonNode payload) {
         var dialogueIdNode = payload.get("dialogueId");
         var responseDataNode = payload.get("responseData");
@@ -227,13 +381,20 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         cog.dialogue.handleResponse(dialogueId, responseDataNode)
                 .ifPresentOrElse(
                         future -> {
+                            // Response handled, future will complete
+                            // We could wait for the future here and send a success/failure response
+                            // based on its outcome, but for now, just handling the response is enough.
+                            // The original request that triggered the dialogue will get its result
+                            // when the dialogue future completes.
+                            sendSuccessResponse(conn, responseId, null, "Dialogue response processed.");
                         },
                         () -> sendErrorResponse(conn, responseId, "No pending dialogue request found for ID: " + dialogueId)
                 );
     }
 
     private void broadcastEvent(Event event) {
-        if (event instanceof Answer.AnswerEvent || event instanceof Event.TaskUpdateEvent || event instanceof Events.DialogueRequestEvent) {
+        // Filter out events that are handled by specific broadcast methods
+        if (event instanceof Answer.AnswerEvent || event instanceof Event.TaskUpdateEvent || event instanceof Events.DialogueRequestEvent || event instanceof Events.LogMessageEvent) {
             return;
         }
 
@@ -304,7 +465,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         payload.set("notes", notesArray);
         payload.set("assertions", assertionsArray);
         payload.set("rules", rulesArray);
-        payload.set("tasks", Json.the.createArrayNode());
+        payload.set("tasks", Json.the.createArrayNode()); // Tasks are not part of snapshot currently
 
         ObjectNode initialState = Json.node()
                 .put("type", SIGNAL_TYPE_INITIAL_STATE)
