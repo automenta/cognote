@@ -634,7 +634,8 @@ public class Reason {
 
                                     if (opResult == null) return Stream.empty();
 
-                                    if (opResult instanceof Term.Atom(String value)) {
+                                    if (opResult instanceof Term.Atom atomResult) {
+                                        String value = atomResult.value();
                                         if ("true".equals(value)) return Stream.of(bindings);
                                         if ("false".equals(value)) return Stream.empty();
                                     }
