@@ -233,7 +233,7 @@ class Editor extends Component {
     load(n) {
         if (n) {
             this.$title.val(n.title).prop('disabled', !1);
-            this.$content.html(n.content).prop('contenteditable', !0);
+            this.$content.html(n.content).prop('contenteditable', !0); // Set contenteditable to true when loading a note
             this.updateMeta(n);
         } else this.clear();
     }
@@ -244,7 +244,7 @@ class Editor extends Component {
 
     clear() {
         this.$title.val('').prop('disabled', !0);
-        this.$content.html('').prop('contenteditable', !1);
+        this.$content.html('').prop('contenteditable', !1); // Set contenteditable to false when clearing
         this.$meta.text('Select or create a note');
     }
 
