@@ -93,7 +93,7 @@ public class Cog {
 
     public static void main(String[] args) {
         String rulesFile = null;
-        var port = 8080;
+        var port = 8081;
 
         for (var i = 0; i < args.length; i++) {
             try {
