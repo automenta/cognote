@@ -1,8 +1,9 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -13,6 +14,7 @@ import java.util.stream.Collectors;
 import static dumb.cognote.Logic.AssertionType.UNIVERSAL;
 import static java.util.Objects.requireNonNull;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nullable String sourceNoteId,
                         Set<String> justificationIds, Logic.AssertionType type,
                         boolean isEquality, boolean isOrientedEquality, boolean negated,
@@ -77,27 +79,23 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
         return new Assertion(id, kif, pri, timestamp, sourceNoteId, justificationIds, type, isEquality, isOrientedEquality, negated, quantifiedVars, derivationDepth, newActiveStatus, kb);
     }
 
-    public JSONObject toJson() {
-        var json = new JSONObject()
-                .put("type", "assertion")
-                .put("id", id)
-                .put("kifJson", kif.toJson())
-                .put("kifString", kif.toKif())
-                .put("pri", pri)
-                .put("timestamp", timestamp)
-                .put("assertionType", type.name())
-                .put("isEquality", isEquality)
-                .put("negated", negated)
-                .put("derivationDepth", derivationDepth)
-                .put("isActive", isActive)
-                .put("kbId", kb);
+    @JsonProperty("kifJson") // Map kif field to kifJson in JSON
+    public JsonNode getKifJson() {
+        return kif.toJson();
+    }
 
-        if (sourceNoteId != null) json.put("sourceNoteId", sourceNoteId);
-        if (!justificationIds.isEmpty()) json.put("justificationIds", new JSONArray(justificationIds));
-        if (!quantifiedVars.isEmpty())
-            json.put("quantifiedVars", new JSONArray(quantifiedVars.stream().map(Term.Var::toJson).collect(Collectors.toList())));
+    @JsonProperty("kifString") // Add kifString property to JSON
+    public String getKifString() {
+        return kif.toKif();
+    }
 
-        return json;
+    @JsonProperty("assertionType") // Map type field to assertionType in JSON
+    public Logic.AssertionType getAssertionType() {
+        return type;
+    }
+
+    public JsonNode toJson() {
+        return JsonUtil.toJsonNode(this);
     }
 
     public record PotentialAssertion(Term.Lst kif, double pri, Set<String> support, String sourceId, boolean isEquality,

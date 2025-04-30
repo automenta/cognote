@@ -1,7 +1,9 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONObject;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -11,6 +13,7 @@ import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double pri,
                    List<Term> antecedents, @Nullable String sourceNoteId) {
     public Rule {
@@ -77,15 +80,18 @@ public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, d
         }
     }
 
-    public JSONObject toJson() {
-        var json = new JSONObject()
-                .put("type", "rule")
-                .put("id", id)
-                .put("formJson", form.toJson())
-                .put("formString", form.toKif())
-                .put("pri", pri);
-        if (sourceNoteId != null) json.put("sourceNoteId", sourceNoteId);
-        return json;
+    @JsonProperty("formJson") // Map form field to formJson in JSON
+    public JsonNode getFormJson() {
+        return form.toJson();
+    }
+
+    @JsonProperty("formString") // Add formString property to JSON
+    public String getFormString() {
+        return form.toKif();
+    }
+
+    public JsonNode toJson() {
+        return JsonUtil.toJsonNode(this);
     }
 
     @Override

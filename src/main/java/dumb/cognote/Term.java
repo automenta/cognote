@@ -1,7 +1,9 @@
 package dumb.cognote;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.JsonTypeName;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -13,6 +15,16 @@ import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.EXISTING_PROPERTY,
+        property = "type",
+        visible = true)
+@JsonSubTypes({
+        @JsonSubTypes.Type(value = Term.Atom.class, name = "atom"),
+        @JsonSubTypes.Type(value = Term.Var.class, name = "var"),
+        @JsonSubTypes.Type(value = Term.Lst.class, name = "list")
+})
 sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
     static Set<Var> collectSpecVars(Term varsTerm) {
         return switch (varsTerm) {
@@ -43,8 +55,14 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         };
     }
 
-    JSONObject toJson();
+    // Jackson requires a 'type' property for @JsonTypeInfo
+    String getType();
 
+    default JsonNode toJson() {
+        return JsonUtil.toJsonNode(this);
+    }
+
+    @JsonTypeName("var")
     record Var(String name) implements Term {
         private static final Map<String, Var> internCache = new ConcurrentHashMap<>(256);
 
@@ -70,7 +88,7 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
 
         @Override
         public Set<Var> vars() {
-            return Set.of(this);
+            return Set.of();
         }
 
         @Override
@@ -84,14 +102,12 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         }
 
         @Override
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "var")
-                    .put("name", name)
-                    .put("kifString", toKif());
+        public String getType() {
+            return "var";
         }
     }
 
+    @JsonTypeName("list")
     final class Lst implements Term {
         public final List<Term> terms;
         private volatile int hashCodeCache;
@@ -107,6 +123,10 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
 
         public Lst(Term... terms) {
             this(List.of(terms));
+        }
+
+        public List<Term> getTerms() { // Jackson getter
+            return terms;
         }
 
         public Term get(int index) {
@@ -173,16 +193,12 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         }
 
         @Override
-        public JSONObject toJson() {
-            var jsonTerms = new JSONArray();
-            terms.forEach(term -> jsonTerms.put(term.toJson()));
-            return new JSONObject()
-                    .put("type", "list")
-                    .put("terms", jsonTerms)
-                    .put("kifString", toKif());
+        public String getType() {
+            return "list";
         }
     }
 
+    @JsonTypeName("atom")
     record Atom(String value) implements Term {
         private static final Pattern SAFE_ATOM_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\-+*/.<>=:!#%&']+$");
         private static final Map<String, Atom> internCache = new ConcurrentHashMap<>(1024);
@@ -222,11 +238,8 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         }
 
         @Override
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "atom")
-                    .put("value", value)
-                    .put("kifString", toKif());
+        public String getType() {
+            return "atom";
         }
     }
 }

@@ -1,7 +1,12 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONObject;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -79,13 +84,14 @@ public class Cog {
     }
 
     static Note createDefaultConfigNote() {
-        var configJson = new JSONObject()
-                .put("llmApiUrl", LM.DEFAULT_LLM_URL)
-                .put("llmModel", LM.DEFAULT_LLM_MODEL)
-                .put("globalKbCapacity", DEFAULT_KB_CAPACITY)
-                .put("reasoningDepthLimit", DEFAULT_REASONING_DEPTH)
-                .put("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, configJson.toString(2), Note.Status.IDLE);
+        var config = new CogNote.Configuration(
+                LM.DEFAULT_LLM_URL,
+                LM.DEFAULT_LLM_MODEL,
+                DEFAULT_KB_CAPACITY,
+                DEFAULT_REASONING_DEPTH,
+                DEFAULT_BROADCAST_INPUT
+        );
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, JsonUtil.toJsonString(config), Note.Status.IDLE);
     }
 
     public void start() {
@@ -103,7 +109,7 @@ public class Cog {
         status("Stopping");
         paused.set(false);
         synchronized (pauseLock) {
-            pauseLock.notifyAll();
+                pauseLock.notifyAll();
         }
 
         shutdownExecutor(mainExecutor, "Main Executor");
@@ -229,12 +235,40 @@ public class Cog {
         boolean test(double a, double b);
     }
 
+    @JsonTypeInfo(
+            use = JsonTypeInfo.Id.NAME,
+            include = JsonTypeInfo.As.EXISTING_PROPERTY,
+            property = "eventType",
+            visible = true)
+    @JsonSubTypes({
+            @JsonSubTypes.Type(value = AssertedEvent.class, name = "AssertedEvent"),
+            @JsonSubTypes.Type(value = RetractedEvent.class, name = "RetractedEvent"),
+            @JsonSubTypes.Type(value = AssertionEvictedEvent.class, name = "AssertionEvictedEvent"),
+            @JsonSubTypes.Type(value = AssertionStateEvent.class, name = "AssertionStateEvent"),
+            @JsonSubTypes.Type(value = TemporaryAssertionEvent.class, name = "TemporaryAssertionEvent"),
+            @JsonSubTypes.Type(value = RuleAddedEvent.class, name = "RuleAddedEvent"),
+            @JsonSubTypes.Type(value = RuleRemovedEvent.class, name = "RuleRemovedEvent"),
+            @JsonSubTypes.Type(value = TaskUpdateEvent.class, name = "TaskUpdateEvent"),
+            @JsonSubTypes.Type(value = SystemStatusEvent.class, name = "SystemStatusEvent"),
+            @JsonSubTypes.Type(value = AddedEvent.class, name = "AddedEvent"),
+            @JsonSubTypes.Type(value = RemovedEvent.class, name = "RemovedEvent"),
+            @JsonSubTypes.Type(value = ExternalInputEvent.class, name = "ExternalInputEvent"),
+            @JsonSubTypes.Type(value = RetractionRequestEvent.class, name = "RetractionRequestEvent"),
+            @JsonSubTypes.Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"), // From Events.java
+            @JsonSubTypes.Type(value = Events.DialogueRequestEvent.class, name = "DialogueRequestEvent"), // From Events.java
+            @JsonSubTypes.Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"), // From Truths.java
+            @JsonSubTypes.Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"), // From Answer.java
+            @JsonSubTypes.Type(value = Query.QueryEvent.class, name = "QueryEvent"), // From Query.java
+            @JsonSubTypes.Type(value = CogNote.NoteStatusEvent.class, name = "NoteStatusEvent") // From CogNote.java
+    })
     public interface CogEvent {
         default String assocNote() {
             return null;
         }
 
-        JSONObject toJson();
+        JsonNode toJson(); // Return JsonNode instead of JSONObject
+
+        String getEventType(); // Required for @JsonTypeInfo
     }
 
     public interface NoteEvent extends CogEvent {
@@ -264,6 +298,7 @@ public class Cog {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AssertedEvent(Assertion assertion, String kbId) implements AssertionEvent {
 
         @Override
@@ -271,16 +306,17 @@ public class Cog {
             return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "AssertedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("assertion", assertion.toJson())
-                            .put("kbId", kbId));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "AssertedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RetractedEvent(Assertion assertion, String kbId, String reason) implements AssertionEvent {
 
         @Override
@@ -288,63 +324,73 @@ public class Cog {
             return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "RetractedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("assertion", assertion.toJson())
-                            .put("kbId", kbId)
-                            .put("reason", reason));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "RetractedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AssertionEvictedEvent(Assertion assertion, String kbId) implements AssertionEvent {
         @Override
         public String assocNote() {
             return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "AssertionEvictedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("assertion", assertion.toJson())
-                            .put("kbId", kbId));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "AssertionEvictedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements CogEvent {
 
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "AssertionStateEvent")
-                    .put("eventData", new JSONObject()
-                            .put("assertionId", assertionId)
-                            .put("isActive", isActive)
-                            .put("kbId", kbId));
+        @Override
+        public String getEventType() {
+            return "AssertionStateEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record TemporaryAssertionEvent(Term.Lst temporaryAssertion, Map<Term.Var, Term> bindings,
                                           String noteId) implements NoteIDEvent {
 
-        public JSONObject toJson() {
-            var jsonBindings = new JSONObject();
-            bindings.forEach((var, term) -> jsonBindings.put(var.name(), term.toJson()));
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "TemporaryAssertionEvent")
-                    .put("eventData", new JSONObject()
-                            .put("temporaryAssertion", temporaryAssertion.toJson())
-                            .put("bindings", jsonBindings)
-                            .put("noteId", noteId));
+        @JsonProperty("temporaryAssertionJson") // Map temporaryAssertion field to temporaryAssertionJson
+        public JsonNode getTemporaryAssertionJson() {
+            return temporaryAssertion.toJson();
+        }
+
+        @JsonProperty("bindingsJson") // Map bindings field to bindingsJson
+        public JsonNode getBindingsJson() {
+            var jsonBindings = JsonUtil.getMapper().createObjectNode();
+            bindings.forEach((var, term) -> jsonBindings.set(var.name(), term.toJson()));
+            return jsonBindings;
+        }
+
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "TemporaryAssertionEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RuleAddedEvent(Rule rule) implements CogEvent {
 
         @Override
@@ -352,15 +398,17 @@ public class Cog {
             return rule.sourceNoteId();
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "RuleAddedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("rule", rule.toJson()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "RuleAddedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RuleRemovedEvent(Rule rule) implements CogEvent {
 
         @Override
@@ -368,95 +416,103 @@ public class Cog {
             return rule.sourceNoteId();
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "RuleRemovedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("rule", rule.toJson()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "RuleRemovedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "TaskUpdateEvent")
-                    .put("eventData", new JSONObject()
-                            .put("taskId", taskId)
-                            .put("status", status.name())
-                            .put("content", content));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "TaskUpdateEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record SystemStatusEvent(String statusMessage, int kbCount, int kbCapacity, int taskQueueSize,
                                     int ruleCount) implements CogEvent {
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "SystemStatusEvent")
-                    .put("eventData", new JSONObject()
-                            .put("statusMessage", statusMessage)
-                            .put("kbCount", kbCount)
-                            .put("kbCapacity", kbCapacity)
-                            .put("taskQueueSize", taskQueueSize)
-                            .put("ruleCount", ruleCount));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "SystemStatusEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AddedEvent(Note note) implements NoteEvent {
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "AddedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("note", note.toJson()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "AddedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RemovedEvent(Note note) implements NoteEvent {
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "RemovedEvent")
-                    .put("eventData", new JSONObject()
-                            .put("note", note.toJson()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "RemovedEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ExternalInputEvent(Term term, String sourceId, @Nullable String noteId) implements NoteIDEvent {
 
-        public JSONObject toJson() {
-            var json = new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "ExternalInputEvent")
-                    .put("eventData", new JSONObject()
-                            .put("termJson", term.toJson())
-                            .put("termString", term.toKif())
-                            .put("sourceId", sourceId));
-            if (noteId != null) json.put("noteId", noteId);
-            return json;
+        @JsonProperty("termJson") // Map term field to termJson
+        public JsonNode getTermJson() {
+            return term.toJson();
+        }
+
+        @JsonProperty("termString") // Add termString property
+        public String getTermString() {
+            return term.toKif();
+        }
+
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "ExternalInputEvent";
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RetractionRequestEvent(String target, RetractionType type, String sourceId,
                                          @Nullable String noteId) implements NoteIDEvent {
 
-        public JSONObject toJson() {
-            var json = new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "RetractionRequestEvent")
-                    .put("eventData", new JSONObject()
-                            .put("target", target)
-                            .put("type", type.name())
-                            .put("sourceId", sourceId));
-            if (noteId != null) json.put("noteId", noteId);
-            return json;
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "RetractionRequestEvent";
         }
     }
-
 }

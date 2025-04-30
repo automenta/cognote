@@ -1,7 +1,8 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONObject;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -180,9 +181,10 @@ public class Logic {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Explanation(String details) {
-        public JSONObject toJson() {
-            return new JSONObject().put("details", details);
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
         }
     }
 

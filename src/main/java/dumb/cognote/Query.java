@@ -1,12 +1,15 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONObject;
 
 import java.util.Map;
 
 import static java.util.Objects.requireNonNull;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record Query(String id, Cog.QueryType type, Term pattern, @Nullable String targetKbId,
                     Map<String, Object> parameters) {
     public Query {
@@ -16,16 +19,23 @@ public record Query(String id, Cog.QueryType type, Term pattern, @Nullable Strin
         requireNonNull(parameters);
     }
 
-    public JSONObject toJson() {
-        var json = new JSONObject()
-                .put("type", "query")
-                .put("id", id)
-                .put("queryType", type.name())
-                .put("patternJson", pattern.toJson())
-                .put("patternString", pattern.toKif());
-        if (targetKbId != null) json.put("targetKbId", targetKbId);
-        if (!parameters.isEmpty()) json.put("parameters", new JSONObject(parameters));
-        return json;
+    @JsonProperty("queryType") // Map type field to queryType in JSON
+    public Cog.QueryType getQueryType() {
+        return type;
+    }
+
+    @JsonProperty("patternJson") // Map pattern field to patternJson in JSON
+    public JsonNode getPatternJson() {
+        return pattern.toJson();
+    }
+
+    @JsonProperty("patternString") // Add patternString property to JSON
+    public String getPatternString() {
+        return pattern.toKif();
+    }
+
+    public JsonNode toJson() {
+        return JsonUtil.toJsonNode(this);
     }
 
     public record QueryEvent(Query query) implements Cog.CogEvent {
@@ -38,11 +48,13 @@ public record Query(String id, Cog.QueryType type, Term pattern, @Nullable Strin
             return query.targetKbId();
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "QueryEvent")
-                    .put("eventData", query.toJson());
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "QueryEvent";
         }
     }
 }

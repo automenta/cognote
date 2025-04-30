@@ -1,6 +1,10 @@
 package dumb.cognote;
 
-import org.json.JSONObject;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,24 +73,26 @@ public class Events {
         exe.shutdown();
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record LogMessageEvent(String message, Log.LogLevel level) implements Cog.CogEvent {
         public LogMessageEvent {
             requireNonNull(message);
             requireNonNull(level);
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "LogMessageEvent")
-                    .put("eventData", new JSONObject()
-                            .put("message", message)
-                            .put("level", level.name()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "LogMessageEvent";
         }
     }
 
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options,
-                                       JSONObject context) implements Cog.CogEvent {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JsonNode options, // Use JsonNode
+                                       JsonNode context) implements Cog.CogEvent { // Use JsonNode
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
             requireNonNull(requestType);
@@ -95,16 +101,13 @@ public class Events {
             requireNonNull(context);
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "DialogueRequestEvent")
-                    .put("eventData", new JSONObject()
-                            .put("dialogueId", dialogueId)
-                            .put("requestType", requestType)
-                            .put("prompt", prompt)
-                            .put("options", options)
-                            .put("context", context));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "DialogueRequestEvent";
         }
     }
 }

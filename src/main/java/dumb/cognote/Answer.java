@@ -1,17 +1,20 @@
 package dumb.cognote;
 
-import dumb.cognote.Logic.Explanation;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Term>> bindings,
-                     @Nullable Explanation explanation) {
+                     @Nullable Logic.Explanation explanation) { // Use Logic.Explanation
     public Answer {
         requireNonNull(query);
         requireNonNull(status);
@@ -27,28 +30,28 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
     }
 
     static Answer error(String queryId, String message) {
-        return new Answer(queryId, Cog.QueryStatus.ERROR, List.of(), new Explanation(message));
+        return new Answer(queryId, Cog.QueryStatus.ERROR, List.of(), new Logic.Explanation(message)); // Use Logic.Explanation
     }
 
-    public JSONObject toJson() {
-        var json = new JSONObject()
-                .put("type", "answer")
-                .put("queryId", query)
-                .put("status", status.name());
+    @JsonProperty("queryId") // Map query field to queryId in JSON
+    public String getQueryId() {
+        return query;
+    }
 
-        if (!bindings.isEmpty()) {
-            var jsonBindings = new JSONArray();
-            bindings.forEach(bindingMap -> {
-                var jsonBinding = new JSONObject();
-                bindingMap.forEach((var, term) -> jsonBinding.put(var.name(), term.toJson()));
-                jsonBindings.put(jsonBinding);
-            });
-            json.put("bindingsJson", jsonBindings);
-        }
+    @JsonProperty("bindingsJson") // Add bindingsJson property to JSON
+    public JsonNode getBindingsJson() {
+        if (bindings.isEmpty()) return null;
+        var jsonBindings = JsonUtil.getMapper().createArrayNode();
+        bindings.forEach(bindingMap -> {
+            var jsonBinding = JsonUtil.getMapper().createObjectNode();
+            bindingMap.forEach((var, term) -> jsonBinding.set(var.name(), term.toJson()));
+            jsonBindings.add(jsonBinding);
+        });
+        return jsonBindings;
+    }
 
-        if (explanation != null) json.put("explanation", explanation.toJson());
-
-        return json;
+    public JsonNode toJson() {
+        return JsonUtil.toJsonNode(this);
     }
 
     public record AnswerEvent(Answer result) implements Cog.CogEvent {
@@ -56,11 +59,13 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
             requireNonNull(result);
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "AnswerEvent")
-                    .put("eventData", result.toJson());
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "AnswerEvent";
         }
     }
 }

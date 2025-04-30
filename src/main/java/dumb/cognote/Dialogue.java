@@ -1,6 +1,7 @@
 package dumb.cognote;
 
-import org.json.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.Optional;
 import java.util.concurrent.*;
@@ -13,7 +14,7 @@ public class Dialogue {
 
     private final CogNote cog;
 
-    private final ConcurrentMap<String, CompletableFuture<JSONObject>> pending = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>(); // Use JsonNode
 
     private final long requestTimeoutSeconds = 60;
 
@@ -21,16 +22,16 @@ public class Dialogue {
         this.cog = cog;
     }
 
-    public CompletableFuture<JSONObject> request(String dialogueId, String requestType, String prompt, JSONObject options, JSONObject context) {
+    public CompletableFuture<JsonNode> request(String dialogueId, String requestType, String prompt, JsonNode options, JsonNode context) { // Use JsonNode
         if (pending.containsKey(dialogueId)) {
             error("Dialogue request with ID " + dialogueId + " already pending.");
             return CompletableFuture.failedFuture(new IllegalStateException("Dialogue request with ID " + dialogueId + " already pending."));
         }
 
-        var future = new CompletableFuture<JSONObject>();
+        var future = new CompletableFuture<JsonNode>(); // Use JsonNode
         pending.put(dialogueId, future);
 
-        cog.events.emit(new DialogueRequestEvent(dialogueId, requestType, prompt, options, context));
+        cog.events.emit(new Events.DialogueRequestEvent(dialogueId, requestType, prompt, options, context)); // Use Events.DialogueRequestEvent
 
         cog.mainExecutor.schedule(() -> {
             if (pending.remove(dialogueId) != null) {
@@ -42,7 +43,7 @@ public class Dialogue {
         return future;
     }
 
-    public Optional<CompletableFuture<JSONObject>> handleResponse(String dialogueId, JSONObject responseData) {
+    public Optional<CompletableFuture<JsonNode>> handleResponse(String dialogueId, JsonNode responseData) { // Use JsonNode
         return ofNullable(pending.remove(dialogueId))
                 .map(future -> {
                     future.complete(responseData);
@@ -65,19 +66,5 @@ public class Dialogue {
         message("Cleared all pending dialogue requests.");
     }
 
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JSONObject options,
-                                       JSONObject context) implements Cog.CogEvent {
-
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "DialogueRequestEvent")
-                    .put("eventData", new JSONObject()
-                            .put("dialogueId", dialogueId)
-                            .put("requestType", requestType)
-                            .put("prompt", prompt)
-                            .put("options", options)
-                            .put("context", context));
-        }
-    }
+    // DialogueRequestEvent moved to Events.java
 }

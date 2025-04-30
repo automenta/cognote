@@ -1,10 +1,11 @@
 package dumb.cognote;
 
-import dumb.cognote.plugin.*;
-import dumb.cognote.tool.*;
-import org.json.JSONArray;
-import org.json.JSONObject;
-import org.json.JSONTokener;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -73,6 +74,9 @@ public class CogNote extends Cog {
         try {
             var c = new CogNote();
             // WebSocketPlugin needs the port, so it's registered here after parsing args
+            // Assuming WebSocketPlugin handles JSON parsing/serialization internally or uses a different mechanism
+            // If it uses org.json, it would need refactoring too, but it's not in the provided summaries.
+            // For now, we assume it's compatible or will be refactored separately.
             c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
 
             c.start();
@@ -114,14 +118,9 @@ public class CogNote extends Cog {
             toSave.add(createDefaultConfigNote());
         }
 
-        var jsonArray = new JSONArray();
-        toSave.forEach(n -> jsonArray.put(new JSONObject()
-                .put("id", n.id)
-                .put("title", n.title)
-                .put("text", n.text)
-                .put("status", n.status.name())));
         try {
-            Files.writeString(Paths.get(NOTES_FILE), jsonArray.toString(2));
+            // Use Jackson to write the list of Note objects directly
+            JsonUtil.getMapper().writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
             message("Notes saved to " + NOTES_FILE);
         } catch (IOException e) {
             error("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
@@ -135,18 +134,9 @@ public class CogNote extends Cog {
             return new ArrayList<>();
         }
         try {
-            var jsonText = Files.readString(path);
-            var jsonArray = new JSONArray(new JSONTokener(jsonText));
-            return IntStream.range(0, jsonArray.length())
-                    .mapToObj(jsonArray::getJSONObject)
-                    .map(json -> new Note(
-                            json.getString("id"),
-                            json.getString("title"),
-                            json.optString("text", ""), // Handle missing text field
-                            Note.Status.valueOf(json.optString("status", Note.Status.IDLE.name())) // Handle missing status
-                    ))
-                    .toList();
-        } catch (IOException | org.json.JSONException e) {
+            // Use Jackson to read the list of Note objects directly
+            return JsonUtil.getMapper().readValue(path.toFile(), new TypeReference<List<Note>>() {});
+        } catch (IOException e) {
             error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
             e.printStackTrace();
             return new ArrayList<>();
@@ -203,7 +193,7 @@ public class CogNote extends Cog {
             save();
             message("Added note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
         } else {
             message("Note with ID " + note.id + " already exists.");
         }
@@ -222,7 +212,7 @@ public class CogNote extends Cog {
             save();
             message("Removed note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
         });
     }
 
@@ -347,23 +337,26 @@ public class CogNote extends Cog {
         // Emit status event reflecting the cleared state
         events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
         // Signal UI to update note list
-        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, new JSONObject());
+        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
     }
 
     public boolean updateConfig(String newConfigJsonText) {
         try {
-            var newConfigJson = new JSONObject(new JSONTokener(newConfigJsonText));
-            parseConfig(newConfigJsonText);
+            // Use Jackson to read the config from JSON string
+            var newConfig = JsonUtil.fromJsonString(newConfigJsonText, Configuration.class);
+            applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
-                note.text = newConfigJson.toString(2);
+                // Use Jackson to write the config back to JSON string (pretty printed)
+                note.text = JsonUtil.toJsonString(newConfig);
                 save();
                 message("Configuration updated and saved.");
             });
             // Reconfigure LM immediately after config update
             lm.reconfigure();
             return true;
-        } catch (org.json.JSONException e) {
-            error("Failed to parse new configuration JSON: " + e.getMessage());
+        } catch (Exception e) { // Catch JsonProcessingException and others
+            error("Failed to parse or apply new configuration JSON: " + e.getMessage());
+            e.printStackTrace();
             return false;
         }
     }
@@ -379,15 +372,29 @@ public class CogNote extends Cog {
         });
 
         var configNoteOpt = note(CONFIG_NOTE_ID);
+        Configuration config;
         if (configNoteOpt.isPresent()) {
-            parseConfig(configNoteOpt.get().text);
+            try {
+                // Use Jackson to parse config from note text
+                config = JsonUtil.fromJsonString(configNoteOpt.get().text, Configuration.class);
+                message("Configuration note found and parsed.");
+            } catch (Exception e) { // Catch JsonProcessingException
+                error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
+                e.printStackTrace();
+                config = new Configuration(); // Default config
+                var configNote = createDefaultConfigNote();
+                notes.put(CONFIG_NOTE_ID, configNote);
+                save(); // Save the new default config note
+            }
         } else {
             message("Configuration note not found, using defaults and creating one.");
+            config = new Configuration(); // Default config
             var configNote = createDefaultConfigNote();
             notes.put(CONFIG_NOTE_ID, configNote);
-            parseConfig(configNote.text);
-            save();
+            save(); // Save the new default config note
         }
+        applyConfig(config);
+
 
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
             notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
@@ -396,24 +403,14 @@ public class CogNote extends Cog {
         // context.addActiveNote(GLOBAL_KB_NOTE_ID); // This happens in start()
     }
 
-    private void parseConfig(String jsonText) {
-        try {
-            var configJson = new JSONObject(new JSONTokener(jsonText));
-            this.lm.llmApiUrl = configJson.optString("llmApiUrl", LM.DEFAULT_LLM_URL);
-            this.lm.llmModel = configJson.optString("llmModel", LM.DEFAULT_LLM_MODEL);
-            this.globalKbCapacity = configJson.optInt("globalKbCapacity", DEFAULT_KB_CAPACITY);
-            this.reasoningDepthLimit = configJson.optInt("reasoningDepthLimit", DEFAULT_REASONING_DEPTH);
-            this.broadcastInputAssertions = configJson.optBoolean("broadcastInputAssertions", DEFAULT_BROADCAST_INPUT);
-            message(String.format("System config loaded: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d",
-                    globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
-        } catch (Exception e) {
-            error("Error parsing configuration JSON, using defaults: " + e.getMessage());
-            this.lm.llmApiUrl = LM.DEFAULT_LLM_URL;
-            this.lm.llmModel = LM.DEFAULT_LLM_MODEL;
-            this.globalKbCapacity = DEFAULT_KB_CAPACITY;
-            this.reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
-            this.broadcastInputAssertions = DEFAULT_BROADCAST_INPUT;
-        }
+    private void applyConfig(Configuration config) {
+        this.lm.llmApiUrl = config.llmApiUrl();
+        this.lm.llmModel = config.llmModel();
+        this.globalKbCapacity = config.globalKbCapacity();
+        this.reasoningDepthLimit = config.reasoningDepthLimit();
+        this.broadcastInputAssertions = config.broadcastInputAssertions();
+        message(String.format("System config applied: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d",
+                globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
         // LM reconfig happens in start() and updateConfig()
     }
 
@@ -421,14 +418,14 @@ public class CogNote extends Cog {
      * Asserts a UI action into the dedicated KB for UI communication.
      *
      * @param actionType The type of UI action (e.g., ProtocolConstants.UI_ACTION_DISPLAY_MESSAGE).
-     * @param actionData A JSONObject containing data for the UI action.
+     * @param actionData A JsonNode containing data for the UI action.
      */
-    public void assertUiAction(String actionType, JSONObject actionData) {
+    public void assertUiAction(String actionType, JsonNode actionData) { // Use JsonNode
         context.tryCommit(new Assertion.PotentialAssertion(
                 new Term.Lst(
                         Term.Atom.of(Protocol.PRED_UI_ACTION),
                         Term.Atom.of(actionType),
-                        Term.Atom.of(actionData.toString()) // Store JSON string in an atom
+                        Term.Atom.of(JsonUtil.toJsonString(actionData)) // Store JSON string in an atom
                 ),
                 Cog.INPUT_ASSERTION_BASE_PRIORITY, // Use a base priority
                 java.util.Set.of(), // No justifications needed for a UI action
@@ -481,6 +478,7 @@ public class CogNote extends Cog {
         saveNotesToFile(getAllNotes());
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record NoteStatusEvent(Note note, Note.Status oldStatus, Note.Status newStatus) implements NoteEvent {
         public NoteStatusEvent {
             requireNonNull(note);
@@ -488,46 +486,56 @@ public class CogNote extends Cog {
             requireNonNull(newStatus);
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "NoteStatusEvent")
-                    .put("eventData", new JSONObject()
-                            .put("note", note.toJson())
-                            .put("oldStatus", oldStatus.name())
-                            .put("newStatus", newStatus.name()));
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "NoteStatusEvent";
         }
     }
 
-    public record Configuration(CogNote cog) {
-        String llmApiUrl() {
-            return cog.lm.llmApiUrl;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Configuration(
+            @JsonProperty("llmApiUrl") String llmApiUrl,
+            @JsonProperty("llmModel") String llmModel,
+            @JsonProperty("globalKbCapacity") int globalKbCapacity,
+            @JsonProperty("reasoningDepthLimit") int reasoningDepthLimit,
+            @JsonProperty("broadcastInputAssertions") boolean broadcastInputAssertions
+    ) {
+        // Default constructor for Jackson deserialization when fields are not present
+        @JsonCreator
+        public Configuration(
+                @JsonProperty("llmApiUrl") String llmApiUrl,
+                @JsonProperty("llmModel") String llmModel,
+                @JsonProperty("globalKbCapacity") Integer globalKbCapacity, // Use Integer for nullable default
+                @JsonProperty("reasoningDepthLimit") Integer reasoningDepthLimit, // Use Integer for nullable default
+                @JsonProperty("broadcastInputAssertions") Boolean broadcastInputAssertions // Use Boolean for nullable default
+        ) {
+            this(
+                    llmApiUrl != null ? llmApiUrl : LM.DEFAULT_LLM_URL,
+                    llmModel != null ? llmModel : LM.DEFAULT_LLM_MODEL,
+                    globalKbCapacity != null ? globalKbCapacity : DEFAULT_KB_CAPACITY,
+                    reasoningDepthLimit != null ? reasoningDepthLimit : DEFAULT_REASONING_DEPTH,
+                    broadcastInputAssertions != null ? broadcastInputAssertions : DEFAULT_BROADCAST_INPUT
+            );
         }
 
-        String llmModel() {
-            return cog.lm.llmModel;
+        // Constructor for creating default config programmatically
+        public Configuration() {
+            this(LM.DEFAULT_LLM_URL, LM.DEFAULT_LLM_MODEL, DEFAULT_KB_CAPACITY, DEFAULT_REASONING_DEPTH, DEFAULT_BROADCAST_INPUT);
         }
 
-        int globalKbCapacity() {
-            return cog.globalKbCapacity;
+        // Private constructor for the main record fields
+        private Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
+            this.llmApiUrl = llmApiUrl;
+            this.llmModel = llmModel;
+            this.globalKbCapacity = globalKbCapacity;
+            this.reasoningDepthLimit = reasoningDepthLimit;
+            this.broadcastInputAssertions = broadcastInputAssertions;
         }
 
-        int reasoningDepthLimit() {
-            return cog.reasoningDepthLimit;
-        }
-
-        boolean broadcastInputAssertions() {
-            return cog.broadcastInputAssertions;
-        }
-
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "configuration")
-                    .put("llmApiUrl", llmApiUrl())
-                    .put("llmModel", llmModel())
-                    .put("globalKbCapacity", globalKbCapacity())
-                    .put("reasoningDepthLimit", reasoningDepthLimit())
-                    .put("broadcastInputAssertions", broadcastInputAssertions());
-        }
+        // No need for toJson() method here, use JsonUtil.toJsonNode(this) or toJsonString(this)
     }
 }

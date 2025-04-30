@@ -1,7 +1,8 @@
 package dumb.cognote;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,17 +39,15 @@ public interface Truths {
     record SupportTicket(String ticketId, String assertionId) {
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Contradiction(Set<String> conflictingAssertionIds, String kbId) {
         public Contradiction {
             requireNonNull(conflictingAssertionIds);
             requireNonNull(kbId);
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "contradiction")
-                    .put("conflictingAssertionIds", new JSONArray(conflictingAssertionIds))
-                    .put("kbId", kbId);
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
         }
     }
 
@@ -254,6 +253,7 @@ public interface Truths {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds, String kbId) implements Cog.CogEvent {
         public ContradictionDetectedEvent {
             requireNonNull(contradictoryAssertionIds);
@@ -265,11 +265,13 @@ public interface Truths {
             return kbId;
         }
 
-        public JSONObject toJson() {
-            return new JSONObject()
-                    .put("type", "event")
-                    .put("eventType", "ContradictionDetectedEvent")
-                    .put("eventData", new Contradiction(contradictoryAssertionIds, kbId).toJson());
+        public JsonNode toJson() {
+            return JsonUtil.toJsonNode(this);
+        }
+
+        @Override
+        public String getEventType() {
+            return "ContradictionDetectedEvent";
         }
     }
 }
