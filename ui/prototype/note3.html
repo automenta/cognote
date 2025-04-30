@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Note Management v2</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <style>
+        :root {
+            --bg-main: #f4f4f4; /* Slightly lighter main background */
+            --bg-sidebar: #e9e9e9;
+            --bg-note-list: #ffffff;
+            --bg-note-selected: #dbe4f0; /* Softer selection */
+            --bg-editor: #ffffff;
+            --bg-action-icon: #d8e8e8; /* Adjusted action icon bg */
+            --bg-action-icon-hover: #c8d8d8;
+            --bg-action-icon-urgent: #f8d7da;
+            --bg-action-dock: #f8f9fa;
+            --bg-modal-header: #4a90e2; /* Softer modal header blue */
+            --border-color: #d1d1d1; /* Slightly softer border */
+            --text-color: #333333;
+            --text-muted: #666666; /* Slightly darker muted text */
+            --accent-color-1: #e57373; /* Softer Red */
+            --accent-color-2: #ffb74d; /* Softer Orange */
+            --accent-color-3: #ba68c8; /* Softer Purple */
+            --accent-color-action: #77a7a7; /* Adjusted action icon border */
+            --accent-color-action-urgent: #dc3545;
+            --shadow-light: rgba(0, 0, 0, 0.1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: var(--text-color); background-color: var(--bg-main); line-height: 1.5; }
+        button, input, select, textarea { font-family: inherit; font-size: inherit; }
+        button { cursor: pointer; }
+        input[type="text"], input[type="search"], textarea { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; }
+        input[type="search"] { width: 100%; }
+        select { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: white; }
+        h1, h2, h3, h4, h5, h6 { margin-bottom: 0.5em; font-weight: 600; }
+
+        #app-container { display: flex; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px; /* Slightly wider */
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .sidebar-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .sidebar-controls button, .sidebar-controls select { padding: 6px 10px; font-size: 0.9em; border-radius: 4px; border: 1px solid var(--border-color); background-color: white; }
+        .note-list-container { flex-grow: 1; overflow-y: auto; margin-top: 5px; }
+        .note-item {
+            background-color: var(--bg-note-list);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-bottom: 8px;
+            padding: 12px;
+            cursor: pointer;
+            position: relative;
+            border-left-width: 6px;
+            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+            box-shadow: 0 1px 2px var(--shadow-light);
+        }
+        .note-item:hover { background-color: var(--bg-note-selected); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
+        .note-item.selected { background-color: var(--bg-note-selected); border-color: var(--accent-color-action); border-left-color: var(--accent-color-action) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+        .note-item h4 { margin-bottom: 4px; font-size: 1em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .note-item .meta { font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px; }
+        .note-item .preview { font-size: 0.9em; color: var(--text-muted); max-height: 3em; /* Limit preview height */ overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .note-priority-controls { position: absolute; top: 8px; right: 8px; display: flex; gap: 3px; opacity: 0; transition: opacity 0.2s ease; background-color: rgba(255, 255, 255, 0.8); padding: 2px; border-radius: 3px; }
+        .note-item:hover .note-priority-controls { opacity: 1; }
+        .note-priority-controls button { font-size: 10px; padding: 1px 5px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px; line-height: 1.2; }
+
+        /* Main Content */
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--bg-editor); overflow: hidden; /* Prevent content overflow issues */ }
+
+        /* Menu Bar */
+        .menu-bar {
+            background-color: var(--bg-main);
+            padding: 8px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px; /* Adjusted gap */
+            font-size: 0.9em;
+            flex-shrink: 0;
+        }
+        .menu-bar span { cursor: pointer; color: #007bff; transition: color 0.2s ease; }
+        .menu-bar span:hover { color: #0056b3; text-decoration: underline; }
+        .menu-bar .group { display: flex; align-items: center; gap: 12px; padding-right: 18px; border-right: 1px solid #ccc; }
+        .menu-bar .group:last-child { border-right: none; padding-right: 0; }
+        .menu-bar .group > span:first-child:not([data-action]) { color: var(--text-muted); cursor: default; } /* Label styling */
+        .menu-bar .group > span:first-child:not([data-action]):hover { text-decoration: none; }
+
+        /* Editor Area */
+        .editor-area { flex-grow: 1; display: flex; flex-direction: column; padding: 25px; overflow: hidden; }
+        .editor-header { margin-bottom: 15px; flex-shrink: 0; }
+        .editor-title {
+            font-size: 2.2em; /* Larger title */
+            font-weight: 700; /* Bolder title */
+            border: none;
+            outline: none;
+            width: 100%;
+            padding: 5px 0;
+            background: transparent;
+            margin-bottom: 8px;
+            color: #222;
+        }
+        .editor-meta { font-size: 0.85em; color: var(--text-muted); margin-bottom: 15px; }
+        .editor-toolbar { margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-shrink: 0; }
+        .editor-toolbar button { padding: 6px 10px; font-size: 1em; cursor: pointer; margin-right: 6px; border: 1px solid transparent; background: none; border-radius: 4px; transition: background-color 0.2s ease, border-color 0.2s ease; }
+        .editor-toolbar button:hover { background-color: #eee; border-color: #ccc; }
+        .editor-toolbar button.icon { font-weight: bold; min-width: 30px; text-align: center; } /* Basic icon styling */
+        .editor-content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
+        .editor-content {
+            height: 100%;
+            overflow-y: auto;
+            padding-right: 15px; /* Space for scrollbar */
+            outline: none;
+            line-height: 1.7; /* Increased line height */
+            font-size: 1.05em; /* Slightly larger base font */
+        }
+        .editor-content ul, .editor-content ol { margin-left: 30px; margin-bottom: 12px; }
+        .editor-content li { margin-bottom: 6px; }
+        .editor-content strong { font-weight: 600; } /* Adjusted bold */
+        .editor-content em { font-style: italic; }
+        .editor-content u { text-decoration: underline; }
+        .editor-content .field { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e0e0e0; padding: 3px 6px; border-radius: 4px; background-color: #f9f9f9; margin: 0 3px; font-size: 0.9em; }
+        .editor-content .field-label { font-weight: 600; color: #555; }
+        .editor-content .field-value { border: 1px solid #d8d8d8; padding: 2px 5px; min-width: 80px; background: white; border-radius: 3px; }
+        .editor-content [contenteditable="true"] { outline: none; } /* Ensure editable fields look clean */
+
+        /* Action Area */
+        .action-area {
+            background-color: var(--bg-main);
+            border-top: 1px solid var(--border-color);
+            padding: 12px 20px;
+            min-height: 65px; /* Slightly taller */
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+            transition: height 0.3s ease; /* Smooth transition for dock */
+        }
+        .action-icons-container { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .action-icon {
+            width: 36px; /* Larger icons */
+            height: 36px;
+            background-color: var(--bg-action-icon);
+            border: 2px solid var(--accent-color-action);
+            border-radius: 6px; /* Slightly more rounded */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 1.1em;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px var(--shadow-light);
+        }
+        .action-icon:hover { background-color: var(--bg-action-icon-hover); border-color: darken(var(--accent-color-action), 10%); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
+        .action-icon.urgent {
+            border-color: var(--accent-color-action-urgent);
+            background-color: var(--bg-action-icon-urgent);
+            animation: strobe 1.2s infinite alternate ease-in-out; /* Smoother strobe */
+        }
+        @keyframes strobe { from { box-shadow: 0 0 4px var(--accent-color-action-urgent); } to { box-shadow: 0 0 12px var(--accent-color-action-urgent), 0 0 1px var(--accent-color-action-urgent); } }
+        .action-icon .hide-btn {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border: 1px solid #aaa;
+            border-radius: 50%;
+            font-size: 10px;
+            line-height: 14px;
+            text-align: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            color: #555;
+            transform: scale(0.8);
+        }
+        .action-icon:hover .hide-btn { opacity: 1; transform: scale(1); }
+        .action-icon .tooltip {
+            visibility: hidden; min-width: 100px; max-width: 180px; /* More flexible width */
+            background-color: rgba(0, 0, 0, 0.8); /* Semi-transparent */
+            color: #fff; text-align: center; border-radius: 4px; padding: 6px 8px;
+            position: absolute; z-index: 10; bottom: 120%; left: 50%; transform: translateX(-50%); /* Centered */
+            opacity: 0; transition: opacity 0.3s ease, visibility 0.3s ease; font-size: 0.85em; white-space: normal; /* Allow wrapping */
+        }
+        .action-icon:hover .tooltip { visibility: visible; opacity: 1; }
+        .action-area-description { font-size: 0.85em; color: var(--text-muted); margin-left: auto; text-align: right; line-height: 1.3; }
+
+        /* Action Dock */
+        .action-dock {
+            display: none; /* Hidden by default */
+            max-height: 300px; /* Max height */
+            background-color: var(--bg-action-dock);
+            border-top: 1px solid var(--border-color);
+            padding: 15px 20px;
+            overflow-y: auto;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+        .action-dock.visible { display: block; }
+        .action-dock h5 { margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; font-size: 1.1em; color: #444; }
+        .action-dock ul { list-style: none; padding-left: 0; margin-bottom: 15px; }
+        .action-dock li { margin-bottom: 8px; font-size: 0.95em; background: #fff; padding: 8px 10px; border: 1px solid #eee; border-radius: 4px; box-shadow: 0 1px 1px var(--shadow-light); }
+
+        /* Settings Modal */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.5); /* Darker overlay */
+            justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease;
+        }
+        .modal.visible { display: flex; opacity: 1; }
+        .modal-content {
+            background-color: #fefefe; margin: auto; padding: 0; border: 1px solid #bbb; /* Slightly darker border */
+            width: 85%; max-width: 750px; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.3s ease;
+        }
+        .modal.visible .modal-content { transform: scale(1); }
+        .modal-header { padding: 12px 20px; background-color: var(--bg-modal-header); color: white; border-bottom: 1px solid #ddd; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h4 { margin: 0; font-size: 1.2em; font-weight: 600; }
+        .modal-close { color: white; font-size: 28px; font-weight: bold; cursor: pointer; opacity: 0.8; transition: opacity 0.2s ease; }
+        .modal-close:hover { opacity: 1; }
+        .modal-body { padding: 0; flex-grow: 1; display: flex; min-height: 350px; background-color: #f9f9f9; }
+        .modal-tabs { list-style: none; padding: 0; margin: 0; border-right: 1px solid #ddd; background: #f0f0f0; width: 160px; flex-shrink: 0; }
+        .modal-tabs li { padding: 14px 18px; cursor: pointer; border-bottom: 1px solid #e0e0e0; font-size: 0.95em; color: #444; transition: background-color 0.2s ease, color 0.2s ease; }
+        .modal-tabs li:hover { background: #e8e8e8; }
+        .modal-tabs li.active { background: #fff; border-right: 3px solid var(--bg-modal-header); margin-right: -1px; font-weight: 600; color: var(--bg-modal-header); }
+        .modal-tab-content { padding: 20px; flex-grow: 1; background: #fff; display: none; }
+        .modal-tab-content.active { display: block; }
+        .modal-tab-content h5 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #333; }
+        .modal-tab-content label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9em; color: #555; }
+        .modal-tab-content input[type="text"], .modal-tab-content input[type="password"], .modal-tab-content select, .modal-tab-content textarea { width: 100%; margin-bottom: 15px; }
+        .modal-tab-content textarea { min-height: 80px; resize: vertical; }
+        .modal-footer { padding: 12px 20px; background-color: #f1f1f1; border-top: 1px solid #ddd; text-align: right; border-radius: 0 0 6px 6px; }
+        .modal-footer button { padding: 9px 18px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; margin-left: 8px; transition: background-color 0.2s ease, border-color 0.2s ease; }
+        .modal-footer button#settings-save-btn { background-color: var(--bg-modal-header); color: white; border-color: var(--bg-modal-header); }
+        .modal-footer button#settings-save-btn:hover { background-color: #3a80d2; }
+        .modal-footer button#settings-cancel-btn { background-color: #f9f9f9; }
+        .modal-footer button#settings-cancel-btn:hover { background-color: #eee; }
+
+        /* Utility */
+        .hidden { display: none; }
+        [contenteditable=true]:empty:before { content: attr(placeholder); color: grey; font-style: italic; pointer-events: none; }
+    </style>
+</head>
+<body>
+<div id="app-container">
+    <!-- Components will render here -->
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+<script>
+
+    // --- Utilities ---
+    const Utils = {
+        debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func.apply(this, args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        },
+        timeAgo(timestamp) {
+            const now = Date.now();
+            const seconds = Math.floor((now - timestamp) / 1000);
+            if (seconds < 5) return "just now";
+            const intervals = [
+                { label: 'year', seconds: 31536000 }, { label: 'month', seconds: 2592000 },
+                { label: 'day', seconds: 86400 }, { label: 'hour', seconds: 3600 },
+                { label: 'minute', seconds: 60 }, { label: 'second', seconds: 1 }
+            ];
+            for (const interval of intervals) {
+                const count = Math.floor(seconds / interval.seconds);
+                if (count >= 1) {
+                    return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+                }
+            }
+            return "just now";
+        },
+        sanitizeHTML(str) {
+            const temp = document.createElement('div');
+            temp.textContent = str;
+            return temp.innerHTML;
+        },
+        generateId: () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+
+    // --- Notifier Service ---
+    const Notifier = {
+        init() {
+            toastr.options = {
+                "closeButton": true, "progressBar": true, "positionClass": "toast-bottom-right",
+                "preventDuplicates": true, "timeOut": "3500", "extendedTimeOut": "1500",
+                "showEasing": "swing", "hideEasing": "linear", "showMethod": "fadeIn", "hideMethod": "fadeOut"
+            };
+        },
+        success: (msg) => toastr.success(msg),
+        info: (msg) => toastr.info(msg),
+        warning: (msg) => toastr.warning(msg),
+        error: (msg) => toastr.error(msg)
+    };
+
+    // --- Storage Service ---
+    const StorageService = {
+        loadNotes: () => JSON.parse(localStorage.getItem('agenticNotesV2') || '[]'),
+        saveNotes: (notes) => localStorage.setItem('agenticNotesV2', JSON.stringify(notes)),
+        getDefaultNotes: () => [
+             { id: Utils.generateId(), title: "Welcome Note", updated: Date.now() - 7200000, created: Date.now() - 86400000, priority: 0, state: 'Private', content: "This is an agentic note management platform.<br>Use the sidebar to manage notes, and the editor to modify content.<br>Try adding structured fields like <span class='field'><span class='field-label'>Status:</span><span class='field-value' contenteditable='true'>New</span></span>.", color: 'var(--accent-color-1)' },
+             { id: Utils.generateId(), title: "Shopping List", updated: Date.now() - 60000, created: Date.now() - 172800000, priority: 2, state: 'Private', content: "<ul><li>Milk</li><li>Eggs</li><li>Cat food <span class='field'><span class='field-label'>Cost:</span><span class='field-value' contenteditable='true'>< $20</span></span> <span class='field'><span class='field-label'>Brand:</span><span class='field-value' contenteditable='true'>Any</span></span></li></ul>", color: 'var(--accent-color-2)' },
+             { id: Utils.generateId(), title: "Ideas Brainstorm", updated: Date.now() - 259200000, created: Date.now() - 345600000, priority: 1, state: 'Private', content: "Feature ideas:<br>- P2P Sync (Nostr?)<br>- LLM Integration (Enhance/Summarize)<br>- Advanced Ontology Support", color: 'var(--accent-color-3)' }
+        ]
+    };
+
+    // --- Component Base Class ---
+    class Component {
+        constructor(app, elementSelector) {
+            this.app = app;
+            this.$el = $(elementSelector);
+            if (!this.$el.length) console.error(`Element not found for selector: ${elementSelector}`);
+        }
+        render() { /* To be implemented by subclasses */ }
+        bindEvents() { /* To be implemented by subclasses */ }
+        destroy() { if (this.$el) this.$el.empty().off(); } // Basic cleanup
+    }
+
+    // --- NoteItem Component ---
+    class NoteItem extends Component {
+        constructor(app, note) {
+            super(app); // Don't need selector, will create element
+            this.note = note;
+            this.$el = this.createMarkup();
+            this.bindEvents();
+        }
+
+        createMarkup() {
+            const updatedAgo = Utils.timeAgo(this.note.updated);
+            // Basic text extraction for preview, avoiding complex HTML parsing
+            const previewText = $('<div>').html(this.note.content).text().substring(0, 80) + ($('<div>').html(this.note.content).text().length > 80 ? '...' : '');
+            const noteColor = this.note.color || '#ccc';
+
+            return $(`
+                <div class="note-item" data-id="${this.note.id}" style="border-left-color: ${noteColor};">
+                    <h4>${Utils.sanitizeHTML(this.note.title || 'Untitled Note')}</h4>
+                    <div class="meta">Updated ${updatedAgo}</div>
+                    <div class="preview">${Utils.sanitizeHTML(previewText)}</div>
+                    <div class="note-priority-controls">
+                        <button class="priority-inc" title="Increase Priority">+</button>
+                        <button class="priority-dec" title="Decrease Priority">-</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        bindEvents() {
+            this.$el.on('click', () => this.app.selectNote(this.note.id));
+            this.$el.find('.priority-inc').on('click', (e) => {
+                e.stopPropagation();
+                this.app.updateNotePriority(this.note.id, 1);
+            });
+            this.$el.find('.priority-dec').on('click', (e) => {
+                e.stopPropagation();
+                this.app.updateNotePriority(this.note.id, -1);
+            });
+        }
+
+        update(note) {
+            this.note = note;
+             // More efficient update than full re-render
+            this.$el.find('h4').text(Utils.sanitizeHTML(this.note.title || 'Untitled Note'));
+            this.$el.find('.meta').text(`Updated ${Utils.timeAgo(this.note.updated)}`);
+            const previewText = $('<div>').html(this.note.content).text().substring(0, 80) + ($('<div>').html(this.note.content).text().length > 80 ? '...' : '');
+            this.$el.find('.preview').text(Utils.sanitizeHTML(previewText));
+            this.$el.css('border-left-color', this.note.color || '#ccc');
+        }
+
+        setActive(isActive) {
+            this.$el.toggleClass('selected', isActive);
+        }
+    }
+
+    // --- NoteList Component ---
+    class NoteList extends Component {
+        constructor(app, elementSelector) {
+            super(app, elementSelector);
+            this.noteItemComponents = {}; // Store NoteItem instances by id
+        }
+
+        render(notes, currentNoteId) {
+            this.$el.empty();
+            this.noteItemComponents = {}; // Reset components map
+            if (notes && notes.length > 0) {
+                notes.forEach(note => {
+                    const noteItem = new NoteItem(this.app, note);
+                    this.noteItemComponents[note.id] = noteItem;
+                    this.$el.append(noteItem.$el);
+                    if (note.id === currentNoteId) {
+                        noteItem.setActive(true);
+                    }
+                });
+            } else {
+                this.$el.html('<p style="text-align: center; color: var(--text-muted); margin-top: 20px;">No notes found.</p>');
+            }
+        }
+
+         updateNoteItem(note) {
+            if (this.noteItemComponents[note.id]) {
+                this.noteItemComponents[note.id].update(note);
+            }
+         }
+
+        setActiveNote(noteId) {
+            Object.values(this.noteItemComponents).forEach(item => item.setActive(false));
+            if (noteId && this.noteItemComponents[noteId]) {
+                this.noteItemComponents[noteId].setActive(true);
+                 // Scroll into view if needed
+                 const $itemEl = this.noteItemComponents[noteId].$el;
+                 const container = this.$el[0];
+                 const itemTop = $itemEl.position().top + container.scrollTop;
+                 const itemBottom = itemTop + $itemEl.outerHeight();
+                 if (itemTop < container.scrollTop || itemBottom > container.scrollTop + container.clientHeight) {
+                     container.scrollTop = itemTop - container.clientHeight / 2 + $itemEl.outerHeight() / 2; // Center roughly
+                 }
+            }
+        }
+    }
+
+    // --- Sidebar Component ---
+    class Sidebar extends Component {
+         constructor(app, elementSelector) {
+            super(app, elementSelector);
+            this.noteList = null; // Will be initialized in render
+            this.render();
+            this.bindEvents();
+        }
+
+        render() {
+             this.$el.html(`
+                <div class="sidebar-controls">
+                    <button id="add-note-btn" title="Create New Note">+</button>
+                    <select id="sort-notes">
+                        <option value="priority">Sort: Priority</option>
+                        <option value="updated">Sort: Updated</option>
+                        <option value="created">Sort: Created</option>
+                        <option value="title">Sort: Title</option>
+                    </select>
+                </div>
+                <input type="search" id="search-notes" placeholder="Filter/Search Notes...">
+                <div class="note-list-container" id="note-list"></div>
+            `);
+             this.noteList = new NoteList(this.app, '#note-list');
+        }
+
+        bindEvents() {
+            this.$el.on('click', '#add-note-btn', () => this.app.createNewNote());
+            this.$el.on('change', '#sort-notes', () => this.app.sortAndFilterNotes());
+            this.$el.on('input', '#search-notes', Utils.debounce(() => this.app.sortAndFilterNotes(), 300));
+        }
+
+        renderNoteList(notes, currentNoteId) {
+            this.noteList.render(notes, currentNoteId);
+        }
+
+        updateNoteItem(note) {
+            this.noteList.updateNoteItem(note);
+        }
+
+        setActiveNote(noteId) {
+            this.noteList.setActiveNote(noteId);
+        }
+
+         getSortCriteria() { return this.$el.find('#sort-notes').val(); }
+         getSearchTerm() { return this.$el.find('#search-notes').val(); }
+    }
+
+    // --- Editor Component ---
+    class Editor extends Component {
+         constructor(app, elementSelector) {
+             super(app, elementSelector);
+             this.debouncedSave = Utils.debounce(() => this.app.saveCurrentNote(), 1000);
+             this.render();
+             this.bindEvents();
+         }
+
+        render() {
+            this.$el.html(`
+                <div class="editor-header">
+                    <input type="text" class="editor-title" id="note-title" placeholder="Note Title">
+                    <div class="editor-meta" id="note-meta">Select or create a note</div>
+                </div>
+                <div class="editor-toolbar">
+                    <button data-command="bold" class="icon" title="Bold">B</button>
+                    <button data-command="italic" class="icon" title="Italic">I</button>
+                    <button data-command="underline" class="icon" title="Underline">U</button>
+                    <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button>
+                    <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button>
+                    <button data-action="insert-field" class="icon" title="Insert Field">+</button>
+                    <!-- <button data-command="find" class="icon">Find</button> -->
+                </div>
+                <div class="editor-content-wrapper">
+                    <div class="editor-content" id="note-content" contenteditable="true" placeholder="Start writing..."></div>
+                </div>
+            `);
+            this.$noteTitle = this.$el.find('#note-title');
+            this.$noteMeta = this.$el.find('#note-meta');
+            this.$noteContent = this.$el.find('#note-content');
+        }
+
+        bindEvents() {
+            this.$el.find('.editor-toolbar button[data-command]').on('click', (e) => {
+                const command = $(e.currentTarget).data('command');
+                document.execCommand(command, false, null);
+                this.$noteContent.trigger('input'); // Trigger save
+                this.$noteContent.focus(); // Keep focus in editor
+            });
+
+            this.$el.find('.editor-toolbar button[data-action="insert-field"]').on('click', () => this.insertField());
+
+            this.$noteContent.on('input', () => this.debouncedSave());
+            this.$noteTitle.on('input', () => this.debouncedSave());
+
+             // Allow tabbing within list items
+             this.$noteContent.on('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
+                }
+            });
+        }
+
+        loadNote(note) {
+            if (note) {
+                this.$noteTitle.val(note.title);
+                this.$noteContent.html(note.content);
+                this.updateMeta(note);
+                this.$noteContent.prop('contenteditable', true);
+                this.$noteTitle.prop('disabled', false);
+            } else {
+                this.clear();
+            }
+        }
+
+         updateMeta(note) {
+            this.$noteMeta.text(`Created: ${new Date(note.created).toLocaleDateString()} | Updated: ${Utils.timeAgo(note.updated)} | State: ${note.state}`);
+         }
+
+        clear() {
+            this.$noteTitle.val('').prop('disabled', true);
+            this.$noteContent.html('').prop('contenteditable', false);
+            this.$noteMeta.text('Select or create a note');
+        }
+
+        getNoteData() {
+            return {
+                title: this.$noteTitle.val(),
+                content: this.$noteContent.html()
+            };
+        }
+
+        focusTitle() {
+            this.$noteTitle.focus();
+        }
+
+         insertField() {
+             const fieldName = prompt("Enter field name (e.g., Cost, Brand):");
+             if (fieldName) {
+                 const fieldValue = prompt(`Enter value for ${fieldName} (e.g., < $20, Any):`);
+                 const fieldHtml = ` <span class='field'><span class='field-label'>${Utils.sanitizeHTML(fieldName)}:</span><span class='field-value' contenteditable='true'>${Utils.sanitizeHTML(fieldValue || '')}</span></span> `;
+                 document.execCommand('insertHTML', false, fieldHtml);
+                 this.$noteContent.trigger('input'); // Trigger save
+                 this.$noteContent.focus();
+             }
+         }
+    }
+
+    // --- MenuBar Component ---
+    class MenuBar extends Component {
+         constructor(app, elementSelector) {
+             super(app, elementSelector);
+             this.render();
+             this.bindEvents();
+         }
+
+         render() {
+             this.$el.html(`
+                 <div class="group">
+                     <span data-action="undo" title="Undo last action">Undo</span>
+                     <span data-action="redo" title="Redo last action">Redo</span>
+                     <span data-action="clone" title="Create a copy of the current note">Clone</span>
+                 </div>
+                 <div class="group">
+                     <span data-action="insert" title="Insert structured data field">Insert Field</span>
+                 </div>
+                 <div class="group">
+                     <span data-action="publish" title="Publish note to P2P network">Publish</span>
+                 </div>
+                 <div class="group">
+                     <span>Tools:</span>
+                     <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span>
+                     <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span>
+                 </div>
+                 <div class="group">
+                     <span data-action="view-source" title="View raw note data">View source</span>
+                     <span data-action="settings" title="Open application settings">Settings</span>
+                 </div>
+             `);
+         }
+
+         bindEvents() {
+             this.$el.on('click', 'span[data-action]', (e) => {
+                 const action = $(e.currentTarget).data('action');
+                 this.app.handleMenuAction(action);
+             });
+         }
+    }
+
+    // --- ActionIcon Component ---
+    class ActionIcon extends Component {
+         constructor(app, parentContainer, iconData) {
+             super(app); // No main element selector needed
+             this.parentContainer = parentContainer;
+             this.iconData = iconData; // { type, details, symbol, urgent }
+             this.$el = this.createMarkup();
+             this.bindEvents();
+             this.parentContainer.append(this.$el);
+         }
+
+         createMarkup() {
+             const urgentClass = this.iconData.urgent ? 'urgent' : '';
+             return $(`
+                 <div class="action-icon ${urgentClass}" data-type="${this.iconData.type}" title="${this.iconData.type}: ${this.iconData.details}">
+                     ${this.iconData.symbol || this.iconData.type.charAt(0)}
+                     <span class="hide-btn" title="Hide this icon">x</span>
+                     <span class="tooltip">${this.iconData.type}: ${this.iconData.details}</span>
+                 </div>
+             `);
+         }
+
+         bindEvents() {
+             this.$el.on('click', (e) => {
+                 if ($(e.target).hasClass('hide-btn')) {
+                     this.hide();
+                 } else {
+                     this.app.showActionDock(this.iconData);
+                 }
+             });
+         }
+
+         hide() {
+             this.$el.fadeOut(300, () => this.$el.remove());
+             // Optionally notify app if persistence of hidden state is needed
+         }
+    }
+
+    // --- ActionArea Component ---
+    class ActionArea extends Component {
+         constructor(app, elementSelector) {
+             super(app, elementSelector);
+             this.actionIcons = [];
+             this.render();
+             this.bindEvents(); // Bind events for the dock part
+         }
+
+         render() {
+             this.$el.html(`
+                 <div class="action-icons-container" id="action-icons">
+                     <!-- Action icons will be added here -->
+                 </div>
+                 <div class="action-area-description">
+                     Action Dock - holds Note's icons:<br>
+                     Matches, Questions, Suggestions, Alerts etc.
+                 </div>
+                 <div class="action-dock" id="action-dock">
+                     <div id="action-dock-content"></div>
+                 </div>
+             `);
+             this.$iconsContainer = this.$el.find('#action-icons');
+             this.$dock = this.$el.find('#action-dock');
+             this.$dockContent = this.$el.find('#action-dock-content');
+         }
+
+         bindEvents() {
+             // Hide dock if clicking outside of it or its triggers
+             $(document).on('click', (event) => {
+                 if (!$(event.target).closest('.action-icon, .action-dock').length) {
+                     if (this.$dock.hasClass('visible')) {
+                         this.hideDock();
+                     }
+                 }
+             });
+         }
+
+         renderActionIcons(note) {
+             this.clearIcons();
+             if (!note) return;
+
+             // Simulate analysis - add icons based on keywords
+             const contentLower = $('<div>').html(note.content).text().toLowerCase();
+             const iconsToAdd = [];
+
+             if (contentLower.includes('cost') || contentLower.includes('$') || contentLower.includes('budget')) {
+                 iconsToAdd.push({ type: 'Match', details: 'Potential budget match found.', symbol: 'M' });
+             }
+             if (contentLower.includes('?')) {
+                 iconsToAdd.push({ type: 'Question', details: 'Question detected in note.', symbol: '?' });
+             }
+             if (contentLower.includes('idea') || contentLower.includes('feature') || contentLower.includes('suggestion')) {
+                 iconsToAdd.push({ type: 'Suggestion', details: 'Idea or suggestion found.', symbol: 'S' });
+             }
+             if (contentLower.includes('error') || contentLower.includes('fix') || contentLower.includes('issue') || contentLower.includes('problem')) {
+                 iconsToAdd.push({ type: 'Error', details: 'Potential error or issue mentioned.', symbol: '!', urgent: true });
+             }
+              if (contentLower.includes('link') || contentLower.includes('related')) {
+                 iconsToAdd.push({ type: 'Related', details: 'Related item or link detected.', symbol: 'L' });
+             }
+
+             iconsToAdd.forEach(iconData => {
+                 this.actionIcons.push(new ActionIcon(this.app, this.$iconsContainer, iconData));
+             });
+         }
+
+         clearIcons() {
+             this.actionIcons.forEach(icon => icon.$el.remove());
+             this.actionIcons = [];
+             this.hideDock(); // Hide dock when icons are cleared
+         }
+
+         showDock(iconData) {
+             let contentHtml = `<h5>${iconData.type} Details</h5><ul><li>${Utils.sanitizeHTML(iconData.details)}</li>`;
+             // Add dummy related items based on type for demo
+             switch(iconData.type) {
+                 case 'Match': contentHtml += `<li>Related: Product XYZ ($18)</li><li>Action: Check competitor prices</li>`; break;
+                 case 'Question': contentHtml += `<li>Context: Needs clarification.</li><li>Action: Ask team member.</li>`; break;
+                 case 'Suggestion': contentHtml += `<li>Related: Similar concept article</li><li>Action: Add to backlog</li>`; break;
+                 case 'Error': contentHtml += `<li>Context: Line 5 - calculation.</li><li>Action: Review constraints.</li>`; break;
+                 case 'Related': contentHtml += `<li>Link: www.example.com</li><li>Action: Follow up</li>`; break;
+             }
+             contentHtml += `</ul>`;
+
+             this.$dockContent.html(contentHtml);
+             this.$dock.addClass('visible');
+         }
+
+         hideDock() {
+             this.$dock.removeClass('visible');
+             // Optionally clear content after transition
+             // setTimeout(() => { if (!this.$dock.hasClass('visible')) this.$dockContent.empty(); }, 300);
+         }
+    }
+
+    // --- SettingsModal Component ---
+    class SettingsModal extends Component {
+         constructor(app, elementSelector) {
+             super(app, elementSelector);
+             this.render();
+             this.bindEvents();
+         }
+
+         render() {
+             this.$el.html(`
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4>Application Settings</h4>
+                        <span class="modal-close" id="settings-modal-close" title="Close">×</span>
+                    </div>
+                    <div class="modal-body">
+                        <ul class="modal-tabs" id="settings-tabs">
+                            <li class="active" data-tab="general">General</li>
+                            <li data-tab="account">Account</li>
+                            <li data-tab="network">Network</li>
+                            <li data-tab="ontology">Ontology</li>
+                            <li data-tab="llm">LLM Tools</li>
+                            <li data-tab="appearance">Appearance</li>
+                        </ul>
+                        <div class="modal-tab-content active" id="tab-general">
+                            <h5>General Settings</h5>
+                            <label for="setting-default-state">Default Note State:</label>
+                            <select id="setting-default-state"><option>Private</option><option>Published</option></select>
+                            <p style="margin-top: 15px; font-size: 0.9em; color: var(--text-muted);">Configure general application behavior.</p>
+                        </div>
+                        <div class="modal-tab-content" id="tab-account">
+                            <h5>Account/Identity</h5>
+                            <label>User ID (Stub):</label> <input type="text" value="user_${Utils.generateId().substring(3, 8)}" disabled>
+                            <p style="font-size: 0.9em; color: var(--text-muted);">Manage your user identity (future feature).</p>
+                        </div>
+                        <div class="modal-tab-content" id="tab-network">
+                            <h5>Network (P2P) Settings</h5>
+                            <label for="setting-nostr-relays">Nostr Relays (one per line):</label>
+                            <textarea id="setting-nostr-relays" rows="4">wss://relay.damus.io
+wss://relay.snort.social</textarea>
+                            <p style="font-size: 0.9em; color: var(--text-muted);">Configure relays for P2P publishing via Nostr.</p>
+                        </div>
+                        <div class="modal-tab-content" id="tab-ontology">
+                            <h5>Ontology Settings</h5>
+                            <button disabled>Import Ontology (Stub)</button> <button disabled>Export Ontology (Stub)</button>
+                            <p style="margin-top: 15px; font-size: 0.9em; color: var(--text-muted);">Manage semantic types, fields, and templates (future feature).</p>
+                        </div>
+                        <div class="modal-tab-content" id="tab-llm">
+                            <h5>LLM Tools Settings</h5>
+                            <label for="setting-llm-provider">LLM Provider:</label>
+                            <select id="setting-llm-provider"><option>OpenAI (Stub)</option><option>Local (Stub)</option></select>
+                            <label for="setting-llm-apikey">API Key:</label> <input type="password" id="setting-llm-apikey">
+                            <p style="font-size: 0.9em; color: var(--text-muted);">Configure API keys for Enhance/Summary features.</p>
+                        </div>
+                        <div class="modal-tab-content" id="tab-appearance">
+                            <h5>Appearance Settings</h5>
+                            <label for="setting-theme">Theme:</label>
+                            <select id="setting-theme"><option>Light</option><option disabled>Dark (Stub)</option></select>
+                            <p style="font-size: 0.9em; color: var(--text-muted);">Customize the look and feel.</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button id="settings-cancel-btn">Cancel</button>
+                        <button id="settings-save-btn">Save Changes</button>
+                    </div>
+                </div>
+             `);
+         }
+
+         bindEvents() {
+             this.$el.on('click', '#settings-modal-close, #settings-cancel-btn', () => this.hide());
+             this.$el.on('click', '#settings-save-btn', () => this.save());
+             this.$el.on('click', '.modal-tabs li', (e) => this.switchTab(e));
+             // Close on backdrop click
+             this.$el.on('click', (e) => { if (e.target === this.$el[0]) this.hide(); });
+         }
+
+         switchTab(e) {
+             const $tab = $(e.currentTarget);
+             const tabId = $tab.data('tab');
+             this.$el.find('.modal-tabs li').removeClass('active');
+             $tab.addClass('active');
+             this.$el.find('.modal-tab-content').removeClass('active');
+             this.$el.find(`#tab-${tabId}`).addClass('active');
+         }
+
+         show() { this.$el.addClass('visible'); }
+         hide() { this.$el.removeClass('visible'); }
+         save() {
+             // Stub: Collect and save settings
+             console.log('Stub: Saving settings...');
+             Notifier.success('Stub: Settings saved.');
+             this.hide();
+         }
+    }
+
+    // --- Main Application Class ---
+    class App {
+        constructor(containerSelector) {
+            this.$container = $(containerSelector);
+            this.notes = [];
+            this.currentNoteId = null;
+            this.initComponents();
+            this.loadInitialData();
+            Notifier.init();
+            console.log("App initialized");
+        }
+
+        initComponents() {
+            this.$container.html(`
+                <aside class="sidebar" id="sidebar-container"></aside>
+                <main class="main-content">
+                    <nav class="menu-bar" id="menu-bar-container"></nav>
+                    <div class="editor-area" id="editor-container"></div>
+                    <div class="action-area" id="action-area-container"></div>
+                </main>
+                <div id="settings-modal" class="modal"></div>
+            `);
+
+            this.sidebar = new Sidebar(this, '#sidebar-container');
+            this.editor = new Editor(this, '#editor-container');
+            this.menuBar = new MenuBar(this, '#menu-bar-container');
+            this.actionArea = new ActionArea(this, '#action-area-container');
+            this.settingsModal = new SettingsModal(this, '#settings-modal');
+        }
+
+        loadInitialData() {
+            this.notes = StorageService.loadNotes();
+            if (this.notes.length === 0) {
+                this.notes = StorageService.getDefaultNotes();
+                StorageService.saveNotes(this.notes); // Save defaults if loaded
+            }
+            this.sortAndFilterNotes(); // Initial render
+            if (this.notes.length > 0) {
+                 // Select the first note based on current sort order
+                 const sortedNotes = this.getSortedFilteredNotes();
+                 if (sortedNotes.length > 0) {
+                    this.selectNote(sortedNotes[0].id);
+                 }
+            } else {
+                this.editor.clear();
+                this.actionArea.clearIcons();
+            }
+        }
+
+         getSortedFilteredNotes() {
+            const sortBy = this.sidebar.getSortCriteria();
+            const searchTerm = this.sidebar.getSearchTerm().toLowerCase();
+
+            let filteredNotes = this.notes.filter(note =>
+                (note.title || '').toLowerCase().includes(searchTerm) ||
+                $(`<div>${note.content}</div>`).text().toLowerCase().includes(searchTerm) // Basic text search
+            );
+
+            return filteredNotes.sort((a, b) => {
+                switch (sortBy) {
+                    case 'priority': return (b.priority || 0) - (a.priority || 0);
+                    case 'updated': return b.updated - a.updated;
+                    case 'created': return b.created - a.created;
+                    case 'title': return (a.title || '').localeCompare(b.title || '');
+                    default: return (b.priority || 0) - (a.priority || 0); // Default to priority
+                }
+            });
+        }
+
+        sortAndFilterNotes() {
+            const sortedFilteredNotes = this.getSortedFilteredNotes();
+            this.sidebar.renderNoteList(sortedFilteredNotes, this.currentNoteId);
+        }
+
+        selectNote(id) {
+            if (id === this.currentNoteId && this.currentNoteId !== null) return; // Avoid re-selecting
+
+            this.saveCurrentNote(); // Save previous note first
+
+            const note = this.notes.find(n => n.id === id);
+            if (note) {
+                this.currentNoteId = id;
+                this.editor.loadNote(note);
+                this.sidebar.setActiveNote(id);
+                this.actionArea.renderActionIcons(note);
+            } else {
+                console.error(`Note with id ${id} not found.`);
+                this.currentNoteId = null;
+                this.editor.clear();
+                this.sidebar.setActiveNote(null);
+                this.actionArea.clearIcons();
+            }
+        }
+
+        saveCurrentNote() {
+            if (this.currentNoteId === null) return false;
+
+            const note = this.notes.find(n => n.id === this.currentNoteId);
+            if (note) {
+                const editorData = this.editor.getNoteData();
+                let changed = false;
+
+                if (note.title !== editorData.title) {
+                    note.title = editorData.title;
+                    changed = true;
+                }
+                if (note.content !== editorData.content) {
+                    note.content = editorData.content;
+                    changed = true;
+                }
+
+                if (changed) {
+                    note.updated = Date.now();
+                    StorageService.saveNotes(this.notes);
+                    this.sidebar.updateNoteItem(note); // Update list item efficiently
+                    this.editor.updateMeta(note); // Update editor meta timestamp
+                    this.actionArea.renderActionIcons(note); // Re-analyze content for actions
+                    console.log(`Note ${note.id} saved.`);
+                    return true;
+                }
+            }
+             return false;
+        }
+
+        createNewNote() {
+            this.saveCurrentNote();
+            const newNote = {
+                id: Utils.generateId(),
+                title: "Untitled Note",
+                content: "",
+                created: Date.now(),
+                updated: Date.now(),
+                priority: 0,
+                state: 'Private',
+                color: `hsl(${Math.random() * 360}, 60%, 85%)` // Lighter pastel
+            };
+            this.notes.unshift(newNote); // Add to top
+            StorageService.saveNotes(this.notes);
+            this.sortAndFilterNotes(); // Re-render list
+            this.selectNote(newNote.id);
+            this.editor.focusTitle();
+            Notifier.success("New note created");
+        }
+
+        updateNotePriority(id, delta) {
+            const note = this.notes.find(n => n.id === id);
+            if (note) {
+                note.priority = (note.priority || 0) + delta;
+                note.updated = Date.now();
+                StorageService.saveNotes(this.notes);
+                this.sortAndFilterNotes(); // Re-sort and render list
+                if (id === this.currentNoteId) {
+                    this.editor.updateMeta(note); // Update meta if current note
+                }
+                Notifier.info(`Priority updated for "${note.title || 'Untitled'}"`);
+            }
+        }
+
+        handleMenuAction(action) {
+            this.saveCurrentNote(); // Ensure latest state is saved
+
+            const note = this.currentNoteId ? this.notes.find(n => n.id === this.currentNoteId) : null;
+
+            switch (action) {
+                case 'undo': document.execCommand('undo'); break; // Relies on browser implementation
+                case 'redo': document.execCommand('redo'); break; // Relies on browser implementation
+                case 'clone':
+                    if (note) {
+                        const clonedNote = { ...note, id: Utils.generateId(), title: `${note.title || 'Untitled'} (Clone)`, created: Date.now(), updated: Date.now() };
+                        this.notes.unshift(clonedNote);
+                        StorageService.saveNotes(this.notes);
+                        this.sortAndFilterNotes();
+                        this.selectNote(clonedNote.id);
+                        Notifier.success('Note cloned.');
+                    } else Notifier.warning('Select a note to clone.');
+                    break;
+                case 'insert': this.editor.insertField(); break;
+                case 'publish':
+                    if (note) {
+                        note.state = 'Published';
+                        note.updated = Date.now();
+                        StorageService.saveNotes(this.notes);
+                        this.editor.updateMeta(note);
+                        this.sidebar.updateNoteItem(note); // Reflect state change if visible
+                        Notifier.success(`Stub: Note "${note.title || 'Untitled'}" published.`);
+                        console.log('Stub: Publishing note to Nostr...', note);
+                    } else Notifier.warning('Select a note to publish.');
+                    break;
+                case 'enhance': Notifier.info('Stub: LLM Enhancement not implemented.'); break;
+                case 'summary': Notifier.info('Stub: LLM Summarization not implemented.'); break;
+                case 'view-source':
+                    if (note) {
+                        alert(`Note Source (ID: ${note.id}):\n\nTitle: ${note.title}\n\nContent:\n${note.content}\n\nState: ${note.state} | Priority: ${note.priority}`);
+                    } else Notifier.warning('Select a note to view source.');
+                    break;
+                case 'settings': this.settingsModal.show(); break;
+                default: console.warn(`Unknown menu action: ${action}`);
+            }
+        }
+
+         showActionDock(iconData) {
+             this.actionArea.showDock(iconData);
+         }
+    }
+
+    // --- Initialize ---
+    $(document).ready(() => {
+        const app = new App('#app-container');
+        // Save on unload/close
+        $(window).on('beforeunload', () => app.saveCurrentNote());
+    });
+
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 package dumb.cognote.plugin;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import dumb.cognote.*;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
@@ -202,9 +203,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private void handleDialogueResponse(WebSocket conn, String responseId, @Nullable String inReplyToId, JSONObject payload) {
-        var dialogueId = payload.optString("dialogueId");
-        var responseData = payload.optJSONObject("responseData");
+    private void handleDialogueResponse(WebSocket conn, String responseId, @Nullable String inReplyToId, JsonNode payload) {
+        var dialogueId = payload.get("dialogueId").asText();
+        var responseData = payload.get("responseData");
 
         if (dialogueId == null || responseData == null) {
             sendErrorResponse(conn, responseId, "Invalid dialogue response format: missing dialogueId or responseData.");
@@ -250,7 +251,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         conn.send(initialState.toString());
     }
 
-    private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JSONObject result, @Nullable String message) {
+    private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JsonNode result, @Nullable String message) {
         var response = new JSONObject()
                 .put("type", SIGNAL_TYPE_RESPONSE)
                 .put("id", UUID.randomUUID().toString())
@@ -262,7 +263,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         if (conn.isOpen()) conn.send(response.toString());
     }
 
-    private void sendSuccessResponse(WebSocket conn, String inReplyToId, @Nullable JSONObject result, @Nullable String message) {
+    private void sendSuccessResponse(WebSocket conn, String inReplyToId, @Nullable JsonNode result, @Nullable String message) {
         sendResponse(conn, inReplyToId, RESPONSE_STATUS_SUCCESS, result, message);
     }
 
@@ -421,7 +422,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }, () -> sendFailureResponse(conn, commandId, "Tool not found: " + toolName));
     }
 
-    private void handleRunQueryCommand(WebSocket conn, JSONObject payload) {
+    private void handleRunQueryCommand(WebSocket conn, JsonNode payload) {
         var queryId = payload.optString("queryId", Cog.id(Cog.ID_PREFIX_QUERY));
         var queryTypeStr = payload.optString("queryType");
         var patternString = payload.optString("patternString");
@@ -462,13 +463,13 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-    private void handleClearAllCommand(WebSocket conn, JSONObject payload) {
+    private void handleClearAllCommand(WebSocket conn, JsonNode payload) {
         var commandId = payload.optString("id");
         cog.clear();
         sendSuccessResponse(conn, commandId, null, "Clear all requested.");
     }
 
-    private void handleSetConfigCommand(WebSocket conn, JSONObject payload) {
+    private void handleSetConfigCommand(WebSocket conn, JsonNode payload) {
         var configJsonText = payload.optString("configJsonText");
         var commandId = payload.optString("id");
         if (configJsonText == null || configJsonText.isBlank()) {
@@ -476,19 +477,19 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             return;
         }
         if (cog.updateConfig(configJsonText)) {
-            sendSuccessResponse(conn, commandId, new CogNote.Configuration(cog).toJson(), "Configuration updated.");
+            sendSuccessResponse(conn, commandId, JsonUtil.toJsonNode(new CogNote.Configuration(cog)), "Configuration updated.");
         } else {
             sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
         }
     }
 
-    private void handleGetInitialStateCommand(WebSocket conn, JSONObject payload) {
+    private void handleGetInitialStateCommand(WebSocket conn, JsonNode payload) {
         var commandId = payload.optString("id");
         sendInitialState(conn);
         sendSuccessResponse(conn, commandId, null, "Initial state sent.");
     }
 
-    private void handleSaveNotesCommand(WebSocket conn, JSONObject payload) {
+    private void handleSaveNotesCommand(WebSocket conn, JsonNode payload) {
         var commandId = payload.optString("id");
         cog.save();
         sendSuccessResponse(conn, commandId, null, "Notes saved.");

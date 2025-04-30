@@ -4,7 +4,6 @@ package dumb.cognote.tool;
 import dumb.cognote.CogNote;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
-import org.json.JSONArray;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;

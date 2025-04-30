@@ -6,6 +6,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dumb.cognote.plugin.*;
+import dumb.cognote.tool.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -528,7 +530,7 @@ public class CogNote extends Cog {
         }
 
         // Private constructor for the main record fields
-        private Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
+        public Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
             this.llmApiUrl = llmApiUrl;
             this.llmModel = llmModel;
             this.globalKbCapacity = globalKbCapacity;
@@ -536,6 +538,9 @@ public class CogNote extends Cog {
             this.broadcastInputAssertions = broadcastInputAssertions;
         }
 
-        // No need for toJson() method here, use JsonUtil.toJsonNode(this) or toJsonString(this)
+        public Configuration(CogNote cog) {
+            this();
+            //TODO
+        }
     }
 }

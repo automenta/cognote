@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Note Management v2</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <style>
+        :root {
+            --bg-main: #f0f0f0;
+            --bg-sidebar: #e8e8e8;
+            --bg-note-list: #ffffff;
+            --bg-note-selected: #e0e8f0;
+            --bg-editor: #ffffff;
+            --bg-action-icon: #d0e0d0;
+            --bg-action-icon-hover: #c0d0c0;
+            --bg-action-icon-urgent: #f8d7da;
+            --border-color: #cccccc;
+            --text-color: #333333;
+            --text-muted: #777777;
+            --accent-color-1: #dc3545; /* Red */
+            --accent-color-2: #ffc107; /* Orange */
+            --accent-color-3: #6f42c1; /* Purple */
+            --accent-color-action: #86b7b7; /* Action Icon Teal */
+            --accent-color-action-urgent: #dc3545; /* Urgent Red */
+            --priority-high-color: #dc3545; /* Red */
+            --priority-medium-color: #ffc107; /* Orange */
+            --priority-low-color: #28a745;  /* Green */
+            --semantic-bg: #e9f5ff;
+            --semantic-border: #b3d7ff;
+            --semantic-label: #0056b3;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; font-family: sans-serif; font-size: 14px; color: var(--text-color); background-color: var(--bg-main); }
+
+        .app-container { display: flex; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px; /* Slightly wider */
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column; padding: 10px; gap: 10px;
+        }
+        .sidebar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .sidebar-header button, .sidebar-header select { padding: 5px 8px; font-size: 12px; cursor: pointer; }
+        .note-list { flex-grow: 1; overflow-y: auto; }
+        .note-item {
+            background-color: var(--bg-note-list); border: 1px solid var(--border-color);
+            border-radius: 4px; margin-bottom: 8px; padding: 10px; cursor: pointer;
+            position: relative; border-left-width: 5px; transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .note-item:hover { background-color: var(--bg-note-selected); }
+        .note-item.selected { background-color: var(--bg-note-selected); border-color: var(--accent-color-action); border-left-color: var(--accent-color-action) !important; } /* Ensure selection overrides priority color */
+        .note-item h4 { margin-bottom: 4px; font-size: 1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .note-item .meta { font-size: 0.8em; color: var(--text-muted); margin-bottom: 4px; }
+        .note-item .preview { font-size: 0.9em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .note-priority-controls { position: absolute; top: 5px; right: 5px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.2s ease; }
+        .note-item:hover .note-priority-controls { opacity: 1; }
+        .note-priority-controls button { font-size: 10px; padding: 1px 4px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px; line-height: 1; }
+        .note-item.priority-high { border-left-color: var(--priority-high-color); }
+        .note-item.priority-medium { border-left-color: var(--priority-medium-color); }
+        .note-item.priority-low { border-left-color: var(--priority-low-color); }
+
+        /* Main Content */
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--bg-editor); }
+
+        /* Top Menu Bar */
+        .menu-bar { background-color: var(--bg-main); padding: 5px 15px; border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 5px 15px; font-size: 0.9em; }
+        .menu-bar span { cursor: pointer; color: #007bff; }
+        .menu-bar span:hover { text-decoration: underline; }
+        .menu-bar .group { display: flex; gap: 10px; border-right: 1px solid #ccc; padding-right: 15px; align-items: center;}
+        .menu-bar .group:last-child { border-right: none; }
+
+        /* Editor Area */
+        .editor-area { flex-grow: 1; display: flex; flex-direction: column; padding: 20px; overflow: hidden; }
+        .editor-header { margin-bottom: 15px; }
+        .editor-title { font-size: 2em; font-weight: bold; border: none; outline: none; width: 100%; padding: 5px 0; background: transparent; margin-bottom: 5px; }
+        .editor-meta { font-size: 0.8em; color: var(--text-muted); margin-bottom: 10px; }
+        .editor-toolbar { margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+        .editor-toolbar button { padding: 5px 8px; font-size: 1em; cursor: pointer; margin-right: 5px; border: 1px solid transparent; background: none; }
+        .editor-toolbar button:hover { background-color: #eee; border-color: #ccc; }
+        .editor-toolbar button.icon { font-family: 'Courier New', Courier, monospace; /* Placeholder for icons */ }
+        .editor-content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
+        .editor-content { height: 100%; overflow-y: auto; padding-right: 15px; outline: none; line-height: 1.6; }
+        .editor-content ul { margin-left: 25px; margin-bottom: 10px; }
+        .editor-content li { margin-bottom: 5px; }
+        .editor-content strong { font-weight: bold; }
+        .editor-content em { font-style: italic; }
+        .editor-content u { text-decoration: underline; }
+
+        /* Semantic Elements Styling */
+        .semantic-element {
+            display: inline-block; /* Changed from inline-flex */
+            border: 1px solid var(--semantic-border);
+            background-color: var(--semantic-bg);
+            border-radius: 4px;
+            padding: 2px 6px;
+            margin: 0 3px;
+            font-size: 0.9em;
+            cursor: pointer; /* Make editable on click */
+            white-space: nowrap;
+        }
+        .semantic-element .label { font-weight: bold; color: var(--semantic-label); margin-right: 4px; }
+        .semantic-element .value { color: var(--text-color); }
+        .semantic-element .mode { font-style: italic; color: var(--text-muted); font-size: 0.8em; margin-left: 4px; }
+        .semantic-element[data-type="Tag"] .label { display: none; } /* Hide label for tags */
+        .semantic-element[data-type="Tag"]::before { content: "#"; color: var(--semantic-label); font-weight: bold; margin-right: 2px;}
+
+        /* Semantic Insert Popup */
+        #semantic-popup {
+            display: none; position: absolute; background: white; border: 1px solid #ccc;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-radius: 4px; padding: 15px;
+            width: 350px; z-index: 100; font-size: 0.9em;
+        }
+        #semantic-popup h5 { margin-top: 0; margin-bottom: 10px; font-size: 1.1em; }
+        #semantic-popup label { display: block; margin-bottom: 3px; font-weight: bold; }
+        #semantic-popup input, #semantic-popup select, #semantic-popup textarea { width: 100%; padding: 6px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 3px; font-size: 1em;}
+        #semantic-popup .radio-group label { display: inline-block; margin-right: 10px; font-weight: normal;}
+        #semantic-popup .radio-group input { width: auto; margin-right: 3px;}
+        #semantic-popup button { padding: 6px 12px; cursor: pointer; margin-right: 5px; }
+        #semantic-popup .predicate-help { font-size: 0.8em; color: #666; margin-top: -5px; margin-bottom: 10px; }
+
+        /* Action Area */
+        .action-area { background-color: var(--bg-main); border-top: 1px solid var(--border-color); padding: 10px 15px; min-height: 60px; position: relative; display: flex; align-items: center; gap: 10px; }
+        .action-icons-container { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .action-icon { width: 32px; height: 32px; background-color: var(--bg-action-icon); border: 2px solid var(--accent-color-action); border-radius: 4px; display: flex; justify-content: center; align-items: center; font-weight: bold; cursor: pointer; position: relative; transition: all 0.2s ease; }
+        .action-icon:hover { background-color: var(--bg-action-icon-hover); border-color: darken(var(--accent-color-action), 10%); }
+        .action-icon.urgent { border-color: var(--accent-color-action-urgent); background-color: var(--bg-action-icon-urgent); animation: strobe 1s infinite alternate; }
+        @keyframes strobe { from { box-shadow: 0 0 5px var(--accent-color-action-urgent); } to { box-shadow: 0 0 15px var(--accent-color-action-urgent); } }
+        .action-icon .hide-btn { position: absolute; top: -5px; right: -5px; width: 14px; height: 14px; background: white; border: 1px solid #aaa; border-radius: 50%; font-size: 10px; line-height: 12px; text-align: center; cursor: pointer; opacity: 0; transition: opacity 0.2s ease; color: #555; }
+        .action-icon:hover .hide-btn { opacity: 1; }
+        .action-icon .tooltip { visibility: hidden; width: 120px; background-color: black; color: #fff; text-align: center; border-radius: 6px; padding: 5px 0; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -60px; opacity: 0; transition: opacity 0.3s; font-size: 0.8em; }
+        .action-icon:hover .tooltip { visibility: visible; opacity: 1; }
+        .action-area-description { font-size: 0.8em; color: var(--text-muted); margin-left: auto; text-align: right; }
+
+        /* Action Dock */
+        .action-dock { display: none; height: 250px; background-color: #f8f9fa; border-top: 1px solid var(--border-color); padding: 15px; overflow-y: auto; }
+        .action-dock.visible { display: block; }
+        .action-dock h5 { margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .action-dock ul { list-style: none; padding-left: 0; margin-bottom: 15px; }
+        .action-dock li { margin-bottom: 5px; font-size: 0.9em; background: #fff; padding: 5px; border: 1px solid #eee; border-radius: 3px; }
+
+        /* Settings Modal */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); justify-content: center; align-items: center; }
+        .modal.visible { display: flex; }
+        .modal-content { background-color: #fefefe; margin: auto; padding: 0; border: 1px solid #888; width: 80%; max-width: 700px; border-radius: 5px; box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2); display: flex; flex-direction: column; }
+        .modal-header { padding: 10px 16px; background-color: #5cb85c; color: white; border-bottom: 1px solid #ddd; border-radius: 5px 5px 0 0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h4 { margin: 0; }
+        .modal-close { color: white; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .modal-body { padding: 0; flex-grow: 1; display: flex; min-height: 300px; }
+        .modal-tabs { list-style: none; padding: 0; margin: 0; border-right: 1px solid #ddd; background: #f8f8f8; width: 150px; }
+        .modal-tabs li { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid #eee; }
+        .modal-tabs li:hover { background: #eee; }
+        .modal-tabs li.active { background: #fff; border-right: 3px solid #5cb85c; margin-right: -1px; font-weight: bold; }
+        .modal-tab-content { padding: 15px; flex-grow: 1; background: #fff; display: none; }
+        .modal-tab-content.active { display: block; }
+        .modal-footer { padding: 10px 16px; background-color: #f9f9f9; border-top: 1px solid #ddd; text-align: right; border-radius: 0 0 5px 5px; }
+        .modal-footer button { padding: 8px 15px; cursor: pointer; }
+
+        /* Utility */
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <!-- Left Sidebar -->
+    <aside class="sidebar" id="sidebar-component">
+        <div class="sidebar-header">
+            <button id="add-note-btn" title="Create New Note">+</button>
+            <select id="sort-notes">
+                <option value="priority">Sort by Priority</option>
+                <option value="updated">Sort by Updated</option>
+                <option value="created">Sort by Created</option>
+                <option value="title">Sort by Title</option>
+            </select>
+        </div>
+        <input type="search" id="search-notes" placeholder="Filter/Search Notes..." style="width: 100%; padding: 5px; margin-bottom: 10px;">
+        <div class="note-list" id="note-list">
+            <!-- Note items will be rendered here by Sidebar component -->
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+        <!-- Top Menu Bar -->
+        <nav class="menu-bar" id="menu-bar">
+            <div class="group">
+                <span data-action="undo">Undo</span>
+                <span data-action="redo">Redo</span>
+                <span data-action="clone">Clone</span>
+            </div>
+            <div class="group">
+                <span data-action="rich-text">Rich-text Edit</span>
+                <span data-action="insert">Insert Tag/Field/Template</span>
+            </div>
+            <div class="group">
+                <span data-action="publish">Publish</span>
+            </div>
+            <div class="group">
+                <span>Tools:</span>
+                <span data-action="enhance">Enhance</span>
+                <span data-action="summary">Summary</span>
+            </div>
+            <div class="group">
+                <span data-action="view-source">View source</span>
+                <span data-action="settings">Settings</span>
+            </div>
+        </nav>
+
+        <!-- Editor Area -->
+        <div class="editor-area" id="editor-component">
+            <div class="editor-header">
+                <input type="text" class="editor-title" id="note-title" placeholder="Note Title">
+                <div class="editor-meta" id="note-meta">Created: N/A | Updated: N/A | State: N/A</div>
+            </div>
+            <div class="editor-toolbar">
+                <button data-command="bold" class="icon">B</button>
+                <button data-command="italic" class="icon">I</button>
+                <button data-command="underline" class="icon">U</button>
+                <button data-command="insertUnorderedList" class="icon">UL</button>
+                <button data-command="insertOrderedList" class="icon">OL</button>
+                <button data-command="find" class="icon">Find</button>
+                <button id="insert-semantic-btn" class="icon">+</button> <!-- For Tag/Field/Template -->
+            </div>
+            <div class="editor-content-wrapper">
+                <div class="editor-content" id="note-content" contenteditable="true">
+                    <!-- Note content will be loaded here -->
+                </div>
+            </div>
+            <!-- Semantic Insertion Popup -->
+            <div id="semantic-popup">
+                <h5 id="semantic-popup-title">Insert Semantic Element</h5>
+                <input type="hidden" id="semantic-element-id"> <!-- For editing existing elements -->
+                <label for="semantic-type">Type:</label>
+                <select id="semantic-type">
+                    <option value="Tag">Tag</option>
+                    <option value="Field">Field</option>
+                    <option value="Template">Template</option>
+                </select>
+
+                <div id="semantic-details-tag" class="hidden">
+                    <label for="tag-value">Tag Value:</label>
+                    <input type="text" id="tag-value" placeholder="e.g., important, project-x">
+                </div>
+
+                <div id="semantic-details-field" class="hidden">
+                    <label for="field-name">Field Name:</label>
+                    <input type="text" id="field-name" placeholder="e.g., Cost, DueDate">
+                    <label for="field-type">Data Type:</label>
+                    <select id="field-type">
+                        <option value="text">Text</option>
+                        <option value="number">Number</option>
+                        <option value="currency">Currency</option>
+                        <option value="date">Date</option>
+                        <option value="boolean">Boolean (True/False)</option>
+                        <option value="url">URL</option>
+                        <option value="quantity">Quantity (e.g., 10m, 5kg)</option>
+                        <option value="enum">Enum (List)</option>
+                    </select>
+                    <label>Mode:</label>
+                    <div class="radio-group">
+                        <label><input type="radio" name="field-mode" value="Real" checked> Real (Fact)</label>
+                        <label><input type="radio" name="field-mode" value="Imaginary"> Imaginary (Preference/Condition)</label>
+                    </div>
+                    <label for="field-value">Value:</label>
+                    <textarea id="field-value" rows="2" placeholder="Enter value or predicate (e.g., < 20, = 'urgent', BETWEEN 2024-01-01 AND 2024-12-31)"></textarea>
+                    <div class="predicate-help hidden">Use operators like <, >, =, <=, >=, CONTAINS, BETWEEN, IN (...) with AND/OR/NOT for Imaginary mode.</div>
+                </div>
+
+                <div id="semantic-details-template" class="hidden">
+                    <label for="template-select">Choose Template:</label>
+                    <select id="template-select">
+                        <!-- Templates loaded dynamically -->
+                    </select>
+                </div>
+
+                <button id="semantic-popup-save">Insert</button>
+                <button id="semantic-popup-cancel" type="button">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Action Area -->
+        <div class="action-area" id="action-area-component">
+            <div class="action-icons-container" id="action-icons">
+                <!-- Action icons rendered by ActionArea component -->
+            </div>
+            <div class="action-area-description">
+                Action Dock - holds Note's icons:<br>
+                Matches/Opportunities, Questions, Suggestions/Ideas, Related/Linked, Messages/Alerts
+            </div>
+        </div>
+
+        <!-- Action Dock -->
+        <div class="action-dock" id="action-dock">
+            <h5>Action Details</h5>
+            <div id="action-dock-content">
+                <!-- Content based on selected action icon -->
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="modal">
+    <!-- Modal structure remains the same, managed by SettingsModal component -->
+    <div class="modal-content">
+        <div class="modal-header">
+            <h4>Application Settings</h4>
+            <span class="modal-close" id="settings-modal-close">×</span>
+        </div>
+        <div class="modal-body">
+            <ul class="modal-tabs" id="settings-tabs">
+                <li class="active" data-tab="general">General</li>
+                <li data-tab="account">Account/Identity</li>
+                <li data-tab="network">Network (P2P)</li>
+                <li data-tab="ontology">Ontology</li>
+                <li data-tab="llm">LLM Tools</li>
+                <li data-tab="appearance">Appearance</li>
+            </ul>
+            <div class="modal-tab-content active" id="tab-general">
+                <h5>General Settings</h5>
+                <p>Configure general application behavior...</p>
+                <label>Default Note State:</label>
+                <select><option>Private</option><option>Published</option></select>
+            </div>
+            <div class="modal-tab-content" id="tab-account">
+                <h5>Account/Identity</h5>
+                <p>Manage your user identity...</p>
+                <label>User ID:</label> <input type="text" value="user123" disabled>
+            </div>
+            <div class="modal-tab-content" id="tab-network">
+                <h5>Network (P2P) Settings</h5>
+                <p>Configure Nostr relays and P2P settings...</p>
+                <label>Nostr Relays:</label> <textarea>wss://relay.damus.io
+wss://relay.snort.social</textarea>
+            </div>
+            <div class="modal-tab-content" id="tab-ontology">
+                <h5>Ontology Settings</h5>
+                <p>Manage semantic types, fields, and templates...</p>
+                <button>Import Ontology</button> <button>Export Ontology</button>
+                <h6>Defined Templates:</h6> <ul id="ontology-template-list"></ul>
+            </div>
+            <div class="modal-tab-content" id="tab-llm">
+                <h5>LLM Tools Settings</h5>
+                <p>Configure API keys and models for Enhance/Summary...</p>
+                <label>LLM Provider:</label> <select><option>OpenAI</option><option>Local</option></select><br>
+                <label>API Key:</label> <input type="password">
+            </div>
+            <div class="modal-tab-content" id="tab-appearance">
+                <h5>Appearance Settings</h5>
+                <p>Customize the look and feel...</p>
+                <label>Theme:</label> <select><option>Light</option><option>Dark</option></select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="settings-save-btn">Save Changes</button>
+            <button id="settings-cancel-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+<script>
+    // --- Utility Functions ---
+    const Utils = {
+        debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func.apply(this, args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        },
+        timeAgo(timestamp) {
+            const now = Date.now();
+            const seconds = Math.floor((now - timestamp) / 1000);
+            let interval = Math.floor(seconds / 31536000);
+            if (interval > 1) return `${interval} years ago`;
+            interval = Math.floor(seconds / 2592000);
+            if (interval > 1) return `${interval} months ago`;
+            interval = Math.floor(seconds / 86400);
+            if (interval > 1) return `${interval} days ago`;
+             if (interval === 1) return `1 day ago`;
+            interval = Math.floor(seconds / 3600);
+            if (interval > 1) return `${interval} hours ago`;
+             if (interval === 1) return `1 hour ago`;
+            interval = Math.floor(seconds / 60);
+            if (interval > 1) return `${interval} minutes ago`;
+             if (interval === 1) return `1 minute ago`;
+            return `just now`;
+        },
+        escapeHtml(unsafe) {
+             return unsafe
+                 .replace(/&/g, "&")
+                 .replace(/</g, "<")
+                 .replace(/>/g, ">")
+                 .replace(/\"/g, "\"")
+                 .replace(/\'/g, "\'");
+        },
+         generateUUID() { // Simple UUID generator
+             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+    };
+
+    // --- Ontology Service ---
+    class OntologyService {
+        constructor() {
+            this.fieldTypes = ['text', 'number', 'currency', 'date', 'boolean', 'url', 'quantity', 'enum'];
+            this.templates = {
+                'Task': [
+                    { name: 'Description', type: 'text', mode: 'Real', value: '' },
+                    { name: 'DueDate', type: 'date', mode: 'Imaginary', value: '<=' },
+                    { name: 'Priority', type: 'enum', mode: 'Real', value: 'Medium', options: ['High', 'Medium', 'Low'] }, // Example enum options
+                    { name: 'Status', type: 'enum', mode: 'Real', value: 'Todo', options: ['Todo', 'InProgress', 'Done'] }
+                ],
+                'ProductRequirement': [
+                    { name: 'FeatureName', type: 'text', mode: 'Real', value: '' },
+                    { name: 'Cost', type: 'currency', mode: 'Imaginary', value: '<' },
+                    { name: 'Effort', type: 'enum', mode: 'Real', value: 'M', options: ['S', 'M', 'L', 'XL'] },
+                    { name: 'MustHave', type: 'boolean', mode: 'Real', value: 'true' }
+                ],
+                 'Contact': [
+                    { name: 'Name', type: 'text', mode: 'Real', value: '' },
+                    { name: 'Email', type: 'url', mode: 'Real', value: '' },
+                    { name: 'Phone', type: 'text', mode: 'Real', value: '' }
+                ]
+            };
+        }
+
+        getTemplateNames() {
+            return Object.keys(this.templates);
+        }
+
+        getTemplateFields(templateName) {
+            return this.templates[templateName] ? [...this.templates[templateName]] : []; // Return copy
+        }
+
+        // Basic parser for semantic elements in HTML
+        parseSemanticData(htmlContent) {
+            const elements = [];
+            const $content = $(`<div>${htmlContent}</div>`);
+            $content.find('.semantic-element').each((i, el) => {
+                const $el = $(el);
+                const data = $el.data();
+                elements.push({
+                    id: data.id,
+                    type: data.type, // 'Tag', 'Field'
+                    name: data.name, // Field name or undefined for Tag
+                    mode: data.mode, // 'Real', 'Imaginary' or undefined for Tag
+                    dataType: data.dataType, // Field data type or undefined for Tag
+                    value: $el.find('.value').text() || $el.text().replace(/^#/, '') // Get value
+                });
+            });
+            return elements;
+        }
+
+        // Generates HTML for a semantic element
+        createSemanticHtml(data) {
+             const id = data.id || Utils.generateUUID(); // Assign ID if new
+             let content = '';
+             const escapedValue = Utils.escapeHtml(data.value || '');
+
+             if (data.type === 'Tag') {
+                 content = `<span class="value">${escapedValue}</span>`;
+             } else if (data.type === 'Field') {
+                 content = `<span class="label">${Utils.escapeHtml(data.name || '')}:</span> <span class="value">${escapedValue}</span>`;
+                 if (data.mode === 'Imaginary') {
+                     content += ` <span class="mode">(Imaginary)</span>`;
+                 }
+             }
+
+             return `<span class="semantic-element" contenteditable="false" data-id="${id}" data-type="${data.type}" data-name="${Utils.escapeHtml(data.name || '')}" data-mode="${data.mode || ''}" data-data-type="${data.dataType || ''}">${content}</span>`;
+        }
+    }
+
+    // --- Data Model ---
+    class Note {
+        constructor({ id, title = "Untitled Note", content = "", created = Date.now(), updated = Date.now(), priority = 0, state = 'Private', color = null, structuredData = [] }) {
+            this.id = id || Utils.generateUUID();
+            this.title = title;
+            this.content = content;
+            this.created = created;
+            this.updated = updated;
+            this.priority = priority; // 0: Normal, >0 Higher (e.g., 1: Low, 2: Medium, 3: High), <0 Lower
+            this.state = state; // 'Private', 'Published'
+            this.color = color || `hsl(${Math.random() * 360}, 70%, 80%)`;
+            this.structuredData = structuredData; // Array of parsed semantic objects
+        }
+
+        updateContent(newContent, ontologyService) {
+            if (this.content !== newContent) {
+                this.content = newContent;
+                this.structuredData = ontologyService.parseSemanticData(newContent); // Re-parse on change
+                this.touch();
+                return true;
+            }
+            return false;
+        }
+
+        updateTitle(newTitle) {
+             if (this.title !== newTitle) {
+                this.title = newTitle;
+                this.touch();
+                return true;
+             }
+             return false;
+        }
+
+        setPriority(newPriority) {
+            if (this.priority !== newPriority) {
+                this.priority = newPriority;
+                this.touch();
+                return true;
+            }
+            return false;
+        }
+
+         setState(newState) {
+             if (this.state !== newState && ['Private', 'Published'].includes(newState)) {
+                 this.state = newState;
+                 this.touch();
+                 return true;
+             }
+             return false;
+         }
+
+        touch() {
+            this.updated = Date.now();
+        }
+
+        getPreview() {
+            return $(`<div>${this.content}</div>`).text().substring(0, 50) + '...';
+        }
+
+        getPriorityClass() {
+            if (this.priority >= 3) return 'priority-high';
+            if (this.priority === 2) return 'priority-medium';
+            if (this.priority === 1) return 'priority-low';
+            return '';
+        }
+    }
+
+    // --- Component Base Class ---
+    class Component {
+        constructor(app, elementId) {
+            this.app = app; // Reference to the main App controller
+            this.element = $(`#${elementId}`);
+            if (!this.element.length) {
+                console.error(`Component element #${elementId} not found.`);
+            }
+            this.bindEvents();
+        }
+        // Placeholder for event binding logic in subclasses
+        bindEvents() {}
+        // Placeholder for rendering logic in subclasses
+        render() {}
+    }
+
+    // --- Sidebar Component ---
+    class Sidebar extends Component {
+        constructor(app) {
+            super(app, 'sidebar-component');
+        }
+
+        bindEvents() {
+            this.$noteList = this.element.find('#note-list');
+            this.$sortSelect = this.element.find('#sort-notes');
+            this.$searchNotes = this.element.find('#search-notes');
+            this.$addNoteBtn = this.element.find('#add-note-btn');
+            this.$addNoteBtn.on('click', () => this.app.createNewNote());
+            this.$sortSelect.on('change', () => this.render());
+            this.$searchNotes.on('input', Utils.debounce(() => this.render(), 300));
+
+            this.$noteList.on('click', '.note-item', (e) => {
+                // Prevent selection if priority button was clicked
+                if ($(e.target).closest('.note-priority-controls').length === 0) {
+                     const id = $(e.currentTarget).data('id');
+                     this.app.selectNote(id);
+                }
+            });
+
+            this.$noteList.on('click', '.priority-inc', (e) => {
+                e.stopPropagation();
+                const id = $(e.currentTarget).data('id');
+                this.app.updateNotePriority(id, 1);
+            });
+
+            this.$noteList.on('click', '.priority-dec', (e) => {
+                e.stopPropagation();
+                const id = $(e.currentTarget).data('id');
+                this.app.updateNotePriority(id, -1);
+            });
+        }
+
+        render(notes = this.app.notes, currentNoteId = this.app.currentNoteId) {
+            const sortBy = this.$sortSelect.val();
+            const searchTerm = this.$searchNotes.val().toLowerCase();
+
+            let filteredNotes = notes.filter(note =>
+                note.title.toLowerCase().includes(searchTerm) ||
+                note.content.toLowerCase().includes(searchTerm) // Simple content search
+            );
+
+            filteredNotes.sort((a, b) => {
+                switch (sortBy) {
+                    case 'priority': return b.priority - a.priority; // Higher priority first
+                    case 'updated': return b.updated - a.updated;
+                    case 'created': return b.created - a.created;
+                    case 'title': return a.title.localeCompare(b.title);
+                    default: return 0;
+                }
+            });
+
+            this.$noteList.empty();
+            filteredNotes.forEach(note => this.$noteList.append(this.renderNoteItem(note, currentNoteId)));
+        }
+
+        renderNoteItem(note, currentNoteId) {
+            const selectedClass = note.id === currentNoteId ? 'selected' : '';
+            const priorityClass = note.getPriorityClass();
+            const updatedAgo = Utils.timeAgo(note.updated);
+            const previewText = note.getPreview();
+
+            return $(`
+                <div class="note-item ${selectedClass} ${priorityClass}" data-id="${note.id}" style="border-left-color: ${note.color};">
+                    <h4>${Utils.escapeHtml(note.title) || 'Untitled Note'}</h4>
+                    <div class="meta">Updated ${updatedAgo}</div>
+                    <div class="preview">${Utils.escapeHtml(previewText)}</div>
+                    <div class="note-priority-controls">
+                         <span style="margin-right: 5px; font-weight: bold;">P: ${note.priority}</span>
+                        <button class="priority-inc" data-id="${note.id}">+</button>
+                        <button class="priority-dec" data-id="${note.id}">-</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        updateNoteItem(note) {
+             const $item = this.$noteList.find(`.note-item[data-id="${note.id}"]`);
+             if ($item.length) {
+                 $item.replaceWith(this.renderNoteItem(note, this.app.currentNoteId));
+                 // Ensure correct border color if not selected
+                 if (note.id !== this.app.currentNoteId) {
+                     $item.css('border-left-color', note.color);
+                 }
+             } else {
+                 this.render(); // Fallback to full render if item not found
+             }
+        }
+
+         setActiveNote(noteId) {
+            this.$noteList.find('.note-item').removeClass('selected');
+            if (noteId) {
+                this.$noteList.find(`.note-item[data-id="${noteId}"]`).addClass('selected');
+            }
+        }
+    }
+
+    // --- Editor Component ---
+    class Editor extends Component {
+        constructor(app) {
+            super(app, 'editor-component');
+            this.currentNote = null;
+            this.saveDebounced = Utils.debounce(() => this.app.saveCurrentNote(), 1000);
+            this.activeSemanticElement = null; // Track element being edited
+        }
+
+        bindEvents() {
+            this.$title = this.element.find('#note-title');
+            this.$meta = this.element.find('#note-meta');
+            this.$content = this.element.find('#note-content');
+            this.$toolbar = this.element.find('.editor-toolbar');
+            this.$semanticPopup = $('#semantic-popup'); // Popup is outside editor component element
+
+            // Standard editor commands
+            this.$toolbar.on('click', 'button[data-command]', (e) => {
+                const command = $(e.currentTarget).data('command');
+                if (command === 'find') {
+                    const searchTerm = prompt("Find text:");
+                    if (searchTerm) toastr.info(`Stub: Finding "${searchTerm}"`);
+                } else {
+                    document.execCommand(command, false, null);
+                    this.$content.trigger('input'); // Trigger save
+                }
+            });
+
+            // Semantic insert button
+            this.$toolbar.on('click', '#insert-semantic-btn', () => this.showSemanticPopup());
+
+            // Content change listener
+            this.$content.on('input', () => this.saveDebounced());
+            this.$title.on('input', () => this.saveDebounced());
+
+            // Semantic Popup Events
+            this.$semanticPopup.on('click', '#semantic-popup-cancel', () => this.hideSemanticPopup());
+            this.$semanticPopup.on('click', '#semantic-popup-save', () => this.saveSemanticElement());
+            this.$semanticPopup.on('change', '#semantic-type', () => this.updateSemanticPopupUI());
+            this.$semanticPopup.on('change', 'input[name="field-mode"]', () => this.togglePredicateHelp());
+
+             // Edit existing semantic elements on click
+            this.$content.on('click', '.semantic-element', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const $element = $(e.currentTarget);
+                this.editSemanticElement($element);
+            });
+
+             // Prevent editing semantic spans directly, allow clicking
+             this.$content.on('keydown', (e) => {
+                const selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    const $target = $(range.commonAncestorContainer);
+                    if ($target.closest('.semantic-element').length > 0) {
+                         // Allow deletion (Backspace/Delete) but prevent typing inside
+                         if (e.key.length === 1) { // Character keys
+                             e.preventDefault();
+                             toastr.info("Click the element to edit its properties.");
+                         }
+                    }
+                }
+            });
+        }
+
+        loadNote(note) {
+            this.currentNote = note;
+            if (note) {
+                this.$title.val(note.title);
+                this.$content.html(note.content); // Trusting saved HTML for now
+                this.updateMeta(note);
+            } else {
+                this.clear();
+            }
+        }
+
+        updateMeta(note) {
+             this.$meta.text(`Created: ${new Date(note.created).toLocaleDateString()} | Updated: ${Utils.timeAgo(note.updated)} | State: ${note.state}`);
+        }
+
+        clear() {
+            this.currentNote = null;
+            this.$title.val('');
+            this.$content.html('');
+            this.$meta.text('Created: N/A | Updated: N/A | State: N/A');
+        }
+
+        getContent() {
+            return this.$content.html();
+        }
+
+        getTitle() {
+            return this.$title.val();
+        }
+
+        // --- Semantic Data Handling ---
+        showSemanticPopup(position = null, existingData = null) {
+            this.resetSemanticPopup();
+            if (existingData) {
+                // Populate popup for editing
+                this.$semanticPopup.find('#semantic-popup-title').text('Edit Semantic Element');
+                this.$semanticPopup.find('#semantic-element-id').val(existingData.id);
+                $('#semantic-type').val(existingData.type).trigger('change');
+
+                if (existingData.type === 'Tag') {
+                    $('#tag-value').val(existingData.value);
+                } else if (existingData.type === 'Field') {
+                    $('#field-name').val(existingData.name);
+                    $('#field-type').val(existingData.dataType);
+                    $(`input[name="field-mode"][value="${existingData.mode}"]`).prop('checked', true).trigger('change');
+                    $('#field-value').val(existingData.value);
+                }
+                 this.$semanticPopup.find('#semantic-popup-save').text('Update');
+            } else {
+                 this.$semanticPopup.find('#semantic-popup-title').text('Insert Semantic Element');
+                 this.$semanticPopup.find('#semantic-popup-save').text('Insert');
+            }
+
+
+            // Position near button or selection
+             if (!position) {
+                const btnPos = this.$toolbar.find('#insert-semantic-btn').offset();
+                position = { top: btnPos.top + 30, left: btnPos.left };
+             }
+             this.$semanticPopup.css({ top: position.top + 'px', left: position.left + 'px' }).fadeIn(200);
+             $('#semantic-type').focus();
+        }
+
+        hideSemanticPopup() {
+            this.$semanticPopup.fadeOut(200);
+            this.activeSemanticElement = null; // Clear active element on hide
+        }
+
+        resetSemanticPopup() {
+             $('#semantic-element-id').val('');
+             $('#semantic-type').val('Tag').trigger('change');
+             $('#tag-value').val('');
+             $('#field-name').val('');
+             $('#field-type').val('text');
+             $('input[name="field-mode"][value="Real"]').prop('checked', true).trigger('change');
+             $('#field-value').val('');
+             $('#template-select').empty(); // Clear templates
+             this.activeSemanticElement = null;
+        }
+
+        updateSemanticPopupUI() {
+            const type = $('#semantic-type').val();
+            this.$semanticPopup.find('#semantic-details-tag, #semantic-details-field, #semantic-details-template').addClass('hidden');
+            if (type === 'Tag') {
+                this.$semanticPopup.find('#semantic-details-tag').removeClass('hidden');
+            } else if (type === 'Field') {
+                this.$semanticPopup.find('#semantic-details-field').removeClass('hidden');
+                this.togglePredicateHelp(); // Ensure help text visibility is correct
+            } else if (type === 'Template') {
+                this.$semanticPopup.find('#semantic-details-template').removeClass('hidden');
+                this.loadTemplatesIntoPopup();
+            }
+        }
+
+         togglePredicateHelp() {
+            const mode = $('input[name="field-mode"]:checked').val();
+            this.$semanticPopup.find('.predicate-help').toggleClass('hidden', mode !== 'Imaginary');
+        }
+
+        loadTemplatesIntoPopup() {
+            const $select = $('#template-select');
+            $select.empty().append('<option value="">-- Select Template --</option>');
+            this.app.ontologyService.getTemplateNames().forEach(name => {
+                $select.append(`<option value="${name}">${name}</option>`);
+            });
+        }
+
+        saveSemanticElement() {
+             const type = $('#semantic-type').val();
+             let elementsHtml = '';
+             const elementId = $('#semantic-element-id').val(); // Get ID if editing
+
+             try {
+                 if (type === 'Tag') {
+                     const value = $('#tag-value').val().trim();
+                     if (!value) throw new Error("Tag value cannot be empty.");
+                     elementsHtml = this.app.ontologyService.createSemanticHtml({ id: elementId, type: 'Tag', value: value });
+                 } else if (type === 'Field') {
+                     const name = $('#field-name').val().trim();
+                     const dataType = $('#field-type').val();
+                     const mode = $('input[name="field-mode"]:checked').val();
+                     const value = $('#field-value').val().trim(); // Keep value as string for now
+                     if (!name) throw new Error("Field name cannot be empty.");
+                     // Basic validation could be added here based on dataType
+                     elementsHtml = this.app.ontologyService.createSemanticHtml({ id: elementId, type: 'Field', name: name, dataType: dataType, mode: mode, value: value });
+                 } else if (type === 'Template') {
+                     const templateName = $('#template-select').val();
+                     if (!templateName) throw new Error("Please select a template.");
+                     const fields = this.app.ontologyService.getTemplateFields(templateName);
+                     fields.forEach(field => {
+                         // Create HTML for each field in the template
+                         elementsHtml += this.app.ontologyService.createSemanticHtml({ type: 'Field', name: field.name, dataType: field.type, mode: field.mode, value: field.value }) + ' '; // Add space between elements
+                     });
+                 }
+
+                 if (this.activeSemanticElement) {
+                     // Replace existing element if editing
+                     this.activeSemanticElement.replaceWith(elementsHtml);
+                 } else {
+                     // Insert new element(s) at cursor position
+                     document.execCommand('insertHTML', false, elementsHtml + ' '); // Add space after insertion
+                 }
+
+                 this.$content.trigger('input'); // Trigger save
+                 this.hideSemanticPopup();
+
+             } catch (error) {
+                 toastr.error(`Error saving semantic element: ${error.message}`);
+             }
+        }
+
+         editSemanticElement($element) {
+             this.activeSemanticElement = $element; // Store the element being edited
+             const data = $element.data();
+             const existingData = {
+                 id: data.id,
+                 type: data.type,
+                 name: data.name,
+                 mode: data.mode,
+                 dataType: data.dataType,
+                 // Extract value carefully depending on type
+                 value: data.type === 'Tag' ? $element.text().replace(/^#/, '') : $element.find('.value').text()
+             };
+             const position = $element.offset();
+             this.showSemanticPopup({ top: position.top + $element.height() + 5, left: position.left }, existingData);
+         }
+    }
+
+    // --- ActionArea Component ---
+    class ActionArea extends Component {
+        constructor(app) {
+            super(app, 'action-area-component');
+        }
+
+        bindEvents() {
+            this.$iconsContainer = this.element.find('#action-icons');
+            this.$dock = $('#action-dock'); // Dock is outside component element
+            this.$dockContent = this.$dock.find('#action-dock-content');
+            this.$iconsContainer.on('click', '.action-icon', (e) => {
+                if ($(e.target).hasClass('hide-btn')) return;
+                const $icon = $(e.currentTarget);
+                this.showActionDock($icon.data('type'), $icon.data('details'), $icon.data('context'));
+            });
+
+            this.$iconsContainer.on('click', '.hide-btn', (e) => {
+                e.stopPropagation();
+                $(e.currentTarget).closest('.action-icon').fadeOut(300, function() { $(this).remove(); });
+            });
+
+             // Hide dock if clicking outside
+             $(document).on('click', (event) => {
+                if (!$(event.target).closest('.action-icon, .action-dock').length) {
+                    if (this.$dock.hasClass('visible')) {
+                        this.hideActionDock();
+                    }
+                }
+            });
+        }
+
+        render(note) {
+            this.$iconsContainer.empty();
+            if (!note) return;
+
+            // Simulate analysis based on content and structured data
+            const contentLower = note.content.toLowerCase();
+            const structuredData = note.structuredData || [];
+
+            // Example: Icon for cost fields
+            structuredData.filter(d => d.type === 'Field' && d.name.toLowerCase() === 'cost').forEach(field => {
+                 const urgent = field.mode === 'Imaginary' && field.value.includes('<') && parseFloat(field.value.replace(/[^0-9.]/g, '')) < 20; // Example urgent condition
+                 this.addIcon('Match', `Cost field found: ${field.value}`, `Field ID: ${field.id}`, urgent ? 'urgent' : '');
+            });
+
+            // Example: Icon for questions
+            if (contentLower.includes('?')) {
+                this.addIcon('Question', 'Question mark detected in text.', 'Text content');
+            }
+
+             // Example: Icon for tasks
+             structuredData.filter(d => d.type === 'Field' && d.name.toLowerCase() === 'status' && d.value.toLowerCase() === 'todo').forEach(field => {
+                 this.addIcon('Task', `Open task found: ${field.value}`, `Field ID: ${field.id}`);
+             });
+
+             // Example: Generic suggestion
+             if (contentLower.includes('idea') || contentLower.includes('suggestion')) {
+                 this.addIcon('Suggestion', 'Idea or suggestion mentioned.', 'Text content');
+             }
+        }
+
+         addIcon(type, details, context = '', className = '') {
+             const iconChar = type.charAt(0); // Simple character representation
+             const tooltip = `${type}: ${details}`;
+             const $icon = $(`
+                <div class="action-icon ${className}" data-type="${type}" data-details="${Utils.escapeHtml(details)}" data-context="${Utils.escapeHtml(context)}">
+                    ${iconChar}
+                    <span class="hide-btn">x</span>
+                    <span class="tooltip">${Utils.escapeHtml(tooltip)}</span>
+                </div>`);
+             this.$iconsContainer.append($icon);
+         }
+
+        showActionDock(type, details, context) {
+            let contentHtml = `<h5>${type} Details</h5>`;
+            contentHtml += `<p><strong>Context:</strong> ${context || 'N/A'}</p>`;
+            contentHtml += `<ul><li>${details}</li>`;
+            // Add more dummy items based on type for demo
+             switch(type) {
+                case 'Match': contentHtml += `<li>Related: Check price history</li>`; break;
+                case 'Question': contentHtml += `<li>Action: Find answer</li>`; break;
+                case 'Task': contentHtml += `<li>Action: Mark as In Progress</li>`; break;
+                case 'Suggestion': contentHtml += `<li>Action: Create follow-up note</li>`; break;
+             }
+             contentHtml += `</ul>`;
+
+            this.$dockContent.html(contentHtml);
+            this.$dock.addClass('visible');
+        }
+
+        hideActionDock() {
+            this.$dock.removeClass('visible');
+            this.$dockContent.empty();
+        }
+    }
+
+    // --- SettingsModal Component ---
+    class SettingsModal extends Component {
+        constructor(app) {
+            super(app, 'settings-modal'); // Use the modal ID
+        }
+
+        bindEvents() {
+            this.$tabs = this.element.find('#settings-tabs');
+            this.$tabContents = this.element.find('.modal-tab-content');
+            this.$closeBtn = this.element.find('#settings-modal-close');
+            this.$cancelBtn = this.element.find('#settings-cancel-btn');
+            this.$saveBtn = this.element.find('#settings-save-btn');
+            this.$ontologyTemplateList = this.element.find('#ontology-template-list');
+            this.$closeBtn.on('click', () => this.hide());
+            this.$cancelBtn.on('click', () => this.hide());
+            this.$saveBtn.on('click', () => this.save());
+
+            this.$tabs.on('click', 'li', (e) => {
+                const tabId = $(e.currentTarget).data('tab');
+                this.activateTab(tabId);
+            });
+        }
+
+        show() {
+            this.loadSettings(); // Load current settings when shown
+            this.element.addClass('visible');
+            this.activateTab('general'); // Default to general tab
+        }
+
+        hide() {
+            this.element.removeClass('visible');
+        }
+
+        save() {
+            // Stub: Collect data from inputs and save to localStorage or config
+            console.log('Stub: Saving settings...');
+            toastr.success('Stub: Settings saved.');
+            this.hide();
+        }
+
+        loadSettings() {
+            // Stub: Load settings from localStorage or config and populate fields
+            console.log('Stub: Loading settings...');
+            // Example: Populate template list
+            this.$ontologyTemplateList.empty();
+            this.app.ontologyService.getTemplateNames().forEach(name => {
+                this.$ontologyTemplateList.append(`<li>${name}</li>`);
+            });
+        }
+
+        activateTab(tabId) {
+            this.$tabs.find('li').removeClass('active');
+            this.$tabs.find(`li[data-tab="${tabId}"]`).addClass('active');
+            this.$tabContents.removeClass('active');
+            this.$tabContents.filter(`#tab-${tabId}`).addClass('active');
+        }
+    }
+
+    // --- Stub Services ---
+    class P2PService {
+        publish(note) {
+            console.log(`[P2P Stub] Publishing Note ID: ${note.id}, Title: "${note.title}"`);
+            // Simulate network delay
+            return new Promise(resolve => setTimeout(() => {
+                console.log(`[P2P Stub] Successfully published Note ID: ${note.id}`);
+                resolve(true);
+            }, 500));
+        }
+    }
+
+    class LLMService {
+        enhance(text) {
+            console.log("[LLM Stub] Enhancing text...");
+            return Promise.resolve(text + "\n\n✨ Enhanced content by LLM ✨");
+        }
+        summarize(text) {
+            console.log("[LLM Stub] Summarizing text...");
+            const summary = text.split('.').slice(0, 2).join('.') + '.';
+            return Promise.resolve(`📝 Summary: ${summary}`);
+        }
+    }
+
+
+    // --- Main Application Controller ---
+    class App {
+        constructor() {
+            this.notes = [];
+            this.currentNoteId = null;
+            this.noteIdCounter = 0; // Simple counter for demo IDs
+
+            // Services
+            this.ontologyService = new OntologyService();
+            this.p2pService = new P2PService(); // Stub
+            this.llmService = new LLMService(); // Stub
+
+            // Components
+            this.sidebar = new Sidebar(this);
+            this.editor = new Editor(this);
+            this.actionArea = new ActionArea(this);
+            this.settingsModal = new SettingsModal(this);
+
+            this.loadNotes();
+            this.bindGlobalEvents();
+
+            // Initial render
+            this.sidebar.render();
+            if (this.notes.length > 0) {
+                this.selectNote(this.notes[0].id);
+            } else {
+                this.editor.clear();
+                this.actionArea.render(null);
+            }
+
+             toastr.options = { "closeButton": true, "progressBar": true, "positionClass": "toast-bottom-right", "preventDuplicates": true, "timeOut": "3000" };
+             console.log("App Initialized");
+        }
+
+        bindGlobalEvents() {
+            // Top Menu Bar Actions
+            $('#menu-bar').on('click', 'span[data-action]', (e) => {
+                const action = $(e.currentTarget).data('action');
+                this.handleMenuAction(action);
+            });
+
+             // Save notes on window close/unload
+             $(window).on('beforeunload', () => this.saveCurrentNote());
+        }
+
+        loadNotes() {
+            const storedNotes = localStorage.getItem('agenticNotesV2');
+            const storedCounter = localStorage.getItem('agenticNotesCounterV2');
+            let loadedNotesData = [];
+            if (storedNotes) {
+                try {
+                    loadedNotesData = JSON.parse(storedNotes);
+                } catch (e) {
+                    console.error("Error parsing stored notes:", e);
+                    localStorage.removeItem('agenticNotesV2'); // Clear corrupted data
+                    loadedNotesData = this.getDefaultNotesData();
+                }
+            } else {
+                 loadedNotesData = this.getDefaultNotesData();
+            }
+
+            this.notes = loadedNotesData.map(data => new Note(data));
+             // Ensure notes have structuredData parsed
+             this.notes.forEach(note => {
+                 if (!note.structuredData || note.structuredData.length === 0) {
+                     note.structuredData = this.ontologyService.parseSemanticData(note.content);
+                 }
+             });
+
+            this.noteIdCounter = storedCounter ? parseInt(storedCounter) : Math.max(0, ...this.notes.map(n => parseInt(n.id) || 0)); // Use max existing ID or 0
+            console.log(`Loaded ${this.notes.length} notes. Counter: ${this.noteIdCounter}`);
+        }
+
+        saveNotes() {
+             // Only save core data, not full objects with methods
+             const notesToStore = this.notes.map(note => ({
+                id: note.id,
+                title: note.title,
+                content: note.content,
+                created: note.created,
+                updated: note.updated,
+                priority: note.priority,
+                state: note.state,
+                color: note.color
+                // structuredData is derived from content, no need to store separately if parsing on load
+             }));
+            localStorage.setItem('agenticNotesV2', JSON.stringify(notesToStore));
+            localStorage.setItem('agenticNotesCounterV2', this.noteIdCounter.toString());
+            // console.log("Notes saved.");
+        }
+
+         getDefaultNotesData() { // Returns plain data objects
+            return [
+                { id: '1', title: "Weekly Meeting Notes", updated: Date.now() - 7200000, created: Date.now() - 86400000, priority: 1, state: 'Private', content: "Discuss project timeline and blockers.<br>Assign action items.<br>" + this.ontologyService.createSemanticHtml({type: 'Tag', value: 'meeting'}), color: 'var(--accent-color-1)' },
+                { id: '2', title: "Grocery list", updated: Date.now() - 60000, created: Date.now() - 172800000, priority: 3, state: 'Private', content: `We need food from the store.<br><ul><li>Cat food<br> * ${this.ontologyService.createSemanticHtml({type: 'Field', name: 'Cost', dataType: 'currency', mode: 'Imaginary', value: '< $20'})}<br> * ${this.ontologyService.createSemanticHtml({type: 'Field', name: 'Brand', dataType: 'text', mode: 'Real', value: "Don't care"})}</li><li>Eggs</li><li>Milk</li><li>Bread</li><li>Apples</li></ul>`, color: 'var(--accent-color-2)' },
+                { id: '3', title: "App Feature Ideas", updated: Date.now() - 259200000, created: Date.now() - 345600000, priority: 2, state: 'Private', content: `Dark mode implementation. ${this.ontologyService.createSemanticHtml({type: 'Tag', value: 'ui'})}<br>Markdown support. ${this.ontologyService.createSemanticHtml({type: 'Tag', value: 'editor'})}<br>P2P sync improvements. ${this.ontologyService.createSemanticHtml({type: 'Field', name: 'Effort', dataType: 'enum', mode: 'Real', value: 'L'})}`, color: 'var(--accent-color-3)' }
+            ];
+        }
+
+        findNoteById(id) {
+            return this.notes.find(n => n.id === id);
+        }
+
+        selectNote(id) {
+            if (id === this.currentNoteId) return; // No change
+
+            this.saveCurrentNote(); // Save previous note
+
+            const note = this.findNoteById(id);
+            if (note) {
+                this.currentNoteId = id;
+                this.editor.loadNote(note);
+                this.sidebar.setActiveNote(id);
+                this.actionArea.render(note); // Update actions for the new note
+                console.log(`Selected Note ID: ${id}`);
+            } else {
+                console.warn(`Note ID ${id} not found for selection.`);
+                this.currentNoteId = null;
+                this.editor.clear();
+                this.sidebar.setActiveNote(null);
+                this.actionArea.render(null);
+            }
+        }
+
+        saveCurrentNote() {
+            if (this.currentNoteId === null) return false;
+
+            const note = this.findNoteById(this.currentNoteId);
+            if (!note) return false;
+
+            let changed = false;
+            const newTitle = this.editor.getTitle();
+            const newContent = this.editor.getContent();
+
+            if (note.updateTitle(newTitle)) changed = true;
+            if (note.updateContent(newContent, this.ontologyService)) changed = true; // Pass ontology service for parsing
+
+            if (changed) {
+                this.saveNotes();
+                this.sidebar.updateNoteItem(note); // Update list item efficiently
+                this.editor.updateMeta(note); // Update meta display
+                this.actionArea.render(note); // Re-analyze actions
+                // console.log(`Saved changes for Note ID: ${this.currentNoteId}`);
+                return true;
+            }
+            return false;
+        }
+
+        createNewNote() {
+            this.saveCurrentNote();
+            this.noteIdCounter++;
+            const newNote = new Note({ id: this.noteIdCounter.toString() }); // Use string IDs for consistency if needed
+            this.notes.unshift(newNote); // Add to top
+            this.saveNotes();
+            this.sidebar.render(); // Full re-render to show new note at top
+            this.selectNote(newNote.id);
+            this.editor.$title.focus();
+            toastr.success('New note created.');
+        }
+
+        updateNotePriority(id, delta) {
+            const note = this.findNoteById(id);
+            if (note) {
+                const newPriority = Math.max(-5, Math.min(5, note.priority + delta)); // Clamp priority e.g., -5 to 5
+                if (note.setPriority(newPriority)) {
+                    this.saveNotes();
+                    this.sidebar.render(); // Re-render to reflect sorting/style changes
+                    if (id === this.currentNoteId) {
+                        this.editor.updateMeta(note);
+                    }
+                }
+            }
+        }
+
+        deleteNote(id) {
+             if (!confirm("Are you sure you want to delete this note?")) return;
+
+             const index = this.notes.findIndex(n => n.id === id);
+             if (index > -1) {
+                 this.notes.splice(index, 1);
+                 this.saveNotes();
+                 toastr.success('Note deleted.');
+
+                 if (id === this.currentNoteId) {
+                     // Select the next note or clear editor
+                     const nextNote = this.notes[index] || this.notes[index - 1] || (this.notes.length > 0 ? this.notes[0] : null);
+                     if (nextNote) {
+                         this.selectNote(nextNote.id);
+                     } else {
+                         this.currentNoteId = null;
+                         this.editor.clear();
+                         this.actionArea.render(null);
+                     }
+                 }
+                 this.sidebar.render(); // Update list
+             }
+        }
+
+         cloneNote(id) {
+             const originalNote = this.findNoteById(id);
+             if (originalNote) {
+                 this.saveCurrentNote(); // Save current work first
+                 this.noteIdCounter++;
+                 const clonedData = { ...originalNote }; // Shallow copy properties
+                 delete clonedData.id; // Remove original ID
+                 clonedData.title = `${originalNote.title} (Clone)`;
+                 clonedData.created = Date.now();
+                 clonedData.updated = Date.now();
+                 clonedData.state = 'Private'; // Clones are private by default
+                 const clonedNote = new Note({ id: this.noteIdCounter.toString(), ...clonedData });
+                 clonedNote.structuredData = this.ontologyService.parseSemanticData(clonedNote.content); // Ensure data is parsed
+
+                 this.notes.unshift(clonedNote);
+                 this.saveNotes();
+                 this.sidebar.render();
+                 this.selectNote(clonedNote.id);
+                 toastr.success('Note cloned successfully.');
+             } else {
+                 toastr.warning('Could not find note to clone.');
+             }
+         }
+
+        async publishNote(id) {
+             const note = this.findNoteById(id);
+             if (note) {
+                 if (note.state === 'Published') {
+                     toastr.info('Note is already published.');
+                     return;
+                 }
+                 try {
+                     toastr.info(`Publishing note "${note.title}"...`);
+                     const success = await this.p2pService.publish(note);
+                     if (success) {
+                         if(note.setState('Published')) {
+                             this.saveNotes();
+                             this.sidebar.updateNoteItem(note);
+                             this.editor.updateMeta(note);
+                         }
+                         toastr.success(`Note "${note.title}" published successfully.`);
+                     } else {
+                         toastr.error(`Failed to publish note "${note.title}".`);
+                     }
+                 } catch (error) {
+                     console.error("Publishing error:", error);
+                     toastr.error(`Error publishing note: ${error.message}`);
+                 }
+             } else {
+                 toastr.warning('No note selected to publish.');
+             }
+        }
+
+         async enhanceNote(id) {
+             const note = this.findNoteById(id);
+             if (note) {
+                 toastr.info('Applying LLM enhancement...');
+                 try {
+                     const enhancedContent = await this.llmService.enhance(note.content);
+                     if (note.updateContent(enhancedContent, this.ontologyService)) {
+                         this.saveNotes();
+                         this.editor.loadNote(note); // Reload editor with new content
+                         this.sidebar.updateNoteItem(note);
+                         this.actionArea.render(note);
+                         toastr.success('Note enhanced successfully.');
+                     }
+                 } catch (error) {
+                     console.error("Enhancement error:", error);
+                     toastr.error(`Error enhancing note: ${error.message}`);
+                 }
+             } else {
+                 toastr.warning('No note selected to enhance.');
+             }
+         }
+
+         async summarizeNote(id) {
+             const note = this.findNoteById(id);
+             if (note) {
+                 toastr.info('Applying LLM summarization...');
+                 try {
+                     const summary = await this.llmService.summarize(note.content);
+                     // Display summary, perhaps in action dock or toast
+                     this.actionArea.addIcon('Summary', summary, 'LLM Analysis');
+                     toastr.success('Summary generated.');
+                 } catch (error) {
+                     console.error("Summarization error:", error);
+                     toastr.error(`Error summarizing note: ${error.message}`);
+                 }
+             } else {
+                 toastr.warning('No note selected to summarize.');
+             }
+         }
+
+         viewNoteSource(id) {
+             const note = this.findNoteById(id);
+             if (note) {
+                 const sourceInfo = `
+                     Note Source (ID: ${note.id})
+                     --------------------------
+                     Title: ${note.title}
+                     State: ${note.state}
+                     Priority: ${note.priority}
+                     Created: ${new Date(note.created).toISOString()}
+                     Updated: ${new Date(note.updated).toISOString()}
+                     Color: ${note.color}
+                     --------------------------
+                     Content (HTML):
+                     ${note.content}
+                     --------------------------
+                     Structured Data (Parsed):
+                     ${JSON.stringify(note.structuredData, null, 2)}
+                 `;
+                 // Display in a large alert or a dedicated modal for better readability
+                 alert(sourceInfo); // Simple alert for now
+                 console.log(sourceInfo);
+             } else {
+                 toastr.warning('No note selected to view source.');
+             }
+         }
+
+
+        handleMenuAction(action) {
+            this.saveCurrentNote(); // Ensure current state is saved before actions
+
+            switch (action) {
+                case 'undo': document.execCommand('undo'); break;
+                case 'redo': document.execCommand('redo'); break;
+                case 'clone': if (this.currentNoteId) this.cloneNote(this.currentNoteId); break;
+                case 'rich-text': toastr.info('Rich-text editing is enabled.'); break;
+                case 'insert': this.editor.showSemanticPopup(); break; // Use editor's method
+                case 'publish': if (this.currentNoteId) this.publishNote(this.currentNoteId); break;
+                case 'enhance': if (this.currentNoteId) this.enhanceNote(this.currentNoteId); break;
+                case 'summary': if (this.currentNoteId) this.summarizeNote(this.currentNoteId); break;
+                case 'view-source': if (this.currentNoteId) this.viewNoteSource(this.currentNoteId); break;
+                case 'settings': this.settingsModal.show(); break;
+                default: console.warn(`Unknown menu action: ${action}`);
+            }
+        }
+    }
+
+    // --- Initialize ---
+    $(document).ready(() => {
+        window.app = new App();
+    });
+
+</script>
+</body>
+</html>
