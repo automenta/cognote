@@ -39,6 +39,11 @@ public class Protocol {
 
     public static final String KB_UI_ACTIONS = "kb://ui-actions";
     public static final String KB_USER_FEEDBACK = "kb://user-feedback";
+    public static final String KB_MINDMAP = "kb://mindmap";
+    public static final String KB_CLIENT_INPUT = "kb://client-input";
+    public static final String KB_LLM_TASKS = "kb://llm-tasks";
+    public static final String KB_DIALOGUE_STATE = "kb://dialogue-state";
+
 
     public static final String PRED_UI_ACTION = "uiAction";
     public static final String PRED_HIGHLIGHT_TEXT = "highlightText";
