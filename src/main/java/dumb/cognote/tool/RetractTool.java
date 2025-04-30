@@ -1,7 +1,7 @@
 package dumb.cognote.tool;
 
-import dumb.cognote.CogEvent;
 import dumb.cognote.Cog;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Logic;
 import dumb.cognote.Tool;
 

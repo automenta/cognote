@@ -1,246 +1,246 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Netention v2 - Design</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
-  <style>
-    :root {
-        --bg-main: #f4f4f4; --bg-sidebar: #e9e9e9; --bg-note-list: #ffffff;
-        --bg-note-selected: #dbe4f0; --bg-editor: #ffffff; --bg-action-icon: #d8e8e8;
-        --bg-action-icon-hover: #c8d8d8; --bg-action-icon-urgent: #f8d7da; --bg-action-dock: #f8f9fa;
-        --bg-modal-header: #4a90e2; --border-color: #d1d1d1; --text-color: #333333;
-        --text-muted: #666666; --accent-color-1: #e57373; --accent-color-2: #ffb74d;
-        --accent-color-3: #ba68c8; --accent-color-action: #77a7a7; --accent-color-action-urgent: #dc3545;
-        --shadow-light: rgba(0, 0, 0, 0.1);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: var(--text-color); background-color: var(--bg-main); line-height: 1.5; }
-    button, input, select, textarea { font-family: inherit; font-size: inherit; }
-    button { cursor: pointer; }
-    input[type="text"], input[type="search"], textarea { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; }
-    input[type="search"] { width: 100%; }
-    select { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: white; }
-    h1, h2, h3, h4, h5, h6 { margin-bottom: 0.5em; font-weight: 600; }
-    #app-container { display: flex; height: 100vh; }
-    .sidebar { width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: 12px; gap: 12px; flex-shrink: 0; }
-    .sidebar-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .sidebar-controls button, .sidebar-controls select { padding: 6px 10px; font-size: 0.9em; border-radius: 4px; border: 1px solid var(--border-color); background-color: white; }
-    .note-list-container { flex-grow: 1; overflow-y: auto; margin-top: 5px; }
-    .note-item { background-color: var(--bg-note-list); border: 1px solid var(--border-color); border-radius: 5px; margin-bottom: 8px; padding: 12px; cursor: pointer; position: relative; border-left-width: 6px; transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease; box-shadow: 0 1px 2px var(--shadow-light); }
-    .note-item:hover { background-color: var(--bg-note-selected); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
-    .note-item.selected { background-color: var(--bg-note-selected); border-color: var(--accent-color-action); border-left-color: var(--accent-color-action) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
-    .note-item h4 { margin-bottom: 4px; font-size: 1em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .note-item .meta { font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px; }
-    .note-item .preview { font-size: 0.9em; color: var(--text-muted); max-height: 3em; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .note-priority-controls { position: absolute; top: 8px; right: 8px; display: flex; gap: 3px; opacity: 0; transition: opacity 0.2s ease; background-color: rgba(255, 255, 255, 0.8); padding: 2px; border-radius: 3px; }
-    .note-item:hover .note-priority-controls { opacity: 1; }
-    .note-priority-controls button { font-size: 10px; padding: 1px 5px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px; line-height: 1.2; }
-    .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--bg-editor); overflow: hidden; }
-    .menu-bar { background-color: var(--bg-main); padding: 8px 20px; border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.9em; flex-shrink: 0; }
-    .menu-bar span { cursor: pointer; color: #007bff; transition: color 0.2s ease; }
-    .menu-bar span:hover { color: #0056b3; text-decoration: underline; }
-    .menu-bar .group { display: flex; align-items: center; gap: 12px; padding-right: 18px; border-right: 1px solid #ccc; }
-    .menu-bar .group:last-child { border-right: none; padding-right: 0; }
-    .menu-bar .group > span:first-child:not([data-action]) { color: var(--text-muted); cursor: default; }
-    .menu-bar .group > span:first-child:not([data-action]):hover { text-decoration: none; }
-    .editor-area { flex-grow: 1; display: flex; flex-direction: column; padding: 25px; overflow: hidden; }
-    .editor-header { margin-bottom: 15px; flex-shrink: 0; }
-    .editor-title { font-size: 2.2em; font-weight: 700; border: none; outline: none; width: 100%; padding: 5px 0; background: transparent; margin-bottom: 8px; color: #222; }
-    .editor-meta { font-size: 0.85em; color: var(--text-muted); margin-bottom: 15px; }
-    .editor-toolbar { margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-shrink: 0; }
-    .editor-toolbar button { padding: 6px 10px; font-size: 1em; cursor: pointer; margin-right: 6px; border: 1px solid transparent; background: none; border-radius: 4px; transition: background-color 0.2s ease, border-color 0.2s ease; }
-    .editor-toolbar button:hover { background-color: #eee; border-color: #ccc; }
-    .editor-toolbar button.icon { font-weight: bold; min-width: 30px; text-align: center; }
-    .editor-content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
-    .editor-content { height: 100%; overflow-y: auto; padding-right: 15px; outline: none; line-height: 1.7; font-size: 1.05em; }
-    .editor-content ul, .editor-content ol { margin-left: 30px; margin-bottom: 12px; }
-    .editor-content li { margin-bottom: 6px; }
-    .editor-content strong { font-weight: 600; } .editor-content em { font-style: italic; } .editor-content u { text-decoration: underline; }
-    .editor-content .field { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e0e0e0; padding: 3px 6px; border-radius: 4px; background-color: #f9f9f9; margin: 0 3px; font-size: 0.9em; }
-    .editor-content .field-label { font-weight: 600; color: #555; }
-    .editor-content .field-value { border: 1px solid #d8d8d8; padding: 2px 5px; min-width: 80px; background: white; border-radius: 3px; }
-    .editor-content [contenteditable="true"] { outline: none; }
-    .action-area { background-color: var(--bg-main); border-top: 1px solid var(--border-color); padding: 12px 20px; min-height: 65px; position: relative; display: flex; align-items: center; gap: 12px; flex-shrink: 0; transition: height 0.3s ease; }
-    .action-icons-container { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .action-icon { width: 36px; height: 36px; background-color: var(--bg-action-icon); border: 2px solid var(--accent-color-action); border-radius: 6px; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 1.1em; cursor: pointer; position: relative; transition: all 0.2s ease; box-shadow: 0 1px 2px var(--shadow-light); }
-    .action-icon:hover { background-color: var(--bg-action-icon-hover); border-color: darken(var(--accent-color-action), 10%); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
-    .action-icon.urgent { border-color: var(--accent-color-action-urgent); background-color: var(--bg-action-icon-urgent); animation: strobe 1.2s infinite alternate ease-in-out; }
-    @keyframes strobe { from { box-shadow: 0 0 4px var(--accent-color-action-urgent); } to { box-shadow: 0 0 12px var(--accent-color-action-urgent), 0 0 1px var(--accent-color-action-urgent); } }
-    .action-icon .hide-btn { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; background: white; border: 1px solid #aaa; border-radius: 50%; font-size: 10px; line-height: 14px; text-align: center; cursor: pointer; opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease; color: #555; transform: scale(0.8); }
-    .action-icon:hover .hide-btn { opacity: 1; transform: scale(1); }
-    .action-icon .tooltip { visibility: hidden; min-width: 100px; max-width: 180px; background-color: rgba(0, 0, 0, 0.8); color: #fff; text-align: center; border-radius: 4px; padding: 6px 8px; position: absolute; z-index: 10; bottom: 120%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s ease, visibility 0.3s ease; font-size: 0.85em; white-space: normal; }
-    .action-icon:hover .tooltip { visibility: visible; opacity: 1; }
-    .action-area-description { font-size: 0.85em; color: var(--text-muted); margin-left: auto; text-align: right; line-height: 1.3; }
-    .action-dock { display: none; max-height: 300px; background-color: var(--bg-action-dock); border-top: 1px solid var(--border-color); padding: 15px 20px; overflow-y: auto; flex-shrink: 0; }
-    .action-dock.visible { display: block; }
-    .action-dock h5 { margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; font-size: 1.1em; color: #444; }
-    .action-dock ul { list-style: none; padding-left: 0; margin-bottom: 15px; }
-    .action-dock li { margin-bottom: 8px; font-size: 0.95em; background: #fff; padding: 8px 10px; border: 1px solid #eee; border-radius: 4px; box-shadow: 0 1px 1px var(--shadow-light); }
-    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; }
-    .modal.visible { display: flex; opacity: 1; }
-    .modal-content { background-color: #fefefe; margin: auto; padding: 0; border: 1px solid #bbb; width: 85%; max-width: 750px; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.3s ease; }
-    .modal.visible .modal-content { transform: scale(1); }
-    .modal-header { padding: 12px 20px; background-color: var(--bg-modal-header); color: white; border-bottom: 1px solid #ddd; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; align-items: center; }
-    .modal-header h4 { margin: 0; font-size: 1.2em; font-weight: 600; }
-    .modal-close { color: white; font-size: 28px; font-weight: bold; cursor: pointer; opacity: 0.8; transition: opacity 0.2s ease; }
-    .modal-close:hover { opacity: 1; }
-    .modal-body { padding: 0; flex-grow: 1; display: flex; min-height: 350px; background-color: #f9f9f9; }
-    .modal-tabs { list-style: none; padding: 0; margin: 0; border-right: 1px solid #ddd; background: #f0f0f0; width: 160px; flex-shrink: 0; }
-    .modal-tabs li { padding: 14px 18px; cursor: pointer; border-bottom: 1px solid #e0e0e0; font-size: 0.95em; color: #444; transition: background-color 0.2s ease, color 0.2s ease; }
-    .modal-tabs li:hover { background: #e8e8e8; }
-    .modal-tabs li.active { background: #fff; border-right: 3px solid var(--bg-modal-header); margin-right: -1px; font-weight: 600; color: var(--bg-modal-header); }
-    .modal-tab-content { padding: 20px; flex-grow: 1; background: #fff; display: none; }
-    .modal-tab-content.active { display: block; }
-    .modal-tab-content h5 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #333; }
-    .modal-tab-content label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9em; color: #555; }
-    .modal-tab-content input[type="text"], .modal-tab-content input[type="password"], .modal-tab-content select, .modal-tab-content textarea { width: 100%; margin-bottom: 15px; }
-    .modal-tab-content textarea { min-height: 80px; resize: vertical; }
-    .modal-footer { padding: 12px 20px; background-color: #f1f1f1; border-top: 1px solid #ddd; text-align: right; border-radius: 0 0 6px 6px; }
-    .modal-footer button { padding: 9px 18px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; margin-left: 8px; transition: background-color 0.2s ease, border-color 0.2s ease; }
-    .modal-footer button#settings-save-btn { background-color: var(--bg-modal-header); color: white; border-color: var(--bg-modal-header); }
-    .modal-footer button#settings-save-btn:hover { background-color: #3a80d2; }
-    .modal-footer button#settings-cancel-btn { background-color: #f9f9f9; }
-    .modal-footer button#settings-cancel-btn:hover { background-color: #eee; }
-    [contenteditable=true]:empty:before { content: attr(placeholder); color: grey; font-style: italic; pointer-events: none; }
-  </style>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Netention v2 - Design</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #f4f4f4; --bg-sidebar: #e9e9e9; --bg-note-list: #ffffff;
+            --bg-note-selected: #dbe4f0; --bg-editor: #ffffff; --bg-action-icon: #d8e8e8;
+            --bg-action-icon-hover: #c8d8d8; --bg-action-icon-urgent: #f8d7da; --bg-action-dock: #f8f9fa;
+            --bg-modal-header: #4a90e2; --border-color: #d1d1d1; --text-color: #333333;
+            --text-muted: #666666; --accent-color-1: #e57373; --accent-color-2: #ffb74d;
+            --accent-color-3: #ba68c8; --accent-color-action: #77a7a7; --accent-color-action-urgent: #dc3545;
+            --shadow-light: rgba(0, 0, 0, 0.1);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: var(--text-color); background-color: var(--bg-main); line-height: 1.5; }
+        button, input, select, textarea { font-family: inherit; font-size: inherit; }
+        button { cursor: pointer; }
+        input[type="text"], input[type="search"], textarea { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; }
+        input[type="search"] { width: 100%; }
+        select { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: white; }
+        h1, h2, h3, h4, h5, h6 { margin-bottom: 0.5em; font-weight: 600; }
+        #app-container { display: flex; height: 100vh; }
+        .sidebar { width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: 12px; gap: 12px; flex-shrink: 0; }
+        .sidebar-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .sidebar-controls button, .sidebar-controls select { padding: 6px 10px; font-size: 0.9em; border-radius: 4px; border: 1px solid var(--border-color); background-color: white; }
+        .note-list-container { flex-grow: 1; overflow-y: auto; margin-top: 5px; }
+        .note-item { background-color: var(--bg-note-list); border: 1px solid var(--border-color); border-radius: 5px; margin-bottom: 8px; padding: 12px; cursor: pointer; position: relative; border-left-width: 6px; transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease; box-shadow: 0 1px 2px var(--shadow-light); }
+        .note-item:hover { background-color: var(--bg-note-selected); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
+        .note-item.selected { background-color: var(--bg-note-selected); border-color: var(--accent-color-action); border-left-color: var(--accent-color-action) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+        .note-item h4 { margin-bottom: 4px; font-size: 1em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .note-item .meta { font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px; }
+        .note-item .preview { font-size: 0.9em; color: var(--text-muted); max-height: 3em; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .note-priority-controls { position: absolute; top: 8px; right: 8px; display: flex; gap: 3px; opacity: 0; transition: opacity 0.2s ease; background-color: rgba(255, 255, 255, 0.8); padding: 2px; border-radius: 3px; }
+        .note-item:hover .note-priority-controls { opacity: 1; }
+        .note-priority-controls button { font-size: 10px; padding: 1px 5px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px; line-height: 1.2; }
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--bg-editor); overflow: hidden; }
+        .menu-bar { background-color: var(--bg-main); padding: 8px 20px; border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.9em; flex-shrink: 0; }
+        .menu-bar span { cursor: pointer; color: #007bff; transition: color 0.2s ease; }
+        .menu-bar span:hover { color: #0056b3; text-decoration: underline; }
+        .menu-bar .group { display: flex; align-items: center; gap: 12px; padding-right: 18px; border-right: 1px solid #ccc; }
+        .menu-bar .group:last-child { border-right: none; padding-right: 0; }
+        .menu-bar .group > span:first-child:not([data-action]) { color: var(--text-muted); cursor: default; }
+        .menu-bar .group > span:first-child:not([data-action]):hover { text-decoration: none; }
+        .editor-area { flex-grow: 1; display: flex; flex-direction: column; padding: 25px; overflow: hidden; }
+        .editor-header { margin-bottom: 15px; flex-shrink: 0; }
+        .editor-title { font-size: 2.2em; font-weight: 700; border: none; outline: none; width: 100%; padding: 5px 0; background: transparent; margin-bottom: 8px; color: #222; }
+        .editor-meta { font-size: 0.85em; color: var(--text-muted); margin-bottom: 15px; }
+        .editor-toolbar { margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-shrink: 0; }
+        .editor-toolbar button { padding: 6px 10px; font-size: 1em; cursor: pointer; margin-right: 6px; border: 1px solid transparent; background: none; border-radius: 4px; transition: background-color 0.2s ease, border-color 0.2s ease; }
+        .editor-toolbar button:hover { background-color: #eee; border-color: #ccc; }
+        .editor-toolbar button.icon { font-weight: bold; min-width: 30px; text-align: center; }
+        .editor-content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
+        .editor-content { height: 100%; overflow-y: auto; padding-right: 15px; outline: none; line-height: 1.7; font-size: 1.05em; }
+        .editor-content ul, .editor-content ol { margin-left: 30px; margin-bottom: 12px; }
+        .editor-content li { margin-bottom: 6px; }
+        .editor-content strong { font-weight: 600; } .editor-content em { font-style: italic; } .editor-content u { text-decoration: underline; }
+        .editor-content .field { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e0e0e0; padding: 3px 6px; border-radius: 4px; background-color: #f9f9f9; margin: 0 3px; font-size: 0.9em; }
+        .editor-content .field-label { font-weight: 600; color: #555; }
+        .editor-content .field-value { border: 1px solid #d8d8d8; padding: 2px 5px; min-width: 80px; background: white; border-radius: 3px; }
+        .editor-content [contenteditable="true"] { outline: none; }
+        .action-area { background-color: var(--bg-main); border-top: 1px solid var(--border-color); padding: 12px 20px; min-height: 65px; position: relative; display: flex; align-items: center; gap: 12px; flex-shrink: 0; transition: height 0.3s ease; }
+        .action-icons-container { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .action-icon { width: 36px; height: 36px; background-color: var(--bg-action-icon); border: 2px solid var(--accent-color-action); border-radius: 6px; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 1.1em; cursor: pointer; position: relative; transition: all 0.2s ease; box-shadow: 0 1px 2px var(--shadow-light); }
+        .action-icon:hover { background-color: var(--bg-action-icon-hover); border-color: darken(var(--accent-color-action), 10%); transform: translateY(-1px); box-shadow: 0 2px 4px var(--shadow-light); }
+        .action-icon.urgent { border-color: var(--accent-color-action-urgent); background-color: var(--bg-action-icon-urgent); animation: strobe 1.2s infinite alternate ease-in-out; }
+        @keyframes strobe { from { box-shadow: 0 0 4px var(--accent-color-action-urgent); } to { box-shadow: 0 0 12px var(--accent-color-action-urgent), 0 0 1px var(--accent-color-action-urgent); } }
+        .action-icon .hide-btn { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; background: white; border: 1px solid #aaa; border-radius: 50%; font-size: 10px; line-height: 14px; text-align: center; cursor: pointer; opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease; color: #555; transform: scale(0.8); }
+        .action-icon:hover .hide-btn { opacity: 1; transform: scale(1); }
+        .action-icon .tooltip { visibility: hidden; min-width: 100px; max-width: 180px; background-color: rgba(0, 0, 0, 0.8); color: #fff; text-align: center; border-radius: 4px; padding: 6px 8px; position: absolute; z-index: 10; bottom: 120%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s ease, visibility 0.3s ease; font-size: 0.85em; white-space: normal; }
+        .action-icon:hover .tooltip { visibility: visible; opacity: 1; }
+        .action-area-description { font-size: 0.85em; color: var(--text-muted); margin-left: auto; text-align: right; line-height: 1.3; }
+        .action-dock { display: none; max-height: 300px; background-color: var(--bg-action-dock); border-top: 1px solid var(--border-color); padding: 15px 20px; overflow-y: auto; flex-shrink: 0; }
+        .action-dock.visible { display: block; }
+        .action-dock h5 { margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; font-size: 1.1em; color: #444; }
+        .action-dock ul { list-style: none; padding-left: 0; margin-bottom: 15px; }
+        .action-dock li { margin-bottom: 8px; font-size: 0.95em; background: #fff; padding: 8px 10px; border: 1px solid #eee; border-radius: 4px; box-shadow: 0 1px 1px var(--shadow-light); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center; opacity: 0; transition: opacity 0.3s ease; }
+        .modal.visible { display: flex; opacity: 1; }
+        .modal-content { background-color: #fefefe; margin: auto; padding: 0; border: 1px solid #bbb; width: 85%; max-width: 750px; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.3s ease; }
+        .modal.visible .modal-content { transform: scale(1); }
+        .modal-header { padding: 12px 20px; background-color: var(--bg-modal-header); color: white; border-bottom: 1px solid #ddd; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h4 { margin: 0; font-size: 1.2em; font-weight: 600; }
+        .modal-close { color: white; font-size: 28px; font-weight: bold; cursor: pointer; opacity: 0.8; transition: opacity 0.2s ease; }
+        .modal-close:hover { opacity: 1; }
+        .modal-body { padding: 0; flex-grow: 1; display: flex; min-height: 350px; background-color: #f9f9f9; }
+        .modal-tabs { list-style: none; padding: 0; margin: 0; border-right: 1px solid #ddd; background: #f0f0f0; width: 160px; flex-shrink: 0; }
+        .modal-tabs li { padding: 14px 18px; cursor: pointer; border-bottom: 1px solid #e0e0e0; font-size: 0.95em; color: #444; transition: background-color 0.2s ease, color 0.2s ease; }
+        .modal-tabs li:hover { background: #e8e8e8; }
+        .modal-tabs li.active { background: #fff; border-right: 3px solid var(--bg-modal-header); margin-right: -1px; font-weight: 600; color: var(--bg-modal-header); }
+        .modal-tab-content { padding: 20px; flex-grow: 1; background: #fff; display: none; }
+        .modal-tab-content.active { display: block; }
+        .modal-tab-content h5 { margin-top: 0; margin-bottom: 15px; font-size: 1.1em; color: #333; }
+        .modal-tab-content label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9em; color: #555; }
+        .modal-tab-content input[type="text"], .modal-tab-content input[type="password"], .modal-tab-content select, .modal-tab-content textarea { width: 100%; margin-bottom: 15px; }
+        .modal-tab-content textarea { min-height: 80px; resize: vertical; }
+        .modal-footer { padding: 12px 20px; background-color: #f1f1f1; border-top: 1px solid #ddd; text-align: right; border-radius: 0 0 6px 6px; }
+        .modal-footer button { padding: 9px 18px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; margin-left: 8px; transition: background-color 0.2s ease, border-color 0.2s ease; }
+        .modal-footer button#settings-save-btn { background-color: var(--bg-modal-header); color: white; border-color: var(--bg-modal-header); }
+        .modal-footer button#settings-save-btn:hover { background-color: #3a80d2; }
+        .modal-footer button#settings-cancel-btn { background-color: #f9f9f9; }
+        .modal-footer button#settings-cancel-btn:hover { background-color: #eee; }
+        [contenteditable=true]:empty:before { content: attr(placeholder); color: grey; font-style: italic; pointer-events: none; }
+    </style>
 </head>
 <body>
 <div id="app-container"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
 <script>
-  const Utils = {
-      debounce(func, wait) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => func.apply(this, a), wait); }; },
-      timeAgo(ts) { const s = Math.floor((Date.now() - ts) / 1e3); if (s < 5) return "just now"; const i = [{ l: 'y', s: 31536e3 }, { l: 'm', s: 2592e3 }, { l: 'd', s: 86400 }, { l: 'h', s: 3600 }, { l: 'm', s: 60 }, { l: 's', s: 1 }]; for (const { l, s: v } of i) { const c = Math.floor(s / v); if (c >= 1) return `${c}${l} ago`; } return "just now"; },
-      sanitizeHTML: (s) => Object.assign(document.createElement('div'), { textContent: s }).innerHTML,
-      generateId: () => `id_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-      extractText: (html) => Object.assign(document.createElement('div'), { innerHTML: html }).textContent || ""
-  };
-  const Notifier = {
-      init() { toastr.options = { closeButton: !0, progressBar: !0, positionClass: "toast-bottom-right", preventDuplicates: !0, timeOut: "3500", extendedTimeOut: "1500", showEasing: "swing", hideEasing: "linear", showMethod: "fadeIn", hideMethod: "fadeOut" }; },
-      success: (m) => toastr.success(m), info: (m) => toastr.info(m),
-      warning: (m) => toastr.warning(m), error: (m) => toastr.error(m)
-  };
-  const StorageService = {
-      load: (key, def) => JSON.parse(localStorage.getItem(key) || JSON.stringify(def)),
-      save: (key, data) => localStorage.setItem(key, JSON.stringify(data)),
-      getNotes: () => StorageService.load('agenticNotesV2', [
-           { id: Utils.generateId(), title: "Welcome Note", updated: Date.now() - 72e5, created: Date.now() - 864e5, priority: 0, state: 'Private', content: "This is an agentic note management platform.<br>Use the sidebar to manage notes, and the editor to modify content.<br>Try adding structured fields like <span class='field'><span class='field-label'>Status:</span><span class='field-value' contenteditable='true'>New</span></span>.", color: 'var(--accent-color-1)' },
-           { id: Utils.generateId(), title: "Shopping List", updated: Date.now() - 6e4, created: Date.now() - 1728e5, priority: 2, state: 'Private', content: "<ul><li>Milk</li><li>Eggs</li><li>Cat food <span class='field'><span class='field-label'>Cost:</span><span class='field-value' contenteditable='true'>< $20</span></span> <span class='field'><span class='field-label'>Brand:</span><span class='field-value' contenteditable='true'>Any</span></span></li></ul>", color: 'var(--accent-color-2)' },
-           { id: Utils.generateId(), title: "Ideas Brainstorm", updated: Date.now() - 2592e5, created: Date.now() - 3456e5, priority: 1, state: 'Private', content: "Feature ideas:<br>- P2P Sync (Nostr?)<br>- LLM Integration (Enhance/Summarize)<br>- Advanced Ontology Support", color: 'var(--accent-color-3)' }
-      ]),
-      saveNotes: (notes) => StorageService.save('agenticNotesV2', notes),
-      getSettings: () => StorageService.load('agenticSettingsV2', { defaultState: 'Private', nostrRelays: "wss://relay.damus.io\nwss://relay.snort.social", llmProvider: 'OpenAI (Stub)', llmApiKey: '', theme: 'Light' }),
-      saveSettings: (settings) => StorageService.save('agenticSettingsV2', settings)
-  };
-  class Component { constructor(app, el) { this.app = app; this.$el = $(el); } render() {} bindEvents() {} destroy() { this.$el?.empty().off(); } }
-  class NoteItem extends Component {
-      constructor(app, note) { super(app); this.note = note; this.$el = this.createMarkup(); this.bindEvents(); }
-      createMarkup() {
-          const preview = Utils.extractText(this.note.content).substring(0, 80) + (Utils.extractText(this.note.content).length > 80 ? '...' : '');
-          return $(`
-              <div class="note-item" data-id="${this.note.id}" style="border-left-color: ${this.note.color || '#ccc'};">
-                  <h4>${Utils.sanitizeHTML(this.note.title || 'Untitled Note')}</h4>
-                  <div class="meta">Upd ${Utils.timeAgo(this.note.updated)} | P:${this.note.priority || 0} | ${this.note.state}</div>
-                  <div class="preview">${Utils.sanitizeHTML(preview)}</div>
-                  <div class="note-priority-controls">
-                      <button class="priority-inc" title="Increase Priority">+</button>
-                      <button class="priority-dec" title="Decrease Priority">-</button>
-                  </div>
-              </div>`);
-      }
-      bindEvents() {
-          this.$el.on('click', () => this.app.selectNote(this.note.id));
-          this.$el.find('.priority-inc').on('click', (e) => { e.stopPropagation(); this.app.updateNotePriority(this.note.id, 1); });
-          this.$el.find('.priority-dec').on('click', (e) => { e.stopPropagation(); this.app.updateNotePriority(this.note.id, -1); });
-      }
-      update(note) {
-          this.note = note;
-          const preview = Utils.extractText(note.content).substring(0, 80) + (Utils.extractText(note.content).length > 80 ? '...' : '');
-          this.$el.find('h4').text(Utils.sanitizeHTML(note.title || 'Untitled Note'));
-          this.$el.find('.meta').text(`Upd ${Utils.timeAgo(note.updated)} | P:${note.priority || 0} | ${note.state}`);
-          this.$el.find('.preview').text(Utils.sanitizeHTML(preview));
-          this.$el.css('border-left-color', note.color || '#ccc');
-      }
-      setActive(isActive) { this.$el.toggleClass('selected', isActive); }
-  }
-  class NoteList extends Component {
-      constructor(app, el) { super(app, el); this.items = {}; }
-      render(notes, currentId) {
-          this.$el.empty(); this.items = {};
-          notes?.length ? notes.forEach(n => { const i = new NoteItem(this.app, n); this.items[n.id] = i; this.$el.append(i.$el); if (n.id === currentId) i.setActive(!0); })
-                        : this.$el.html('<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>');
-      }
-      updateItem(note) { this.items[note.id]?.update(note); }
-      setActive(id) { Object.values(this.items).forEach(i => i.setActive(!1)); if (id && this.items[id]) { this.items[id].setActive(!0); const $i = this.items[id].$el, c = this.$el[0], iT = $i.position().top + c.scrollTop, iB = iT + $i.outerHeight(); if (iT < c.scrollTop || iB > c.scrollTop + c.clientHeight) c.scrollTop = iT - c.clientHeight / 2 + $i.outerHeight() / 2; } }
-  }
-  class Sidebar extends Component {
-      constructor(app, el) { super(app, el); this.noteList = null; this.render(); this.bindEvents(); }
-      render() { this.$el.html(` <div class="sidebar-controls"> <button id="add-note-btn" title="Create New Note">+</button> <select id="sort-notes"><option value="priority">Sort: Priority</option><option value="updated">Sort: Updated</option><option value="created">Sort: Created</option><option value="title">Sort: Title</option></select> </div> <input type="search" id="search-notes" placeholder="Filter/Search Notes..."> <div class="note-list-container" id="note-list"></div>`); this.noteList = new NoteList(this.app, '#note-list'); }
-      bindEvents() { this.$el.on('click', '#add-note-btn', () => this.app.createNewNote()); this.$el.on('change', '#sort-notes', () => this.app.sortAndFilter()); this.$el.on('input', '#search-notes', Utils.debounce(() => this.app.sortAndFilter(), 300)); }
-      renderNotes(n, c) { this.noteList.render(n, c); }
-      updateNote(n) { this.noteList.updateItem(n); }
-      setActive(id) { this.noteList.setActive(id); }
-      getSort() { return this.$el.find('#sort-notes').val(); }
-      getSearch() { return this.$el.find('#search-notes').val(); }
-  }
-  class Editor extends Component {
-      constructor(app, el) { super(app, el); this.save = Utils.debounce(() => this.app.saveCurrentNote(), 1e3); this.render(); this.bindEvents(); }
-      render() { this.$el.html(` <div class="editor-header"> <input type="text" class="editor-title" id="note-title" placeholder="Note Title"> <div class="editor-meta" id="note-meta">Select or create a note</div> </div> <div class="editor-toolbar"> <button data-command="bold" class="icon" title="Bold">B</button> <button data-command="italic" class="icon" title="Italic">I</button> <button data-command="underline" class="icon" title="Underline">U</button> <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button> <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button> <button data-action="insert-field" class="icon" title="Insert Field">+</button> </div> <div class="editor-content-wrapper"> <div class="editor-content" id="note-content" contenteditable="true" placeholder="Start writing..."></div> </div>`); this.$title = this.$el.find('#note-title'); this.$meta = this.$el.find('#note-meta'); this.$content = this.$el.find('#note-content'); }
-      bindEvents() { this.$el.find('.editor-toolbar button[data-command]').on('click', (e) => { document.execCommand($(e.currentTarget).data('command'), !1, null); this.$content.trigger('input').focus(); }); this.$el.find('.editor-toolbar button[data-action="insert-field"]').on('click', () => this.insertField()); this.$content.on('input', () => this.save()); this.$title.on('input', () => this.save()); this.$content.on('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand(e.shiftKey ? 'outdent' : 'indent', !1, null); } }); }
-      load(n) { if (n) { this.$title.val(n.title).prop('disabled', !1); this.$content.html(n.content).prop('contenteditable', !0); this.updateMeta(n); } else this.clear(); }
-      updateMeta(n) { this.$meta.text(`Cr: ${new Date(n.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(n.updated)} | St: ${n.state} | P: ${n.priority || 0}`); }
-      clear() { this.$title.val('').prop('disabled', !0); this.$content.html('').prop('contenteditable', !1); this.$meta.text('Select or create a note'); }
-      getData() { return { title: this.$title.val(), content: this.$content.html() }; }
-      focusTitle() { this.$title.focus(); }
-      insertField() { const n = prompt("Field name (e.g., Cost):"); if (n) { const v = prompt(`Value for ${n} (e.g., < $20):`), h = ` <span class='field'><span class='field-label'>${Utils.sanitizeHTML(n)}:</span><span class='field-value' contenteditable='true'>${Utils.sanitizeHTML(v || '')}</span></span> `; document.execCommand('insertHTML', !1, h); this.$content.trigger('input').focus(); } }
-  }
-  class MenuBar extends Component {
-      constructor(app, el) { super(app, el); this.render(); this.bindEvents(); }
-      render() { this.$el.html(` <div class="group"> <span data-action="undo" title="Undo last action">Undo</span> <span data-action="redo" title="Redo last action">Redo</span> <span data-action="clone" title="Create a copy of the current note">Clone</span> </div> <div class="group"> <span data-action="insert" title="Insert structured data field">Insert Field</span> </div> <div class="group"> <span data-action="publish" title="Publish note to P2P network">Publish</span> <span data-action="set-private" title="Make note Private">Set Private</span> </div> <div class="group"> <span>Tools:</span> <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span> <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span> </div> <div class="group"> <span data-action="delete" title="Delete current note">Delete</span> <span data-action="view-source" title="View raw note data">View source</span> <span data-action="settings" title="Open application settings">Settings</span> </div>`); }
-      bindEvents() { this.$el.on('click', 'span[data-action]', (e) => this.app.handleMenu($(e.currentTarget).data('action'))); }
-  }
-  class ActionIcon extends Component {
-      constructor(app, parent, data) { super(app); this.parent = parent; this.data = data; this.$el = this.createMarkup(); this.bindEvents(); this.parent.append(this.$el); }
-      createMarkup() { return $(`<div class="action-icon ${this.data.urgent ? 'urgent' : ''}" data-type="${this.data.type}" title="${this.data.type}: ${this.data.details}"> ${this.data.symbol || this.data.type[0]} <span class="hide-btn" title="Hide this icon">x</span> <span class="tooltip">${this.data.type}: ${this.data.details}</span> </div>`); }
-      bindEvents() { this.$el.on('click', (e) => { $(e.target).hasClass('hide-btn') ? this.hide() : this.app.showDock(this.data); }); }
-      hide() { this.$el.fadeOut(300, () => this.$el.remove()); /* Notify app for persistence if needed */ }
-  }
-  class ActionArea extends Component {
-      constructor(app, el) { super(app, el); this.icons = []; this.render(); this.bindEvents(); }
-      render() { this.$el.html(` <div class="action-icons-container" id="action-icons"></div> <div class="action-area-description"> Action Dock: Matches, Questions, Alerts etc.</div> <div class="action-dock" id="action-dock"> <div id="action-dock-content"></div> </div>`); this.$icons = this.$el.find('#action-icons'); this.$dock = this.$el.find('#action-dock'); this.$dockContent = this.$el.find('#action-dock-content'); }
-      bindEvents() { $(document).on('click', (e) => { if (!$(e.target).closest('.action-icon, .action-dock').length && this.$dock.hasClass('visible')) this.hideDock(); }); }
-      renderIcons(note) { this.clearIcons(); if (!note) return; const txt = Utils.extractText(note.content).toLowerCase(), toAdd = []; if (txt.includes('cost') || txt.includes('$') || txt.includes('budget')) toAdd.push({ type: 'Match', details: 'Potential budget match found.', symbol: 'M' }); if (txt.includes('?')) toAdd.push({ type: 'Question', details: 'Question detected in note.', symbol: '?' }); if (txt.includes('idea') || txt.includes('feature') || txt.includes('suggest')) toAdd.push({ type: 'Suggestion', details: 'Idea or suggestion found.', symbol: 'S' }); if (txt.includes('error') || txt.includes('fix') || txt.includes('issue')) toAdd.push({ type: 'Alert', details: 'Potential issue mentioned.', symbol: '!', urgent: !0 }); if (txt.includes('link') || txt.includes('related')) toAdd.push({ type: 'Related', details: 'Related item or link detected.', symbol: 'L' }); toAdd.forEach(d => this.icons.push(new ActionIcon(this.app, this.$icons, d))); }
-      clearIcons() { this.icons.forEach(i => i.$el.remove()); this.icons = []; this.hideDock(); }
-      showDock(data) { let h = `<h5>${data.type} Details</h5><ul><li>${Utils.sanitizeHTML(data.details)}</li>`; switch(data.type) { case 'Match': h += `<li>Related: Product XYZ ($18)</li><li>Action: Check competitor prices</li>`; break; case 'Question': h += `<li>Context: Needs clarification.</li><li>Action: Ask team member.</li>`; break; case 'Suggestion': h += `<li>Related: Similar concept article</li><li>Action: Add to backlog</li>`; break; case 'Alert': h += `<li>Context: Urgent review required.</li><li>Action: Review constraints.</li>`; break; case 'Related': h += `<li>Link: example.com</li><li>Action: Follow up</li>`; break; } h += `</ul>`; this.$dockContent.html(h); this.$dock.addClass('visible'); }
-      hideDock() { this.$dock.removeClass('visible'); }
-  }
-  class SettingsModal extends Component {
-      constructor(app, el) { super(app, el); this.render(); this.bindEvents(); this.loadSettings(); }
-      render() { this.$el.html(` <div class="modal-content"> <div class="modal-header"> <h4>Settings</h4> <span class="modal-close" id="settings-modal-close" title="Close">×</span> </div> <div class="modal-body"> <ul class="modal-tabs" id="settings-tabs"> <li class="active" data-tab="general">General</li> <li data-tab="network">Network</li> <li data-tab="ontology">Ontology</li> <li data-tab="llm">LLM Tools</li> <li data-tab="appearance">Appearance</li> </ul> <div class="modal-tab-content active" id="tab-general"> <h5>General</h5> <label for="setting-default-state">Default Note State:</label> <select id="setting-default-state"><option>Private</option><option>Published</option></select> </div> <div class="modal-tab-content" id="tab-network"> <h5>Network (P2P)</h5> <label for="setting-nostr-relays">Nostr Relays (one per line):</label> <textarea id="setting-nostr-relays" rows="4"></textarea> <p style="font-size:.9em;color:var(--text-muted)">Configure relays for P2P publishing.</p> </div> <div class="modal-tab-content" id="tab-ontology"> <h5>Ontology</h5> <button disabled>Import (Stub)</button> <button disabled>Export (Stub)</button> <p style="margin-top:15px;font-size:.9em;color:var(--text-muted)">Manage types/fields (future).</p> </div> <div class="modal-tab-content" id="tab-llm"> <h5>LLM Tools</h5> <label for="setting-llm-provider">Provider:</label> <select id="setting-llm-provider"><option>OpenAI (Stub)</option><option>Local (Stub)</option></select> <label for="setting-llm-apikey">API Key:</label> <input type="password" id="setting-llm-apikey"> </div> <div class="modal-tab-content" id="tab-appearance"> <h5>Appearance</h5> <label for="setting-theme">Theme:</label> <select id="setting-theme"><option>Light</option><option disabled>Dark (Stub)</option></select> </div> </div> <div class="modal-footer"> <button id="settings-cancel-btn">Cancel</button> <button id="settings-save-btn">Save</button> </div> </div>`); }
-      bindEvents() { this.$el.on('click', '#settings-modal-close, #settings-cancel-btn', () => this.hide()); this.$el.on('click', '#settings-save-btn', () => this.save()); this.$el.on('click', '.modal-tabs li', (e) => this.switchTab(e)); this.$el.on('click', (e) => { if (e.target === this.$el[0]) this.hide(); }); }
-      switchTab(e) { const $t = $(e.currentTarget), id = $t.data('tab'); this.$el.find('.modal-tabs li, .modal-tab-content').removeClass('active'); $t.addClass('active'); this.$el.find(`#tab-${id}`).addClass('active'); }
-      loadSettings() { const s = StorageService.getSettings(); this.$el.find('#setting-default-state').val(s.defaultState); this.$el.find('#setting-nostr-relays').val(s.nostrRelays); this.$el.find('#setting-llm-provider').val(s.llmProvider); this.$el.find('#setting-llm-apikey').val(s.llmApiKey); this.$el.find('#setting-theme').val(s.theme); }
-      save() { const s = { defaultState: this.$el.find('#setting-default-state').val(), nostrRelays: this.$el.find('#setting-nostr-relays').val(), llmProvider: this.$el.find('#setting-llm-provider').val(), llmApiKey: this.$el.find('#setting-llm-apikey').val(), theme: this.$el.find('#setting-theme').val() }; StorageService.saveSettings(s); Notifier.success('Settings saved.'); this.hide(); /* Apply settings if needed */ }
-      show() { this.$el.addClass('visible'); } hide() { this.$el.removeClass('visible'); }
-  }
-  class App {
-      constructor(sel) { this.$cont = $(sel); this.notes = []; this.currentId = null; this.settings = StorageService.getSettings(); this.initComps(); this.loadData(); Notifier.init(); console.log("Netention Ready"); }
-      initComps() { this.$cont.html(` <aside class="sidebar" id="sidebar-container"></aside> <main class="main-content"> <nav class="menu-bar" id="menu-bar-container"></nav> <div class="editor-area" id="editor-container"></div> <div class="action-area" id="action-area-container"></div> </main> <div id="settings-modal" class="modal"></div>`); this.sidebar = new Sidebar(this, '#sidebar-container'); this.editor = new Editor(this, '#editor-container'); this.menuBar = new MenuBar(this, '#menu-bar-container'); this.actionArea = new ActionArea(this, '#action-area-container'); this.settingsModal = new SettingsModal(this, '#settings-modal'); }
-      loadData() { this.notes = StorageService.getNotes(); if (!this.notes.length) StorageService.saveNotes(this.notes = StorageService.getNotes()); this.sortAndFilter(); const sorted = this.getSortedFiltered(); if (sorted.length) this.selectNote(sorted[0].id); else { this.editor.clear(); this.actionArea.clearIcons(); } }
-      getSortedFiltered() { const sort = this.sidebar.getSort(), search = this.sidebar.getSearch().toLowerCase(); let filt = this.notes.filter(n => (n.title || '').toLowerCase().includes(search) || Utils.extractText(n.content).toLowerCase().includes(search)); return filt.sort((a, b) => { switch (sort) { case 'priority': return (b.priority || 0) - (a.priority || 0); case 'updated': return b.updated - a.updated; case 'created': return b.created - a.created; case 'title': return (a.title || '').localeCompare(b.title || ''); default: return (b.priority || 0) - (a.priority || 0); } }); }
-      sortAndFilter() { this.sidebar.renderNotes(this.getSortedFiltered(), this.currentId); }
-      selectNote(id) { if (id === this.currentId && id !== null) return; this.saveCurrentNote(); const n = this.notes.find(n => n.id === id); if (n) { this.currentId = id; this.editor.load(n); this.sidebar.setActive(id); this.actionArea.renderIcons(n); } else { console.error(`Note ${id} not found.`); this.currentId = null; this.editor.clear(); this.sidebar.setActive(null); this.actionArea.clearIcons(); } }
-      saveCurrentNote() { if (this.currentId === null) return !1; const n = this.notes.find(n => n.id === this.currentId); if (n) { const d = this.editor.getData(); let c = !1; if (n.title !== d.title) { n.title = d.title; c = !0; } if (n.content !== d.content) { n.content = d.content; c = !0; } if (c) { n.updated = Date.now(); StorageService.saveNotes(this.notes); this.sidebar.updateNote(n); this.editor.updateMeta(n); this.actionArea.renderIcons(n); /* Logic engine hook (conceptual) */ console.log(`Saved ${n.id}`); return !0; } } return !1; }
-      createNewNote() { this.saveCurrentNote(); const n = { id: Utils.generateId(), title: "Untitled Note", content: "", created: Date.now(), updated: Date.now(), priority: 0, state: this.settings.defaultState || 'Private', color: `hsl(${Math.random() * 360}, 60%, 85%)` }; this.notes.unshift(n); StorageService.saveNotes(this.notes); this.sortAndFilter(); this.selectNote(n.id); this.editor.focusTitle(); Notifier.success("New note created"); }
-      updateNotePriority(id, delta) { const n = this.notes.find(n => n.id === id); if (n) { n.priority = (n.priority || 0) + delta; n.updated = Date.now(); StorageService.saveNotes(this.notes); this.sortAndFilter(); if (id === this.currentId) this.editor.updateMeta(n); Notifier.info(`Priority updated for "${n.title || 'Untitled'}"`); } }
-      handleMenu(action) { this.saveCurrentNote(); const n = this.currentId ? this.notes.find(n => n.id === this.currentId) : null; switch (action) { case 'undo': document.execCommand('undo'); break; case 'redo': document.execCommand('redo'); break; case 'clone': if (n) { const c = { ...n, id: Utils.generateId(), title: `${n.title || 'Untitled'} (Clone)`, created: Date.now(), updated: Date.now() }; this.notes.unshift(c); StorageService.saveNotes(this.notes); this.sortAndFilter(); this.selectNote(c.id); Notifier.success('Note cloned.'); } else Notifier.warning('Select note to clone.'); break; case 'insert': this.editor.insertField(); break; case 'publish': this.updateNoteState(n, 'Published'); break; case 'set-private': this.updateNoteState(n, 'Private'); break; case 'enhance': Notifier.info('Stub: LLM Enhance'); break; case 'summary': Notifier.info('Stub: LLM Summary'); break; case 'delete': if (n && confirm(`Delete "${n.title || 'Untitled Note'}"?`)) { this.notes = this.notes.filter(note => note.id !== n.id); StorageService.saveNotes(this.notes); this.currentId = null; this.sortAndFilter(); this.editor.clear(); this.actionArea.clearIcons(); Notifier.success('Note deleted.'); } else if (!n) Notifier.warning('Select note to delete.'); break; case 'view-source': if (n) alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\n\n${n.content}`); else Notifier.warning('Select note to view source.'); break; case 'settings': this.settingsModal.show(); break; default: console.warn(`Unknown menu action: ${action}`); } }
-      updateNoteState(note, newState) { if (note) { note.state = newState; note.updated = Date.now(); StorageService.saveNotes(this.notes); this.editor.updateMeta(note); this.sidebar.updateNote(note); Notifier.success(`Note "${note.title || 'Untitled'}" set to ${newState}.`); if(newState === 'Published') console.log('Stub: Publishing note...', note); } else Notifier.warning(`Select a note to set ${newState}.`); }
-      showDock(d) { this.actionArea.showDock(d); }
-  }
-  $(() => { const app = new App('#app-container'); $(window).on('beforeunload', () => app.saveCurrentNote()); });
+    const Utils = {
+        debounce(func, wait) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => func.apply(this, a), wait); }; },
+        timeAgo(ts) { const s = Math.floor((Date.now() - ts) / 1e3); if (s < 5) return "just now"; const i = [{ l: 'y', s: 31536e3 }, { l: 'm', s: 2592e3 }, { l: 'd', s: 86400 }, { l: 'h', s: 3600 }, { l: 'm', s: 60 }, { l: 's', s: 1 }]; for (const { l, s: v } of i) { const c = Math.floor(s / v); if (c >= 1) return `${c}${l} ago`; } return "just now"; },
+        sanitizeHTML: (s) => Object.assign(document.createElement('div'), { textContent: s }).innerHTML,
+        generateId: () => `id_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+        extractText: (html) => Object.assign(document.createElement('div'), { innerHTML: html }).textContent || ""
+    };
+    const Notifier = {
+        init() { toastr.options = { closeButton: !0, progressBar: !0, positionClass: "toast-bottom-right", preventDuplicates: !0, timeOut: "3500", extendedTimeOut: "1500", showEasing: "swing", hideEasing: "linear", showMethod: "fadeIn", hideMethod: "fadeOut" }; },
+        success: (m) => toastr.success(m), info: (m) => toastr.info(m),
+        warning: (m) => toastr.warning(m), error: (m) => toastr.error(m)
+    };
+    const StorageService = {
+        load: (key, def) => JSON.parse(localStorage.getItem(key) || JSON.stringify(def)),
+        save: (key, data) => localStorage.setItem(key, JSON.stringify(data)),
+        getNotes: () => StorageService.load('agenticNotesV2', [
+             { id: Utils.generateId(), title: "Welcome Note", updated: Date.now() - 72e5, created: Date.now() - 864e5, priority: 0, state: 'Private', content: "This is an agentic note management platform.<br>Use the sidebar to manage notes, and the editor to modify content.<br>Try adding structured fields like <span class='field'><span class='field-label'>Status:</span><span class='field-value' contenteditable='true'>New</span></span>.", color: 'var(--accent-color-1)' },
+             { id: Utils.generateId(), title: "Shopping List", updated: Date.now() - 6e4, created: Date.now() - 1728e5, priority: 2, state: 'Private', content: "<ul><li>Milk</li><li>Eggs</li><li>Cat food <span class='field'><span class='field-label'>Cost:</span><span class='field-value' contenteditable='true'>< $20</span></span> <span class='field'><span class='field-label'>Brand:</span><span class='field-value' contenteditable='true'>Any</span></span></li></ul>", color: 'var(--accent-color-2)' },
+             { id: Utils.generateId(), title: "Ideas Brainstorm", updated: Date.now() - 2592e5, created: Date.now() - 3456e5, priority: 1, state: 'Private', content: "Feature ideas:<br>- P2P Sync (Nostr?)<br>- LLM Integration (Enhance/Summarize)<br>- Advanced Ontology Support", color: 'var(--accent-color-3)' }
+        ]),
+        saveNotes: (notes) => StorageService.save('agenticNotesV2', notes),
+        getSettings: () => StorageService.load('agenticSettingsV2', { defaultState: 'Private', nostrRelays: "wss://relay.damus.io\nwss://relay.snort.social", llmProvider: 'OpenAI (Stub)', llmApiKey: '', theme: 'Light' }),
+        saveSettings: (settings) => StorageService.save('agenticSettingsV2', settings)
+    };
+    class Component { constructor(app, el) { this.app = app; this.$el = $(el); } render() {} bindEvents() {} destroy() { this.$el?.empty().off(); } }
+    class NoteItem extends Component {
+        constructor(app, note) { super(app); this.note = note; this.$el = this.createMarkup(); this.bindEvents(); }
+        createMarkup() {
+            const preview = Utils.extractText(this.note.content).substring(0, 80) + (Utils.extractText(this.note.content).length > 80 ? '...' : '');
+            return $(`
+                <div class="note-item" data-id="${this.note.id}" style="border-left-color: ${this.note.color || '#ccc'};">
+                    <h4>${Utils.sanitizeHTML(this.note.title || 'Untitled Note')}</h4>
+                    <div class="meta">Upd ${Utils.timeAgo(this.note.updated)} | P:${this.note.priority || 0} | ${this.note.state}</div>
+                    <div class="preview">${Utils.sanitizeHTML(preview)}</div>
+                    <div class="note-priority-controls">
+                        <button class="priority-inc" title="Increase Priority">+</button>
+                        <button class="priority-dec" title="Decrease Priority">-</button>
+                    </div>
+                </div>`);
+        }
+        bindEvents() {
+            this.$el.on('click', () => this.app.selectNote(this.note.id));
+            this.$el.find('.priority-inc').on('click', (e) => { e.stopPropagation(); this.app.updateNotePriority(this.note.id, 1); });
+            this.$el.find('.priority-dec').on('click', (e) => { e.stopPropagation(); this.app.updateNotePriority(this.note.id, -1); });
+        }
+        update(note) {
+            this.note = note;
+            const preview = Utils.extractText(note.content).substring(0, 80) + (Utils.extractText(note.content).length > 80 ? '...' : '');
+            this.$el.find('h4').text(Utils.sanitizeHTML(note.title || 'Untitled Note'));
+            this.$el.find('.meta').text(`Upd ${Utils.timeAgo(note.updated)} | P:${note.priority || 0} | ${note.state}`);
+            this.$el.find('.preview').text(Utils.sanitizeHTML(preview));
+            this.$el.css('border-left-color', note.color || '#ccc');
+        }
+        setActive(isActive) { this.$el.toggleClass('selected', isActive); }
+    }
+    class NoteList extends Component {
+        constructor(app, el) { super(app, el); this.items = {}; }
+        render(notes, currentId) {
+            this.$el.empty(); this.items = {};
+            notes?.length ? notes.forEach(n => { const i = new NoteItem(this.app, n); this.items[n.id] = i; this.$el.append(i.$el); if (n.id === currentId) i.setActive(!0); })
+                          : this.$el.html('<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>');
+        }
+        updateItem(note) { this.items[note.id]?.update(note); }
+        setActive(id) { Object.values(this.items).forEach(i => i.setActive(!1)); if (id && this.items[id]) { this.items[id].setActive(!0); const $i = this.items[id].$el, c = this.$el[0], iT = $i.position().top + c.scrollTop, iB = iT + $i.outerHeight(); if (iT < c.scrollTop || iB > c.scrollTop + c.clientHeight) c.scrollTop = iT - c.clientHeight / 2 + $i.outerHeight() / 2; } }
+    }
+    class Sidebar extends Component {
+        constructor(app, el) { super(app, el); this.noteList = null; this.render(); this.bindEvents(); }
+        render() { this.$el.html(` <div class="sidebar-controls"> <button id="add-note-btn" title="Create New Note">+</button> <select id="sort-notes"><option value="priority">Sort: Priority</option><option value="updated">Sort: Updated</option><option value="created">Sort: Created</option><option value="title">Sort: Title</option></select> </div> <input type="search" id="search-notes" placeholder="Filter/Search Notes..."> <div class="note-list-container" id="note-list"></div>`); this.noteList = new NoteList(this.app, '#note-list'); }
+        bindEvents() { this.$el.on('click', '#add-note-btn', () => this.app.createNewNote()); this.$el.on('change', '#sort-notes', () => this.app.sortAndFilter()); this.$el.on('input', '#search-notes', Utils.debounce(() => this.app.sortAndFilter(), 300)); }
+        renderNotes(n, c) { this.noteList.render(n, c); }
+        updateNote(n) { this.noteList.updateItem(n); }
+        setActive(id) { this.noteList.setActive(id); }
+        getSort() { return this.$el.find('#sort-notes').val(); }
+        getSearch() { return this.$el.find('#search-notes').val(); }
+    }
+    class Editor extends Component {
+        constructor(app, el) { super(app, el); this.save = Utils.debounce(() => this.app.saveCurrentNote(), 1e3); this.render(); this.bindEvents(); }
+        render() { this.$el.html(` <div class="editor-header"> <input type="text" class="editor-title" id="note-title" placeholder="Note Title"> <div class="editor-meta" id="note-meta">Select or create a note</div> </div> <div class="editor-toolbar"> <button data-command="bold" class="icon" title="Bold">B</button> <button data-command="italic" class="icon" title="Italic">I</button> <button data-command="underline" class="icon" title="Underline">U</button> <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button> <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button> <button data-action="insert-field" class="icon" title="Insert Field">+</button> </div> <div class="editor-content-wrapper"> <div class="editor-content" id="note-content" contenteditable="true" placeholder="Start writing..."></div> </div>`); this.$title = this.$el.find('#note-title'); this.$meta = this.$el.find('#note-meta'); this.$content = this.$el.find('#note-content'); }
+        bindEvents() { this.$el.find('.editor-toolbar button[data-command]').on('click', (e) => { document.execCommand($(e.currentTarget).data('command'), !1, null); this.$content.trigger('input').focus(); }); this.$el.find('.editor-toolbar button[data-action="insert-field"]').on('click', () => this.insertField()); this.$content.on('input', () => this.save()); this.$title.on('input', () => this.save()); this.$content.on('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand(e.shiftKey ? 'outdent' : 'indent', !1, null); } }); }
+        load(n) { if (n) { this.$title.val(n.title).prop('disabled', !1); this.$content.html(n.content).prop('contenteditable', !0); this.updateMeta(n); } else this.clear(); }
+        updateMeta(n) { this.$meta.text(`Cr: ${new Date(n.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(n.updated)} | St: ${n.state} | P: ${n.priority || 0}`); }
+        clear() { this.$title.val('').prop('disabled', !0); this.$content.html('').prop('contenteditable', !1); this.$meta.text('Select or create a note'); }
+        getData() { return { title: this.$title.val(), content: this.$content.html() }; }
+        focusTitle() { this.$title.focus(); }
+        insertField() { const n = prompt("Field name (e.g., Cost):"); if (n) { const v = prompt(`Value for ${n} (e.g., < $20):`), h = ` <span class='field'><span class='field-label'>${Utils.sanitizeHTML(n)}:</span><span class='field-value' contenteditable='true'>${Utils.sanitizeHTML(v || '')}</span></span> `; document.execCommand('insertHTML', !1, h); this.$content.trigger('input').focus(); } }
+    }
+    class MenuBar extends Component {
+        constructor(app, el) { super(app, el); this.render(); this.bindEvents(); }
+        render() { this.$el.html(` <div class="group"> <span data-action="undo" title="Undo last action">Undo</span> <span data-action="redo" title="Redo last action">Redo</span> <span data-action="clone" title="Create a copy of the current note">Clone</span> </div> <div class="group"> <span data-action="insert" title="Insert structured data field">Insert Field</span> </div> <div class="group"> <span data-action="publish" title="Publish note to P2P network">Publish</span> <span data-action="set-private" title="Make note Private">Set Private</span> </div> <div class="group"> <span>Tools:</span> <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span> <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span> </div> <div class="group"> <span data-action="delete" title="Delete current note">Delete</span> <span data-action="view-source" title="View raw note data">View source</span> <span data-action="settings" title="Open application settings">Settings</span> </div>`); }
+        bindEvents() { this.$el.on('click', 'span[data-action]', (e) => this.app.handleMenu($(e.currentTarget).data('action'))); }
+    }
+    class ActionIcon extends Component {
+        constructor(app, parent, data) { super(app); this.parent = parent; this.data = data; this.$el = this.createMarkup(); this.bindEvents(); this.parent.append(this.$el); }
+        createMarkup() { return $(`<div class="action-icon ${this.data.urgent ? 'urgent' : ''}" data-type="${this.data.type}" title="${this.data.type}: ${this.data.details}"> ${this.data.symbol || this.data.type[0]} <span class="hide-btn" title="Hide this icon">x</span> <span class="tooltip">${this.data.type}: ${this.data.details}</span> </div>`); }
+        bindEvents() { this.$el.on('click', (e) => { $(e.target).hasClass('hide-btn') ? this.hide() : this.app.showDock(this.data); }); }
+        hide() { this.$el.fadeOut(300, () => this.$el.remove()); /* Notify app for persistence if needed */ }
+    }
+    class ActionArea extends Component {
+        constructor(app, el) { super(app, el); this.icons = []; this.render(); this.bindEvents(); }
+        render() { this.$el.html(` <div class="action-icons-container" id="action-icons"></div> <div class="action-area-description"> Action Dock: Matches, Questions, Alerts etc.</div> <div class="action-dock" id="action-dock"> <div id="action-dock-content"></div> </div>`); this.$icons = this.$el.find('#action-icons'); this.$dock = this.$el.find('#action-dock'); this.$dockContent = this.$el.find('#action-dock-content'); }
+        bindEvents() { $(document).on('click', (e) => { if (!$(e.target).closest('.action-icon, .action-dock').length && this.$dock.hasClass('visible')) this.hideDock(); }); }
+        renderIcons(note) { this.clearIcons(); if (!note) return; const txt = Utils.extractText(note.content).toLowerCase(), toAdd = []; if (txt.includes('cost') || txt.includes('$') || txt.includes('budget')) toAdd.push({ type: 'Match', details: 'Potential budget match found.', symbol: 'M' }); if (txt.includes('?')) toAdd.push({ type: 'Question', details: 'Question detected in note.', symbol: '?' }); if (txt.includes('idea') || txt.includes('feature') || txt.includes('suggest')) toAdd.push({ type: 'Suggestion', details: 'Idea or suggestion found.', symbol: 'S' }); if (txt.includes('error') || txt.includes('fix') || txt.includes('issue')) toAdd.push({ type: 'Alert', details: 'Potential issue mentioned.', symbol: '!', urgent: !0 }); if (txt.includes('link') || txt.includes('related')) toAdd.push({ type: 'Related', details: 'Related item or link detected.', symbol: 'L' }); toAdd.forEach(d => this.icons.push(new ActionIcon(this.app, this.$icons, d))); }
+        clearIcons() { this.icons.forEach(i => i.$el.remove()); this.icons = []; this.hideDock(); }
+        showDock(data) { let h = `<h5>${data.type} Details</h5><ul><li>${Utils.sanitizeHTML(data.details)}</li>`; switch(data.type) { case 'Match': h += `<li>Related: Product XYZ ($18)</li><li>Action: Check competitor prices</li>`; break; case 'Question': h += `<li>Context: Needs clarification.</li><li>Action: Ask team member.</li>`; break; case 'Suggestion': h += `<li>Related: Similar concept article</li><li>Action: Add to backlog</li>`; break; case 'Alert': h += `<li>Context: Urgent review required.</li><li>Action: Review constraints.</li>`; break; case 'Related': h += `<li>Link: example.com</li><li>Action: Follow up</li>`; break; } h += `</ul>`; this.$dockContent.html(h); this.$dock.addClass('visible'); }
+        hideDock() { this.$dock.removeClass('visible'); }
+    }
+    class SettingsModal extends Component {
+        constructor(app, el) { super(app, el); this.render(); this.bindEvents(); this.loadSettings(); }
+        render() { this.$el.html(` <div class="modal-content"> <div class="modal-header"> <h4>Settings</h4> <span class="modal-close" id="settings-modal-close" title="Close">×</span> </div> <div class="modal-body"> <ul class="modal-tabs" id="settings-tabs"> <li class="active" data-tab="general">General</li> <li data-tab="network">Network</li> <li data-tab="ontology">Ontology</li> <li data-tab="llm">LLM Tools</li> <li data-tab="appearance">Appearance</li> </ul> <div class="modal-tab-content active" id="tab-general"> <h5>General</h5> <label for="setting-default-state">Default Note State:</label> <select id="setting-default-state"><option>Private</option><option>Published</option></select> </div> <div class="modal-tab-content" id="tab-network"> <h5>Network (P2P)</h5> <label for="setting-nostr-relays">Nostr Relays (one per line):</label> <textarea id="setting-nostr-relays" rows="4"></textarea> <p style="font-size:.9em;color:var(--text-muted)">Configure relays for P2P publishing.</p> </div> <div class="modal-tab-content" id="tab-ontology"> <h5>Ontology</h5> <button disabled>Import (Stub)</button> <button disabled>Export (Stub)</button> <p style="margin-top:15px;font-size:.9em;color:var(--text-muted)">Manage types/fields (future).</p> </div> <div class="modal-tab-content" id="tab-llm"> <h5>LLM Tools</h5> <label for="setting-llm-provider">Provider:</label> <select id="setting-llm-provider"><option>OpenAI (Stub)</option><option>Local (Stub)</option></select> <label for="setting-llm-apikey">API Key:</label> <input type="password" id="setting-llm-apikey"> </div> <div class="modal-tab-content" id="tab-appearance"> <h5>Appearance</h5> <label for="setting-theme">Theme:</label> <select id="setting-theme"><option>Light</option><option disabled>Dark (Stub)</option></select> </div> </div> <div class="modal-footer"> <button id="settings-cancel-btn">Cancel</button> <button id="settings-save-btn">Save</button> </div> </div>`); }
+        bindEvents() { this.$el.on('click', '#settings-modal-close, #settings-cancel-btn', () => this.hide()); this.$el.on('click', '#settings-save-btn', () => this.save()); this.$el.on('click', '.modal-tabs li', (e) => this.switchTab(e)); this.$el.on('click', (e) => { if (e.target === this.$el[0]) this.hide(); }); }
+        switchTab(e) { const $t = $(e.currentTarget), id = $t.data('tab'); this.$el.find('.modal-tabs li, .modal-tab-content').removeClass('active'); $t.addClass('active'); this.$el.find(`#tab-${id}`).addClass('active'); }
+        loadSettings() { const s = StorageService.getSettings(); this.$el.find('#setting-default-state').val(s.defaultState); this.$el.find('#setting-nostr-relays').val(s.nostrRelays); this.$el.find('#setting-llm-provider').val(s.llmProvider); this.$el.find('#setting-llm-apikey').val(s.llmApiKey); this.$el.find('#setting-theme').val(s.theme); }
+        save() { const s = { defaultState: this.$el.find('#setting-default-state').val(), nostrRelays: this.$el.find('#setting-nostr-relays').val(), llmProvider: this.$el.find('#setting-llm-provider').val(), llmApiKey: this.$el.find('#setting-llm-apikey').val(), theme: this.$el.find('#setting-theme').val() }; StorageService.saveSettings(s); Notifier.success('Settings saved.'); this.hide(); /* Apply settings if needed */ }
+        show() { this.$el.addClass('visible'); } hide() { this.$el.removeClass('visible'); }
+    }
+    class App {
+        constructor(sel) { this.$cont = $(sel); this.notes = []; this.currentId = null; this.settings = StorageService.getSettings(); this.initComps(); this.loadData(); Notifier.init(); console.log("Netention Ready"); }
+        initComps() { this.$cont.html(` <aside class="sidebar" id="sidebar-container"></aside> <main class="main-content"> <nav class="menu-bar" id="menu-bar-container"></nav> <div class="editor-area" id="editor-container"></div> <div class="action-area" id="action-area-container"></div> </main> <div id="settings-modal" class="modal"></div>`); this.sidebar = new Sidebar(this, '#sidebar-container'); this.editor = new Editor(this, '#editor-container'); this.menuBar = new MenuBar(this, '#menu-bar-container'); this.actionArea = new ActionArea(this, '#action-area-container'); this.settingsModal = new SettingsModal(this, '#settings-modal'); }
+        loadData() { this.notes = StorageService.getNotes(); if (!this.notes.length) StorageService.saveNotes(this.notes = StorageService.getNotes()); this.sortAndFilter(); const sorted = this.getSortedFiltered(); if (sorted.length) this.selectNote(sorted[0].id); else { this.editor.clear(); this.actionArea.clearIcons(); } }
+        getSortedFiltered() { const sort = this.sidebar.getSort(), search = this.sidebar.getSearch().toLowerCase(); let filt = this.notes.filter(n => (n.title || '').toLowerCase().includes(search) || Utils.extractText(n.content).toLowerCase().includes(search)); return filt.sort((a, b) => { switch (sort) { case 'priority': return (b.priority || 0) - (a.priority || 0); case 'updated': return b.updated - a.updated; case 'created': return b.created - a.created; case 'title': return (a.title || '').localeCompare(b.title || ''); default: return (b.priority || 0) - (a.priority || 0); } }); }
+        sortAndFilter() { this.sidebar.renderNotes(this.getSortedFiltered(), this.currentId); }
+        selectNote(id) { if (id === this.currentId && id !== null) return; this.saveCurrentNote(); const n = this.notes.find(n => n.id === id); if (n) { this.currentId = id; this.editor.load(n); this.sidebar.setActive(id); this.actionArea.renderIcons(n); } else { console.error(`Note ${id} not found.`); this.currentId = null; this.editor.clear(); this.sidebar.setActive(null); this.actionArea.clearIcons(); } }
+        saveCurrentNote() { if (this.currentId === null) return !1; const n = this.notes.find(n => n.id === this.currentId); if (n) { const d = this.editor.getData(); let c = !1; if (n.title !== d.title) { n.title = d.title; c = !0; } if (n.content !== d.content) { n.content = d.content; c = !0; } if (c) { n.updated = Date.now(); StorageService.saveNotes(this.notes); this.sidebar.updateNote(n); this.editor.updateMeta(n); this.actionArea.renderIcons(n); /* Logic engine hook (conceptual) */ console.log(`Saved ${n.id}`); return !0; } } return !1; }
+        createNewNote() { this.saveCurrentNote(); const n = { id: Utils.generateId(), title: "Untitled Note", content: "", created: Date.now(), updated: Date.now(), priority: 0, state: this.settings.defaultState || 'Private', color: `hsl(${Math.random() * 360}, 60%, 85%)` }; this.notes.unshift(n); StorageService.saveNotes(this.notes); this.sortAndFilter(); this.selectNote(n.id); this.editor.focusTitle(); Notifier.success("New note created"); }
+        updateNotePriority(id, delta) { const n = this.notes.find(n => n.id === id); if (n) { n.priority = (n.priority || 0) + delta; n.updated = Date.now(); StorageService.saveNotes(this.notes); this.sortAndFilter(); if (id === this.currentId) this.editor.updateMeta(n); Notifier.info(`Priority updated for "${n.title || 'Untitled'}"`); } }
+        handleMenu(action) { this.saveCurrentNote(); const n = this.currentId ? this.notes.find(n => n.id === this.currentId) : null; switch (action) { case 'undo': document.execCommand('undo'); break; case 'redo': document.execCommand('redo'); break; case 'clone': if (n) { const c = { ...n, id: Utils.generateId(), title: `${n.title || 'Untitled'} (Clone)`, created: Date.now(), updated: Date.now() }; this.notes.unshift(c); StorageService.saveNotes(this.notes); this.sortAndFilter(); this.selectNote(c.id); Notifier.success('Note cloned.'); } else Notifier.warning('Select note to clone.'); break; case 'insert': this.editor.insertField(); break; case 'publish': this.updateNoteState(n, 'Published'); break; case 'set-private': this.updateNoteState(n, 'Private'); break; case 'enhance': Notifier.info('Stub: LLM Enhance'); break; case 'summary': Notifier.info('Stub: LLM Summary'); break; case 'delete': if (n && confirm(`Delete "${n.title || 'Untitled Note'}"?`)) { this.notes = this.notes.filter(note => note.id !== n.id); StorageService.saveNotes(this.notes); this.currentId = null; this.sortAndFilter(); this.editor.clear(); this.actionArea.clearIcons(); Notifier.success('Note deleted.'); } else if (!n) Notifier.warning('Select note to delete.'); break; case 'view-source': if (n) alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\n\n${n.content}`); else Notifier.warning('Select note to view source.'); break; case 'settings': this.settingsModal.show(); break; default: console.warn(`Unknown menu action: ${action}`); } }
+        updateNoteState(note, newState) { if (note) { note.state = newState; note.updated = Date.now(); StorageService.saveNotes(this.notes); this.editor.updateMeta(note); this.sidebar.updateNote(note); Notifier.success(`Note "${note.title || 'Untitled'}" set to ${newState}.`); if(newState === 'Published') console.log('Stub: Publishing note...', note); } else Notifier.warning(`Select a note to set ${newState}.`); }
+        showDock(d) { this.actionArea.showDock(d); }
+    }
+    $(() => { const app = new App('#app-container'); $(window).on('beforeunload', () => app.saveCurrentNote()); });
 </script>
 </body>
 </html>

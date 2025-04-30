@@ -411,9 +411,7 @@ public class Cog {
 
     private void load() {
         var loadedNotes = loadNotesFromFile();
-        loadedNotes.forEach(note -> {
-            notes.put(note.id(), note);
-        });
+        loadedNotes.forEach(note -> notes.put(note.id(), note));
 
         var configNoteOpt = note(CONFIG_NOTE_ID);
         Configuration config;

@@ -4,8 +4,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dumb.cognote.CogEvent;
 import dumb.cognote.Cog;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
