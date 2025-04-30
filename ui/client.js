@@ -32,7 +32,7 @@ class WebSocketClient {
             return;
         }
 
-        console.log(`Attempting to connect to WebSocket: ${this.url} (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+        console.log(`Attempting to connect to WebSocket: ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts}`);
         this.ws = new WebSocket(this.url);
 
         this.ws.onopen = this._onOpen.bind(this);
@@ -47,7 +47,7 @@ class WebSocketClient {
         this.reconnectAttempts = 0;
         this._flushQueue();
         this._emit('connected');
-        this.sendInitialStateRequest(); // Request initial state upon connection
+        // Removed: this.sendInitialStateRequest(); // Rely on backend sending it automatically
     }
 
     _onMessage(event) {
