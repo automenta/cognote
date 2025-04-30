@@ -18,9 +18,13 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     private void handleGoalAssertion(CogEvent event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof CogEvent.ExternalInputEvent(var term, var sourceId, var noteId))) {
-            return; // Should not happen with correct registration, but defensive
+        if (!(event instanceof CogEvent.ExternalInputEvent)) {
+             return; // Should not happen with correct registration, but defensive
         }
+        CogEvent.ExternalInputEvent externalInputEvent = (CogEvent.ExternalInputEvent) event;
+        Term term = externalInputEvent.term();
+        String sourceId = externalInputEvent.sourceId();
+        String noteId = externalInputEvent.noteId();
         // This is the targetNoteId from the input event
 
 
