@@ -18,10 +18,10 @@ import static java.util.Objects.requireNonNull;
 
 public class Events {
     public final ExecutorService exe;
-    final ConcurrentMap<Class<? extends Event>, CopyOnWriteArrayList<Consumer<Event>>> listeners = new ConcurrentHashMap<>();
+    public final ConcurrentMap<Class<? extends Event>, CopyOnWriteArrayList<Consumer<Event>>> listeners = new ConcurrentHashMap<>();
     private final ConcurrentMap<Term, CopyOnWriteArrayList<BiConsumer<Event, Map<Term.Var, Term>>>> patternListeners = new ConcurrentHashMap<>();
 
-    Events(ExecutorService exe) {
+    public Events(ExecutorService exe) {
         this.exe = requireNonNull(exe);
     }
 
