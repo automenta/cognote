@@ -97,6 +97,11 @@ websocketClient.on('initialState', (statePayload) => {
         }
         if (statePayload.notes) {
             summary += `- Notes: ${statePayload.notes.length} total\n`;
+            // Check if notes are empty and create examples
+            if (statePayload.notes.length === 0) {
+                appendOutput(`${formatTimestamp()} [STATUS] No notes found. Creating example notes...`, 'status');
+                createExampleNotes(); // Call a new function to handle creation
+            }
         }
          if (statePayload.rules) {
             summary += `- Rules: ${statePayload.rules.length} total\n`;
@@ -349,6 +354,82 @@ function handleCommand(commandString) {
         appendOutput(`${formatTimestamp()} [ERROR] Command failed: ${e.message}`, 'response-error');
         console.error(`Command /${command} failed:`, e);
     }
+}
+
+
+// Function to create example notes
+function createExampleNotes() {
+    const exampleNotes = [
+        {
+            id: 'example-note-1',
+            title: 'Getting Started: Facts & Queries',
+            text: `This note contains basic facts about animals.
+(instance MyCat Cat)
+(instance YourDog Dog)
+(instance MyCat Mammal)
+
+Try querying the system in the REPL input below:
+/query (instance ?X Cat)
+/query (instance ?Y Mammal)
+/query (instance MyCat ?Type)
+`,
+            status: 'ACTIVE'
+        },
+        {
+            id: 'example-note-2',
+            title: 'Reasoning: Rules & Derivations',
+            text: `This note defines a simple rule and a fact that should trigger it.
+(=> (instance ?X Dog) (attribute ?X Canine))
+
+The fact below should cause the rule to derive (attribute MyDog Canine):
+(instance MyDog Dog)
+
+You can query for the derived fact:
+/query (attribute MyDog Canine)
+`,
+            status: 'ACTIVE'
+        },
+        {
+            id: 'example-note-3',
+            title: 'LLM Tools: Summarize & Enhance',
+            text: `This note has some text that might be useful for LLM tools.
+
+Here is a long paragraph about the benefits of agentic systems. Agentic systems, often powered by large language models and symbolic reasoning engines, promise a new era of intelligent automation. They can process information, make decisions, take actions, and even learn and adapt over time. Unlike traditional software, which follows explicit instructions, agentic systems can operate autonomously towards a goal, handling unforeseen circumstances and integrating information from diverse sources. This capability is particularly valuable in complex, dynamic environments where pre-programmed solutions are insufficient. Potential applications range from advanced personal assistants and automated research agents to sophisticated control systems and creative collaborators. However, developing robust and reliable agentic systems presents significant challenges, including ensuring safety, interpretability, and preventing unintended consequences.
+
+Can you summarize this?
+What are the key concepts mentioned?
+Suggest some related questions.
+
+Try running tools from the REPL:
+/tool summarize { "note_id": "example-note-3" }
+/tool identifyConcepts { "note_id": "example-note-3" }
+/tool generateQuestions { "note_id": "example-note-3" }
+`,
+            status: 'ACTIVE'
+        },
+        {
+            id: 'example-note-4',
+            title: 'Dialogue & Interaction',
+            text: `This note contains a KIF term that uses the (ask-user ...) operator.
+(ask-user "What is your favorite color?")
+
+Running this query in the REPL should trigger a dialogue modal asking for your input.
+/query (ask-user "What is your favorite color?")
+
+The response you provide will be returned as the result of the query.
+`,
+            status: 'ACTIVE'
+        }
+    ];
+
+    exampleNotes.forEach(noteData => {
+        // Send commands sequentially for each note
+        websocketClient.sendCommand('addNote', { noteId: noteData.id, title: noteData.title })
+            .then(() => websocketClient.sendCommand('updateNoteText', { noteId: noteData.id, newText: noteData.text }))
+            .then(() => websocketClient.sendCommand('updateNoteStatus', { noteId: noteData.id, newStatus: noteData.status }))
+            .then(() => appendOutput(`${formatTimestamp()} [STATUS] Created example note: "${noteData.title}"`, 'status'))
+            .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to create example note "${noteData.title}": ${err.message}`, 'response-error'));
+    });
 }
 
 
