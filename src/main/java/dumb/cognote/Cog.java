@@ -129,7 +129,10 @@ public class Cog {
                         requestPath = "/index.html"; // Serve index.html for root
                     }
 
-                    java.nio.file.Path filePath = Paths.get(STATIC, requestPath).normalize();
+                    // Strip leading slash for path resolution relative to staticDir
+                    String filePathString = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
+
+                    java.nio.file.Path filePath = Paths.get(STATIC, filePathString).normalize();
 
                     // Basic security check: prevent directory traversal
                     if (!filePath.startsWith(Paths.get(STATIC).normalize())) {
