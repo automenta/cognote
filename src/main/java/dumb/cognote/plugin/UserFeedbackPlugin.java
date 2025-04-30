@@ -3,12 +3,14 @@ package dumb.cognote.plugin;
 import dumb.cognote.*;
 
 import static dumb.cognote.Log.message;
-import static dumb.cognote.Protocol.*;
+import static dumb.cognote.Protocol.KB_USER_FEEDBACK;
 
 /**
  * Plugin that listens for assertions in the user feedback KB and processes them.
  */
 public class UserFeedbackPlugin extends Plugin.BasePlugin {
+
+    private static final String PRED_USER_ASSERTED_KIF = "asserted", PRED_USER_EDITED_NOTE_TEXT = "edited_text", PRED_USER_EDITED_NOTE_TITLE = "asserted_title", PRED_USER_CLICKED = "clicked";
 
     @Override
     public void start(Events ev, Logic.Cognition ctx) {

@@ -18,17 +18,17 @@ import static java.util.Optional.ofNullable;
 
 public class RequestProcessorPlugin extends Plugin.BasePlugin {
 
-    private static final Lst ADD_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_ADD_NOTE), new Lst(Atom.of("title"), of("?title")), new Lst(Atom.of("text"), of("?text"))));
-    private static final Lst REMOVE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_REMOVE_NOTE), new Lst(Atom.of("noteId"), of("?noteId"))));
-    private static final Lst START_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_START_NOTE), new Lst(Atom.of("noteId"), of("?noteId"))));
-    private static final Lst PAUSE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_PAUSE_NOTE), new Lst(Atom.of("noteId"), of("?noteId"))));
-    private static final Lst COMPLETE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_COMPLETE_NOTE), new Lst(Atom.of("noteId"), of("?noteId"))));
-    private static final Lst RUN_TOOL_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_RUN_TOOL), new Lst(Atom.of("toolName"), of("?toolName")), new Lst(Atom.of("parameters"), of("?parameters"))));
-    private static final Lst RUN_QUERY_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_RUN_QUERY), new Lst(Atom.of("queryType"), of("?queryType")), new Lst(Atom.of("patternString"), of("?patternString")), new Lst(Atom.of("targetKbId"), of("?targetKbId")), new Lst(Atom.of("parameters"), of("?parameters"))));
-    private static final Lst CLEAR_ALL_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_CLEAR_ALL)));
-    private static final Lst SET_CONFIG_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_SET_CONFIG), new Lst(Atom.of("configJsonText"), of("?configJsonText"))));
-    private static final Lst SAVE_NOTES_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_SAVE_NOTES)));
-    private static final Lst GET_INITIAL_STATE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of(REQUEST_GET_INITIAL_STATE)));
+    private static final Lst ADD_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_ADD_NOTE"), new Lst(Atom.of("title"), of("?title")), new Lst(Atom.of("text"), of("?text"))));
+    private static final Lst REMOVE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_REMOVE_NOTE"), new Lst(Atom.of("noteId"), of("?noteId"))));
+    private static final Lst START_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_START_NOTE"), new Lst(Atom.of("noteId"), of("?noteId"))));
+    private static final Lst PAUSE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_PAUSE_NOTE"), new Lst(Atom.of("noteId"), of("?noteId"))));
+    private static final Lst COMPLETE_NOTE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_COMPLETE_NOTE"), new Lst(Atom.of("noteId"), of("?noteId"))));
+    private static final Lst RUN_TOOL_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_RUN_TOOL"), new Lst(Atom.of("toolName"), of("?toolName")), new Lst(Atom.of("parameters"), of("?parameters"))));
+    private static final Lst RUN_QUERY_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_RUN_QUERY"), new Lst(Atom.of("queryType"), of("?queryType")), new Lst(Atom.of("patternString"), of("?patternString")), new Lst(Atom.of("targetKbId"), of("?targetKbId")), new Lst(Atom.of("parameters"), of("?parameters"))));
+    private static final Lst CLEAR_ALL_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_CLEAR_ALL")));
+    private static final Lst SET_CONFIG_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_SET_CONFIG"), new Lst(Atom.of("configJsonText"), of("?configJsonText"))));
+    private static final Lst SAVE_NOTES_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_SAVE_NOTES")));
+    private static final Lst GET_INITIAL_STATE_PATTERN = new Lst(Atom.of(PRED_REQUEST), new Lst(Atom.of("REQUEST_GET_INITIAL_STATE")));
 
 
     @Override

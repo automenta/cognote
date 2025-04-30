@@ -10,10 +10,7 @@ import dumb.cognote.tool.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -538,8 +535,7 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<Event> listener = e -> {
-            if (e instanceof Answer.AnswerEvent answerEvent) {
-                Answer result = answerEvent.result();
+            if (e instanceof Answer.AnswerEvent(Answer result)) {
                 if (result.queryId().equals(queryID)) {
                     answerFuture.complete(result);
                 }

@@ -18,12 +18,9 @@ public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     private void handleGoalAssertion(Event event, java.util.Map<Term.Var, Term> bindings) {
         // The event is guaranteed to be ExternalInputEvent by the pattern listener registration
-        if (!(event instanceof Event.ExternalInputEvent externalInputEvent)) {
+        if (!(event instanceof Event.ExternalInputEvent(Term term, String sourceId, String noteId))) {
             return; // Should not happen with correct registration, but defensive
         }
-        Term term = externalInputEvent.term();
-        String sourceId = externalInputEvent.sourceId();
-        String noteId = externalInputEvent.noteId();
         // This is the targetNoteId from the input event
 
 

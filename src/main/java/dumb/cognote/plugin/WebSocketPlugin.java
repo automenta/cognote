@@ -2,7 +2,6 @@ package dumb.cognote.plugin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dumb.cognote.*;
 import org.java_websocket.WebSocket;
@@ -171,7 +170,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         for (var kifStringNode : kifStringsNode) {
             if (!kifStringNode.isTextual()) {
-                errorMessages.append("Invalid element in kifStrings array (not a string): ").append(kifStringNode.toString()).append("; ");
+                errorMessages.append("Invalid element in kifStrings array (not a string): ").append(kifStringNode).append("; ");
                 continue;
             }
             var kifString = kifStringNode.asText();
@@ -190,7 +189,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                                 List.of(),
                                 0
                         );
-                        context.ctx.tryCommit(potentialAssertion, sourceId);
+                        context.tryCommit(potentialAssertion, sourceId);
                         successCount++;
                     } else {
                         errorMessages.append("Input term is not a list: ").append(term.toKif()).append("; ");
@@ -205,8 +204,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             }
         }
 
-        if (errorMessages.length() > 0) {
-            sendFailureResponse(conn, signalId, "Processed " + successCount + " terms with errors: " + errorMessages.toString());
+        if (!errorMessages.isEmpty()) {
+            sendFailureResponse(conn, signalId, "Processed " + successCount + " terms with errors: " + errorMessages);
         } else {
             sendSuccessResponse(conn, signalId, null, "Successfully processed and asserted " + successCount + " terms.");
         }
@@ -224,7 +223,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         cog.dialogue.handleResponse(dialogueId, responseDataNode)
                 .ifPresentOrElse(
-                        future -> { },
+                        future -> {
+                        },
                         () -> sendErrorResponse(conn, responseId, "No pending dialogue request found for ID: " + dialogueId)
                 );
     }
