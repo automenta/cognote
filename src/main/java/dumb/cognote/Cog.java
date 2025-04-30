@@ -563,6 +563,15 @@ public class Cog {
         }
     }
 
+    public SystemStateSnapshot getSystemStateSnapshot() {
+        return new SystemStateSnapshot(
+                getAllNotes(),
+                context.truth.getAllActiveAssertions(),
+                context.rules(),
+                new Configuration(this)
+        );
+    }
+
     public enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
 
     public enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}
@@ -631,5 +640,14 @@ public class Cog {
         public Configuration(Cog cog) {
             this(cog.lm.llmApiUrl, cog.lm.llmModel, cog.globalKbCapacity, cog.reasoningDepthLimit, cog.broadcastInputAssertions);
         }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record SystemStateSnapshot(
+            List<Note> notes,
+            Collection<Assertion> assertions,
+            Collection<Rule> rules,
+            Cog.Configuration configuration
+    ) {
     }
 }
