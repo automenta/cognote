@@ -218,12 +218,12 @@ public class Reason {
         }
 
         @Override
-        public Set<QueryType> getSupportedQueryTypes() {
+        public Set<Cog.QueryType> getSupportedQueryTypes() {
             return Set.of();
         }
 
         @Override
-        public Set<Feature> getSupportedFeatures() {
+        public Set<Cog.Feature> getSupportedFeatures() {
             return Set.of();
         }
 

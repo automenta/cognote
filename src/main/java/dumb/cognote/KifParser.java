@@ -146,7 +146,9 @@ public class KifParser {
         while (peek() != -1 && !Character.isWhitespace(peek()) && peek() != '(' && peek() != ')' && peek() != '"' && peek() != ';') {
             sb.append((char) consumeChar());
         }
-        return Term.Var.of(sb.toString());
+        var value = sb.toString();
+        if (value.length() < 2) throw createParseException("Variable name must have length > 1: " + value);
+        return Term.Var.of(value);
     }
 
     private Term.Atom parseSymbolAtom() throws IOException, ParseException {

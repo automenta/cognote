@@ -31,7 +31,7 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
         if (type == UNIVERSAL && (kif.op().filter(Logic.KIF_OP_FORALL::equals).isEmpty() || quantifiedVars.isEmpty()))
             throw new IllegalArgumentException("Universal assertion must be (forall ...) with quantified vars: " + kif.toKif());
         if (type != UNIVERSAL && !quantifiedVars.isEmpty())
-            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKif());
+            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKIF());
     }
 
     private static void collectPredicatesRecursive(Term term, Set<Term.Atom> predicates) {

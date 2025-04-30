@@ -18,7 +18,6 @@ import java.util.function.Consumer;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
-import static dumb.cognote.Logic.Cognition;
 import static dumb.cognote.Note.Status.IDLE;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
@@ -49,7 +48,7 @@ public class Cog {
     private static final String STATE_FILE = "cognote_state.json";
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    public final Cognition context;
+    public final Logic.Cognition context;
     public final LM lm;
     public final Dialogue dialogue;
     public final Events events;
@@ -74,7 +73,7 @@ public class Cog {
         this.tools = new Tools();
 
         var tms = new Truths.BasicTMS(events);
-        this.context = new Cognition(globalKbCapacity, tms, this);
+        this.context = new Logic.Cognition(globalKbCapacity, tms, this);
 
         this.dialogue = new Dialogue(this);
         this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
@@ -228,6 +227,7 @@ public class Cog {
         ofNullable(notes.remove(noteId)).ifPresent(note -> {
             events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
             events.emit(new Event.RemovedEvent(note));
+            context.removeNoteKb(noteId, "CogNote-Remove");
             context.removeActiveNote(noteId);
             message("Removed note: " + note.title() + " [" + note.id() + "]");
             assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
