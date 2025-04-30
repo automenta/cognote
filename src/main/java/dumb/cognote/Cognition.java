@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.DERIVED_PRIORITY_DECAY;
 import static dumb.cognote.Cog.GLOBAL_KB_NOTE_ID;
+import static dumb.cognote.Logic.KIF_OP_NOT;
 import static dumb.cognote.util.Log.error;
 import static java.util.Optional.ofNullable;
 
@@ -33,8 +34,8 @@ public class Cognition {
         activeNoteIds.add(GLOBAL_KB_NOTE_ID);
     }
 
-    public static Term.Lst performSkolemization(Term.Lst body, Collection<Term.Var> existentialVars, Map<Term.Var, Term> contextBindings) {
-        return Logic.Skolemizer.skolemize(new Term.Lst(Term.Atom.of(Logic.KIF_OP_EXISTS), new Term.Lst(new ArrayList<>(existentialVars)), body), contextBindings);
+    public static Term.Lst performSkolemization(Term.Lst existentialFormula, Collection<Term.Var> existentialVars, Map<Term.Var, Term> contextBindings) {
+        return Logic.Skolemizer.skolemize(existentialFormula, existentialVars, contextBindings);
     }
 
     public static Term.Lst simplifyLogicalTerm(Term.Lst term) {
@@ -51,7 +52,7 @@ public class Cognition {
     }
 
     private static Term.Lst simplifyLogicalTermOnce(Term.Lst term) {
-        if (term.op().filter(Logic.KIF_OP_NOT::equals).isPresent() && term.size() == 2 && term.get(1) instanceof Term.Lst nl && nl.op().filter(Logic.KIF_OP_NOT::equals).isPresent() && nl.size() == 2 && nl.get(1) instanceof Term.Lst inner)
+        if (term.op().filter(KIF_OP_NOT::equals).isPresent() && term.size() == 2 && term.get(1) instanceof Term.Lst nl && nl.op().filter(KIF_OP_NOT::equals).isPresent() && nl.size() == 2 && nl.get(1) instanceof Term.Lst inner)
             return simplifyLogicalTermOnce(inner);
         var changed = new boolean[]{false};
         var newTerms = term.terms.stream().map(subTerm -> {

@@ -13,6 +13,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.id;
+import static dumb.cognote.Logic.ID_PREFIX_TICKET;
+import static dumb.cognote.Logic.KIF_OP_NOT;
 import static dumb.cognote.util.Log.error;
 import static dumb.cognote.util.Log.message;
 import static java.util.Objects.requireNonNull;
@@ -97,7 +99,7 @@ public interface Truths {
             else
                 checkForContradictions(assertionToAdd);
 
-            return new SupportTicket(id(Logic.ID_PREFIX_TICKET), aid);
+            return new SupportTicket(id(ID_PREFIX_TICKET), aid);
         }
 
         @Override
@@ -228,7 +230,7 @@ public interface Truths {
 
         private void checkForContradictions(Assertion newlyActive) {
             if (!newlyActive.isActive()) return;
-            var oppositeForm = newlyActive.negated() ? newlyActive.getEffectiveTerm() : new Term.Lst(Term.Atom.of(Logic.KIF_OP_NOT), newlyActive.kif());
+            var oppositeForm = newlyActive.negated() ? newlyActive.getEffectiveTerm() : new Term.Lst(Term.Atom.of(KIF_OP_NOT), newlyActive.kif());
             if (!(oppositeForm instanceof Term.Lst)) return;
             findMatchingAssertion((Term.Lst) oppositeForm, newlyActive.kb(), !newlyActive.negated())
                     .ifPresent(match -> {

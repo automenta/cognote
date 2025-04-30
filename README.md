@@ -4,17 +4,16 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 
 ## Notes
 
-- **Thought Evolution:** `Note`s describe thoughts and ideas, allowing them to evolve agentically.
-- **Shared Notes:** Create, prioritize, and manage data collaboratively as `Note`s.
-- **Privacy by Default:** All `Note`s are private unless explicitly shared.
+- Thought Evolution: `Note`s describe thoughts and ideas, allowing them to evolve agentically.
+- Shared Notes: Create, prioritize, and manage data collaboratively as `Note`s.
+- Privacy by Default: All `Note`s are private unless explicitly shared.
 
 ## Search and Match
 
-- **Persistent Queries:** `Note`s can act as ongoing search interests.
-- **Semantic Matching:** `Note`s capture meaning and intent.
-- **Notifications:** The app receives matches to shared `Note`s as replies.
-- **Real vs. Imaginary:** Matches factual descriptions of real things to hypothetical (acceptable) descriptions of
-  imaginary things - effecting the realization of imagination.
+- Persistent Queries: `Note`s can act as ongoing search interests.
+- Semantic Matching: `Note`s capture meaning and intent.
+- Notifications: The app receives matches to shared `Note`s as replies.
+- Real vs. Imaginary: Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary things - effecting the realization of imagination.
 
 ## Components
 
@@ -46,8 +45,8 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 
 ### P2P Network (Plugin)
 
-- **Decentralized**
-- **Secure**
+- Decentralized
+- Secure
     - End-to-end encryption protects private data.
     - Crypto-signing ensures `Note` integrity and provenance.
 - Networks:
@@ -60,7 +59,6 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 ## Code Guidelines
 
 - Complete (fully functional)
-    - Ensure all functionality remains present, in some way.
 - Professional-grade, not explanatory/educational
 - Correct (bug-free and logically sound)
 - Compact (minimal codebase size)
