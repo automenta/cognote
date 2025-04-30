@@ -14,6 +14,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Define LangChain4j version -->
         <langchain4j.version>1.0.0-beta3</langchain4j.version>
+        <!-- Define Jackson version -->
+        <jackson.version>2.17.1</jackson.version> <!-- Use a recent stable version -->
     </properties>
 
     <dependencies>
@@ -31,6 +33,18 @@
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
             <version>26.0.2</version>
+        </dependency>
+
+        <!-- Jackson Dependencies for JSON serialization/deserialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
         </dependency>
 
         <!-- LangChain4j Dependencies -->
