@@ -208,10 +208,11 @@ class Editor extends Component {
     }
 
     render() {
-        this.$el.html(` <div class="editor-header"> <input type="text" class="editor-title" id="note-title" placeholder="Note Title"> <div class="editor-meta" id="note-meta">Select or create a note</div> </div> <div class="editor-toolbar"> <button data-command="bold" class="icon" title="Bold">B</button> <button data-command="italic" class="icon" title="Italic">I</button> <button data-command="underline" class="icon" title="Underline">U</button> <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button> <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button> <button data-action="insert-field" class="icon" title="Insert Field">+</button> </div> <div class="editor-content-wrapper"> <div class="editor-content" id="note-content" contenteditable="true" placeholder="Start writing..."></div> </div>`);
+        this.$el.html(` <div class="editor-header"> <input type="text" class="editor-title" id="note-title" placeholder="Note Title"> <div class="editor-meta" id="note-meta">Select or create a note</div> <span id="save-status" class="save-status"></span> </div> <div class="editor-toolbar"> <button data-command="bold" class="icon" title="Bold">B</button> <button data-command="italic" class="icon" title="Italic">I</button> <button data-command="underline" class="icon" title="Underline">U</button> <button data-command="insertUnorderedList" class="icon" title="Bullet List">UL</button> <button data-command="insertOrderedList" class="icon" title="Numbered List">OL</button> <button data-action="insert-field" class="icon" title="Insert Field">+</button> </div> <div class="editor-content-wrapper"> <div class="editor-content" id="note-content" contenteditable="false" placeholder="Start writing..."></div> </div>`);
         this.$title = this.$el.find('#note-title');
         this.$meta = this.$el.find('#note-meta');
         this.$content = this.$el.find('#note-content');
+        this.$saveStatus = this.$el.find('#save-status');
     }
 
     bindEvents() {
@@ -223,9 +224,15 @@ class Editor extends Component {
         this.$content.on('input', () => this.save());
         this.$title.on('input', () => this.save());
         this.$content.on('keydown', (e) => {
-            if (e.key === 'Tab') {
+            if (e.key === 'Tab' && !e.shiftKey && this.$content.is(':focus')) {
+                // Basic indent for contenteditable
                 e.preventDefault();
-                document.execCommand(e.shiftKey ? 'outdent' : 'indent', !1, null);
+                document.execCommand('insertHTML', false, '&#009;'); // Insert tab character
+            } else if (e.key === 'Tab' && e.shiftKey && this.$content.is(':focus')) {
+                 // Basic outdent - execCommand('outdent') only works for list items
+                 // More complex logic needed for general text outdent
+                 // For now, just prevent default tab behavior
+                 e.preventDefault();
             }
         });
     }
@@ -235,6 +242,7 @@ class Editor extends Component {
             this.$title.val(n.title).prop('disabled', !1);
             this.$content.html(n.content).prop('contenteditable', !0); // Set contenteditable to true when loading a note
             this.updateMeta(n);
+            this.$saveStatus.text(''); // Clear status on load
         } else this.clear();
     }
 
@@ -246,6 +254,7 @@ class Editor extends Component {
         this.$title.val('').prop('disabled', !0);
         this.$content.html('').prop('contenteditable', !1); // Set contenteditable to false when clearing
         this.$meta.text('Select or create a note');
+        this.$saveStatus.text(''); // Clear status
     }
 
     getData() {
@@ -263,6 +272,13 @@ class Editor extends Component {
                 h = ` <span class='field'><span class='field-label'>${Utils.sanitizeHTML(n)}:</span><span class='field-value' contenteditable='true'>${Utils.sanitizeHTML(v || '')}</span></span> `;
             document.execCommand('insertHTML', !1, h);
             this.$content.trigger('input').focus();
+        }
+    }
+
+    setSaveStatus(status) {
+        this.$saveStatus.text(status);
+        if (status === 'Saved') {
+            setTimeout(() => this.$saveStatus.text(''), 2000); // Clear 'Saved' message after 2s
         }
     }
 }
@@ -454,6 +470,105 @@ class SettingsModal extends Component {
     }
 }
 
+class DialogueManager extends Component {
+    constructor(app, el) {
+        super(app, el);
+        this.$modal = this.$el;
+        this.$prompt = this.$el.find('#dialogue-prompt');
+        this.$input = this.$el.find('#dialogue-input');
+        this.$sendButton = this.$el.find('#dialogue-send-button');
+        this.$cancelButton = this.$el.find('#dialogue-cancel-button');
+        this.$closeButton = this.$el.find('#dialogue-modal-close');
+        this.currentDialogueId = null;
+
+        this.bindEvents();
+    }
+
+    bindEvents() {
+        this.$sendButton.on('click', () => this.sendResponse());
+        this.$cancelButton.on('click', () => this.cancelDialogue());
+        this.$closeButton.on('click', () => this.cancelDialogue());
+        this.$input.on('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.sendResponse();
+            }
+        });
+        this.$modal.on('click', (e) => {
+            if (e.target === this.$modal[0]) {
+                this.cancelDialogue();
+            }
+        });
+    }
+
+    show(dialogueRequest) {
+        if (this.currentDialogueId) {
+            console.warn(`Received new dialogue request (${dialogueRequest.dialogueId}) while another is active (${this.currentDialogueId}). Cancelling the old one.`);
+            this.cancelDialogue(); // Cancel previous one
+        }
+
+        // For now, only handle text_input requests
+        if (dialogueRequest.requestType !== 'text_input') {
+            console.warn(`Received unsupported dialogue request type: ${dialogueRequest.requestType}. Cancelling.`);
+            this.app.cancelDialogue(dialogueRequest.dialogueId); // Notify backend we can't handle it
+            return;
+        }
+
+        this.currentDialogueId = dialogueRequest.dialogueId;
+        this.$prompt.text(dialogueRequest.prompt);
+        this.$input.val(''); // Clear previous input
+        this.$modal.addClass('visible');
+        this.$input.focus();
+    }
+
+    hide() {
+        this.$modal.removeClass('visible');
+        this.currentDialogueId = null;
+        this.$prompt.text('');
+        this.$input.val('');
+    }
+
+    sendResponse() {
+        if (!this.currentDialogueId) return;
+
+        const responseText = this.$input.val().trim();
+        // Allow empty response for now, backend can validate if needed
+
+        console.log(`Sending dialogue response for ${this.currentDialogueId}: "${responseText}"`);
+        websocketClient.sendDialogueResponse(this.currentDialogueId, { text: responseText }) // Assuming text_input type
+            .then(response => {
+                console.log('Dialogue response acknowledged by backend:', response);
+                // Backend response is handled by generic 'response' listener in client.js
+                // No need for specific UI feedback here unless the response indicates an error
+            })
+            .catch(err => {
+                console.error('Failed to send dialogue response:', err);
+                Notifier.error('Failed to send dialogue response.');
+            });
+
+        this.hide();
+    }
+
+    cancelDialogue() {
+        if (!this.currentDialogueId) return;
+
+        console.log(`Cancelling dialogue ${this.currentDialogueId}`);
+        this.app.cancelDialogue(this.currentDialogueId); // Delegate cancellation command to App
+
+        this.hide();
+    }
+
+    // Called by App when WS disconnects
+    handleWsDisconnected() {
+        if (this.currentDialogueId) {
+            console.warn('WS disconnected, cancelling active dialogue.');
+            this.hide(); // Just hide, don't send cancel command as WS is down
+            Notifier.warning('Dialogue cancelled due to disconnection.');
+        }
+    }
+}
+
+
 class App {
     constructor(sel) {
         this.$cont = $(sel);
@@ -468,7 +583,11 @@ class App {
         // Connect and request initial state
         if (websocketClient.isConnected) {
              console.log('WS already connected, requesting initial state...');
-             websocketClient.sendInitialStateRequest();
+             websocketClient.sendInitialStateRequest()
+                .catch(err => {
+                    console.error('Failed to request initial state on ready WS:', err);
+                    Notifier.error('Failed to load initial state.');
+                });
         } else {
              console.log('WS not connected, waiting for connection...');
              // The 'connected' event listener will trigger the initial state request
@@ -482,11 +601,13 @@ class App {
         this.menuBar = new MenuBar(this, '#menu-bar-container');
         this.actionArea = new ActionArea(this, '#action-area-container');
         this.settingsModal = new SettingsModal(this, '#settings-modal');
+        this.dialogueManager = new DialogueManager(this, '#dialogue-modal'); // Initialize DialogueManager
     }
 
     bindWebSocketEvents() {
         websocketClient.on('connected', () => {
             console.log('WS Connected');
+            Notifier.info('Connected to backend.');
             // Request initial state upon connection
             websocketClient.sendInitialStateRequest()
                 .catch(err => {
@@ -498,33 +619,42 @@ class App {
         websocketClient.on('disconnected', (e) => {
             console.warn('WS Disconnected', e);
             Notifier.error('Disconnected from backend.');
-            // Optionally clear UI or show a disconnected state
+            // Clear UI or show a disconnected state
             this.notes = [];
             this.currentId = null;
             this.sortAndFilter();
             this.editor.clear();
             this.actionArea.clearIcons();
+            this.editor.$meta.text('Disconnected. Attempting to reconnect...'); // Update meta text
+            this.dialogueManager.handleWsDisconnected(); // Notify dialogue manager
         });
 
         websocketClient.on('reconnectFailed', () => {
             Notifier.error('Failed to connect to backend.');
+            this.editor.$meta.text('Connection failed.'); // Final state after failed attempts
         });
 
         websocketClient.on('error', (e) => {
             console.error('WS Error', e);
             // Generic error handler, specific errors might be in response payloads
+            Notifier.error('WebSocket error occurred.');
         });
 
         websocketClient.on('initialState', (state) => this.handleInitialState(state));
         websocketClient.on('NoteStatusEvent', (event) => this.handleNoteStatusEvent(event));
-        // Add listeners for other relevant events if backend sends them (e.g., NoteUpdatedEvent)
-        // For now, relying on NoteStatusEvent and initial load for updates.
-        // A NoteUpdatedEvent would be ideal for real-time content/title/priority updates.
-        // Without it, changes only appear after a full refresh or NoteStatusEvent.
-        // Let's add a listener for a hypothetical NoteUpdatedEvent
         websocketClient.on('NoteUpdatedEvent', (event) => this.handleNoteUpdatedEvent(event));
         websocketClient.on('NoteDeletedEvent', (event) => this.handleNoteDeletedEvent(event));
         websocketClient.on('NoteAddedEvent', (event) => this.handleNoteAddedEvent(event));
+        websocketClient.on('dialogueRequest', (request) => this.dialogueManager.show(request)); // Handle dialogue requests
+        websocketClient.on('response', (response) => {
+             // Generic response handler - useful for debugging or unexpected responses
+             console.log('Received generic response:', response);
+             // Specific response handling (like save status) is done in the promise chain
+        });
+        websocketClient.on('event', (event) => {
+             // Generic event handler - useful for debugging or unexpected events
+             console.log('Received generic event:', event);
+        });
     }
 
     handleInitialState(state) {
@@ -565,7 +695,7 @@ class App {
         if (note) {
             note.state = event.newStatus;
             // Backend should ideally provide updated timestamp, using client time for responsiveness
-            note.updated = Date.now();
+            note.updated = event.timestamp || Date.now();
             this.sidebar.updateNote(note);
             if (note.id === this.currentId) {
                 this.editor.updateMeta(note);
@@ -576,7 +706,9 @@ class App {
             console.warn('NoteStatusEvent for unknown note ID:', event.noteId);
             // If a note status event arrives for a note not in our list,
             // we might need a full refresh or a specific NoteAddedEvent.
-            // For now, log warning.
+            // For now, log warning and request full state.
+            websocketClient.sendInitialStateRequest()
+                 .catch(err => console.error('Failed to request initial state after unknown NoteStatusEvent:', err));
         }
     }
 
@@ -596,19 +728,20 @@ class App {
                  this.sidebar.updateNote(this.notes[noteIndex]);
                  if (this.notes[noteIndex].id === this.currentId) {
                      // If the updated note is the currently selected one, reload the editor
-                     this.editor.load(this.notes[noteIndex]);
+                     this.editor.load(this.notes[noteIndex]); // Reloads content, title, meta
                  }
                  this.sortAndFilter(); // Re-sort/filter in case title/priority changed
                  this.actionArea.renderIcons(this.notes[noteIndex]); // Re-render action icons
-                 Notifier.info(`Note "${this.notes[noteIndex].title || 'Untitled'}" updated.`);
+                 // Notifier.info(`Note "${this.notes[noteIndex].title || 'Untitled'}" updated.`); // Avoid excessive notifications
              } else {
                  console.warn('NoteUpdatedEvent received without updated note data.');
              }
          } else {
              console.warn('NoteUpdatedEvent for unknown note ID:', event.noteId);
              // If an update arrives for a note not in our list, request a full state refresh
-             // This might happen if the note was added by another client/plugin
-             websocketClient.sendInitialStateRequest();
+             // This might happen if the note was added/updated by another client/plugin
+             websocketClient.sendInitialStateRequest()
+                 .catch(err => console.error('Failed to request initial state after unknown NoteUpdatedEvent:', err));
          }
     }
 
@@ -633,7 +766,8 @@ class App {
          } else {
              console.warn('NoteDeletedEvent for unknown note ID:', noteId);
              // If a delete event arrives for a note not in our list, request a full state refresh
-             websocketClient.sendInitialStateRequest();
+             websocketClient.sendInitialStateRequest()
+                 .catch(err => console.error('Failed to request initial state after unknown NoteDeletedEvent:', err));
          }
     }
 
@@ -696,6 +830,7 @@ class App {
             this.editor.clear();
             this.sidebar.setActive(null);
             this.actionArea.clearIcons();
+            Notifier.warning(`Note ${id} not found.`);
         }
     }
 
@@ -717,7 +852,9 @@ class App {
             if (changed) {
                 // Update local state immediately for responsiveness
                 // Backend will send NoteUpdatedEvent with correct timestamp later
-                n.updated = Date.now();
+                n.updated = Date.now(); // Optimistic update
+
+                this.editor.setSaveStatus('Saving...');
 
                 // Send update action to backend
                 websocketClient.sendUiAction('updateNote', {
@@ -730,19 +867,24 @@ class App {
                     color: n.color
                 }).then(response => {
                     console.log(`Backend acknowledged update for ${n.id}:`, response);
-                    // Backend should ideally send an event confirming the update (NoteUpdatedEvent)
+                    this.editor.setSaveStatus('Saved');
+                    // Backend should send an event confirming the update (NoteUpdatedEvent)
+                    // which will trigger editor.load() and sidebar.updateNote()
                 }).catch(err => {
                     console.error(`Failed to send update for ${n.id}:`, err);
+                    this.editor.setSaveStatus('Save Failed');
                     Notifier.error(`Failed to save note "${n.title || 'Untitled'}".`);
                     // Consider reverting local changes or showing error state
                 });
 
-                // Update UI based on local changes immediately
+                // Update UI based on local changes immediately (optimistic)
                 this.sidebar.updateNote(n);
                 this.editor.updateMeta(n);
                 this.actionArea.renderIcons(n);
                 console.log(`Attempted save for ${n.id}`);
                 return true;
+            } else {
+                 this.editor.setSaveStatus(''); // Clear status if no changes
             }
         }
         return false;
@@ -803,6 +945,9 @@ class App {
                 this.editor.updateMeta(n); // Update meta in editor
             }
             Notifier.info(`Priority update requested for "${n.title || 'Untitled'}"`);
+        } else {
+             console.warn(`Attempted to update priority for unknown note ID: ${id}`);
+             Notifier.warning(`Cannot update priority for unknown note.`);
         }
     }
 
@@ -812,10 +957,18 @@ class App {
 
         switch (action) {
             case 'undo':
-                document.execCommand('undo'); // Client-side editor action
+                if (this.currentId && this.editor.$content.is(':focus')) {
+                    document.execCommand('undo'); // Client-side editor action
+                } else {
+                    Notifier.warning('Select a note and focus the editor to undo.');
+                }
                 break;
             case 'redo':
-                document.execCommand('redo'); // Client-side editor action
+                 if (this.currentId && this.editor.$content.is(':focus')) {
+                    document.execCommand('redo'); // Client-side editor action
+                } else {
+                    Notifier.warning('Select a note and focus the editor to redo.');
+                }
                 break;
             case 'clone':
                 if (n) {
@@ -834,7 +987,11 @@ class App {
                 } else Notifier.warning('Select note to clone.');
                 break;
             case 'insert':
-                this.editor.insertField(); // Client-side editor action
+                if (this.currentId && this.editor.$content.is(':focus')) {
+                    this.editor.insertField(); // Client-side editor action
+                } else {
+                    Notifier.warning('Select a note and focus the editor to insert a field.');
+                }
                 break;
             case 'publish':
                 this.updateNoteState(n, 'Published'); // Calls updateNoteState which sends UI action
@@ -893,6 +1050,7 @@ class App {
     updateNoteState(note, newState) {
         if (note) {
             // Update local state immediately
+            const oldState = note.state;
             note.state = newState;
             note.updated = Date.now(); // Optimistic update
 
@@ -906,10 +1064,13 @@ class App {
             }).catch(err => {
                 console.error(`Failed to send state update for ${note.id}:`, err);
                 Notifier.error(`Failed to set note state to ${newState}.`);
-                // Consider reverting local changes or showing error state
+                // Revert local state on failure
+                note.state = oldState;
+                this.editor.updateMeta(note);
+                this.sidebar.updateNote(note);
             });
 
-            // Update UI based on local changes immediately
+            // Update UI based on local changes immediately (optimistic)
             this.editor.updateMeta(note);
             this.sidebar.updateNote(note);
             Notifier.success(`Note "${note.title || 'Untitled'}" set to ${newState}.`);
@@ -935,6 +1096,13 @@ class App {
 
     showDock(d) {
         this.actionArea.showDock(d);
+    }
+
+    // Method to cancel a dialogue request (called by DialogueManager)
+    cancelDialogue(dialogueId) {
+         websocketClient.sendCommand('cancelDialogue', { dialogueId: dialogueId })
+             .then(response => console.log(`Backend acknowledged dialogue cancellation ${dialogueId}:`, response))
+             .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));
     }
 }
 

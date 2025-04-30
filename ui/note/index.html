@@ -8,8 +8,29 @@
 </head>
 <body>
 <div id="app-container"></div>
+
+<!-- Dialogue Modal -->
+<div id="dialogue-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h4>Dialogue Request</h4>
+            <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
+        </div>
+        <div class="modal-body">
+            <p id="dialogue-prompt"></p>
+            <input type="text" id="dialogue-input" placeholder="Enter your response...">
+        </div>
+        <div class="modal-footer">
+            <button id="dialogue-cancel-button">Cancel</button>
+            <button id="dialogue-send-button">Send Response</button>
+        </div>
+    </div>
+</div>
+
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+<script src="../client.js" type="module"></script>
 <script src="index.js" type="module"></script>
 </body>
 </html>

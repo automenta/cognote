@@ -18,6 +18,7 @@
     --accent-color-action: #77a7a7;
     --accent-color-action-urgent: #dc3545;
     --shadow-light: rgba(0, 0, 0, 0.1);
+    --danger-color: #dc3545; /* Added danger color */
 }
 
 * {
@@ -245,6 +246,9 @@ h1, h2, h3, h4, h5, h6 {
 .editor-header {
     margin-bottom: 15px;
     flex-shrink: 0;
+    display: flex; /* Added flex for layout */
+    align-items: baseline; /* Align items to baseline */
+    gap: 15px; /* Space between elements */
 }
 
 .editor-title {
@@ -252,18 +256,30 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 700;
     border: none;
     outline: none;
-    width: 100%;
+    width: 100%; /* Allow title to take available space */
     padding: 5px 0;
     background: transparent;
     margin-bottom: 8px;
     color: #222;
+    flex-grow: 1; /* Allow title to grow */
 }
 
 .editor-meta {
     font-size: 0.85em;
     color: var(--text-muted);
     margin-bottom: 15px;
+    flex-shrink: 0; /* Prevent meta from shrinking */
 }
+
+.save-status { /* Added style for save status */
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 15px;
+    flex-shrink: 0;
+    min-width: 80px; /* Give it some minimum space */
+    text-align: right;
+}
+
 
 .editor-toolbar {
     margin-bottom: 15px;
@@ -591,6 +607,31 @@ h1, h2, h3, h4, h5, h6 {
     background-color: #f9f9f9;
 }
 
+/* Styles for the Dialogue Modal body */
+#dialogue-modal .modal-body {
+    display: block; /* Override flex for simple dialogue */
+    min-height: auto; /* Override min-height */
+    padding: 20px;
+}
+
+#dialogue-modal .modal-body p {
+    margin-bottom: 15px;
+    color: var(--text-color); /* Use standard text color */
+}
+
+#dialogue-modal .modal-body input[type="text"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: white;
+    color: var(--text-color);
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+}
+
+
 .modal-tabs {
     list-style: none;
     padding: 0;
@@ -675,27 +716,24 @@ h1, h2, h3, h4, h5, h6 {
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.modal-footer button#settings-save-btn {
+.modal-footer button#settings-save-btn,
+.modal-footer button#dialogue-send-button { /* Added dialogue send button */
     background-color: var(--bg-modal-header);
     color: white;
     border-color: var(--bg-modal-header);
 }
 
-.modal-footer button#settings-save-btn:hover {
+.modal-footer button#settings-save-btn:hover,
+.modal-footer button#dialogue-send-button:hover { /* Added dialogue send button */
     background-color: #3a80d2;
 }
 
-.modal-footer button#settings-cancel-btn {
+.modal-footer button#settings-cancel-btn,
+.modal-footer button#dialogue-cancel-button { /* Added dialogue cancel button */
     background-color: #f9f9f9;
 }
 
-.modal-footer button#settings-cancel-btn:hover {
+.modal-footer button#settings-cancel-btn:hover,
+.modal-footer button#dialogue-cancel-button:hover { /* Added dialogue cancel button */
     background-color: #eee;
-}
-
-[contenteditable=true]:empty:before {
-    content: attr(placeholder);
-    color: grey;
-    font-style: italic;
-    pointer-events: none;
 }
