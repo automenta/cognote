@@ -13,7 +13,7 @@ public class Dialogue {
 
     private final CogNote cog;
 
-    private final ConcurrentMap<String, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>(); // Use JsonNode
+    private final ConcurrentMap<String, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
 
     private final long requestTimeoutSeconds = 60;
 
@@ -21,16 +21,16 @@ public class Dialogue {
         this.cog = cog;
     }
 
-    public CompletableFuture<JsonNode> request(String dialogueId, String requestType, String prompt, JsonNode options, JsonNode context) { // Use JsonNode
+    public CompletableFuture<JsonNode> request(String dialogueId, String requestType, String prompt, JsonNode options, JsonNode context) {
         if (pending.containsKey(dialogueId)) {
             error("Dialogue request with ID " + dialogueId + " already pending.");
             return CompletableFuture.failedFuture(new IllegalStateException("Dialogue request with ID " + dialogueId + " already pending."));
         }
 
-        var future = new CompletableFuture<JsonNode>(); // Use JsonNode
+        var future = new CompletableFuture<JsonNode>();
         pending.put(dialogueId, future);
 
-        cog.events.emit(new Events.DialogueRequestEvent(dialogueId, requestType, prompt, options, context)); // Use Events.DialogueRequestEvent
+        cog.events.emit(new Events.DialogueRequestEvent(dialogueId, requestType, prompt, options, context));
 
         cog.mainExecutor.schedule(() -> {
             if (pending.remove(dialogueId) != null) {
@@ -42,7 +42,7 @@ public class Dialogue {
         return future;
     }
 
-    public Optional<CompletableFuture<JsonNode>> handleResponse(String dialogueId, JsonNode responseData) { // Use JsonNode
+    public Optional<CompletableFuture<JsonNode>> handleResponse(String dialogueId, JsonNode responseData) {
         return ofNullable(pending.remove(dialogueId))
                 .map(future -> {
                     future.complete(responseData);
@@ -64,6 +64,4 @@ public class Dialogue {
         pending.clear();
         message("Cleared all pending dialogue requests.");
     }
-
-    // DialogueRequestEvent moved to Events.java
 }

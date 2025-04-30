@@ -15,7 +15,6 @@ import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.warning;
 import static dumb.cognote.Logic.AssertionType.GROUND;
 import static dumb.cognote.Logic.AssertionType.SKOLEMIZED;
-import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 public class Knowledge {
@@ -37,9 +36,8 @@ public class Knowledge {
         this.groundEvictionQueue = new PriorityBlockingQueue<>(1024,
                 Comparator.<String, Double>
                                 comparing(id -> truth.get(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
-                        .thenComparingLong(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE))); // Tie-break by timestamp (oldest first)
+                        .thenComparingLong(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
 
-        // Listen for TMS events to update local indices
         events.on(Cog.AssertionStateEvent.class, this::handleAssertionStateChange);
         events.on(Cog.RetractedEvent.class, this::handleAssertionRetracted);
     }
@@ -87,7 +85,6 @@ public class Knowledge {
             var addedAssertion = truth.get(newId).orElse(null);
             if (addedAssertion == null || !addedAssertion.isActive()) return null;
 
-            // Indices are updated by handleAssertionStateChange
             checkResourceThresholds();
             events.emit(new Cog.AssertedEvent(addedAssertion, id));
             return addedAssertion;
@@ -167,8 +164,6 @@ public class Knowledge {
         try {
             truth.get(event.assertionId()).ifPresent(a -> {
                 if (a.isActive() != event.isActive()) {
-                    // This event is from TMS, the assertion status is already updated in the central store.
-                    // We just need to update local indices.
                     handleExternalStatusChange(a);
                 }
             });
@@ -181,8 +176,6 @@ public class Knowledge {
         if (!event.kbId().equals(this.id)) return;
         lock.writeLock().lock();
         try {
-            // The assertion is already removed from the central store by TMS.
-            // We just need to remove it from local indices.
             retractExternal(event.assertion());
         } finally {
             lock.writeLock().unlock();
@@ -229,6 +222,144 @@ public class Knowledge {
                 retractExternal(a);
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+
+    static class Path {
+
+        static class PathNode {
+            static final Class<Term.Var> VAR_MARKER = Term.Var.class;
+            static final Object LIST_MARKER = new Object();
+            final ConcurrentMap<Object, PathNode> children = new ConcurrentHashMap<>();
+            final Set<String> assertionIdsHere = ConcurrentHashMap.newKeySet();
+        }
+
+        static class PathIndex {
+            private final PathNode root = new PathNode();
+            private final Truths tms;
+
+            PathIndex(Truths tms) {
+                this.tms = tms;
+            }
+
+            private static void addPathsRecursive(Term term, String assertionId, PathNode currentNode) {
+                if (currentNode == null) return;
+                currentNode.assertionIdsHere.add(assertionId);
+                var key = getIndexKey(term);
+                var termNode = currentNode.children.computeIfAbsent(key, _ -> new PathNode());
+                termNode.assertionIdsHere.add(assertionId);
+                if (term instanceof Term.Lst list)
+                    list.terms.forEach(subTerm -> addPathsRecursive(subTerm, assertionId, termNode));
+            }
+
+            private static boolean removePathsRecursive(Term term, String assertionId, PathNode currentNode) {
+                if (currentNode == null) return false;
+                currentNode.assertionIdsHere.remove(assertionId);
+                var key = getIndexKey(term);
+                var termNode = currentNode.children.get(key);
+                if (termNode != null) {
+                    termNode.assertionIdsHere.remove(assertionId);
+                    var canPruneChild = true;
+                    if (term instanceof Term.Lst list)
+                        canPruneChild = list.terms.stream().allMatch(subTerm -> removePathsRecursive(subTerm, assertionId, termNode));
+                    if (canPruneChild && termNode.assertionIdsHere.isEmpty() && termNode.children.isEmpty())
+                        currentNode.children.remove(key, termNode);
+                }
+                return currentNode.assertionIdsHere.isEmpty() && currentNode.children.isEmpty();
+            }
+
+            private static Object getIndexKey(Term term) {
+                return switch (term) {
+                    case Term.Atom a -> a.value();
+                    case Term.Var _ -> PathNode.VAR_MARKER;
+                    case Term.Lst l -> l.op().map(op -> (Object) op).orElse(PathNode.LIST_MARKER);
+                };
+            }
+
+            private static void collectAllAssertionIds(PathNode node, Set<String> ids) {
+                if (node == null) return;
+                ids.addAll(node.assertionIdsHere);
+                node.children.values().forEach(child -> collectAllAssertionIds(child, ids));
+            }
+
+            private static void findUnifiableRecursive(Term queryTerm, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
+                if (queryTerm instanceof Term.Lst)
+                    ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> collectAllAssertionIds(listNode, candidates));
+                var specificNode = indexNode.children.get(getIndexKey(queryTerm));
+                if (specificNode != null) {
+                    candidates.addAll(specificNode.assertionIdsHere);
+                    if (queryTerm instanceof Term.Lst) collectAllAssertionIds(specificNode, candidates);
+                }
+                if (queryTerm instanceof Term.Var)
+                    indexNode.children.values().forEach(childNode -> collectAllAssertionIds(childNode, candidates));
+            }
+
+            private static void findInstancesRecursive(Term queryPattern, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                if (queryPattern instanceof Term.Var) {
+                    collectAllAssertionIds(indexNode, candidates);
+                    return;
+                }
+                var specificNode = indexNode.children.get(getIndexKey(queryPattern));
+                if (specificNode != null) {
+                    candidates.addAll(specificNode.assertionIdsHere);
+                    if (queryPattern instanceof Term.Lst listPattern && !listPattern.terms.isEmpty()) {
+                        collectAllAssertionIds(specificNode, candidates);
+                    }
+                }
+            }
+
+            private static void findGeneralizationsRecursive(Term queryTerm, PathNode indexNode, Set<String> candidates) {
+                if (indexNode == null) return;
+                ofNullable(indexNode.children.get(PathNode.VAR_MARKER)).ifPresent(varNode -> collectAllAssertionIds(varNode, candidates));
+                if (queryTerm instanceof Term.Lst)
+                    ofNullable(indexNode.children.get(PathNode.LIST_MARKER)).ifPresent(listNode -> candidates.addAll(listNode.assertionIdsHere));
+                ofNullable(indexNode.children.get(getIndexKey(queryTerm))).ifPresent(nextNode -> {
+                    candidates.addAll(nextNode.assertionIdsHere);
+                    if (queryTerm instanceof Term.Lst queryList && !queryList.terms.isEmpty()) {
+                        queryList.terms.forEach(subTerm -> findGeneralizationsRecursive(subTerm, nextNode, candidates));
+                    }
+                });
+            }
+
+            void add(Assertion assertion) {
+                if (tms.isActive(assertion.id())) addPathsRecursive(assertion.kif(), assertion.id(), root);
+            }
+
+            void remove(Assertion assertion) {
+                removePathsRecursive(assertion.kif(), assertion.id(), root);
+            }
+
+            void clear() {
+                root.children.clear();
+                root.assertionIdsHere.clear();
+            }
+
+            Stream<Assertion> findUnifiableAssertions(Term queryTerm) {
+                return findCandidates(queryTerm, PathIndex::findUnifiableRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
+            }
+
+            Stream<Assertion> findInstancesOf(Term queryPattern) {
+                var neg = (queryPattern instanceof Term.Lst ql && ql.op().filter(Logic.KIF_OP_NOT::equals).isPresent());
+                return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated() == neg).filter(a -> Logic.Unifier.match(queryPattern, a.kif(), Map.of()) != null);
+            }
+
+            Stream<Assertion> findGeneralizationsOf(Term queryTerm) {
+                return findCandidates(queryTerm, PathIndex::findGeneralizationsRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive);
+            }
+
+            private Set<String> findCandidates(Term queryTerm, TriConsumer<Term, PathNode, Set<String>> findMethod) {
+                Set<String> candidates = new HashSet<>();
+                findMethod.accept(queryTerm, root, candidates);
+                return candidates;
+            }
+
+            @FunctionalInterface
+            private interface TriConsumer<T, U, V> {
+                void accept(T t, U u, V v);
+            }
         }
     }
 }

@@ -55,7 +55,6 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
         };
     }
 
-    // Jackson requires a 'type' property for @JsonTypeInfo
     String getType();
 
     default JsonNode toJson() {
@@ -125,7 +124,7 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
             this(List.of(terms));
         }
 
-        public List<Term> getTerms() { // Jackson getter
+        public List<Term> getTerms() {
             return terms;
         }
 

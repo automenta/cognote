@@ -13,8 +13,8 @@ import static dumb.cognote.Log.error;
 public class Json {
 
     public static final ObjectMapper the = JsonMapper.builder()
-            .addModule(new JavaTimeModule()) // Add support for Java 8 Date/Time types
-            .enable(SerializationFeature.INDENT_OUTPUT) // Pretty print JSON
+            .addModule(new JavaTimeModule())
+            .enable(SerializationFeature.INDENT_OUTPUT)
             .build();
 
     public static String str(Object obj) {
@@ -23,7 +23,7 @@ public class Json {
         } catch (JsonProcessingException e) {
             error("Error serializing object to JSON: " + e.getMessage());
             e.printStackTrace();
-            return "{}"; // Return empty JSON object on error
+            return "{}";
         }
     }
 
@@ -33,7 +33,7 @@ public class Json {
         } catch (IllegalArgumentException e) {
             error("Error converting object to JsonNode: " + e.getMessage());
             e.printStackTrace();
-            return the.createObjectNode(); // Return empty object node on error
+            return the.createObjectNode();
         }
     }
 

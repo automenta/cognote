@@ -507,7 +507,7 @@ public class Reason {
                         .filter(u -> u.type() == AssertionType.UNIVERSAL && u.derivationDepth() < getDerivationDepthMax())
                         .filter(u -> isActiveContext(u.sourceNoteId()))
                         .filter(u -> u.getReferencedPredicates().contains(pred))
-                        .forEach(u -> tryInstantiate(u, newA));
+                        .forEach(this::tryInstantiate);
             } else if (newA.type() == AssertionType.UNIVERSAL && newA.derivationDepth() < getDerivationDepthMax()) {
                 if (!isActiveContext(newA.sourceNoteId())) return;
 

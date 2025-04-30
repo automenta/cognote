@@ -31,7 +31,7 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
         if (type == UNIVERSAL && (kif.op().filter(Logic.KIF_OP_FORALL::equals).isEmpty() || quantifiedVars.isEmpty()))
             throw new IllegalArgumentException("Universal assertion must be (forall ...) with quantified vars: " + kif.toKif());
         if (type != UNIVERSAL && !quantifiedVars.isEmpty())
-            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKif());
+            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKIF());
     }
 
     private static void collectPredicatesRecursive(Term term, Set<Term.Atom> predicates) {
@@ -78,18 +78,18 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
         return new Assertion(id, kif, pri, timestamp, sourceNoteId, justificationIds, type, isEquality, isOrientedEquality, negated, quantifiedVars, derivationDepth, newActiveStatus, kb);
     }
 
-    @JsonProperty("kifJson") // Map kif field to kifJson in JSON
-    public JsonNode getKifJson() {
+    @JsonProperty("kifJson")
+    public JsonNode kifJson() {
         return kif.toJson();
     }
 
-    @JsonProperty("kifString") // Add kifString property to JSON
-    public String getKifString() {
+    @JsonProperty("kifString")
+    public String kifString() {
         return kif.toKif();
     }
 
-    @JsonProperty("assertionType") // Map type field to assertionType in JSON
-    public Logic.AssertionType getAssertionType() {
+    @JsonProperty("assertionType")
+    public Logic.AssertionType assertionType() {
         return type;
     }
 

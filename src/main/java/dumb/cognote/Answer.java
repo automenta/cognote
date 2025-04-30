@@ -11,10 +11,10 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Term>> bindings,
-                     @Nullable Logic.Explanation explanation) { // Use Logic.Explanation
+public record Answer(@JsonProperty("queryId") String queryId, Cog.QueryStatus status, @JsonProperty("bindingsJson") List<Map<Term.Var, Term>> bindings,
+                     @Nullable Logic.Explanation explanation) {
     public Answer {
-        requireNonNull(query);
+        requireNonNull(queryId);
         requireNonNull(status);
         requireNonNull(bindings);
     }
@@ -28,24 +28,7 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
     }
 
     static Answer error(String queryId, String message) {
-        return new Answer(queryId, Cog.QueryStatus.ERROR, List.of(), new Logic.Explanation(message)); // Use Logic.Explanation
-    }
-
-    @JsonProperty("queryId") // Map query field to queryId in JSON
-    public String getQueryId() {
-        return query;
-    }
-
-    @JsonProperty("bindingsJson") // Add bindingsJson property to JSON
-    public JsonNode getBindingsJson() {
-        if (bindings.isEmpty()) return null;
-        var jsonBindings = Json.the.createArrayNode();
-        bindings.forEach(bindingMap -> {
-            var jsonBinding = Json.node();
-            bindingMap.forEach((var, term) -> jsonBinding.set(var.name(), term.toJson()));
-            jsonBindings.add(jsonBinding);
-        });
-        return jsonBindings;
+        return new Answer(queryId, Cog.QueryStatus.ERROR, List.of(), new Logic.Explanation(message));
     }
 
     public JsonNode toJson() {

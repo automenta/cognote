@@ -7,44 +7,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonIgnoreProperties(ignoreUnknown = true) // Ignore any extra fields during deserialization
-public class Note {
-    public final String id;
-    public String text;
-    public String title; // Make public for Jackson
-    public Status status; // Make public for Jackson
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record Note(String id, String title, String text, Status status) {
 
-    // Default constructor for Jackson
-    public Note() {
-        this(null, null, null, Status.IDLE); // Will be populated by Jackson
+    public Note {
+        requireNonNull(id);
+        requireNonNull(title);
+        requireNonNull(text);
+        requireNonNull(status);
     }
 
     public Note(String id, String title, String text) {
         this(id, title, text, Status.IDLE);
-    }
-
-    public Note(String id, String title, String text, Status status) {
-        this.id = requireNonNull(id);
-        this.title = requireNonNull(title);
-        this.text = requireNonNull(text);
-        this.status = requireNonNull(status);
-    }
-
-    // Getters for Jackson (if fields were private)
-    public String getId() {
-        return id;
-    }
-
-    public String getText() {
-        return text;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public Status getStatus() {
-        return status;
     }
 
     public Note withStatus(Status newStatus) {

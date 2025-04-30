@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, double pri,
+public record Rule(String id, @JsonProperty("formJson") Term.Lst form, Term antecedent, Term consequent, double pri,
                    List<Term> antecedents, @Nullable String sourceNoteId) {
     public Rule {
         requireNonNull(id);
@@ -80,13 +80,8 @@ public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, d
         }
     }
 
-    @JsonProperty("formJson") // Map form field to formJson in JSON
-    public JsonNode getFormJson() {
-        return form.toJson();
-    }
-
-    @JsonProperty("formString") // Add formString property to JSON
-    public String getFormString() {
+    @JsonProperty("formString")
+    public String formString() {
         return form.toKif();
     }
 

@@ -35,7 +35,7 @@ public interface Plugin {
         protected final String id = Cog.id(Cog.ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("Plugin", "").toLowerCase() + "_");
         protected Events events;
         protected Logic.Cognition context;
-        protected CogNote cog; // Added field
+        protected CogNote cog;
 
         @Override
         public String id() {
@@ -46,7 +46,7 @@ public interface Plugin {
         public void start(Events e, Logic.Cognition ctx) {
             this.events = e;
             this.context = ctx;
-            this.cog = ctx.cog; // Initialize cog field
+            this.cog = ctx.cog;
         }
 
         protected void emit(Cog.CogEvent event) {

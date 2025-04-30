@@ -199,12 +199,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            // Replaced pattern matching instanceof with traditional check and cast
-            if (e instanceof Answer.AnswerEvent answerEvent) {
-                Answer result = answerEvent.result();
-                if (result.query().equals(queryID)) {
-                    answerFuture.complete(result);
-                }
+            if (e instanceof Answer.AnswerEvent answerEvent && answerEvent.result().queryId().equals(queryID)) {
+                answerFuture.complete(answerEvent.result());
             }
         };
         @SuppressWarnings("unchecked")
@@ -257,21 +253,21 @@ public class Cog {
             @JsonSubTypes.Type(value = RemovedEvent.class, name = "RemovedEvent"),
             @JsonSubTypes.Type(value = ExternalInputEvent.class, name = "ExternalInputEvent"),
             @JsonSubTypes.Type(value = RetractionRequestEvent.class, name = "RetractionRequestEvent"),
-            @JsonSubTypes.Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"), // From Events.java
-            @JsonSubTypes.Type(value = Events.DialogueRequestEvent.class, name = "DialogueRequestEvent"), // From Events.java
-            @JsonSubTypes.Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"), // From Truths.java
-            @JsonSubTypes.Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"), // From Answer.java
-            @JsonSubTypes.Type(value = Query.QueryEvent.class, name = "QueryEvent"), // From Query.java
-            @JsonSubTypes.Type(value = CogNote.NoteStatusEvent.class, name = "NoteStatusEvent") // From CogNote.java
+            @JsonSubTypes.Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"),
+            @JsonSubTypes.Type(value = Events.DialogueRequestEvent.class, name = "DialogueRequestEvent"),
+            @JsonSubTypes.Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"),
+            @JsonSubTypes.Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"),
+            @JsonSubTypes.Type(value = Query.QueryEvent.class, name = "QueryEvent"),
+            @JsonSubTypes.Type(value = CogNote.NoteStatusEvent.class, name = "NoteStatusEvent")
     })
     public interface CogEvent {
         default String assocNote() {
             return null;
         }
 
-        JsonNode toJson(); // Return JsonNode instead of JSONObject
+        JsonNode toJson();
 
-        String getEventType(); // Required for @JsonTypeInfo
+        String getEventType();
     }
 
     public interface NoteEvent extends CogEvent {
@@ -368,19 +364,12 @@ public class Cog {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record TemporaryAssertionEvent(Term.Lst temporaryAssertion, Map<Term.Var, Term> bindings,
+    public record TemporaryAssertionEvent(@JsonProperty("temporaryAssertionJson") Term.Lst temporaryAssertion, @JsonProperty("bindingsJson") Map<Term.Var, Term> bindings,
                                           String noteId) implements NoteIDEvent {
 
-        @JsonProperty("temporaryAssertionJson") // Map temporaryAssertion field to temporaryAssertionJson
-        public JsonNode getTemporaryAssertionJson() {
-            return temporaryAssertion.toJson();
-        }
-
-        @JsonProperty("bindingsJson") // Map bindings field to bindingsJson
-        public JsonNode getBindingsJson() {
-            var jsonBindings = Json.node();
-            bindings.forEach((var, term) -> jsonBindings.set(var.name(), term.toJson()));
-            return jsonBindings;
+        @JsonProperty("temporaryAssertionString")
+        public String temporaryAssertionString() {
+            return temporaryAssertion.toKif();
         }
 
         public JsonNode toJson() {
@@ -483,15 +472,10 @@ public class Cog {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record ExternalInputEvent(Term term, String sourceId, @Nullable String noteId) implements NoteIDEvent {
+    public record ExternalInputEvent(@JsonProperty("termJson") Term term, String sourceId, @Nullable String noteId) implements NoteIDEvent {
 
-        @JsonProperty("termJson") // Map term field to termJson
-        public JsonNode getTermJson() {
-            return term.toJson();
-        }
-
-        @JsonProperty("termString") // Add termString property
-        public String getTermString() {
+        @JsonProperty("termString")
+        public String termString() {
             return term.toKif();
         }
 

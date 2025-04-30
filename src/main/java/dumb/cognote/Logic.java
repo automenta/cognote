@@ -332,8 +332,8 @@ public class Logic {
             }
 
             Stream<Assertion> findInstancesOf(Term queryPattern) {
-                var neg = (queryPattern instanceof Term.Lst ql && ql.op().filter(KIF_OP_NOT::equals).isPresent());
-                return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated() == neg).filter(a -> Unifier.match(queryPattern, a.kif(), Map.of()) != null);
+                var neg = (queryPattern instanceof Term.Lst ql && ql.op().filter(Logic.KIF_OP_NOT::equals).isPresent());
+                return findCandidates(queryPattern, PathIndex::findInstancesRecursive).stream().map(tms::get).flatMap(Optional::stream).filter(Assertion::isActive).filter(a -> a.negated() == neg).filter(a -> Logic.Unifier.match(queryPattern, a.kif(), Map.of()) != null);
             }
 
             Stream<Assertion> findGeneralizationsOf(Term queryTerm) {

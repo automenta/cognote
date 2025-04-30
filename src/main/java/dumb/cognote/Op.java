@@ -36,9 +36,9 @@ public class Op {
 
         CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context);
 
-        JsonNode toJson(); // Return JsonNode instead of JSONObject
+        JsonNode toJson();
 
-        String getType(); // Required for @JsonTypeInfo
+        String getType();
     }
 
     public static class Operators {
@@ -87,7 +87,6 @@ public class Op {
             add(new Op.BasicOperator(Term.Atom.of("<="), args -> comparison.apply(args, (a, b) -> a <= b)));
             add(new Op.BasicOperator(Term.Atom.of(">="), args -> comparison.apply(args, (a, b) -> a >= b)));
 
-            // Add the new (ask-user ?Prompt) operator
             add(new DialogueOperator(Term.Atom.of(Protocol.OP_ASK_USER)));
         }
     }
@@ -98,14 +97,13 @@ public class Op {
         private final Term.Atom pred;
         private final Function<Term.Lst, Optional<Term>> function;
 
-        // Default constructor for Jackson
         private BasicOperator() {
-            this(null, null); // Will be populated by Jackson
+            this(null, null);
         }
 
         BasicOperator(Term.Atom pred, Function<Term.Lst, Optional<Term>> function) {
             this.pred = pred;
-            this.function = function; // Note: Function is not serialized/deserialized by default
+            this.function = function;
         }
 
         @Override
@@ -120,7 +118,6 @@ public class Op {
 
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
-            // Basic operators are synchronous, wrap the result in a completed future
             return CompletableFuture.completedFuture(function.apply(arguments).orElse(null));
         }
 
@@ -140,9 +137,8 @@ public class Op {
         private final String id = Cog.id(Logic.ID_PREFIX_OPERATOR);
         private final Term.Atom pred;
 
-        // Default constructor for Jackson
         private DialogueOperator() {
-            this(null); // Will be populated by Jackson
+            this(null);
         }
 
         DialogueOperator(Term.Atom pred) {
@@ -161,37 +157,31 @@ public class Op {
 
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
-            // Replaced pattern matching instanceof with traditional check and cast
             if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom promptAtom)) {
                 Log.error("Invalid arguments for (ask-user): Expected (ask-user \"Prompt string\"). Found: " + arguments.toKif());
-                return CompletableFuture.completedFuture(null); // Fail the goal if arguments are invalid
+                return CompletableFuture.completedFuture(null);
             }
             String value = promptAtom.value();
 
 
             var dialogueId = Cog.id("dialogue_");
-            var options = Json.node(); // Use Jackson ObjectNode
-            var dialogueContext = Json.node(); // Use Jackson ObjectNode
-            // Add context if needed, e.g., related assertion IDs
+            var options = Json.node();
+            var dialogueContext = Json.node();
 
-            // Request dialogue from the UI via DialogueManager
             return context.dialogue().request(dialogueId, DIALOGUE_TYPE_TEXT_INPUT, value, options, dialogueContext)
-                    .thenApply(responseJson -> { // responseJson is now JsonNode
-                        // Process the response from the UI
+                    .thenApply(responseJson -> {
                         var responseTextNode = responseJson.get(DIALOGUE_RESPONSE_KEY_TEXT);
                         if (responseTextNode != null && responseTextNode.isTextual()) {
                             var responseText = responseTextNode.asText();
-                            // Convert the response text into a KIF Term (e.g., a string atom)
-                            // This term will be unified with the variable in the original goal (if any)
                             return (Term) Term.Atom.of(responseText);
                         } else {
                             Log.warning("Dialogue response for " + dialogueId + " did not contain expected key '" + DIALOGUE_RESPONSE_KEY_TEXT + "' or it was not text.");
-                            return null; // Dialogue failed or user cancelled/provided no text
+                            return null;
                         }
                     })
                     .exceptionally(ex -> {
                         Log.error("Dialogue request failed for " + dialogueId + ": " + ex.getMessage());
-                        return null; // Dialogue failed
+                        return null;
                     });
         }
 

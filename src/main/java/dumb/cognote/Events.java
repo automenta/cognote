@@ -41,7 +41,6 @@ public class Events {
 
     public void emit(Cog.CogEvent event) {
         if (exe.isShutdown()) {
-            //Log.warning("Events executor shutdown. Cannot publish event: " + event.getClass().getSimpleName());
             return;
         }
         exe.submit(() -> {
@@ -89,8 +88,7 @@ public class Events {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JsonNode options,
-                                       // Use JsonNode
-                                       JsonNode context) implements Cog.CogEvent { // Use JsonNode
+                                       JsonNode context) implements Cog.CogEvent {
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
             requireNonNull(requestType);

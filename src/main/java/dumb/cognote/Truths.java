@@ -253,7 +253,7 @@ public interface Truths {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds, String kbId) implements Cog.CogEvent {
+    public record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds, String kbId) implements Cog.CogEvent {
         public ContradictionDetectedEvent {
             requireNonNull(contradictoryAssertionIds);
             requireNonNull(kbId);

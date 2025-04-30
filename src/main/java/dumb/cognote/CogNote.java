@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import static dumb.cognote.Cog.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.Cognition;
@@ -73,10 +74,6 @@ public class CogNote extends Cog {
 
         try {
             var c = new CogNote();
-            // WebSocketPlugin needs the port, so it's registered here after parsing args
-            // Assuming WebSocketPlugin handles JSON parsing/serialization internally or uses a different mechanism
-            // If it uses org.json, it would need refactoring too, but it's not in the provided summaries.
-            // For now, we assume it's compatible or will be refactored separately.
             c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
 
             c.start();
@@ -109,17 +106,15 @@ public class CogNote extends Cog {
     private static synchronized void saveNotesToFile(List<Note> notes) {
 
         var toSave = notes.stream()
-                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID)) // Don't save the global KB note itself
+                .filter(note -> !note.id.equals(GLOBAL_KB_NOTE_ID))
                 .toList();
 
-        // Ensure the config note is always saved, creating a default if necessary
         if (toSave.stream().noneMatch(n -> n.id.equals(CONFIG_NOTE_ID))) {
-            toSave = new ArrayList<>(toSave); // Make mutable copy
+            toSave = new ArrayList<>(toSave);
             toSave.add(createDefaultConfigNote());
         }
 
         try {
-            // Use Jackson to write the list of Note objects directly
             Json.the.writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
             message("Notes saved to " + NOTES_FILE);
         } catch (IOException e) {
@@ -134,7 +129,6 @@ public class CogNote extends Cog {
             return new ArrayList<>();
         }
         try {
-            // Use Jackson to read the list of Note objects directly
             return Json.the.readValue(path.toFile(), new TypeReference<>() {
             });
         } catch (IOException e) {
@@ -151,8 +145,6 @@ public class CogNote extends Cog {
         plugins.add(new UserFeedbackPlugin());
 
         plugins.add(new TaskDecomposePlugin());
-
-        //plugins.add(new StatusUpdaterPlugin());
 
         reasoner.add(new Reason.ForwardChainingReasonerPlugin());
         reasoner.add(new Reason.RewriteRuleReasonerPlugin());
@@ -193,8 +185,7 @@ public class CogNote extends Cog {
             events.emit(new AddedEvent(note));
             save();
             message("Added note: " + note.title + " [" + note.id + "]");
-            // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         } else {
             message("Note with ID " + note.id + " already exists.");
         }
@@ -212,8 +203,7 @@ public class CogNote extends Cog {
             context.removeActiveNote(noteId);
             save();
             message("Removed note: " + note.title + " [" + note.id + "]");
-            // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
         });
     }
 
@@ -233,8 +223,6 @@ public class CogNote extends Cog {
                 message("Updated note status for [" + note.id + "] to " + newStatus);
 
                 if (newStatus == Note.Status.ACTIVE) {
-                    // Re-assert existing content when note becomes active
-                    // This ensures reasoners/plugins process the note's content
                     context.kb(noteId).getAllAssertions().forEach(assertion ->
                             events.emit(new ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
                     );
@@ -302,19 +290,14 @@ public class CogNote extends Cog {
     public synchronized void clear() {
         message("Clearing all knowledge...");
         setPaused(true);
-        // Retract from all KBs except system ones
         context.getAllNoteIds().stream()
                 .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
                 .forEach(noteId -> events.emit(new RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
-        // Retract from Global KB
         context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
-        // Clear rules
         new HashSet<>(context.rules()).forEach(context::removeRule);
 
-        // Clear internal context state
         context.clear();
 
-        // Reset notes to default/loaded state
         var configNote = notes.get(CONFIG_NOTE_ID);
         var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
 
@@ -322,11 +305,8 @@ public class CogNote extends Cog {
         notes.put(CONFIG_NOTE_ID, configNote != null ? configNote.withStatus(Note.Status.IDLE) : createDefaultConfigNote());
         notes.put(GLOBAL_KB_NOTE_ID, globalKbNote != null ? globalKbNote.withStatus(Note.Status.IDLE) : new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB assertions.", Note.Status.IDLE));
 
-        // Re-add system notes to active context
         context.addActiveNote(GLOBAL_KB_NOTE_ID);
-        // CONFIG_NOTE is not typically active for reasoning, but keep it in notes map
 
-        // Emit events for the re-added system notes
         events.emit(new AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
         events.emit(new AddedEvent(notes.get(CONFIG_NOTE_ID)));
 
@@ -335,27 +315,22 @@ public class CogNote extends Cog {
         status("Cleared");
         setPaused(false);
         message("Knowledge cleared.");
-        // Emit status event reflecting the cleared state
         events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
-        // Signal UI to update note list
-        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
+        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
     }
 
     public boolean updateConfig(String newConfigJsonText) {
         try {
-            // Use Jackson to read the config from JSON string
             var newConfig = Json.obj(newConfigJsonText, Configuration.class);
             applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
-                // Use Jackson to write the config back to JSON string (pretty printed)
                 note.text = Json.str(newConfig);
                 save();
                 message("Configuration updated and saved.");
             });
-            // Reconfigure LM immediately after config update
             lm.reconfigure();
             return true;
-        } catch (Exception e) { // Catch JsonProcessingException and others
+        } catch (Exception e) {
             error("Failed to parse or apply new configuration JSON: " + e.getMessage());
             e.printStackTrace();
             return false;
@@ -366,33 +341,28 @@ public class CogNote extends Cog {
         var loadedNotes = loadNotesFromFile();
         loadedNotes.forEach(note -> {
             notes.put(note.id, note);
-            if (note.status == Note.Status.ACTIVE) {
-                // Notes loaded as ACTIVE will be added to active context during start()
-                // after plugins are initialized.
-            }
         });
 
         var configNoteOpt = note(CONFIG_NOTE_ID);
         Configuration config;
         if (configNoteOpt.isPresent()) {
             try {
-                // Use Jackson to parse config from note text
                 config = Json.obj(configNoteOpt.get().text, Configuration.class);
                 message("Configuration note found and parsed.");
-            } catch (Exception e) { // Catch JsonProcessingException
+            } catch (Exception e) {
                 error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
                 e.printStackTrace();
-                config = new Configuration(); // Default config
+                config = new Configuration();
                 var configNote = createDefaultConfigNote();
                 notes.put(CONFIG_NOTE_ID, configNote);
-                save(); // Save the new default config note
+                save();
             }
         } else {
             message("Configuration note not found, using defaults and creating one.");
-            config = new Configuration(); // Default config
+            config = new Configuration();
             var configNote = createDefaultConfigNote();
             notes.put(CONFIG_NOTE_ID, configNote);
-            save(); // Save the new default config note
+            save();
         }
         applyConfig(config);
 
@@ -400,8 +370,6 @@ public class CogNote extends Cog {
         if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
             notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE));
         }
-        // Global KB is always active
-        // context.addActiveNote(GLOBAL_KB_NOTE_ID); // This happens in start()
     }
 
     private void applyConfig(Configuration config) {
@@ -412,33 +380,25 @@ public class CogNote extends Cog {
         this.broadcastInputAssertions = config.broadcastInputAssertions();
         message(String.format("System config applied: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d",
                 globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
-        // LM reconfig happens in start() and updateConfig()
     }
 
-    /**
-     * Asserts a UI action into the dedicated KB for UI communication.
-     *
-     * @param actionType The type of UI action (e.g., ProtocolConstants.UI_ACTION_DISPLAY_MESSAGE).
-     * @param actionData A JsonNode containing data for the UI action.
-     */
-    public void assertUiAction(String actionType, JsonNode actionData) { // Use JsonNode
-        // Create the UI action term using the provided JsonNode data
+    public void assertUiAction(String actionType, JsonNode actionData) {
         var uiActionTerm = new Term.Lst(
                 Term.Atom.of(Protocol.PRED_UI_ACTION),
                 Term.Atom.of(actionType),
-                Term.Atom.of(Json.str(actionData)) // Store JSON string in an atom
+                Term.Atom.of(Json.str(actionData))
         );
 
         context.tryCommit(new Assertion.PotentialAssertion(
                 uiActionTerm,
-                Cog.INPUT_ASSERTION_BASE_PRIORITY, // Use a base priority
-                java.util.Set.of(), // No justifications needed for a UI action
-                "backend:ui-action", // Source
-                false, false, false, // Not equality, not negated
-                Protocol.KB_UI_ACTIONS, // Target KB for UI actions
-                Logic.AssertionType.GROUND, // UI actions are ground facts
-                List.of(), // No quantified variables
-                0 // Derivation depth 0
+                Cog.INPUT_ASSERTION_BASE_PRIORITY,
+                java.util.Set.of(),
+                "backend:ui-action",
+                false, false, false,
+                Protocol.KB_UI_ACTIONS,
+                Logic.AssertionType.GROUND,
+                List.of(),
+                0
         ), "backend:ui-action");
     }
 
@@ -453,12 +413,11 @@ public class CogNote extends Cog {
 
         reasoner.initializeAll();
 
-        // Add notes that were loaded as ACTIVE to the active context
         notes.values().stream()
                 .filter(note -> note.status == Note.Status.ACTIVE)
                 .forEach(note -> context.addActiveNote(note.id));
 
-        context.addActiveNote(GLOBAL_KB_NOTE_ID); // Ensure Global KB is active
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
     }
 
     @Override
@@ -508,14 +467,13 @@ public class CogNote extends Cog {
             @JsonProperty("reasoningDepthLimit") int reasoningDepthLimit,
             @JsonProperty("broadcastInputAssertions") boolean broadcastInputAssertions
     ) {
-        // Default constructor for Jackson deserialization when fields are not present
         @JsonCreator
         public Configuration(
                 @JsonProperty("llmApiUrl") String llmApiUrl,
                 @JsonProperty("llmModel") String llmModel,
-                @JsonProperty("globalKbCapacity") Integer globalKbCapacity, // Use Integer for nullable default
-                @JsonProperty("reasoningDepthLimit") Integer reasoningDepthLimit, // Use Integer for nullable default
-                @JsonProperty("broadcastInputAssertions") Boolean broadcastInputAssertions // Use Boolean for nullable default
+                @JsonProperty("globalKbCapacity") Integer globalKbCapacity,
+                @JsonProperty("reasoningDepthLimit") Integer reasoningDepthLimit,
+                @JsonProperty("broadcastInputAssertions") Boolean broadcastInputAssertions
         ) {
             this(
                     llmApiUrl != null ? llmApiUrl : LM.DEFAULT_LLM_URL,
@@ -526,12 +484,10 @@ public class CogNote extends Cog {
             );
         }
 
-        // Constructor for creating default config programmatically
         public Configuration() {
             this(LM.DEFAULT_LLM_URL, LM.DEFAULT_LLM_MODEL, DEFAULT_KB_CAPACITY, DEFAULT_REASONING_DEPTH, DEFAULT_BROADCAST_INPUT);
         }
 
-        // Private constructor for the main record fields
         public Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
             this.llmApiUrl = llmApiUrl;
             this.llmModel = llmModel;
@@ -542,7 +498,6 @@ public class CogNote extends Cog {
 
         public Configuration(CogNote cog) {
             this();
-            //TODO
         }
     }
 }
