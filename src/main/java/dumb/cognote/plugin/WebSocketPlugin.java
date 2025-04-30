@@ -344,36 +344,39 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var typeTerm = kif.get(1);
         var dataTerm = kif.get(2);
 
-        // Corrected: Renamed the second 'value' variable
-        if (!(typeTerm instanceof Term.Atom(String typeValueString)) || !(dataTerm instanceof Term.Atom(String dataValueString))) {
-            logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
-            return;
-        }
+        // Check if both are Atoms and extract values within the successful branch
+        if (typeTerm instanceof Term.Atom(String typeValueString) && dataTerm instanceof Term.Atom(String dataValueString)) {
+            // Now typeValueString and dataValueString are in scope
 
-        JsonNode uiActionDataNode;
-        try {
-            // Attempt to parse the data atom's value as JSON
-            uiActionDataNode = JsonUtil.fromJsonString(dataValueString, JsonNode.class);
-            if (uiActionDataNode == null || uiActionDataNode.isNull()) {
-                 // If parsing results in null/empty, treat it as a simple string value
-                 uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
+            JsonNode uiActionDataNode;
+            try {
+                // Attempt to parse the data atom's value as JSON
+                uiActionDataNode = JsonUtil.fromJsonString(dataValueString, JsonNode.class);
+                if (uiActionDataNode == null || uiActionDataNode.isNull()) {
+                     // If parsing results in null/empty, treat it as a simple string value
+                     uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
+                }
+            } catch (JsonProcessingException e) {
+                logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataValueString + ". Treating as simple string value. Error: " + e.getMessage());
+                // If data is not valid JSON, send it as a string instead
+                uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
             }
-        } catch (JsonProcessingException e) {
-            logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataValueString + ". Treating as simple string value. Error: " + e.getMessage());
-            // If data is not valid JSON, send it as a string instead
-            uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
+
+            ObjectNode payload = JsonUtil.getMapper().createObjectNode()
+                    .put("uiActionType", typeValueString)
+                    .set("uiActionData", uiActionDataNode);
+
+            ObjectNode signal = JsonUtil.getMapper().createObjectNode()
+                    .put("type", SIGNAL_TYPE_UI_ACTION)
+                    .put("id", UUID.randomUUID().toString())
+                    .set("payload", payload);
+
+            broadcast(JsonUtil.toJsonString(signal));
+
+        } else {
+            // This is the case where one or both are NOT Atoms
+            logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
         }
-
-        ObjectNode payload = JsonUtil.getMapper().createObjectNode()
-                .put("uiActionType", typeValueString) // Use the corrected variable name
-                .set("uiActionData", uiActionDataNode); // Use set for JsonNode
-
-        ObjectNode signal = JsonUtil.getMapper().createObjectNode()
-                .put("type", SIGNAL_TYPE_UI_ACTION)
-                .put("id", UUID.randomUUID().toString())
-                .set("payload", payload);
-
-        broadcast(JsonUtil.toJsonString(signal));
     }
 
 
