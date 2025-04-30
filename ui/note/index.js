@@ -1,4 +1,4 @@
-import { websocketClient } from './client.js'; // Import the websocketClient
+import { websocketClient } from '../client.js'; // Import the websocketClient
 
 // Utility functions (assuming these are defined elsewhere or inline)
 const Utils = {
