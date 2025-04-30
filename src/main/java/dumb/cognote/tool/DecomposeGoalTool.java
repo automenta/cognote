@@ -4,8 +4,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Cog;
-import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
@@ -18,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class DecomposeGoalTool implements Tool {
 
-    private final CogNote cog;
+    private final Cog cog;
 
-    public DecomposeGoalTool(CogNote cog) {
+    public DecomposeGoalTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -37,7 +37,7 @@ public class DecomposeGoalTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Decomposes a high-level goal into a sequence of smaller, actionable steps or sub-goals, expressed as a KIF list.")
     public CompletableFuture<String> decomposeGoal(@dev.langchain4j.agent.tool.P("goal") String goal, @dev.langchain4j.agent.tool.P("context") String context, @dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Decomposing goal: " + goal));
+        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Decomposing goal: " + goal));
 
         var systemMessage = SystemMessage.from("""
                 You are a goal decomposition expert. Your task is to break down a given high-level goal into a sequence of smaller, concrete, actionable steps or sub-goals.

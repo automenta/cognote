@@ -24,13 +24,13 @@ abstract class AbstractTest {
     private static final long TEST_WAIT_DEFAULT_TIMEOUT_SECONDS = 5;
     private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100;
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
-    protected CogNote cog;
+    protected Cog cog;
     private Logic.Cognition context;
     private String testKbId;
 
     @BeforeEach
     void setUp() {
-        cog = new CogNote() {
+        cog = new Cog() {
             @Deprecated
             @Override
             public void save() {
@@ -565,7 +565,7 @@ abstract class AbstractTest {
             throw new IllegalArgumentException("Unsupported retraction type: " + value);
         }
 
-        cog.events.emit(new RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
+        cog.events.emit(new CogEvent.RetractionRequestEvent(targetStr, retractionType, "test-runner:" + testKbId, testKbId));
         return targetStr;
     }
 
@@ -588,7 +588,7 @@ abstract class AbstractTest {
         if (!(action.payload instanceof Term.Lst pattern))
             throw new IllegalArgumentException("Invalid payload for query: Expected KIF list pattern. Found: " + (action.payload == null ? "null" : action.payload.getClass().getSimpleName()));
         var queryTypeStr = (String) action.toolParams.getOrDefault("query_type", "ASK_BINDINGS");
-        QueryType queryType;
+        Cog.QueryType queryType;
         try {
             queryType = QueryType.valueOf(queryTypeStr.toUpperCase());
         } catch (IllegalArgumentException e) {

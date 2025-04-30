@@ -5,7 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.CogNote;
+import dumb.cognote.CogEvent;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
@@ -18,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class TextToKifTool implements Tool {
 
-    private final CogNote cog;
+    private final Cog cog;
 
-    public TextToKifTool(CogNote cog) {
+    public TextToKifTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -37,7 +37,7 @@ public class TextToKifTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Converts the content of a note into KIF expressions and asserts them into the note's knowledge base.")
     public CompletableFuture<String> text2kif(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));
+        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Converting note to KIF: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
                     var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
@@ -69,7 +69,7 @@ public class TextToKifTool implements Tool {
                             message("Text to KIF result for note '" + noteId + "': No KIF terms parsed.");
                             return "No KIF terms parsed.";
                         }
-                        terms.forEach(term -> cog.events.emit(new Cog.ExternalInputEvent(term, "tool:text_to_kif", noteId)));
+                        terms.forEach(term -> cog.events.emit(new CogEvent.ExternalInputEvent(term, "tool:text_to_kif", noteId)));
                         message("Text to KIF result for note '" + noteId + "': Asserted " + terms.size() + " terms.");
                         return "Asserted " + terms.size() + " terms.";
                     } catch (KifParser.ParseException e) {

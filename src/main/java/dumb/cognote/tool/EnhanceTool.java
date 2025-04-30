@@ -5,7 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.CogNote;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
@@ -18,9 +18,9 @@ import static dumb.cognote.Log.message;
 
 public class EnhanceTool implements Tool {
 
-    private final CogNote cog;
+    private final Cog cog;
 
-    public EnhanceTool(CogNote cog) {
+    public EnhanceTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -37,7 +37,7 @@ public class EnhanceTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Uses the LLM to enhance or expand upon the content of a specific note.")
     public CompletableFuture<String> enhance(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Enhancing note: " + noteId));
+        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Enhancing note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
                     var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
@@ -69,7 +69,7 @@ public class EnhanceTool implements Tool {
                             dumb.cognote.Term.Atom.of(noteId),
                             dumb.cognote.Term.Atom.of(enhancedText) // Could assert the new text or just a timestamp/tool ID
                     );
-                    cog.events.emit(new Cog.ExternalInputEvent(enhancementKif, "tool:enhance_note", noteId));
+                    cog.events.emit(new CogEvent.ExternalInputEvent(enhancementKif, "tool:enhance_note", noteId));
 
 
                     return "Note '" + noteId + "' enhanced.";

@@ -14,11 +14,11 @@ public class UserFeedbackPlugin extends Plugin.BasePlugin {
     public void start(Events ev, Logic.Cognition ctx) {
         super.start(ev, ctx);
         // Listen for any assertion being added
-        events.on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+        events.on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
         log("UserFeedbackPlugin started.");
     }
 
-    private void handleAssertionAdded(Cog.AssertedEvent event) {
+    private void handleAssertionAdded(CogEvent.AssertedEvent event) {
         var assertion = event.assertion();
         // Only process assertions in the user feedback KB
         if (!assertion.kb().equals(KB_USER_FEEDBACK) || !assertion.isActive()) {

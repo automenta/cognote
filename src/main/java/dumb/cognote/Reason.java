@@ -1,7 +1,5 @@
 package dumb.cognote;
 
-import dumb.cognote.Cog.QueryStatus;
-import dumb.cognote.Cog.QueryType;
 import dumb.cognote.Op.Operator;
 import dumb.cognote.Term.Var;
 import org.jetbrains.annotations.Nullable;
@@ -17,7 +15,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static dumb.cognote.Cog.ID_PREFIX_PLUGIN;
+import static dumb.cognote.Cog.*;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.*;
@@ -36,8 +34,8 @@ public class Reason {
             return ctx.rules();
         }
 
-        CogNote.Configuration getConfig() {
-            return new CogNote.Configuration(ctx.cog);
+        Configuration getConfig() {
+            return new Configuration(ctx.cog);
         }
 
         Truths getTMS() {
@@ -185,7 +183,7 @@ public class Reason {
             this.context = ctx;
         }
 
-        protected void publish(Cog.CogEvent event) {
+        protected void publish(CogEvent event) {
             if (context != null && context.events() != null) context.events().emit(event);
         }
 
@@ -225,7 +223,7 @@ public class Reason {
         }
 
         @Override
-        public Set<Cog.Feature> getSupportedFeatures() {
+        public Set<Feature> getSupportedFeatures() {
             return Set.of();
         }
 
@@ -247,15 +245,15 @@ public class Reason {
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
         }
 
         @Override
-        public Set<Cog.Feature> getSupportedFeatures() {
-            return Set.of(Cog.Feature.FORWARD_CHAINING);
+        public Set<Feature> getSupportedFeatures() {
+            return Set.of(Feature.FORWARD_CHAINING);
         }
 
-        private void handleAssertionAdded(Cog.AssertedEvent event) {
+        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
             var newAssertion = event.assertion();
             var sourceKbId = event.kbId();
             if (!isActiveContext(sourceKbId) && !isActiveContext(newAssertion.sourceNoteId())) return;
@@ -346,11 +344,11 @@ public class Reason {
             if (body.op().filter(op -> op.equals(KIF_OP_IMPLIES) || op.equals(KIF_OP_EQUIV)).isPresent()) {
                 try {
                     var pri = getCogNoteContext().calculateDerivedPri(result.supportIds(), rule.pri());
-                    var derivedRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), body, pri, targetNoteId);
+                    var derivedRule = Rule.parseRule(Cog.id(ID_PREFIX_RULE + "derived_"), body, pri, targetNoteId);
                     getCogNoteContext().addRule(derivedRule);
                     if (KIF_OP_EQUIV.equals(body.op().orElse(null))) {
                         var revList = new Term.Lst(new Term.Atom(KIF_OP_IMPLIES), body.get(2), body.get(1));
-                        var revRule = Rule.parseRule(Cog.id(Cog.ID_PREFIX_RULE + "derived_"), revList, pri, targetNoteId);
+                        var revRule = Rule.parseRule(Cog.id(ID_PREFIX_RULE + "derived_"), revList, pri, targetNoteId);
                         getCogNoteContext().addRule(revRule);
                     }
                 } catch (IllegalArgumentException e) {
@@ -402,17 +400,17 @@ public class Reason {
 
     static class RewriteRuleReasonerPlugin extends BaseReasonerPlugin {
         @Override
-        public Set<Cog.Feature> getSupportedFeatures() {
-            return Set.of(Cog.Feature.REWRITE_RULES);
+        public Set<Feature> getSupportedFeatures() {
+            return Set.of(Feature.REWRITE_RULES);
         }
 
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
         }
 
-        private void handleAssertionAdded(Cog.AssertedEvent event) {
+        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
@@ -485,15 +483,15 @@ public class Reason {
         @Override
         public void initialize(Reasoning ctx) {
             super.initialize(ctx);
-            ctx.events().on(Cog.AssertedEvent.class, this::handleAssertionAdded);
+            ctx.events().on(CogEvent.AssertedEvent.class, this::handleAssertionAdded);
         }
 
         @Override
-        public Set<Cog.Feature> getSupportedFeatures() {
-            return Set.of(Cog.Feature.UNIVERSAL_INSTANTIATION);
+        public Set<Feature> getSupportedFeatures() {
+            return Set.of(Feature.UNIVERSAL_INSTANTIATION);
         }
 
-        private void handleAssertionAdded(Cog.AssertedEvent event) {
+        private void handleAssertionAdded(CogEvent.AssertedEvent event) {
             var newA = event.assertion();
             var kbId = event.kbId();
             if (!isActiveContext(kbId) && !isActiveContext(newA.sourceNoteId())) return;
@@ -565,8 +563,8 @@ public class Reason {
         }
 
         @Override
-        public Set<Cog.Feature> getSupportedFeatures() {
-            return Set.of(Cog.Feature.BACKWARD_CHAINING, Cog.Feature.OPERATOR_SUPPORT);
+        public Set<Feature> getSupportedFeatures() {
+            return Set.of(Feature.BACKWARD_CHAINING, Feature.OPERATOR_SUPPORT);
         }
 
         @Override

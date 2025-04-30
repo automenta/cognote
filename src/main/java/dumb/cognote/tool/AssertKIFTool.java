@@ -1,6 +1,7 @@
 package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
+import dumb.cognote.CogEvent;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
@@ -33,7 +34,7 @@ public class AssertKIFTool implements Tool {
             try {
                 var terms = KifParser.parseKif(kifString);
                 if (terms.isEmpty()) return "No KIF terms parsed.";
-                terms.forEach(term -> cog.events.emit(new Cog.ExternalInputEvent(term, "tool:assert_kif", noteId)));
+                terms.forEach(term -> cog.events.emit(new CogEvent.ExternalInputEvent(term, "tool:assert_kif", noteId)));
                 return "Asserted " + terms.size() + " terms.";
             } catch (KifParser.ParseException e) {
                 error("AssertKIFTool parse error: " + e.getMessage());

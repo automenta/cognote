@@ -1,7 +1,6 @@
 package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
-import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 
 import java.util.Map;
@@ -30,7 +29,7 @@ public class GetNoteTextTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Retrieves the plain text content of a specific note.")
     public CompletableFuture<String> getNoteText(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         return CompletableFuture.supplyAsync(() -> {
-            var note = ((CogNote) cog).note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
+            var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
             return note.text;
         }, cog.events.exe);
     }

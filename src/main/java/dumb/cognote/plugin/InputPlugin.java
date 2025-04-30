@@ -13,11 +13,11 @@ public class InputPlugin extends Plugin.BasePlugin {
     @Override
     public void start(dumb.cognote.Events e, Logic.Cognition ctx) {
         super.start(e, ctx);
-        events.on(Cog.ExternalInputEvent.class, this::handleExternalInput);
+        events.on(CogEvent.ExternalInputEvent.class, this::handleExternalInput);
         log("InputPlugin started.");
     }
 
-    private void handleExternalInput(Cog.ExternalInputEvent event) {
+    private void handleExternalInput(CogEvent.ExternalInputEvent event) {
         var term = event.term();
         var sourceId = event.sourceId();
         var noteId = event.noteId();

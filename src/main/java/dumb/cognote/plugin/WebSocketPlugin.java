@@ -31,7 +31,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private final Map<String, BiConsumer<WebSocket, JsonNode>> feedbackHandlers = new ConcurrentHashMap<>();
     private WebSocketServer server;
 
-    public WebSocketPlugin(InetSocketAddress address, CogNote cog) {
+    public WebSocketPlugin(InetSocketAddress address, Cog cog) {
         this.address = address;
         this.cog = cog; // Initialize cog here as well, though BasePlugin.start will also set it
         setupCommandHandlers();
@@ -95,7 +95,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         };
         server.start();
 
-        events.on(Cog.CogEvent.class, this::broadcastEvent);
+        events.on(CogEvent.class, this::broadcastEvent);
 
         // Listen for UI Action assertions to broadcast them
         cog.events.on(new Term.Lst(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
@@ -236,7 +236,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
 
-    private void broadcastEvent(Cog.CogEvent event) {
+    private void broadcastEvent(CogEvent event) {
         // Don't broadcast LogMessageEvents back to clients, they are handled by the server's Log class
         if (event instanceof Events.LogMessageEvent) return;
 
@@ -267,8 +267,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var payload = Json.node();
 
         // Serialize various state components to JsonNode
-        payload.set("systemStatus", Json.node(new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
-        payload.set("configuration", Json.node(new CogNote.Configuration(cog)));
+        payload.set("systemStatus", Json.node(new CogEvent.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
+        payload.set("configuration", Json.node(new Cog.Configuration(cog)));
 
         var notesArray = Json.the.createArrayNode();
         cog.getAllNotes().stream().map(Json::node).forEach(notesArray::add); // Assuming Note has toJsonNode()
@@ -323,8 +323,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         sendResponse(conn, inReplyToId, RESPONSE_STATUS_ERROR, null, message);
     }
 
-    private void handleUiActionAssertion(Cog.CogEvent event, Map<Term.Var, Term> bindings) {
-        if (!(event instanceof Cog.AssertedEvent assertedEvent)) return;
+    private void handleUiActionAssertion(CogEvent event, Map<Term.Var, Term> bindings) {
+        if (!(event instanceof CogEvent.AssertedEvent assertedEvent)) return;
         var assertion = assertedEvent.assertion();
         // Only process UI actions asserted into the dedicated KB
         if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
@@ -557,7 +557,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var configJsonText = configJsonTextNode.asText();
 
         if (cog.updateConfig(configJsonText)) {
-            sendSuccessResponse(conn, commandId, Json.node(new CogNote.Configuration(cog)), "Configuration updated.");
+            sendSuccessResponse(conn, commandId, Json.node(new Cog.Configuration(cog)), "Configuration updated.");
         } else {
             sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
         }
@@ -605,7 +605,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 return;
             }
             // Emit ExternalInputEvent for each parsed term
-            terms.forEach(term -> events.emit(new Cog.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
+            terms.forEach(term -> events.emit(new CogEvent.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
 
             // Also assert the feedback itself into the user feedback KB
             var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_ASSERTED_KIF), Term.Atom.of(noteId), Term.Atom.of(kifString));

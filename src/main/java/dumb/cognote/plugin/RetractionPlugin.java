@@ -1,6 +1,6 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Cog;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Logic;
 import dumb.cognote.Plugin;
 import dumb.cognote.Term;
@@ -13,11 +13,11 @@ public class RetractionPlugin extends Plugin.BasePlugin {
     @Override
     public void start(dumb.cognote.Events e, Logic.Cognition ctx) {
         super.start(e, ctx);
-        events.on(Cog.RetractionRequestEvent.class, this::handleRetractionRequest);
+        events.on(CogEvent.RetractionRequestEvent.class, this::handleRetractionRequest);
         log("RetractionPlugin started.");
     }
 
-    private void handleRetractionRequest(Cog.RetractionRequestEvent event) {
+    private void handleRetractionRequest(CogEvent.RetractionRequestEvent event) {
         var target = event.target();
         var type = event.type();
         var sourceId = event.sourceId();

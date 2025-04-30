@@ -38,8 +38,8 @@ public class Knowledge {
                                 comparing(id -> truth.get(id).map(Assertion::pri).orElse(Double.MAX_VALUE))
                         .thenComparingLong(id -> truth.get(id).map(Assertion::timestamp).orElse(Long.MAX_VALUE)));
 
-        events.on(Cog.AssertionStateEvent.class, this::handleAssertionStateChange);
-        events.on(Cog.RetractedEvent.class, this::handleAssertionRetracted);
+        events.on(CogEvent.AssertionStateEvent.class, this::handleAssertionStateChange);
+        events.on(CogEvent.RetractedEvent.class, this::handleAssertionRetracted);
     }
 
     public int getAssertionCount() {
@@ -86,7 +86,7 @@ public class Knowledge {
             if (addedAssertion == null || !addedAssertion.isActive()) return null;
 
             checkResourceThresholds();
-            events.emit(new Cog.AssertedEvent(addedAssertion, id));
+            events.emit(new CogEvent.AssertedEvent(addedAssertion, id));
             return addedAssertion;
         } finally {
             lock.writeLock().unlock();
@@ -143,7 +143,7 @@ public class Knowledge {
                     .filter(a -> Logic.groundOrSkolemized(a) && a.kb().equals(id))
                     .ifPresent(toEvict -> {
                         truth.remove(toEvict.id(), source + "-evict");
-                        events.emit(new Cog.AssertionEvictedEvent(toEvict, id));
+                        events.emit(new CogEvent.AssertionEvictedEvent(toEvict, id));
                     });
         }
     }
@@ -158,7 +158,7 @@ public class Knowledge {
             warning(String.format("KB WARNING (KB: %s): Size %d/%d (%.1f%%)", id, currentSize, capacity, 100.0 * currentSize / capacity));
     }
 
-    private void handleAssertionStateChange(Cog.AssertionStateEvent event) {
+    private void handleAssertionStateChange(CogEvent.AssertionStateEvent event) {
         if (!event.kbId().equals(this.id)) return;
         lock.writeLock().lock();
         try {
@@ -172,7 +172,7 @@ public class Knowledge {
         }
     }
 
-    private void handleAssertionRetracted(Cog.RetractedEvent event) {
+    private void handleAssertionRetracted(CogEvent.RetractedEvent event) {
         if (!event.kbId().equals(this.id)) return;
         lock.writeLock().lock();
         try {

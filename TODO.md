@@ -1,4 +1,4 @@
-Okay, let's refine the plan further, focusing on implementability, smooth integration, and the simplified JSON persistence strategy. We will lean 
+Let's focus on smooth integration, and the simplified JSON persistence strategy. We will lean 
 heavily on the event bus and KIF as the primary interaction mechanisms.                                                                           
 
 The core idea remains: a single backend application managing state as KIF assertions and rules, communicating via events over WebSocket, and a    
@@ -12,25 +12,25 @@ Key Principles:
    data).                                                                                                                                         
  4 Centralized State: All persistent state (Notes, KBs, Rules, Config) is managed by a single component (Cognition) and persisted together.       
  5 Simple Persistence: Load all state from one JSON file at startup, save all state to the same file at shutdown.                                 
- 6 Reactive Frontend: The frontend is a view layer that mirrors backend state received via events and translates user actions into KIF requests.  
+ 6 Reactive Frontend: The frontend is a view layer that mirrors backend state received via events and translates user actions into KIF requests.
 
 Streamlining & Integration Strategy:                                                                                                              
 
- • Consolidate Backend: Merge Cog and CogNote into a single CognoteSystem class. This class is the application entry point and orchestrator.      
+ • Consolidate Backend: Merge Cog and CogNote into a single CogNote class. This class is the application entry point and orchestrator.      
  • Persistence Manager: A dedicated component handles the single JSON file load/save for the entire Cognition state.                              
  • KIF Request Plugin: A plugin listens for client KIF input (asserted into a specific KB) and translates it into calls to the appropriate backend
-   logic (methods on CognoteSystem or Cognition, tool executions, query emissions).                                                               
+   logic (methods on CogNote or Cognition, tool executions, query emissions).                                                               
  • Event Broadcasting: The WebSocket plugin broadcasts all relevant backend events, allowing the frontend to react to any state change.           
  • Frontend as State Mirror: The frontend maintains a local copy of the backend state by processing the event stream. UI components render this   
-   local state.                                                                                                                                   
+   local state.
 
-Revised Plan Steps:                                                                                                                               
+# Follow Coding Guidelines in README.md. NO COMMENTS
 
- 1 Consolidate Backend Core (CognoteSystem.java):                                                                                                 
-    • Rename CogNote.java to CognoteSystem.java. This is the main application class.                                                              
+ 1 Consolidate Backend Core                                                                                                 
+    • Merge Cog.java into CogNote.java, the main application class.                                                              
     • Move the main method here.                                                                                                                  
-    • Remove Cog.java. Integrate any necessary fields/methods from Cog directly into CognoteSystem.                                               
-    • CognoteSystem will instantiate and hold references to:                                                                                      
+    • Remove Cog.java. Integrate any necessary fields/methods from Cog directly into CogNote.                                               
+    • CogNote will instantiate and hold references to:                                                                                      
        • Events events                                                                                                                            
        • Logic.Cognition context                                                                                                                  
        • LM lm                                                                                                                                    
@@ -42,30 +42,32 @@ Revised Plan Steps:
     • Manage the overall start, stop, pause lifecycle, including calling persistence load/save.                                                   
  
 2 Implement Simple JSON Persistence (PersistenceManager.java):                                                                                   
-    • Create PersistenceManager.java. It needs access to the Cognition instance and potentially CognoteSystem for configuration.                  
+    • Create PersistenceManager.java. It needs access to the Cognition instance and potentially CogNote for configuration.                  
     • Define a single, top-level serializable class (e.g., SystemStateSnapshot) that contains fields for:                                         
        • List<Note> (all notes)                                                                                                                   
        • Collection<Assertion> (all assertions, including their KB IDs)                                                                           
        • Collection<Rule> (all rules)                                                                                                             
-       • CognoteSystem.Configuration (system configuration)                                                                                       
+       • CogNote.Configuration (system configuration)                                                                                       
        • Potentially other necessary state (e.g., active note IDs, although these could potentially be derived or managed via assertions).        
     • Implement load(filePath):                                                                                                                   
        • Read the JSON file.                                                                                                                      
        • Deserialize into SystemStateSnapshot.                                                                                                    
        • Populate the Cognition instance: add notes, add assertions to their respective KBs, add rules.                                           
-       • Set the CognoteSystem configuration.                                                                                                     
+       • Set the CogNote configuration.                                                                                                     
        • Handle FileNotFoundException by initializing an empty state. Handle parsing errors gracefully (log and start empty).                     
     • Implement save(filePath):                                                                                                                   
-       • Gather all necessary state from Cognition and CognoteSystem into a SystemStateSnapshot object.                                           
+       • Gather all necessary state from Cognition and CogNote into a SystemStateSnapshot object.                                           
        • Serialize the snapshot object to JSON.                                                                                                   
        • Write the JSON to the file.                                                                                                              
-    • Integrate persistence.load() call early in CognoteSystem.start() and persistence.save() call late in CognoteSystem.stop().                  
- 3 Refine Knowledge Management (Logic.Cognition.java):                                                                                            
+    • Integrate persistence.load() call early in CogNote.start() and persistence.save() call late in CogNote.stop().                  
+ 
+3 Refine Knowledge Management (Logic.Cognition.java):                                                                                            
     • Cognition remains the central holder of KBs, Assertions, and Rules.                                                                         
     • Ensure all necessary KBs are managed: KB_GLOBAL, KB_NOTES:<noteId>, KB_MINDMAP, KB_CONFIG, KB_UI_ACTIONS, KB_USER_FEEDBACK, KB_CLIENT_INPUT,
       KB_LLM_TASKS, KB_DIALOGUE_STATE.                                                                                                            
     • Add methods to Cognition to easily retrieve all notes, all assertions (across all KBs), and all rules for the PersistenceManager.           
- 4 Implement KIF Request Processing Plugin (RequestProcessorPlugin.java):                                                                         
+
+4 Implement KIF Request Processing Plugin (RequestProcessorPlugin.java):                                                                         
     • Create RequestProcessorPlugin.java, extending Plugin.BasePlugin.                                                                            
     • Register this plugin to listen for AssertedEvents where the assertion's KB is KB_CLIENT_INPUT.                                              
     • Inside the event handler:                                                                                                                   
@@ -73,13 +75,14 @@ Revised Plan Steps:
        • Check if the KIF term matches a known (request ...) pattern (e.g., (request (addNote ...)), (request (runTool ...))).                    
        • Use KIF matching/unification to extract parameters from the request term.                                                                
        • Perform basic validation on the extracted parameters.                                                                                    
-       • Call the appropriate method on context.cog (the CognoteSystem instance) or context.ctx (the Cognition instance), or trigger a Tool/Query.
+       • Call the appropriate method on context.cog (the CogNote instance) or context.ctx (the Cognition instance), or trigger a Tool/Query.
        • Example: If the pattern (request (addNote (title ?title) (content ?content))) matches, extract ?title and ?content bindings, then call   
          context.cog.addNote(new Note(..., titleValue, contentValue, ...)).                                                                       
        • Handle errors during request processing (e.g., invalid parameters, tool not found) by asserting an error message into KB_UI_ACTIONS or   
          KB_USER_FEEDBACK so the frontend receives an event.                                                                                      
     • This plugin is the only component that needs to understand the structure of client KIF requests.                                            
- 5 Refine WebSocket Plugin (WebSocketPlugin.java):                                                                                                
+ 
+5 Refine WebSocket Plugin (WebSocketPlugin.java):                                                                                                
     • Keep the basic server structure (onOpen, onClose, onError, onStart).                                                                        
     • In onMessage, parse the incoming JSON signal.                                                                                               
     • If the signal type is INPUT:                                                                                                                
@@ -90,21 +93,23 @@ Revised Plan Steps:
        • Call context.ctx.tryCommit(...) for each potential assertion.                                                                            
        • Send a simple RESPONSE signal back to the client indicating success or failure of the parsing/assertion into KB_CLIENT_INPUT step.       
     • If the signal type is INITIAL_STATE_REQUEST:                                                                                                
-       • Call persistence.getStateSnapshot() (or similar method on CognoteSystem that gets data from Cognition and config).                       
+       • Call persistence.getStateSnapshot() (or similar method on CogNote that gets data from Cognition and config).                       
        • Format this data into the INITIAL_STATE signal payload.                                                                                  
        • Send the INITIAL_STATE signal to the client.                                                                                             
     • If the signal type is DIALOGUE_RESPONSE: Handle as currently designed, calling dialogue.handleResponse.                                     
     • In broadcastEvent, serialize all relevant CogEvent types (decide which ones the frontend needs, e.g., AssertedEvent, RetractedEvent,        
       RuleAddedEvent, RuleRemovedEvent, TaskUpdateEvent, SystemStatusEvent, NoteStatusEvent, Answer.AnswerEvent,                                  
       Truths.ContradictionDetectedEvent, Events.LogMessageEvent, Events.DialogueRequestEvent) and send them via the EVENT signal type.            
- 6 Review and Adapt Existing Plugins/Tools:                                                                                                       
+ 
+6 Review and Adapt Existing Plugins/Tools:                                                                                                       
     • InputPlugin: Modify to only handle non-client input sources (e.g., file loading via loadRules). It will still emit ExternalInputEvents,     
       which will be processed by other parts of the system (e.g., asserted into relevant KBs).                                                    
-    • StatusUpdaterPlugin: Remove this plugin. System status updates will be handled by CognoteSystem directly updating its status field and      
+    • StatusUpdaterPlugin: Remove this plugin. System status updates will be handled by CogNote directly updating its status field and      
       emitting SystemStatusEvent periodically or on key changes (like task updates, KB size changes, rule count changes).                         
     • Other Plugins/Tools: Ensure they interact with context.ctx (Cognition) and context.events (Events) as their primary interfaces. They should 
       signal completion or results by emitting events or asserting into KBs (e.g., LLM tools asserting results, reasoners emitting                
       Answer.AnswerEvent).                                                                                                                        
+
  7 Develop Single Unified Frontend (JavaScript/TypeScript):                                                                                       
     • Implement a core WebSocket client that connects to the backend.                                                                             
     • Implement a central state management system (e.g., using a reactive library) that is only updated by processing incoming EVENT signals from 
@@ -120,17 +125,11 @@ Revised Plan Steps:
           for task progress) to trigger UI-specific effects (toasts, loading spinners, visual highlights).                                        
      • The Mind Map view will read node/edge assertions from KB_MINDMAP in the frontend state and render the graph. User actions send KIF requests
        like (request (updateMindmapNode <id> (position <x> <y> <z>))) or (request (addMindmapEdge <source> <target>)).                            
+
   8 Cleanup:                                                                                                                                      
      • Delete the old ui/note/ and ui/mindmap/ directories.                                                                                       
      • Remove Cog.java and StatusUpdaterPlugin.java.                                                                                              
      • Ensure all backend components interact via Events and Cognition.                                                                           
-  9 Documentation: Document the KIF request patterns for KB_CLIENT_INPUT, the structure of the JSON persistence file (SystemStateSnapshot), and   
-    the structure/meaning of the various CogEvent types broadcast.                                                                                
-
-This plan provides a clear, implementable path. The simplified persistence is concrete. The integration is smooth because components interact     
-through the event bus and shared state (Cognition). The KIF request processing is centralized in one plugin, making it easier to manage and extend
-the client-backend protocol. The frontend's role as a reactive state mirror simplifies its logic significantly.                                   
-
 
 
 
@@ -736,6 +735,7 @@ Sample implementation for a code generation tool:
 package dumb.cognote.tool;
 
 import dumb.cognote.Cog;
+import dumb.cognote.CogNote;
 import dumb.cognote.Tool;
 import dumb.cognote.UI;
 import dev.langchain4j.data.message.UserMessage;
@@ -837,7 +837,7 @@ Here are some concrete ideas and steps to evolve Cognote into an awesome self-pr
    ```java name=SelfModificationPlugin.java
    package dumb.cognote.plugin;
 
-   import dumb.cognote.Cog;import dumb.cognote.Events;
+   import dumb.cognote.CogEvent;import dumb.cognote.Cog;import dumb.cognote.Events;
    import java.util.concurrent.CompletableFuture;
 
    public class SelfModificationPlugin implements Cog.Plugin {
@@ -854,7 +854,7 @@ Here are some concrete ideas and steps to evolve Cognote into an awesome self-pr
            this.cog = context;
            // Hook into events or run periodic diagnostics
            System.out.println("SelfModificationPlugin started, monitoring system state...");
-           events.on(Cog.RuleAddedEvent.class, event -> analyzeAndSuggestChanges());
+           events.on(CogEvent.RuleAddedEvent.class, event -> analyzeAndSuggestChanges());
        }
 
        private void analyzeAndSuggestChanges() {

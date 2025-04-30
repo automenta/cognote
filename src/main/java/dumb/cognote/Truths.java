@@ -91,7 +91,7 @@ public interface Truths {
             justificationIds.forEach(supporterId -> dependents.computeIfAbsent(supporterId, k -> ConcurrentHashMap.newKeySet()).add(finalAssertionToAdd));
 
             if (!assertionToAdd.isActive())
-                events.emit(new Cog.AssertionStateEvent(aid, false, assertionToAdd.kb()));
+                events.emit(new CogEvent.AssertionStateEvent(aid, false, assertionToAdd.kb()));
             else
                 checkForContradictions(assertionToAdd);
 
@@ -122,8 +122,8 @@ public interface Truths {
             }
 
             var kb = assertion.kb();
-            if (assertion.isActive()) events.emit(new Cog.RetractedEvent(assertion, kb, source));
-            else events.emit(new Cog.AssertionStateEvent(assertion.id(), false, kb));
+            if (assertion.isActive()) events.emit(new CogEvent.RetractedEvent(assertion, kb, source));
+            else events.emit(new CogEvent.AssertionStateEvent(assertion.id(), false, kb));
         }
 
         private void updateStatus(String assertionId, Set<String> visited) {
@@ -136,7 +136,7 @@ public interface Truths {
             if (newActiveStatus != assertion.isActive()) {
                 var updatedAssertion = assertion.withStatus(newActiveStatus);
                 assertions.put(assertionId, updatedAssertion);
-                events.emit(new Cog.AssertionStateEvent(assertionId, newActiveStatus, assertion.kb()));
+                events.emit(new CogEvent.AssertionStateEvent(assertionId, newActiveStatus, assertion.kb()));
                 if (newActiveStatus) checkForContradictions(updatedAssertion);
                 dependents.getOrDefault(assertionId, Set.of()).forEach(depId -> updateStatus(depId, visited));
             }
@@ -254,7 +254,7 @@ public interface Truths {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record ContradictionDetectedEvent(Set<String> contradictoryAssertionIds,
-                                      String kbId) implements Cog.CogEvent {
+                                      String kbId) implements CogEvent {
         public ContradictionDetectedEvent {
             requireNonNull(contradictoryAssertionIds);
             requireNonNull(kbId);
@@ -263,10 +263,6 @@ public interface Truths {
         @Override
         public String assocNote() {
             return kbId;
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
         }
 
         @Override

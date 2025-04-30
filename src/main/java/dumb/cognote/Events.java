@@ -15,14 +15,14 @@ import static java.util.Objects.requireNonNull;
 
 public class Events {
     public final ExecutorService exe;
-    final ConcurrentMap<Class<? extends Cog.CogEvent>, CopyOnWriteArrayList<Consumer<Cog.CogEvent>>> listeners = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Term, CopyOnWriteArrayList<BiConsumer<Cog.CogEvent, Map<Term.Var, Term>>>> patternListeners = new ConcurrentHashMap<>();
+    final ConcurrentMap<Class<? extends CogEvent>, CopyOnWriteArrayList<Consumer<CogEvent>>> listeners = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Term, CopyOnWriteArrayList<BiConsumer<CogEvent, Map<Term.Var, Term>>>> patternListeners = new ConcurrentHashMap<>();
 
     Events(ExecutorService exe) {
         this.exe = requireNonNull(exe);
     }
 
-    private static void exeSafe(Consumer<Cog.CogEvent> listener, Cog.CogEvent event, String type) {
+    private static void exeSafe(Consumer<CogEvent> listener, CogEvent event, String type) {
         try {
             listener.accept(event);
         } catch (Exception e) {
@@ -31,23 +31,23 @@ public class Events {
         }
     }
 
-    public <T extends Cog.CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
+    public <T extends CogEvent> void on(Class<T> eventType, Consumer<T> listener) {
         listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(event -> listener.accept(eventType.cast(event)));
     }
 
-    public void on(Term pattern, BiConsumer<Cog.CogEvent, Map<Term.Var, Term>> listener) {
+    public void on(Term pattern, BiConsumer<CogEvent, Map<Term.Var, Term>> listener) {
         patternListeners.computeIfAbsent(pattern, k -> new CopyOnWriteArrayList<>()).add(listener);
     }
 
-    public void emit(Cog.CogEvent event) {
+    public void emit(CogEvent event) {
         if (exe.isShutdown()) {
             return;
         }
         exe.submit(() -> {
             listeners.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>()).forEach(listener -> exeSafe(listener, event, "class"));
             switch (event) {
-                case Cog.AssertedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), aaEvent);
-                case Cog.TemporaryAssertionEvent taEvent ->
+                case CogEvent.AssertedEvent aaEvent -> handlePatternMatching(aaEvent.assertion().kif(), aaEvent);
+                case CogEvent.TemporaryAssertionEvent taEvent ->
                         handlePatternMatching(taEvent.temporaryAssertion(), taEvent);
                 default -> {
                 }
@@ -55,7 +55,7 @@ public class Events {
         });
     }
 
-    private void handlePatternMatching(Term term, Cog.CogEvent event) {
+    private void handlePatternMatching(Term term, CogEvent event) {
         patternListeners.forEach((pattern, listeners) -> {
             if (term instanceof Term.Lst termList) {
                 var bindings = Logic.Unifier.match(pattern, termList, Map.of());
@@ -70,14 +70,10 @@ public class Events {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record LogMessageEvent(String message, Log.LogLevel level) implements Cog.CogEvent {
+    public record LogMessageEvent(String message, Log.LogLevel level) implements CogEvent {
         public LogMessageEvent {
             requireNonNull(message);
             requireNonNull(level);
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
         }
 
         @Override
@@ -88,17 +84,13 @@ public class Events {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JsonNode options,
-                                       JsonNode context) implements Cog.CogEvent {
+                                       JsonNode context) implements CogEvent {
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
             requireNonNull(requestType);
             requireNonNull(prompt);
             requireNonNull(options);
             requireNonNull(context);
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
         }
 
         @Override

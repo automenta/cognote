@@ -1,16 +1,20 @@
 package dumb.cognote;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import org.jetbrains.annotations.Nullable;
+import dumb.cognote.plugin.*;
+import dumb.cognote.tool.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -18,12 +22,20 @@ import java.util.function.Consumer;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
-import static dumb.cognote.Logic.RetractionType;
+import static dumb.cognote.Logic.Cognition;
+import static dumb.cognote.Note.Status.IDLE;
+import static java.util.Objects.requireNonNull;
+import static java.util.Optional.ofNullable;
 
 public class Cog {
 
-    public static final String ID_PREFIX_NOTE = "note-", ID_PREFIX_LLM_ITEM = "llm_", ID_PREFIX_QUERY = "query_", ID_PREFIX_LLM_RESULT = "llmres_", ID_PREFIX_RULE = "rule_", ID_PREFIX_INPUT_ITEM = "input_", ID_PREFIX_PLUGIN = "plugin_";
-
+    public static final String ID_PREFIX_NOTE = "note-";
+    public static final String ID_PREFIX_LLM_ITEM = "llm_";
+    public static final String ID_PREFIX_QUERY = "query_";
+    public static final String ID_PREFIX_LLM_RESULT = "llmres_";
+    public static final String ID_PREFIX_RULE = "rule_";
+    public static final String ID_PREFIX_INPUT_ITEM = "input_";
+    public static final String ID_PREFIX_PLUGIN = "plugin_";
     public static final String GLOBAL_KB_NOTE_ID = "kb://global";
     public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge";
     public static final String CONFIG_NOTE_ID = "note-config";
@@ -31,34 +43,138 @@ public class Cog {
     public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
     public static final int MAX_WS_PARSE_PREVIEW = 100;
     public static final double DEFAULT_RULE_PRIORITY = 1;
-    static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90, KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
+    static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90;
+    static final int KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
     static final double DERIVED_PRIORITY_DECAY = 0.95;
     static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
     static final int DEFAULT_KB_CAPACITY = 64 * 1024;
     static final int DEFAULT_REASONING_DEPTH = 4;
     static final boolean DEFAULT_BROADCAST_INPUT = false;
+    private static final String NOTES_FILE = "cognote_notes.json";
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
     private static final int PORT = 8080;
+    public final Cognition context;
+    public final LM lm;
+    public final Dialogue dialogue;
     public final Events events;
-
     public final Tools tools;
-
     public final ScheduledExecutorService mainExecutor =
             Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
-
-    final AtomicBoolean running = new AtomicBoolean(true), paused = new AtomicBoolean(true);
+    protected final Reason.ReasonerManager reasoner;
+    final Plugins plugins;
+    final AtomicBoolean running = new AtomicBoolean(true);
+    final AtomicBoolean paused = new AtomicBoolean(true);
+    private final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
     private final Object pauseLock = new Object();
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
     public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
 
-
     public Cog() {
-        this.events = new Events(mainExecutor);
+        this.events = new Events(Cog.this.mainExecutor);
         Log.setEvents(this.events);
         this.tools = new Tools();
+
+        this.context = new Cognition(globalKbCapacity,
+                new Truths.BasicTMS(events),
+                this);
+
+        this.dialogue = new Dialogue(this);
+        this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
+        this.plugins = new Plugins(events, context);
+
+        this.lm = new LM(this);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+
+        initPlugins();
+
+        load();
+    }
+
+    public static void main(String[] args) {
+        String rulesFile = null;
+        var port = 8080;
+
+        for (var i = 0; i < args.length; i++) {
+            try {
+                switch (args[i]) {
+                    case "-r", "--rules" -> rulesFile = args[++i];
+                    case "-p", "--port" -> port = Integer.parseInt(args[++i]);
+                    default -> Log.warning("Unknown option: " + args[i] + ". Config via JSON.");
+                }
+            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
+                error(String.format("Error parsing argument for %s: %s", (i > 0 ? args[i - 1] : args[i]), e.getMessage()));
+                printUsageAndExit();
+            }
+        }
+
+        try {
+            var c = new Cog();
+            c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
+
+            c.start();
+
+            if (rulesFile != null) {
+                c.loadRules(rulesFile);
+            }
+
+            try {
+                Thread.currentThread().join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                error("Main thread interrupted.");
+            }
+
+
+        } catch (Exception e) {
+            error("Initialization/Startup failed: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private static void printUsageAndExit() {
+        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif]%n", Cog.class.getName());
+        System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + NOTES_FILE);
+        System.exit(1);
+    }
+
+    private static synchronized void saveNotesToFile(List<Note> notes) {
+
+        var toSave = notes.stream()
+                .filter(note -> !note.id().equals(GLOBAL_KB_NOTE_ID))
+                .toList();
+
+        if (toSave.stream().noneMatch(n -> n.id().equals(CONFIG_NOTE_ID))) {
+            toSave = new ArrayList<>(toSave);
+            toSave.add(createDefaultConfigNote());
+        }
+
+        try {
+            Json.the.writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
+            message("Notes saved to " + NOTES_FILE);
+        } catch (IOException e) {
+            error("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
+        }
+    }
+
+    private static List<Note> loadNotesFromFile() {
+        var path = Paths.get(NOTES_FILE);
+        if (!Files.exists(path) || !Files.isReadable(path)) {
+            message("Notes file not found or not readable: " + NOTES_FILE + ". Starting with defaults.");
+            return new ArrayList<>();
+        }
+        try {
+            return Json.the.readValue(path.toFile(), new TypeReference<>() {
+            });
+        } catch (IOException e) {
+            error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
     }
 
     public static String id(String prefix) {
@@ -83,26 +199,316 @@ public class Cog {
     }
 
     static Note createDefaultConfigNote() {
-        var config = new CogNote.Configuration(
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, Json.str(new Configuration(
                 LM.DEFAULT_LLM_URL,
                 LM.DEFAULT_LLM_MODEL,
                 DEFAULT_KB_CAPACITY,
                 DEFAULT_REASONING_DEPTH,
                 DEFAULT_BROADCAST_INPUT
-        );
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, Json.str(config), Note.Status.IDLE);
+        )), Note.Status.IDLE);
     }
+
+    protected void initPlugins() {
+        plugins.add(new InputPlugin());
+        plugins.add(new RetractionPlugin());
+        plugins.add(new TmsPlugin());
+        plugins.add(new UserFeedbackPlugin());
+
+        plugins.add(new TaskDecomposePlugin());
+
+        reasoner.add(new Reason.ForwardChainingReasonerPlugin());
+        reasoner.add(new Reason.RewriteRuleReasonerPlugin());
+        reasoner.add(new Reason.UniversalInstantiationReasonerPlugin());
+        reasoner.add(new Reason.BackwardChainingReasonerPlugin());
+
+        tools.add(new AssertKIFTool(this));
+        tools.add(new GetNoteTextTool(this));
+        tools.add(new FindAssertionsTool(this));
+        tools.add(new RetractTool(this));
+        tools.add(new QueryTool(this));
+        tools.add(new LogMessageTool(this));
+
+        tools.add(new SummarizeTool(this));
+        tools.add(new IdentifyConceptsTool(this));
+        tools.add(new GenerateQuestionsTool(this));
+        tools.add(new TextToKifTool(this));
+        tools.add(new DecomposeGoalTool(this));
+        tools.add(new EnhanceTool(this));
+    }
+
+    public void status(String status) {
+        this.status = status;
+        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
+    }
+
+    public Optional<Note> note(String id) {
+        return ofNullable(notes.get(id));
+    }
+
+    public List<Note> getAllNotes() {
+        return new ArrayList<>(notes.values());
+    }
+
+    public void addNote(Note note) {
+        if (notes.putIfAbsent(note.id(), note) == null) {
+            events.emit(new CogEvent.AddedEvent(note));
+            save();
+            message("Added note: " + note.title() + " [" + note.id() + "]");
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+        } else {
+            message("Note with ID " + note.id() + " already exists.");
+        }
+    }
+
+    public void removeNote(String noteId) {
+        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID))) {
+            error("Attempted to remove system note: " + noteId + ". Operation ignored.");
+            return;
+        }
+
+        ofNullable(notes.remove(noteId)).ifPresent(note -> {
+            events.emit(new CogEvent.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
+            events.emit(new CogEvent.RemovedEvent(note));
+            context.removeActiveNote(noteId);
+            save();
+            message("Removed note: " + note.title() + " [" + note.id() + "]");
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+        });
+    }
+
+    public void updateNoteStatus(String noteId, Note.Status newStatus) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status() != newStatus) {
+                var oldStatus = note.status();
+                note.status = newStatus;
+
+                switch (newStatus) {
+                    case ACTIVE -> context.addActiveNote(noteId);
+                    case IDLE, PAUSED, COMPLETED -> context.removeActiveNote(noteId);
+                }
+
+                events.emit(new NoteStatusEvent(note, oldStatus, newStatus));
+                save();
+                message("Updated note status for [" + note.id() + "] to " + newStatus);
+
+                if (newStatus == Note.Status.ACTIVE) {
+                    context.kb(noteId).getAllAssertions().forEach(assertion ->
+                            events.emit(new CogEvent.ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
+                    );
+                    context.rules().stream()
+                            .filter(rule -> noteId.equals(rule.sourceNoteId()))
+                            .forEach(rule -> events.emit(new CogEvent.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
+                }
+            }
+        });
+    }
+
+    public void startNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status() == IDLE || note.status() == Note.Status.PAUSED) {
+                message("Starting note: " + note.title() + " [" + note.id() + "]");
+                updateNoteStatus(noteId, Note.Status.ACTIVE);
+            } else {
+                message("Note " + note.title() + " [" + note.id() + "] is already " + note.status() + ". Cannot start.");
+            }
+        });
+    }
+
+    public void pauseNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status() == Note.Status.ACTIVE) {
+                message("Pausing note: " + note.title() + " [" + note.id() + "]");
+                updateNoteStatus(noteId, Note.Status.PAUSED);
+            } else {
+                message("Note " + note.title() + " [" + note.id() + "] is not ACTIVE. Cannot pause.");
+            }
+        });
+    }
+
+    public void completeNote(String noteId) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (note.status() == Note.Status.ACTIVE || note.status() == Note.Status.PAUSED) {
+                message("Completing note: " + note.title() + " [" + note.id() + "]");
+                updateNoteStatus(noteId, Note.Status.COMPLETED);
+            } else {
+                message("Note " + note.title() + " [" + note.id() + "] is already " + note.status() + ". Cannot complete.");
+            }
+        });
+    }
+
+    public void updateNoteText(String noteId, String newText) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (!note.text.equals(newText)) {
+                note.text = newText;
+                save();
+                message("Updated text for note [" + note.id() + "]");
+            }
+        });
+    }
+
+    public void updateNoteTitle(String noteId, String newTitle) {
+        ofNullable(notes.get(noteId)).ifPresent(note -> {
+            if (!note.title.equals(newTitle)) {
+                note.title = newTitle;
+                save();
+                message("Updated title for note [" + note.id() + "]");
+            }
+        });
+    }
+
+    public synchronized void clear() {
+        message("Clearing all knowledge...");
+        setPaused(true);
+        context.getAllNoteIds().stream()
+                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
+                .forEach(noteId -> events.emit(new CogEvent.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
+        context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
+        new HashSet<>(context.rules()).forEach(context::removeRule);
+
+        context.clear();
+
+        var configNote = notes.get(CONFIG_NOTE_ID);
+        var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
+
+        notes.clear();
+
+        globalKbNote.status = configNote.status = IDLE;
+
+        notes.put(CONFIG_NOTE_ID, configNote);
+        notes.put(GLOBAL_KB_NOTE_ID, globalKbNote);
+
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
+
+        events.emit(new CogEvent.AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
+        events.emit(new CogEvent.AddedEvent(notes.get(CONFIG_NOTE_ID)));
+
+        save();
+
+        status("Cleared");
+        setPaused(false);
+        message("Knowledge cleared.");
+        events.emit(new CogEvent.SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
+        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node());
+    }
+
+    public boolean updateConfig(String newConfigJsonText) {
+        try {
+            var newConfig = Json.obj(newConfigJsonText, Configuration.class);
+            applyConfig(newConfig);
+            note(CONFIG_NOTE_ID).ifPresent(note -> {
+                note.text = Json.str(newConfig);
+                save();
+                message("Configuration updated and saved.");
+            });
+            lm.reconfigure();
+            return true;
+        } catch (Exception e) {
+            error("Failed to parse or apply new configuration JSON: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private void load() {
+        var loadedNotes = loadNotesFromFile();
+        loadedNotes.forEach(note -> {
+            notes.put(note.id(), note);
+        });
+
+        var configNoteOpt = note(CONFIG_NOTE_ID);
+        Configuration config;
+        if (configNoteOpt.isPresent()) {
+            try {
+                config = Json.obj(configNoteOpt.get().text(), Configuration.class);
+                message("Configuration note found and parsed.");
+            } catch (Exception e) {
+                error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
+                e.printStackTrace();
+                config = new Configuration();
+                var configNote = createDefaultConfigNote();
+                notes.put(CONFIG_NOTE_ID, configNote);
+                save();
+            }
+        } else {
+            message("Configuration note not found, using defaults and creating one.");
+            config = new Configuration();
+            var configNote = createDefaultConfigNote();
+            notes.put(CONFIG_NOTE_ID, configNote);
+            save();
+        }
+        applyConfig(config);
+
+
+        if (!notes.containsKey(GLOBAL_KB_NOTE_ID)) {
+            notes.put(GLOBAL_KB_NOTE_ID, new Note(GLOBAL_KB_NOTE_ID, GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", IDLE));
+        }
+    }
+
+    private void applyConfig(Configuration config) {
+        this.lm.llmApiUrl = config.llmApiUrl();
+        this.lm.llmModel = config.llmModel();
+        this.globalKbCapacity = config.globalKbCapacity();
+        this.reasoningDepthLimit = config.reasoningDepthLimit();
+        this.broadcastInputAssertions = config.broadcastInputAssertions();
+        message(String.format("System config applied: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d",
+                globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
+    }
+
+    public void assertUiAction(String actionType, JsonNode actionData) {
+        var uiActionTerm = new Term.Lst(
+                Term.Atom.of(Protocol.PRED_UI_ACTION),
+                Term.Atom.of(actionType),
+                Term.Atom.of(Json.str(actionData))
+        );
+
+        context.tryCommit(new Assertion.PotentialAssertion(
+                uiActionTerm,
+                Cog.INPUT_ASSERTION_BASE_PRIORITY,
+                java.util.Set.of(),
+                "backend:ui-action",
+                false, false, false,
+                Protocol.KB_UI_ACTIONS,
+                Logic.AssertionType.GROUND,
+                List.of(),
+                0
+        ), "backend:ui-action");
+    }
+
 
     public void start() {
         if (!running.get()) {
             error("Cannot restart a stopped system.");
-            return;
+        } else {
+            paused.set(true);
+            status("Initializing");
         }
-        paused.set(true);
-        status("Initializing");
+
+        lm.reconfigure();
+
+        plugins.initializeAll();
+
+        reasoner.initializeAll();
+
+        notes.values().stream()
+                .filter(note -> note.status() == Note.Status.ACTIVE)
+                .forEach(note -> context.addActiveNote(note.id()));
+
+        context.addActiveNote(GLOBAL_KB_NOTE_ID);
     }
 
     public void stop() {
+
+        dialogue.clear();
+
+        reasoner.shutdownAll();
+
+        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
+        lm.activeLlmTasks.clear();
+
+        save();
+
+        plugins.shutdownAll();
+
         if (!running.compareAndSet(true, false)) return;
         message("Stopping system...");
         status("Stopping");
@@ -115,6 +521,10 @@ public class Cog {
         events.shutdown();
         status("Stopped");
         message("System stopped.");
+    }
+
+    public void save() {
+        saveNotesToFile(getAllNotes());
     }
 
     public boolean isPaused() {
@@ -130,10 +540,6 @@ public class Cog {
                 pauseLock.notifyAll();
             }
         }
-    }
-
-    public void status(String status) {
-        this.status = status;
     }
 
     public void loadRules(String filename) throws IOException {
@@ -163,7 +569,7 @@ public class Cog {
                     if (!kifText.isEmpty()) {
                         counts[1]++;
                         try {
-                            KifParser.parseKif(kifText).forEach(term -> events.emit(new ExternalInputEvent(term, "file:" + filename, null)));
+                            KifParser.parseKif(kifText).forEach(term -> events.emit(new CogEvent.ExternalInputEvent(term, "file:" + filename, null)));
                             counts[2]++;
                         } catch (Exception e) {
                             error(String.format("File Processing Error (line ~%d): %s for '%s...'", counts[0], e.getMessage(), kifText.substring(0, Math.min(kifText.length(), MAX_KIF_PARSE_PREVIEW))));
@@ -234,274 +640,60 @@ public class Cog {
         boolean test(double a, double b);
     }
 
-    @JsonTypeInfo(
-            use = JsonTypeInfo.Id.NAME,
-            include = JsonTypeInfo.As.EXISTING_PROPERTY,
-            property = "eventType",
-            visible = true)
-    @JsonSubTypes({
-            @JsonSubTypes.Type(value = AssertedEvent.class, name = "AssertedEvent"),
-            @JsonSubTypes.Type(value = RetractedEvent.class, name = "RetractedEvent"),
-            @JsonSubTypes.Type(value = AssertionEvictedEvent.class, name = "AssertionEvictedEvent"),
-            @JsonSubTypes.Type(value = AssertionStateEvent.class, name = "AssertionStateEvent"),
-            @JsonSubTypes.Type(value = TemporaryAssertionEvent.class, name = "TemporaryAssertionEvent"),
-            @JsonSubTypes.Type(value = RuleAddedEvent.class, name = "RuleAddedEvent"),
-            @JsonSubTypes.Type(value = RuleRemovedEvent.class, name = "RuleRemovedEvent"),
-            @JsonSubTypes.Type(value = TaskUpdateEvent.class, name = "TaskUpdateEvent"),
-            @JsonSubTypes.Type(value = SystemStatusEvent.class, name = "SystemStatusEvent"),
-            @JsonSubTypes.Type(value = AddedEvent.class, name = "AddedEvent"),
-            @JsonSubTypes.Type(value = RemovedEvent.class, name = "RemovedEvent"),
-            @JsonSubTypes.Type(value = ExternalInputEvent.class, name = "ExternalInputEvent"),
-            @JsonSubTypes.Type(value = RetractionRequestEvent.class, name = "RetractionRequestEvent"),
-            @JsonSubTypes.Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"),
-            @JsonSubTypes.Type(value = Events.DialogueRequestEvent.class, name = "DialogueRequestEvent"),
-            @JsonSubTypes.Type(value = Truths.ContradictionDetectedEvent.class, name = "ContradictionDetectedEvent"),
-            @JsonSubTypes.Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"),
-            @JsonSubTypes.Type(value = Query.QueryEvent.class, name = "QueryEvent"),
-            @JsonSubTypes.Type(value = CogNote.NoteStatusEvent.class, name = "NoteStatusEvent")
-    })
-    public interface CogEvent {
-        default String assocNote() {
-            return null;
-        }
-
-        JsonNode toJson();
-
-        String getEventType();
-    }
-
-    public interface NoteEvent extends CogEvent {
-        Note note();
-
-        @Override
-        default String assocNote() {
-            return note().id();
-        }
-    }
-
-    public interface NoteIDEvent extends CogEvent {
-        String noteId();
-
-        @Override
-        default String assocNote() {
-            return noteId();
-        }
-    }
-
-    private interface AssertionEvent extends CogEvent {
-        Assertion assertion();
-
-        @Override
-        default String assocNote() {
-            return assertion().sourceNoteId();
-        }
-    }
-
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record AssertedEvent(Assertion assertion, String kbId) implements AssertionEvent {
-
-        @Override
-        public String assocNote() {
-            return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
+    public record NoteStatusEvent(Note note, Note.Status oldStatus,
+                                  Note.Status newStatus) implements CogEvent.NoteEvent {
+        public NoteStatusEvent {
+            requireNonNull(note);
+            requireNonNull(oldStatus);
+            requireNonNull(newStatus);
         }
 
         @Override
         public String getEventType() {
-            return "AssertedEvent";
+            return "NoteStatusEvent";
         }
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RetractedEvent(Assertion assertion, String kbId, String reason) implements AssertionEvent {
-
-        @Override
-        public String assocNote() {
-            return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
+    public record Configuration(
+            @JsonProperty("llmApiUrl") String llmApiUrl,
+            @JsonProperty("llmModel") String llmModel,
+            @JsonProperty("globalKbCapacity") int globalKbCapacity,
+            @JsonProperty("reasoningDepthLimit") int reasoningDepthLimit,
+            @JsonProperty("broadcastInputAssertions") boolean broadcastInputAssertions
+    ) {
+        @JsonCreator
+        public Configuration(
+                @JsonProperty("llmApiUrl") String llmApiUrl,
+                @JsonProperty("llmModel") String llmModel,
+                @JsonProperty("globalKbCapacity") Integer globalKbCapacity,
+                @JsonProperty("reasoningDepthLimit") Integer reasoningDepthLimit,
+                @JsonProperty("broadcastInputAssertions") Boolean broadcastInputAssertions
+        ) {
+            this(
+                    llmApiUrl != null ? llmApiUrl : LM.DEFAULT_LLM_URL,
+                    llmModel != null ? llmModel : LM.DEFAULT_LLM_MODEL,
+                    globalKbCapacity != null ? globalKbCapacity : DEFAULT_KB_CAPACITY,
+                    reasoningDepthLimit != null ? reasoningDepthLimit : DEFAULT_REASONING_DEPTH,
+                    broadcastInputAssertions != null ? broadcastInputAssertions : DEFAULT_BROADCAST_INPUT
+            );
         }
 
-        public JsonNode toJson() {
-            return Json.node(this);
+        public Configuration() {
+            this(LM.DEFAULT_LLM_URL, LM.DEFAULT_LLM_MODEL, DEFAULT_KB_CAPACITY, DEFAULT_REASONING_DEPTH, DEFAULT_BROADCAST_INPUT);
         }
 
-        @Override
-        public String getEventType() {
-            return "RetractedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record AssertionEvictedEvent(Assertion assertion, String kbId) implements AssertionEvent {
-        @Override
-        public String assocNote() {
-            return assertion.sourceNoteId() != null ? assertion.sourceNoteId() : kbId;
+        public Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
+            this.llmApiUrl = llmApiUrl;
+            this.llmModel = llmModel;
+            this.globalKbCapacity = globalKbCapacity;
+            this.reasoningDepthLimit = reasoningDepthLimit;
+            this.broadcastInputAssertions = broadcastInputAssertions;
         }
 
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "AssertionEvictedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements CogEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "AssertionStateEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record TemporaryAssertionEvent(@JsonProperty("temporaryAssertionJson") Term.Lst temporaryAssertion,
-                                          @JsonProperty("bindingsJson") Map<Term.Var, Term> bindings,
-                                          String noteId) implements NoteIDEvent {
-
-        @JsonProperty("temporaryAssertionString")
-        public String temporaryAssertionString() {
-            return temporaryAssertion.toKif();
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "TemporaryAssertionEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RuleAddedEvent(Rule rule) implements CogEvent {
-
-        @Override
-        public String assocNote() {
-            return rule.sourceNoteId();
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "RuleAddedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RuleRemovedEvent(Rule rule) implements CogEvent {
-
-        @Override
-        public String assocNote() {
-            return rule.sourceNoteId();
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "RuleRemovedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "TaskUpdateEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record SystemStatusEvent(String statusMessage, int kbCount, int kbCapacity, int taskQueueSize,
-                                    int ruleCount) implements CogEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "SystemStatusEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record AddedEvent(Note note) implements NoteEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "AddedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RemovedEvent(Note note) implements NoteEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "RemovedEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record ExternalInputEvent(@JsonProperty("termJson") Term term, String sourceId,
-                                     @Nullable String noteId) implements NoteIDEvent {
-
-        @JsonProperty("termString")
-        public String termString() {
-            return term.toKif();
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "ExternalInputEvent";
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RetractionRequestEvent(String target, RetractionType type, String sourceId,
-                                         @Nullable String noteId) implements NoteIDEvent {
-
-        public JsonNode toJson() {
-            return Json.node(this);
-        }
-
-        @Override
-        public String getEventType() {
-            return "RetractionRequestEvent";
+        public Configuration(Cog cog) {
+            this();
         }
     }
 }

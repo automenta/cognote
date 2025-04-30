@@ -10,7 +10,8 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Query(String id, @JsonProperty("queryType") Cog.QueryType type, @JsonProperty("patternJson") Term pattern,
+public record Query(String id, @JsonProperty("queryType") Cog.QueryType type,
+                    @JsonProperty("patternJson") Term pattern,
                     @Nullable String targetKbId,
                     Map<String, Object> parameters) {
 
@@ -23,7 +24,7 @@ public record Query(String id, @JsonProperty("queryType") Cog.QueryType type, @J
         return Json.node(this);
     }
 
-    public record QueryEvent(Query query) implements Cog.CogEvent {
+    public record QueryEvent(Query query) implements CogEvent {
         public QueryEvent {
             requireNonNull(query);
         }
@@ -31,10 +32,6 @@ public record Query(String id, @JsonProperty("queryType") Cog.QueryType type, @J
         @Override
         public String assocNote() {
             return query.targetKbId();
-        }
-
-        public JsonNode toJson() {
-            return Json.node(this);
         }
 
         @Override

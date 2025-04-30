@@ -82,7 +82,7 @@ public class LM {
     public CompletableFuture<AiMessage> llmAsync(String taskId, List<ChatMessage> history, String interactionType, String noteId) {
         if (llmService == null) {
             var errorMsg = interactionType + " Error: LLM Service not configured.";
-            cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.ERROR, errorMsg));
+            cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.ERROR, errorMsg));
             return CompletableFuture.failedFuture(new IllegalStateException(errorMsg));
         }
 
@@ -90,11 +90,11 @@ public class LM {
 
         var taskFuture = CompletableFuture.supplyAsync(() -> {
             cog.waitIfPaused();
-            cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service..."));
+            cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.PROCESSING, interactionType + ": Sending to LLM Service..."));
 
             try {
                 var m = llmService.chat(conversationHistory);
-                cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.DONE, interactionType + ": Received final response."));
+                cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.DONE, interactionType + ": Received final response."));
                 return m;
             } catch (Exception e) {
                 var cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
@@ -111,7 +111,7 @@ public class LM {
             activeLlmTasks.remove(taskId);
             if (error != null) {
                 var cause = (error instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : error;
-                cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage()));
+                cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.ERROR, interactionType + " Error: " + cause.getMessage()));
             }
         });
 

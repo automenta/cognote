@@ -354,7 +354,7 @@ public class Logic {
     }
 
     public static class Cognition {
-        public final CogNote cog;
+        public final Cog cog;
 
         public final Truths truth;
         public final Op.Operators operators;
@@ -365,7 +365,7 @@ public class Logic {
 
         private final Set<Rule> rules = ConcurrentHashMap.newKeySet();
 
-        Cognition(int globalKbCapacity, Truths truth, CogNote cog) {
+        Cognition(int globalKbCapacity, Truths truth, Cog cog) {
             this.cog = cog;
             this.truth = truth;
             this.operators = new Op.Operators();
@@ -436,13 +436,13 @@ public class Logic {
 
         public boolean addRule(Rule rule) {
             var added = rules.add(rule);
-            if (added) cog.events.emit(new RuleAddedEvent(rule));
+            if (added) cog.events.emit(new CogEvent.RuleAddedEvent(rule));
             return added;
         }
 
         public boolean removeRule(Rule rule) {
             var removed = rules.remove(rule);
-            if (removed) cog.events.emit(new RuleRemovedEvent(rule));
+            if (removed) cog.events.emit(new CogEvent.RuleRemovedEvent(rule));
             return removed;
         }
 

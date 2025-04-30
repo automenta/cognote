@@ -1,7 +1,7 @@
 package dumb.cognote.tool;
 
 
-import dumb.cognote.CogNote;
+import dumb.cognote.Cog;
 import dumb.cognote.Json;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
@@ -13,9 +13,9 @@ import static dumb.cognote.Log.error;
 
 public class FindAssertionsTool implements Tool {
 
-    private final CogNote cog;
+    private final Cog cog;
 
-    public FindAssertionsTool(CogNote cog) {
+    public FindAssertionsTool(Cog cog) {
         this.cog = cog;
     }
 

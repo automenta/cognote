@@ -8,7 +8,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
-import dumb.cognote.CogNote;
+import dumb.cognote.CogEvent;
 import dumb.cognote.Json;
 import dumb.cognote.Tool;
 
@@ -22,9 +22,9 @@ import static dumb.cognote.Log.message;
 
 public class IdentifyConceptsTool implements Tool {
 
-    private final CogNote cog;
+    private final Cog cog;
 
-    public IdentifyConceptsTool(CogNote cog) {
+    public IdentifyConceptsTool(Cog cog) {
         this.cog = cog;
     }
 
@@ -41,7 +41,7 @@ public class IdentifyConceptsTool implements Tool {
     @dev.langchain4j.agent.tool.Tool("Identifies key concepts, entities, or topics mentioned in the content of a note. Returns a JSON array of concept strings.")
     public CompletableFuture<String> identifyConcepts(@dev.langchain4j.agent.tool.P("note_id") String noteId) {
         var taskId = Cog.id(Cog.ID_PREFIX_LLM_ITEM);
-        cog.events.emit(new Cog.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
+        cog.events.emit(new CogEvent.TaskUpdateEvent(taskId, Cog.TaskStatus.SENDING, "Identifying concepts for note: " + noteId));
 
         return CompletableFuture.supplyAsync(() -> {
                     var note = cog.note(noteId).orElseThrow(() -> new ToolExecutionException("Note not found: " + noteId));
@@ -85,7 +85,7 @@ public class IdentifyConceptsTool implements Tool {
 
                         concepts.stream()
                                 .map(c -> new dumb.cognote.Term.Lst(dumb.cognote.Term.Atom.of(dumb.cognote.Logic.PRED_NOTE_CONCEPT), dumb.cognote.Term.Atom.of(c)))
-                                .forEach(kif -> cog.events.emit(new Cog.ExternalInputEvent(kif, "tool:identify_concepts", noteId)));
+                                .forEach(kif -> cog.events.emit(new CogEvent.ExternalInputEvent(kif, "tool:identify_concepts", noteId)));
 
                         return jsonString; // Return the original JSON string from LLM
                     } catch (JsonProcessingException e) {

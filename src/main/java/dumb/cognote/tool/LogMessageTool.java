@@ -11,9 +11,9 @@ import static dumb.cognote.Log.error;
 
 public class LogMessageTool implements Tool {
 
-    private final CogNote cog; // Need access to cog to assert UI action
+    private final Cog cog; // Need access to cog to assert UI action
 
-    public LogMessageTool(CogNote cog) {
+    public LogMessageTool(Cog cog) {
         this.cog = cog;
     }
 
