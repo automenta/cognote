@@ -1,3 +1,5 @@
+import { websocketClient } from '../client.js'; // Import the WebSocket client
+
 const Utils = {
     debounce(func, wait) {
         let t;
@@ -20,9 +22,10 @@ const Utils = {
         return "just now";
     },
     sanitizeHTML: (s) => Object.assign(document.createElement('div'), {textContent: s}).innerHTML,
-    generateId: () => `id_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+    // generateId is no longer needed client-side for new notes, backend assigns ID
     extractText: (html) => Object.assign(document.createElement('div'), {innerHTML: html}).textContent || ""
 };
+
 const Notifier = {
     init() {
         toastr.options = {
@@ -41,51 +44,8 @@ const Notifier = {
     success: (m) => toastr.success(m), info: (m) => toastr.info(m),
     warning: (m) => toastr.warning(m), error: (m) => toastr.error(m)
 };
-const StorageService = {
-    load: (key, def) => JSON.parse(localStorage.getItem(key) || JSON.stringify(def)),
-    save: (key, data) => localStorage.setItem(key, JSON.stringify(data)),
-    getNotes: () => StorageService.load('agenticNotesV2', [
-        {
-            id: Utils.generateId(),
-            title: "Welcome Note",
-            updated: Date.now() - 72e5,
-            created: Date.now() - 864e5,
-            priority: 0,
-            state: 'Private',
-            content: "This is an agentic note management platform.<br>Use the sidebar to manage notes, and the editor to modify content.<br>Try adding structured fields like <span class='field'><span class='field-label'>Status:</span><span class='field-value' contenteditable='true'>New</span></span>.",
-            color: 'var(--accent-color-1)'
-        },
-        {
-            id: Utils.generateId(),
-            title: "Shopping List",
-            updated: Date.now() - 6e4,
-            created: Date.now() - 1728e5,
-            priority: 2,
-            state: 'Private',
-            content: "<ul><li>Milk</li><li>Eggs</li><li>Cat food <span class='field'><span class='field-label'>Cost:</span><span class='field-value' contenteditable='true'>< $20</span></span> <span class='field'><span class='field-label'>Brand:</span><span class='field-value' contenteditable='true'>Any</span></span></li></ul>",
-            color: 'var(--accent-color-2)'
-        },
-        {
-            id: Utils.generateId(),
-            title: "Ideas Brainstorm",
-            updated: Date.now() - 2592e5,
-            created: Date.now() - 3456e5,
-            priority: 1,
-            state: 'Private',
-            content: "Feature ideas:<br>- P2P Sync (Nostr?)<br>- LLM Integration (Enhance/Summarize)<br>- Advanced Ontology Support",
-            color: 'var(--accent-color-3)'
-        }
-    ]),
-    saveNotes: (notes) => StorageService.save('agenticNotesV2', notes),
-    getSettings: () => StorageService.load('agenticSettingsV2', {
-        defaultState: 'Private',
-        nostrRelays: "wss://relay.damus.io\nwss://relay.snort.social",
-        llmProvider: 'OpenAI (Stub)',
-        llmApiKey: '',
-        theme: 'Light'
-    }),
-    saveSettings: (settings) => StorageService.save('agenticSettingsV2', settings)
-};
+
+// StorageService is removed, data is managed via WebSocket
 
 class Component {
     constructor(app, el) {
@@ -142,7 +102,7 @@ class NoteItem extends Component {
         this.note = note;
         const preview = Utils.extractText(note.content).substring(0, 80) + (Utils.extractText(note.content).length > 80 ? '...' : '');
         this.$el.find('h4').text(Utils.sanitizeHTML(note.title || 'Untitled Note'));
-        this.$el.find('.meta').text(`Upd ${Utils.timeAgo(note.updated)} | P:${note.priority || 0} | ${note.state}`);
+        this.$el.find('.meta').text(`Cr: ${new Date(note.created).toLocaleDateString()} | Upd: ${Utils.timeAgo(note.updated)} | St: ${note.state} | P: ${note.priority || 0}`);
         this.$el.find('.preview').text(Utils.sanitizeHTML(preview));
         this.$el.css('border-left-color', note.color || '#ccc');
     }
@@ -161,17 +121,27 @@ class NoteList extends Component {
     render(notes, currentId) {
         this.$el.empty();
         this.items = {};
-        notes?.length ? notes.forEach(n => {
+        if (notes?.length) {
+            notes.forEach(n => {
                 const i = new NoteItem(this.app, n);
                 this.items[n.id] = i;
                 this.$el.append(i.$el);
                 if (n.id === currentId) i.setActive(!0);
-            })
-            : this.$el.html('<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>');
+            });
+        } else {
+            this.$el.html('<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>');
+        }
     }
 
     updateItem(note) {
         this.items[note.id]?.update(note);
+    }
+
+    removeItem(noteId) {
+        if (this.items[noteId]) {
+            this.items[noteId].$el.remove();
+            delete this.items[noteId];
+        }
     }
 
     setActive(id) {
@@ -210,6 +180,10 @@ class Sidebar extends Component {
 
     updateNote(n) {
         this.noteList.updateItem(n);
+    }
+
+    removeNote(noteId) {
+        this.noteList.removeItem(noteId);
     }
 
     setActive(id) {
@@ -358,6 +332,7 @@ class ActionArea extends Component {
     renderIcons(note) {
         this.clearIcons();
         if (!note) return;
+        // Client-side text analysis for action icons (stub)
         const txt = Utils.extractText(note.content).toLowerCase(), toAdd = [];
         if (txt.includes('cost') || txt.includes('$') || txt.includes('budget')) toAdd.push({
             type: 'Match',
@@ -391,6 +366,7 @@ class ActionArea extends Component {
     }
 
     showDock(data) {
+        // Stub data for action dock content
         let h = `<h5>${data.type} Details</h5><ul><li>${Utils.sanitizeHTML(data.details)}</li>`;
         switch (data.type) {
             case 'Match':
@@ -424,7 +400,7 @@ class SettingsModal extends Component {
         super(app, el);
         this.render();
         this.bindEvents();
-        this.loadSettings();
+        // Settings are loaded via App.handleInitialState
     }
 
     render() {
@@ -447,13 +423,13 @@ class SettingsModal extends Component {
         this.$el.find(`#tab-${id}`).addClass('active');
     }
 
-    loadSettings() {
-        const s = StorageService.getSettings();
-        this.$el.find('#setting-default-state').val(s.defaultState);
-        this.$el.find('#setting-nostr-relays').val(s.nostrRelays);
-        this.$el.find('#setting-llm-provider').val(s.llmProvider);
-        this.$el.find('#setting-llm-apikey').val(s.llmApiKey);
-        this.$el.find('#setting-theme').val(s.theme);
+    loadSettings(settings) {
+        // Load settings from the object provided by the App (from initial state)
+        this.$el.find('#setting-default-state').val(settings.defaultState || 'Private');
+        this.$el.find('#setting-nostr-relays').val(settings.nostrRelays || '');
+        this.$el.find('#setting-llm-provider').val(settings.llmProvider || 'OpenAI (Stub)');
+        this.$el.find('#setting-llm-apikey').val(settings.llmApiKey || '');
+        this.$el.find('#setting-theme').val(settings.theme || 'Light');
     }
 
     save() {
@@ -464,9 +440,9 @@ class SettingsModal extends Component {
             llmApiKey: this.$el.find('#setting-llm-apikey').val(),
             theme: this.$el.find('#setting-theme').val()
         };
-        StorageService.saveSettings(s);
+        this.app.updateSettings(s); // Delegate saving to the App
         Notifier.success('Settings saved.');
-        this.hide(); /* Apply settings if needed */
+        this.hide();
     }
 
     show() {
@@ -483,11 +459,20 @@ class App {
         this.$cont = $(sel);
         this.notes = [];
         this.currentId = null;
-        this.settings = StorageService.getSettings();
+        this.settings = {}; // Will be populated from WebSocket initial state
         this.initComps();
-        this.loadData();
+        this.bindWebSocketEvents(); // Bind events before connecting
         Notifier.init();
-        console.log("Netention Ready");
+        console.log("Netention Note App Ready");
+
+        // Connect and request initial state
+        if (websocketClient.isConnected) {
+             console.log('WS already connected, requesting initial state...');
+             websocketClient.sendInitialStateRequest();
+        } else {
+             console.log('WS not connected, waiting for connection...');
+             // The 'connected' event listener will trigger the initial state request
+        }
     }
 
     initComps() {
@@ -499,16 +484,176 @@ class App {
         this.settingsModal = new SettingsModal(this, '#settings-modal');
     }
 
-    loadData() {
-        this.notes = StorageService.getNotes();
-        if (!this.notes.length) StorageService.saveNotes(this.notes = StorageService.getNotes());
-        this.sortAndFilter();
-        const sorted = this.getSortedFiltered();
-        if (sorted.length) this.selectNote(sorted[0].id); else {
+    bindWebSocketEvents() {
+        websocketClient.on('connected', () => {
+            console.log('WS Connected');
+            // Request initial state upon connection
+            websocketClient.sendInitialStateRequest()
+                .catch(err => {
+                    console.error('Failed to request initial state:', err);
+                    Notifier.error('Failed to load initial state.');
+                });
+        });
+
+        websocketClient.on('disconnected', (e) => {
+            console.warn('WS Disconnected', e);
+            Notifier.error('Disconnected from backend.');
+            // Optionally clear UI or show a disconnected state
+            this.notes = [];
+            this.currentId = null;
+            this.sortAndFilter();
             this.editor.clear();
+            this.actionArea.clearIcons();
+        });
+
+        websocketClient.on('reconnectFailed', () => {
+            Notifier.error('Failed to connect to backend.');
+        });
+
+        websocketClient.on('error', (e) => {
+            console.error('WS Error', e);
+            // Generic error handler, specific errors might be in response payloads
+        });
+
+        websocketClient.on('initialState', (state) => this.handleInitialState(state));
+        websocketClient.on('NoteStatusEvent', (event) => this.handleNoteStatusEvent(event));
+        // Add listeners for other relevant events if backend sends them (e.g., NoteUpdatedEvent)
+        // For now, relying on NoteStatusEvent and initial load for updates.
+        // A NoteUpdatedEvent would be ideal for real-time content/title/priority updates.
+        // Without it, changes only appear after a full refresh or NoteStatusEvent.
+        // Let's add a listener for a hypothetical NoteUpdatedEvent
+        websocketClient.on('NoteUpdatedEvent', (event) => this.handleNoteUpdatedEvent(event));
+        websocketClient.on('NoteDeletedEvent', (event) => this.handleNoteDeletedEvent(event));
+        websocketClient.on('NoteAddedEvent', (event) => this.handleNoteAddedEvent(event));
+    }
+
+    handleInitialState(state) {
+        console.log('Received initial state:', state);
+        if (state?.notes) {
+            // Assuming state.notes is an array of note objects
+            this.notes = state.notes;
+            // Assuming state.configuration contains settings
+            this.settings = state.configuration || {}; // Use configuration from snapshot
+            this.settingsModal.loadSettings(this.settings); // Load settings into modal
+
+            this.sortAndFilter();
+            const sorted = this.getSortedFiltered();
+            if (sorted.length) {
+                // Select the first note or the previously selected one if it exists
+                const noteToSelect = this.currentId ? this.notes.find(n => n.id === this.currentId) : sorted[0];
+                this.selectNote(noteToSelect ? noteToSelect.id : sorted[0].id);
+            } else {
+                this.currentId = null;
+                this.editor.clear();
+                this.sidebar.setActive(null);
+                this.actionArea.clearIcons();
+            }
+        } else {
+            console.warn('Initial state received without notes data.');
+            this.notes = [];
+            this.sortAndFilter();
+            this.currentId = null;
+            this.editor.clear();
+            this.sidebar.setActive(null);
             this.actionArea.clearIcons();
         }
     }
+
+    handleNoteStatusEvent(event) {
+        console.log('Received NoteStatusEvent:', event);
+        const note = this.notes.find(n => n.id === event.noteId);
+        if (note) {
+            note.state = event.newStatus;
+            // Backend should ideally provide updated timestamp, using client time for responsiveness
+            note.updated = Date.now();
+            this.sidebar.updateNote(note);
+            if (note.id === this.currentId) {
+                this.editor.updateMeta(note);
+            }
+            // Re-sort/filter in case state affects sorting (it doesn't currently)
+            this.sortAndFilter();
+        } else {
+            console.warn('NoteStatusEvent for unknown note ID:', event.noteId);
+            // If a note status event arrives for a note not in our list,
+            // we might need a full refresh or a specific NoteAddedEvent.
+            // For now, log warning.
+        }
+    }
+
+    handleNoteUpdatedEvent(event) {
+         console.log('Received NoteUpdatedEvent:', event);
+         const noteIndex = this.notes.findIndex(n => n.id === event.noteId);
+         if (noteIndex !== -1) {
+             // Update the note object in the local array with data from the event
+             // Assuming the event payload contains the full updated note object or relevant fields
+             const updatedNoteData = event.updatedNote; // Assuming event.updatedNote contains the new data
+             if (updatedNoteData) {
+                 // Merge updated fields, preserving fields not in the event if necessary
+                 Object.assign(this.notes[noteIndex], updatedNoteData);
+                 this.notes[noteIndex].updated = Date.now(); // Update client-side timestamp for UI responsiveness
+
+                 this.sidebar.updateNote(this.notes[noteIndex]);
+                 if (this.notes[noteIndex].id === this.currentId) {
+                     // If the updated note is the currently selected one, reload the editor
+                     this.editor.load(this.notes[noteIndex]);
+                 }
+                 this.sortAndFilter(); // Re-sort/filter in case title/priority changed
+                 this.actionArea.renderIcons(this.notes[noteIndex]); // Re-render action icons
+                 Notifier.info(`Note "${this.notes[noteIndex].title || 'Untitled'}" updated.`);
+             } else {
+                 console.warn('NoteUpdatedEvent received without updated note data.');
+             }
+         } else {
+             console.warn('NoteUpdatedEvent for unknown note ID:', event.noteId);
+             // If an update arrives for a note not in our list, request a full state refresh
+             websocketClient.sendInitialStateRequest();
+         }
+    }
+
+    handleNoteDeletedEvent(event) {
+         console.log('Received NoteDeletedEvent:', event);
+         const noteId = event.noteId;
+         const noteIndex = this.notes.findIndex(n => n.id === noteId);
+         if (noteIndex !== -1) {
+             const deletedNoteTitle = this.notes[noteIndex].title || 'Untitled';
+             this.notes.splice(noteIndex, 1); // Remove from local array
+             this.sidebar.removeNote(noteId); // Remove from sidebar UI
+
+             if (noteId === this.currentId) {
+                 // If the deleted note was the current one, clear the editor
+                 this.currentId = null;
+                 this.editor.clear();
+                 this.sidebar.setActive(null);
+                 this.actionArea.clearIcons();
+             }
+             this.sortAndFilter(); // Update sidebar list display
+             Notifier.success(`Note "${deletedNoteTitle}" deleted.`);
+         } else {
+             console.warn('NoteDeletedEvent for unknown note ID:', noteId);
+             // If a delete event arrives for a note not in our list, request a full state refresh
+             websocketClient.sendInitialStateRequest();
+         }
+    }
+
+    handleNoteAddedEvent(event) {
+         console.log('Received NoteAddedEvent:', event);
+         const newNote = event.newNote; // Assuming event.newNote contains the full new note object
+         if (newNote && !this.notes.some(n => n.id === newNote.id)) {
+             this.notes.unshift(newNote); // Add to the beginning of the local array
+             this.sortAndFilter(); // Re-render sidebar list with the new note
+             this.selectNote(newNote.id); // Select the newly added note
+             this.editor.focusTitle(); // Focus the title field
+             Notifier.success(`New note "${newNote.title || 'Untitled'}" created.`);
+         } else if (newNote) {
+             console.warn('NoteAddedEvent received for a note already in the list:', newNote.id);
+             // Note already exists, maybe it was a clone we were waiting for?
+             // Re-select it to ensure UI is consistent.
+             this.selectNote(newNote.id);
+         } else {
+             console.warn('NoteAddedEvent received without new note data.');
+         }
+    }
+
 
     getSortedFiltered() {
         const sort = this.sidebar.getSort(), search = this.sidebar.getSearch().toLowerCase();
@@ -535,7 +680,8 @@ class App {
 
     selectNote(id) {
         if (id === this.currentId && id !== null) return;
-        this.saveCurrentNote();
+        this.saveCurrentNote(); // Save current note before switching
+
         const n = this.notes.find(n => n.id === id);
         if (n) {
             this.currentId = id;
@@ -543,7 +689,7 @@ class App {
             this.sidebar.setActive(id);
             this.actionArea.renderIcons(n);
         } else {
-            console.error(`Note ${id} not found.`);
+            console.error(`Note ${id} not found in local state.`);
             this.currentId = null;
             this.editor.clear();
             this.sidebar.setActive(null);
@@ -556,114 +702,182 @@ class App {
         const n = this.notes.find(n => n.id === this.currentId);
         if (n) {
             const d = this.editor.getData();
-            let c = !1;
+            let changed = false;
             if (n.title !== d.title) {
                 n.title = d.title;
-                c = !0;
+                changed = true;
             }
             if (n.content !== d.content) {
                 n.content = d.content;
-                c = !0;
+                changed = true;
             }
-            if (c) {
+
+            if (changed) {
+                // Update local state immediately for responsiveness
                 n.updated = Date.now();
-                StorageService.saveNotes(this.notes);
+
+                // Send update action to backend
+                websocketClient.sendUiAction('updateNote', {
+                    noteId: n.id,
+                    title: n.title,
+                    content: n.content,
+                    // Include other properties that might be edited via UI later
+                    state: n.state,
+                    priority: n.priority,
+                    color: n.color
+                }).then(response => {
+                    console.log(`Backend acknowledged update for ${n.id}:`, response);
+                    // Backend should ideally send an event confirming the update (NoteUpdatedEvent)
+                }).catch(err => {
+                    console.error(`Failed to send update for ${n.id}:`, err);
+                    Notifier.error(`Failed to save note "${n.title || 'Untitled'}".`);
+                    // Consider reverting local changes or showing error state
+                });
+
+                // Update UI based on local changes immediately
                 this.sidebar.updateNote(n);
                 this.editor.updateMeta(n);
-                this.actionArea.renderIcons(n); /* Logic engine hook (conceptual) */
-                console.log(`Saved ${n.id}`);
-                return !0;
+                this.actionArea.renderIcons(n);
+                console.log(`Attempted save for ${n.id}`);
+                return true;
             }
         }
-        return !1;
+        return false;
     }
 
     createNewNote() {
-        this.saveCurrentNote();
-        const n = {
-            id: Utils.generateId(),
+        this.saveCurrentNote(); // Save current note before creating a new one
+
+        const newNoteData = {
+            // Backend will assign ID, created/updated timestamps, and potentially priority
             title: "Untitled Note",
             content: "",
-            created: Date.now(),
-            updated: Date.now(),
-            priority: 0,
-            state: this.settings.defaultState || 'Private',
-            color: `hsl(${Math.random() * 360}, 60%, 85%)`
+            state: this.settings.defaultState || 'Private', // Use default state from settings
+            color: `hsl(${Math.random() * 360}, 60%, 85%)` // Client-side color for now
         };
-        this.notes.unshift(n);
-        StorageService.saveNotes(this.notes);
-        this.sortAndFilter();
-        this.selectNote(n.id);
-        this.editor.focusTitle();
-        Notifier.success("New note created");
+
+        // Send add action to backend
+        websocketClient.sendUiAction('addNote', newNoteData)
+            .then(response => {
+                console.log('Backend acknowledged new note creation:', response);
+                // Backend should send an event (like NoteAddedEvent)
+                // which will trigger the UI update and selection of the new note.
+                Notifier.info("New note creation requested.");
+            })
+            .catch(err => {
+                console.error('Failed to send new note action:', err);
+                Notifier.error("Failed to create new note.");
+            });
+
+        // Do NOT immediately add to local notes array or select.
+        // Wait for backend confirmation via event/NoteAddedEvent.
     }
 
     updateNotePriority(id, delta) {
         const n = this.notes.find(n => n.id === id);
         if (n) {
-            n.priority = (n.priority || 0) + delta;
-            n.updated = Date.now();
-            StorageService.saveNotes(this.notes);
-            this.sortAndFilter();
-            if (id === this.currentId) this.editor.updateMeta(n);
-            Notifier.info(`Priority updated for "${n.title || 'Untitled'}"`);
+            const newPriority = (n.priority || 0) + delta;
+            // Update local state immediately
+            n.priority = newPriority;
+            n.updated = Date.now(); // Optimistic update
+
+            // Send update action to backend
+            websocketClient.sendUiAction('updateNotePriority', {
+                noteId: id,
+                priority: newPriority
+            }).then(response => {
+                console.log(`Backend acknowledged priority update for ${id}:`, response);
+                // Backend should ideally send an event confirming the update (NoteUpdatedEvent)
+            }).catch(err => {
+                console.error(`Failed to send priority update for ${id}:`, err);
+                Notifier.error(`Failed to update priority for "${n.title || 'Untitled'}".`);
+                // Consider reverting local changes or showing error state
+            });
+
+            // Update UI based on local changes immediately
+            this.sortAndFilter(); // Re-sort list
+            if (id === this.currentId) {
+                this.editor.updateMeta(n); // Update meta in editor
+            }
+            Notifier.info(`Priority update requested for "${n.title || 'Untitled'}"`);
         }
     }
 
     handleMenu(action) {
-        this.saveCurrentNote();
+        this.saveCurrentNote(); // Save current note before performing action
         const n = this.currentId ? this.notes.find(n => n.id === this.currentId) : null;
+
         switch (action) {
             case 'undo':
-                document.execCommand('undo');
+                document.execCommand('undo'); // Client-side editor action
                 break;
             case 'redo':
-                document.execCommand('redo');
+                document.execCommand('redo'); // Client-side editor action
                 break;
             case 'clone':
                 if (n) {
-                    const c = {
-                        ...n,
-                        id: Utils.generateId(),
-                        title: `${n.title || 'Untitled'} (Clone)`,
-                        created: Date.now(),
-                        updated: Date.now()
-                    };
-                    this.notes.unshift(c);
-                    StorageService.saveNotes(this.notes);
-                    this.sortAndFilter();
-                    this.selectNote(c.id);
-                    Notifier.success('Note cloned.');
+                    // Send clone action to backend
+                    websocketClient.sendUiAction('cloneNote', { noteId: n.id })
+                        .then(response => {
+                            console.log('Backend acknowledged note clone:', response);
+                            // Backend should send event (NoteAddedEvent) with the new cloned note
+                            Notifier.info('Note cloning requested.');
+                        })
+                        .catch(err => {
+                            console.error('Failed to send clone note action:', err);
+                            Notifier.error('Failed to clone note.');
+                        });
+                    // Do NOT immediately add/select locally
                 } else Notifier.warning('Select note to clone.');
                 break;
             case 'insert':
-                this.editor.insertField();
+                this.editor.insertField(); // Client-side editor action
                 break;
             case 'publish':
-                this.updateNoteState(n, 'Published');
+                this.updateNoteState(n, 'Published'); // Calls updateNoteState which sends UI action
                 break;
             case 'set-private':
-                this.updateNoteState(n, 'Private');
+                this.updateNoteState(n, 'Private'); // Calls updateNoteState which sends UI action
                 break;
             case 'enhance':
-                Notifier.info('Stub: LLM Enhance');
-                break;
             case 'summary':
-                Notifier.info('Stub: LLM Summary');
+                if (n) {
+                    // Send command to backend
+                    websocketClient.sendCommand('runTool', { name: action, note_id: n.id })
+                        .then(response => {
+                            console.log(`Backend acknowledged tool '${action}':`, response);
+                            Notifier.info(`Tool '${action}' requested.`);
+                            // Response/result will come via generic response listener or specific event
+                        })
+                        .catch(err => {
+                            console.error(`Failed to send tool '${action}' command:`, err);
+                            Notifier.error(`Failed to run tool '${action}'.`);
+                        });
+                } else Notifier.warning(`Select note to run ${action} tool.`);
                 break;
             case 'delete':
                 if (n && confirm(`Delete "${n.title || 'Untitled Note'}"?`)) {
-                    this.notes = this.notes.filter(note => note.id !== n.id);
-                    StorageService.saveNotes(this.notes);
-                    this.currentId = null;
-                    this.sortAndFilter();
-                    this.editor.clear();
-                    this.actionArea.clearIcons();
-                    Notifier.success('Note deleted.');
+                    // Send delete action to backend
+                    websocketClient.sendUiAction('deleteNote', { noteId: n.id })
+                        .then(response => {
+                            console.log('Backend acknowledged note deletion:', response);
+                            // Backend should send event (NoteDeletedEvent) confirming deletion
+                            // For responsiveness, remove locally immediately
+                            this.notes = this.notes.filter(note => note.id !== n.id);
+                            this.currentId = null;
+                            this.sortAndFilter();
+                            this.editor.clear();
+                            this.actionArea.clearIcons();
+                            Notifier.success('Note deletion requested.');
+                        })
+                        .catch(err => {
+                            console.error('Failed to send delete note action:', err);
+                            Notifier.error('Failed to delete note.');
+                        });
                 } else if (!n) Notifier.warning('Select note to delete.');
                 break;
             case 'view-source':
-                if (n) alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\n\n${n.content}`); else Notifier.warning('Select note to view source.');
+                if (n) alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\nCreated: ${new Date(n.created).toLocaleString()}\nUpdated: ${new Date(n.updated).toLocaleString()}\n\nContent:\n${n.content}`); else Notifier.warning('Select note to view source.');
                 break;
             case 'settings':
                 this.settingsModal.show();
@@ -675,14 +889,45 @@ class App {
 
     updateNoteState(note, newState) {
         if (note) {
+            // Update local state immediately
             note.state = newState;
-            note.updated = Date.now();
-            StorageService.saveNotes(this.notes);
+            note.updated = Date.now(); // Optimistic update
+
+            // Send update action to backend
+            websocketClient.sendUiAction('updateNoteState', {
+                noteId: note.id,
+                state: newState
+            }).then(response => {
+                console.log(`Backend acknowledged state update for ${note.id}:`, response);
+                // Backend should send NoteStatusEvent confirming the update
+            }).catch(err => {
+                console.error(`Failed to send state update for ${note.id}:`, err);
+                Notifier.error(`Failed to set note state to ${newState}.`);
+                // Consider reverting local changes or showing error state
+            });
+
+            // Update UI based on local changes immediately
             this.editor.updateMeta(note);
             this.sidebar.updateNote(note);
             Notifier.success(`Note "${note.title || 'Untitled'}" set to ${newState}.`);
-            if (newState === 'Published') console.log('Stub: Publishing note...', note);
+            if (newState === 'Published') console.log('Stub: Publishing note action sent...');
         } else Notifier.warning(`Select a note to set ${newState}.`);
+    }
+
+    updateSettings(settings) {
+        // Update local settings
+        this.settings = settings;
+
+        // Send update action to backend
+        websocketClient.sendUiAction('updateSettings', { settings: settings })
+            .then(response => {
+                console.log('Backend acknowledged settings update:', response);
+                // Backend should ideally send an event confirming settings update
+            })
+            .catch(err => {
+                console.error('Failed to send settings update action:', err);
+                Notifier.error('Failed to save settings.');
+            });
     }
 
     showDock(d) {
@@ -690,7 +935,9 @@ class App {
     }
 }
 
+// Initialize the app when the DOM is ready
 $(() => {
     const app = new App('#app-container');
-    $(window).on('beforeunload', () => app.saveCurrentNote());
+    // No need to save on beforeunload anymore, saving is triggered by input debounce
+    // $(window).on('beforeunload', () => app.saveCurrentNote());
 });
