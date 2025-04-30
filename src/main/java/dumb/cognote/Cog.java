@@ -175,7 +175,6 @@ public class Cog {
         plugins.add(new RetractionPlugin());
         plugins.add(new TmsPlugin());
         plugins.add(new UserFeedbackPlugin());
-        plugins.add(new RequestProcessorPlugin()); // Keep for now, but its role in client requests is removed
 
         plugins.add(new TaskDecomposePlugin());
 
