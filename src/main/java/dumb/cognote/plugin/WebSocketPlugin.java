@@ -13,6 +13,8 @@ import org.java_websocket.server.WebSocketServer;
 import org.jetbrains.annotations.Nullable;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -24,6 +26,7 @@ import static dumb.cognote.Protocol.*;
 import static dumb.cognote.Term.Lst;
 import static dumb.cognote.util.Log.error;
 import static dumb.cognote.util.Log.message;
+import static dumb.cognote.util.Log.warning;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
@@ -253,19 +256,22 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     if (patternNode == null || !patternNode.isTextual()) throw new IllegalArgumentException("Missing 'pattern' for query command.");
                     var pattern = KifParser.parseKif(patternNode.asText()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Invalid KIF pattern for query."));
                     if (!(pattern instanceof Term.Lst)) throw new IllegalArgumentException("Query pattern must be a KIF list.");
-                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("query"), pattern, Json.node(parametersNode));
+                    // Corrected: Convert JsonNode parameters to Term
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("query"), pattern, jsonNodeToTerm(parametersNode));
                     break;
                 case "runTool":
                     var toolNameNode = parametersNode.get("name");
                      if (toolNameNode == null || !toolNameNode.isTextual()) throw new IllegalArgumentException("Missing 'name' for runTool command.");
-                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("runTool"), Term.Atom.of(toolNameNode.asText()), Json.node(parametersNode));
+                    // Corrected: Convert JsonNode parameters to Term
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("runTool"), Term.Atom.of(toolNameNode.asText()), jsonNodeToTerm(parametersNode));
                     break;
                 case "wait":
                     var conditionNode = parametersNode.get("condition"); // Assuming condition is passed as a KIF string in params
                      if (conditionNode == null || !conditionNode.isTextual()) throw new IllegalArgumentException("Missing 'condition' for wait command.");
                     var conditionTerm = KifParser.parseKif(conditionNode.asText()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Invalid KIF condition for wait."));
                     if (!(conditionTerm instanceof Term.Lst)) throw new IllegalArgumentException("Wait condition must be a KIF list.");
-                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("wait"), conditionTerm, Json.node(parametersNode));
+                    // Corrected: Convert JsonNode parameters to Term
+                    requestTerm = new Term.Lst(Term.Atom.of(Protocol.PRED_REQUEST), Term.Atom.of("wait"), conditionTerm, jsonNodeToTerm(parametersNode));
                     break;
                  case "retract":
                     var retractTypeNode = parametersNode.get("type");
@@ -340,7 +346,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             var uiActionTerm = new Term.Lst(
                     Term.Atom.of(Protocol.PRED_UI_ACTION),
                     Term.Atom.of(actionType),
-                    Term.Atom.of(Json.str(actionData)) // Store actionData as a JSON string atom
+                    jsonNodeToTerm(actionData) // Convert actionData JsonNode to Term
             );
 
             // Assert this term into the dedicated KB for UI actions
@@ -364,6 +370,43 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             error("Error processing UI_ACTION signal: " + e.getMessage());
             e.printStackTrace();
             sendErrorResponse(conn, signalId, "Error processing UI action: " + e.getMessage());
+        }
+    }
+
+    // Helper method to convert JsonNode to Term
+    private Term jsonNodeToTerm(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return Term.Atom.of("null"); // Represent JSON null as KIF atom 'null'
+        } else if (node.isBoolean()) {
+            return Term.Atom.of(String.valueOf(node.asBoolean())); // Represent JSON boolean as KIF atom 'true' or 'false'
+        } else if (node.isNumber()) {
+            // Represent JSON number as KIF atom (string representation)
+            return Term.Atom.of(node.asText());
+        } else if (node.isTextual()) {
+            // Represent JSON string as KIF atom (quoted if necessary, handled by Term.Atom.of)
+            return Term.Atom.of(node.asText());
+        } else if (node.isArray()) {
+            // Represent JSON array as KIF list
+            List<Term> elements = new ArrayList<>();
+            for (JsonNode element : node) {
+                elements.add(jsonNodeToTerm(element)); // Recursively convert array elements
+            }
+            return new Term.Lst(elements);
+        } else if (node.isObject()) {
+            // Represent JSON object as KIF list of (key value) pairs
+            List<Term> pairs = new ArrayList<>();
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                Term keyTerm = Term.Atom.of(field.getKey()); // JSON key becomes KIF atom
+                Term valueTerm = jsonNodeToTerm(field.getValue()); // JSON value is converted recursively
+                pairs.add(new Term.Lst(keyTerm, valueTerm)); // Create (key value) pair list
+            }
+            return new Term.Lst(pairs); // The object becomes a list of these pairs
+        } else {
+            // Handle other JSON node types if necessary, or default
+            warning("Unsupported JsonNode type for conversion to Term: " + node.getNodeType());
+            return Term.Atom.of("unsupported_json_type");
         }
     }
 
