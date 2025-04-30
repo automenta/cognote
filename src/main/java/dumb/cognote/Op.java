@@ -163,10 +163,14 @@ public class Op {
 
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
-            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom(String value))) {
+            // Replaced pattern matching instanceof with traditional check and cast
+            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom)) {
                 Log.error("Invalid arguments for (ask-user): Expected (ask-user \"Prompt string\"). Found: " + arguments.toKif());
                 return CompletableFuture.completedFuture(null); // Fail the goal if arguments are invalid
             }
+            Term.Atom promptAtom = (Term.Atom) arguments.get(1);
+            String value = promptAtom.value();
+
 
             var dialogueId = Cog.id("dialogue_");
             var options = JsonUtil.getMapper().createObjectNode(); // Use Jackson ObjectNode

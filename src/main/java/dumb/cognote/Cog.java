@@ -200,8 +200,13 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
-            if (e instanceof Answer.AnswerEvent(Answer result) && result.query().equals(queryID)) {
-                answerFuture.complete(result);
+            // Replaced pattern matching instanceof with traditional check and cast
+            if (e instanceof Answer.AnswerEvent) {
+                Answer.AnswerEvent answerEvent = (Answer.AnswerEvent) e;
+                Answer result = answerEvent.result();
+                if (result.query().equals(queryID)) {
+                    answerFuture.complete(result);
+                }
             }
         };
         @SuppressWarnings("unchecked")
