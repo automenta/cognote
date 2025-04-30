@@ -80,7 +80,7 @@ body {
     border-color: #007acc;
 }
 
-#send-button {
+#send-button, #clear-button {
     padding: 8px 15px;
     background-color: #007acc;
     color: white;
@@ -95,7 +95,138 @@ body {
     background-color: #005f99;
 }
 
-#send-button:disabled {
+#clear-button {
+    background-color: #555;
+    margin-right: 10px;
+}
+
+#clear-button:hover {
+    background-color: #777;
+}
+
+
+#send-button:disabled, #clear-button:disabled {
     background-color: #555;
     cursor: not-allowed;
+}
+
+/* Dialogue Modal Styles */
+.modal {
+    display: none; /* Hidden by default */
+    position: fixed; /* Stay in place */
+    z-index: 1000; /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%; /* Full width */
+    height: 100%; /* Full height */
+    overflow: auto; /* Enable scroll if needed */
+    background-color: rgba(0,0,0,0.6); /* Black w/ opacity */
+    justify-content: center;
+    align-items: center;
+}
+
+.modal.visible {
+    display: flex;
+}
+
+.modal-content {
+    background-color: #2d2d2d;
+    margin: auto;
+    padding: 0;
+    border: 1px solid #555;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    padding: 10px 20px;
+    background-color: #3c3c3c;
+    color: white;
+    border-bottom: 1px solid #555;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h4 {
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.modal-close {
+    color: #aaa;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.modal-close:hover,
+.modal-close:focus {
+    color: #fff;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.modal-body {
+    padding: 20px;
+    flex-grow: 1;
+}
+
+.modal-body p {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1em;
+    color: #ccc;
+}
+
+.modal-body input[type="text"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #cccccc;
+    font-family: monospace;
+    font-size: 1em;
+    outline: none;
+}
+
+.modal-footer {
+    padding: 10px 20px;
+    background-color: #3c3c3c;
+    border-top: 1px solid #555;
+    text-align: right;
+    border-radius: 0 0 8px 8px;
+}
+
+.modal-footer button {
+    padding: 8px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    margin-left: 10px;
+}
+
+#dialogue-send-button {
+    background-color: #007acc;
+    color: white;
+}
+
+#dialogue-send-button:hover {
+    background-color: #005f99;
+}
+
+#dialogue-cancel-button {
+    background-color: #555;
+    color: white;
+}
+
+#dialogue-cancel-button:hover {
+    background-color: #777;
 }

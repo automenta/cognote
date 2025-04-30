@@ -12,8 +12,27 @@
             <div class="status">Connecting...</div>
         </div>
         <div id="input-area">
-            <textarea id="input" placeholder="Enter KIF or command..."></textarea>
+            <textarea id="input" placeholder="Enter KIF or command (e.g., /query (instance ?X Cat))..."></textarea>
+            <button id="clear-button">Clear</button>
             <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <!-- Dialogue Modal -->
+    <div id="dialogue-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4>Dialogue Request</h4>
+                <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
+            </div>
+            <div class="modal-body">
+                <p id="dialogue-prompt"></p>
+                <input type="text" id="dialogue-input" placeholder="Enter your response...">
+            </div>
+            <div class="modal-footer">
+                <button id="dialogue-cancel-button">Cancel</button>
+                <button id="dialogue-send-button">Send Response</button>
+            </div>
         </div>
     </div>
 

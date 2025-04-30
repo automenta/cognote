@@ -3,10 +3,22 @@ import { websocketClient } from '../client.js';
 const outputDiv = document.getElementById('output');
 const inputArea = document.getElementById('input');
 const sendButton = document.getElementById('send-button');
+const clearButton = document.getElementById('clear-button');
+
+// Dialogue Modal Elements
+const dialogueModal = document.getElementById('dialogue-modal');
+const dialoguePrompt = document.getElementById('dialogue-prompt');
+const dialogueInput = document.getElementById('dialogue-input');
+const dialogueSendButton = document.getElementById('dialogue-send-button');
+const dialogueCancelButton = document.getElementById('dialogue-cancel-button');
+const dialogueModalClose = document.getElementById('dialogue-modal-close');
+
+let currentDialogueId = null; // To keep track of the active dialogue request
 
 function appendOutput(message, className = '') {
     const messageElement = document.createElement('div');
     messageElement.classList.add(className);
+    // Use textContent for safety, unless specific HTML formatting is needed (not for raw REPL output)
     messageElement.textContent = message;
     outputDiv.appendChild(messageElement);
     // Auto-scroll to the bottom
@@ -22,16 +34,21 @@ function formatTimestamp() {
 websocketClient.on('connected', () => {
     appendOutput(`${formatTimestamp()} [STATUS] Connected to WebSocket.`, 'status');
     sendButton.disabled = false;
+    clearButton.disabled = false;
 });
 
 websocketClient.on('disconnected', (event) => {
     appendOutput(`${formatTimestamp()} [STATUS] Disconnected from WebSocket. Code: ${event.code}`, 'status');
     sendButton.disabled = true;
+    clearButton.disabled = true;
+    hideDialogueModal(); // Hide modal if connection drops
 });
 
 websocketClient.on('reconnectFailed', () => {
     appendOutput(`${formatTimestamp()} [STATUS] Reconnect attempts failed.`, 'status');
     sendButton.disabled = true;
+    clearButton.disabled = true;
+    hideDialogueModal(); // Hide modal if connection fails
 });
 
 websocketClient.on('error', (event) => {
@@ -45,6 +62,7 @@ websocketClient.on('event', (eventPayload) => {
         const level = eventPayload.level ? eventPayload.level.toLowerCase() : 'info';
         appendOutput(`${formatTimestamp()} [LOG:${level.toUpperCase()}] ${eventPayload.message}`, `log-${level}`);
     } else {
+        // Display other events
         appendOutput(`${formatTimestamp()} [EVENT:${eventPayload.eventType}] ${JSON.stringify(eventPayload, null, 2)}`, 'event');
     }
 });
@@ -53,32 +71,123 @@ websocketClient.on('event', (eventPayload) => {
 websocketClient.on('response', (responsePayload) => {
     const status = responsePayload.payload?.status || 'unknown';
     const className = status === 'success' ? 'response-success' : (status === 'failure' ? 'response-failure' : 'response-error');
-    appendOutput(`${formatTimestamp()} [RESPONSE:${status.toUpperCase()}] In Reply To: ${responsePayload.inReplyToId}\nPayload: ${JSON.stringify(responsePayload.payload, null, 2)}`, className);
+    let responseText = `${formatTimestamp()} [RESPONSE:${status.toUpperCase()}] In Reply To: ${responsePayload.inReplyToId}\n`;
+
+    if (responsePayload.payload?.message) {
+        responseText += `Message: ${responsePayload.payload.message}\n`;
+    }
+    if (responsePayload.payload?.result !== undefined) {
+         responseText += `Result: ${JSON.stringify(responsePayload.payload.result, null, 2)}\n`;
+    } else if (responsePayload.payload) {
+         // If no specific result/message, show the whole payload
+         responseText += `Payload: ${JSON.stringify(responsePayload.payload, null, 2)}\n`;
+    }
+
+
+    appendOutput(responseText, className);
 });
 
-// Handle dialogue requests (basic logging for now)
+// Handle incoming initial state snapshot
+websocketClient.on('initialState', (statePayload) => {
+    appendOutput(`${formatTimestamp()} [INITIAL STATE] Received system snapshot.`, 'status');
+    if (statePayload) {
+        let summary = "System Snapshot Summary:\n";
+        if (statePayload.configuration) {
+            summary += `- Config: LLM=${statePayload.configuration.llmModel}, KB Capacity=${statePayload.configuration.globalKbCapacity}, Reasoning Depth=${statePayload.configuration.reasoningDepthLimit}\n`;
+        }
+        if (statePayload.notes) {
+            summary += `- Notes: ${statePayload.notes.length} total\n`;
+        }
+         if (statePayload.rules) {
+            summary += `- Rules: ${statePayload.rules.length} total\n`;
+        }
+         if (statePayload.assertions) {
+            summary += `- Assertions: ${statePayload.assertions.length} total\n`;
+        }
+        appendOutput(summary, 'event');
+    }
+});
+
+
+// Handle dialogue requests
 websocketClient.on('dialogueRequest', (requestPayload) => {
     appendOutput(`${formatTimestamp()} [DIALOGUE REQUEST] ID: ${requestPayload.dialogueId}, Type: ${requestPayload.requestType}\nPrompt: ${requestPayload.prompt}\nContext: ${JSON.stringify(requestPayload.context, null, 2)}`, 'event');
-    // TODO: Implement a simple modal or input for dialogue responses if needed
-    // For now, just log and maybe send a canned response or cancel after a delay
-    console.warn("Dialogue request received, no UI handler implemented. Cancelling after 5s.");
-    setTimeout(() => {
-         // Example: Send a canned response for text input
-         if (requestPayload.requestType === 'text_input') {
-             websocketClient.sendDialogueResponse(requestPayload.dialogueId, { text: "Canned response from REPL UI" })
-                 .then(() => appendOutput(`${formatTimestamp()} [SENT] Canned dialogue response for ${requestPayload.dialogueId}`, 'sent'))
-                 .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to send canned dialogue response: ${err.message}`, 'response-error'));
-         } else {
-             websocketClient.sendCommand('cancelDialogue', { dialogueId: requestPayload.dialogueId })
-                 .then(() => appendOutput(`${formatTimestamp()} [SENT] Cancelled dialogue ${requestPayload.dialogueId}`, 'sent'))
-                 .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to send cancelDialogue command: ${err.message}`, 'response-error'));
-         }
-    }, 5000); // Cancel after 5 seconds
+
+    // For now, only handle text_input requests with a simple modal
+    if (requestPayload.requestType === 'text_input') {
+        currentDialogueId = requestPayload.dialogueId;
+        dialoguePrompt.textContent = requestPayload.prompt;
+        dialogueInput.value = ''; // Clear previous input
+        showDialogueModal();
+    } else {
+        console.warn(`Received unsupported dialogue request type: ${requestPayload.requestType}. Cancelling.`);
+        // Automatically cancel unsupported types
+         websocketClient.sendCommand('cancelDialogue', { dialogueId: requestPayload.dialogueId })
+             .then(() => appendOutput(`${formatTimestamp()} [SENT] Cancelled dialogue ${requestPayload.dialogueId} (unsupported type)`, 'sent'))
+             .catch(err => appendOutput(`${formatTimestamp()} [ERROR] Failed to send cancelDialogue command: ${err.message}`, 'response-error'));
+    }
 });
+
+function showDialogueModal() {
+    dialogueModal.classList.add('visible');
+    dialogueInput.focus();
+}
+
+function hideDialogueModal() {
+    dialogueModal.classList.remove('visible');
+    currentDialogueId = null;
+    dialoguePrompt.textContent = '';
+    dialogueInput.value = '';
+}
+
+function sendDialogueResponse() {
+    if (!currentDialogueId) return;
+
+    const responseText = dialogueInput.value.trim();
+    if (!responseText) {
+        // Optionally require input or handle empty response differently
+        // For now, allow empty response
+    }
+
+    const responseData = { text: responseText }; // Assuming text_input type
+
+    appendOutput(`${formatTimestamp()} [SENT] Dialogue response for ${currentDialogueId}: "${responseText}"`, 'sent');
+
+    websocketClient.sendDialogueResponse(currentDialogueId, responseData)
+        .then(() => {
+            // Response handled by generic 'response' listener
+        })
+        .catch(err => {
+            // Error handled by generic 'response' listener
+        });
+
+    hideDialogueModal();
+}
+
+function cancelDialogue() {
+    if (!currentDialogueId) return;
+
+    appendOutput(`${formatTimestamp()} [SENT] Cancelling dialogue ${currentDialogueId}`, 'sent');
+
+    websocketClient.sendCommand('cancelDialogue', { dialogueId: currentDialogueId })
+        .then(() => {
+            // Response handled by generic 'response' listener
+        })
+        .catch(err => {
+            // Error handled by generic 'response' listener
+        });
+
+    hideDialogueModal();
+}
 
 
 // Send input on button click or Enter key
 sendButton.addEventListener('click', sendInput);
+clearButton.addEventListener('click', () => {
+    outputDiv.innerHTML = ''; // Clear the output div
+    appendOutput(`${formatTimestamp()} [STATUS] Output cleared.`, 'status');
+});
+
 inputArea.addEventListener('keypress', (event) => {
     // Check for Enter key without Shift (Shift+Enter for newline)
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -87,48 +196,176 @@ inputArea.addEventListener('keypress', (event) => {
     }
 });
 
+// Dialogue modal event listeners
+dialogueSendButton.addEventListener('click', sendDialogueResponse);
+dialogueCancelButton.addEventListener('click', cancelDialogue);
+dialogueModalClose.addEventListener('click', cancelDialogue); // Close button also cancels
+dialogueInput.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        sendDialogueResponse();
+    }
+});
+// Close modal if clicking outside the content
+dialogueModal.addEventListener('click', (event) => {
+    if (event.target === dialogueModal) {
+        cancelDialogue();
+    }
+});
+
+
 function sendInput() {
     const input = inputArea.value.trim();
     if (!input) return;
 
-    // For this simple REPL, assume input is KIF and send as an 'input' signal
-    // In a more complex REPL, you might parse commands like /commandName {json_params}
-    const kifStrings = input.split('\n').filter(line => line.trim() !== '' && !line.trim().startsWith(';')); // Basic split by line, ignore comments
+    inputArea.value = ''; // Clear input immediately
 
-    if (kifStrings.length === 0) {
-        appendOutput(`${formatTimestamp()} [SENT] No valid KIF lines to send.`, 'sent');
-        inputArea.value = '';
-        return;
+    if (input.startsWith('/')) {
+        handleCommand(input);
+    } else {
+        // Treat as raw KIF input
+        const kifStrings = input.split('\n').filter(line => line.trim() !== '' && !line.trim().startsWith(';')); // Basic split by line, ignore comments
+
+        if (kifStrings.length === 0) {
+            appendOutput(`${formatTimestamp()} [SENT] No valid KIF lines to send.`, 'sent');
+            return;
+        }
+
+        appendOutput(`${formatTimestamp()} [SENT] Sending input signal with KIF:\n${kifStrings.join('\n')}`, 'sent');
+
+        websocketClient.sendInput(kifStrings, 'repl-ui')
+            .then(response => { /* Handled by generic response listener */ })
+            .catch(error => { /* Handled by generic response listener */ });
     }
-
-    appendOutput(`${formatTimestamp()} [SENT] Sending input signal with KIF:\n${kifStrings.join('\n')}`, 'sent');
-
-    // Send the input signal and handle the response promise
-    websocketClient.sendInput(kifStrings, 'repl-ui')
-        .then(response => {
-            // Response is handled by the generic 'response' listener
-            // appendOutput(`${formatTimestamp()} [RESPONSE:SUCCESS] ${JSON.stringify(response, null, 2)}`, 'response-success');
-        })
-        .catch(error => {
-             // Error response is handled by the generic 'response' listener
-             // appendOutput(`${formatTimestamp()} [RESPONSE:ERROR] ${error.message}`, 'response-error');
-        });
-
-    inputArea.value = ''; // Clear input after sending
 }
 
-// Initial state of the button
+function handleCommand(commandString) {
+    const parts = commandString.substring(1).split(/\s+/); // Split by one or more spaces
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1).join(' ').trim(); // Rest of the string is arguments
+
+    appendOutput(`${formatTimestamp()} [COMMAND] Executing: /${command} ${args}`, 'sent');
+
+    try {
+        switch (command) {
+            case 'assert':
+            case 'rule':
+                // Send as input signal (backend handles parsing KIF into assertions/rules)
+                if (!args) throw new Error(`Usage: /${command} <kif_string>`);
+                websocketClient.sendInput([args], 'repl-ui')
+                    .then(response => { /* Handled by generic response listener */ })
+                    .catch(error => { /* Handled by generic response listener */ });
+                break;
+
+            case 'query':
+            case 'tool':
+            case 'wait':
+            case 'retract': // Add retract command
+                 // These map to backend commands
+                if (!args) throw new Error(`Usage: /${command} <arguments>`);
+
+                let commandName, parameters = {};
+                let argKif = args; // Default: treat args as KIF string
+
+                // Attempt to parse arguments as KIF list followed by optional JSON params
+                const kifMatch = args.match(/^\s*(\(.*\))\s*(\{.*\})?\s*$/);
+                if (kifMatch) {
+                    argKif = kifMatch[1];
+                    try {
+                         if (kifMatch[2]) parameters = JSON.parse(kifMatch[2]);
+                    } catch (e) {
+                         throw new Error(`Invalid JSON parameters: ${e.message}`);
+                    }
+                } else {
+                    // If not a KIF list, maybe it's just a tool name or ID?
+                    // Simple case: /tool tool_name {params}
+                    // Complex case: /query (pattern) {params}
+                    // Let's assume the backend command handlers expect specific parameter structures.
+                    // For simplicity here, we'll just pass the raw args string for now,
+                    // or try to parse simple cases like tool name + JSON.
+                    // A more robust REPL would need a KIF parser client-side.
+
+                    // Simple parsing for /tool <name> {params}
+                    if (command === 'tool') {
+                         const toolNameMatch = args.match(/^([a-zA-Z0-9_-]+)\s*(\{.*\})?$/);
+                         if (toolNameMatch) {
+                             commandName = 'runTool'; // Backend command name
+                             parameters.name = toolNameMatch[1];
+                             try {
+                                 if (toolNameMatch[2]) parameters = { ...parameters, ...JSON.parse(toolNameMatch[2]) };
+                             } catch (e) {
+                                 throw new Error(`Invalid JSON parameters for /tool: ${e.message}`);
+                             }
+                         } else {
+                             throw new Error(`Usage: /tool <tool_name> [{json_params}]`);
+                         }
+                    } else if (command === 'retract') {
+                         // Simple parsing for /retract <BY_KIF|BY_ID> <target>
+                         const retractMatch = args.match(/^(BY_KIF|BY_ID)\s+(\(.*\)|[a-zA-Z0-9_-]+)$/);
+                         if (retractMatch) {
+                             commandName = 'retract'; // Backend command name
+                             parameters.type = retractMatch[1];
+                             parameters.target = retractMatch[2]; // KIF string or ID string
+                         } else {
+                             throw new Error(`Usage: /retract <BY_KIF|BY_ID> <target_kif_or_id>`);
+                         }
+                    }
+                    // For /query and /wait, we'll stick to the KIF pattern + optional JSON for now
+                    // A client-side KIF parser would be needed for more flexible command args.
+                }
+
+
+                if (!commandName) {
+                    // Map REPL command to backend command name if not handled above
+                    commandName = command; // Assume command name matches backend command type
+                    // For query/wait, the pattern is the main argument
+                    if (command === 'query' || command === 'wait') {
+                         parameters.pattern = argKif; // Pass the KIF string as 'pattern' parameter
+                    }
+                }
+
+
+                websocketClient.sendCommand(commandName, parameters)
+                    .then(response => { /* Handled by generic response listener */ })
+                    .catch(error => { /* Handled by generic response listener */ });
+
+                break;
+
+            case 'clear':
+                outputDiv.innerHTML = '';
+                appendOutput(`${formatTimestamp()} [STATUS] Output cleared by command.`, 'status');
+                break;
+
+            case 'state':
+                websocketClient.sendInitialStateRequest()
+                    .then(state => { /* Handled by initialState listener */ })
+                    .catch(err => { /* Handled by generic response listener */ });
+                break;
+
+            default:
+                appendOutput(`${formatTimestamp()} [ERROR] Unknown command: /${command}`, 'response-error');
+        }
+    } catch (e) {
+        appendOutput(`${formatTimestamp()} [ERROR] Command failed: ${e.message}`, 'response-error');
+        console.error(`Command /${command} failed:`, e);
+    }
+}
+
+
+// Initial state of the buttons
 sendButton.disabled = !websocketClient.isConnected;
+clearButton.disabled = !websocketClient.isConnected;
 
 // Request initial state when the client is ready (might already be connected)
-if (websocketClient.isConnected) {
-     websocketClient.sendInitialStateRequest()
-        .then(state => {
-            appendOutput(`${formatTimestamp()} [INITIAL STATE] Received system snapshot.`, 'status');
-            // Optionally display parts of the state, e.g., note titles
-            // appendOutput(JSON.stringify(state, null, 2), 'event'); // Too verbose usually
-        })
-        .catch(err => {
-            appendOutput(`${formatTimestamp()} [ERROR] Failed to request initial state: ${err.message}`, 'response-error');
-        });
-}
+// This is now handled automatically by the client on 'connected' event
+// if (websocketClient.isConnected) {
+//      websocketClient.sendInitialStateRequest()
+//         .then(state => {
+//             appendOutput(`${formatTimestamp()} [INITIAL STATE] Received system snapshot.`, 'status');
+//             // Optionally display parts of the state, e.g., note titles
+//             // appendOutput(JSON.stringify(state, null, 2), 'event'); // Too verbose usually
+//         })
+//         .catch(err => {
+//             appendOutput(`${formatTimestamp()} [ERROR] Failed to request initial state: ${err.message}`, 'response-error');
+//         });
+// }
