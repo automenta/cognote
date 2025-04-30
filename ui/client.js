@@ -177,6 +177,7 @@ class WebSocketClient {
     }
 }
 
+// Update WS_PORT to match the new default WebSocket port in the backend
 const WS_PORT = 8081;
 const WS_URL = `ws://localhost:${WS_PORT}`;
 

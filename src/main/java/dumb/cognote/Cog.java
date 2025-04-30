@@ -98,14 +98,16 @@ public class Cog {
 
     public static void main(String[] args) {
         String rulesFile = null;
-        var port = 8082;
+        var httpPort = 8080; // Default port for HTTP static files
+        var wsPort = 8081; // Default port for WebSocket
         String staticDir = "ui"; // Directory containing static files
 
         for (var i = 0; i < args.length; i++) {
             try {
                 switch (args[i]) {
                     case "-r", "--rules" -> rulesFile = args[++i];
-                    case "-p", "--port" -> port = Integer.parseInt(args[++i]);
+                    case "-p", "--http-port" -> httpPort = Integer.parseInt(args[++i]); // Use -p for HTTP port
+                    case "-w", "--ws-port" -> wsPort = Integer.parseInt(args[++i]); // Add -w for WS port
                     case "-s", "--static-dir" -> staticDir = args[++i];
                     default -> Log.warning("Unknown option: " + args[i] + ". Config via JSON.");
                 }
@@ -117,9 +119,7 @@ public class Cog {
 
         try {
             // Start HTTP Server for static files
-            // WARNING: This will likely cause a BindException when the WebSocketPlugin tries to bind to the same port.
-            // A proper solution requires a server framework that supports both HTTP and WS on the same port.
-            HttpServer httpServer = HttpServer.create(new InetSocketAddress(port), 0);
+            HttpServer httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
             String STATIC = staticDir;
             httpServer.createContext("/", new HttpHandler() {
                 @Override
@@ -154,12 +154,12 @@ public class Cog {
             });
             httpServer.setExecutor(null); // Use default executor
             httpServer.start();
-            Log.message("HTTP server started on port " + port + ", serving from '" + staticDir + "'");
+            Log.message("HTTP server started on port " + httpPort + ", serving from '" + staticDir + "'");
 
 
             var c = new Cog();
-            // This will attempt to start a WebSocket server on the *same* port, likely causing a BindException.
-            c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(port), c));
+            // Start WebSocket server on a different port
+            c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(wsPort), c));
 
             c.start();
 
@@ -186,7 +186,8 @@ public class Cog {
     }
 
     private static void printUsageAndExit() {
-        System.err.printf("Usage: java %s [-p port] [-r rules_file.kif] [-s static_directory]%n", Cog.class.getName());
+        System.err.printf("Usage: java %s [-p http_port] [-w ws_port] [-r rules_file.kif] [-s static_directory]%n", Cog.class.getName());
+        System.err.println("Defaults: http_port=8080, ws_port=8081, static_directory=ui");
         System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + STATE_FILE);
         System.exit(1);
     }
