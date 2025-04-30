@@ -66,7 +66,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
             @Override
             public void onStart() {
-                message("WebSocket server started on port " + address.getPort());
+                // Log the port the WebSocket server actually started on
+                message("WebSocket server started on port " + getPort());
             }
         };
         server.start();

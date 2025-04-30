@@ -16,6 +16,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.URLConnection;
 import java.nio.file.Files;
@@ -117,9 +118,13 @@ public class Cog {
             }
         }
 
+        HttpServer httpServer = null;
+        Cog cogInstance = null;
+
         try {
             // Start HTTP Server for static files
-            HttpServer httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
+            Log.message("Attempting to start HTTP server on port " + httpPort + ", serving from '" + staticDir + "'");
+            httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
             String STATIC = staticDir;
             httpServer.createContext("/", new HttpHandler() {
                 @Override
@@ -157,17 +162,18 @@ public class Cog {
             });
             httpServer.setExecutor(null); // Use default executor
             httpServer.start();
-            Log.message("HTTP server started on port " + httpPort + ", serving from '" + staticDir + "'");
+            Log.message("HTTP server started successfully on port " + httpPort);
 
 
-            var c = new Cog();
+            cogInstance = new Cog();
             // Start WebSocket server on a different port
-            c.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(wsPort), c));
+            // The WebSocketPlugin will log its startup port in its onStart method
+            cogInstance.plugins.add(new dumb.cognote.plugin.WebSocketPlugin(new java.net.InetSocketAddress(wsPort), cogInstance));
 
-            c.start();
+            cogInstance.start();
 
             if (rulesFile != null) {
-                c.loadRules(rulesFile);
+                cogInstance.loadRules(rulesFile);
             }
 
             try {
@@ -176,15 +182,29 @@ public class Cog {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 error("Main thread interrupted.");
-            } finally {
-                 // Ensure HTTP server is stopped on shutdown
-                 httpServer.stop(0); // Stop immediately
-                 Log.message("HTTP server stopped.");
             }
-        } catch (Exception e) {
+
+        } catch (BindException e) {
+            error("Failed to start server: Address already in use.");
+            error(String.format("Port %d or %d is already in use.", httpPort, wsPort));
+            error("Please check if another instance of the application is running or if another program is using these ports.");
+            error("You can specify different ports using the -p <http_port> and -w <ws_port> command-line arguments.");
+            e.printStackTrace();
+            System.exit(1);
+        }
+        catch (Exception e) {
             error("Initialization/Startup failed: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
+        } finally {
+             // Ensure servers are stopped on shutdown
+             if (httpServer != null) {
+                 httpServer.stop(0); // Stop immediately
+                 Log.message("HTTP server stopped.");
+             }
+             if (cogInstance != null) {
+                 cogInstance.stop(); // Cog's stop handles WebSocketPlugin shutdown
+             }
         }
     }
 
