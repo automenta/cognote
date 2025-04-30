@@ -2,40 +2,40 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>Cognote REPL</title>
-    <link rel="stylesheet" href="index.css">
+    <link href="index.css" rel="stylesheet">
 </head>
 <body>
-    <div id="repl-container">
-        <div id="output">
-            <div class="status">Connecting...</div>
+<div id="repl-container">
+    <div id="output">
+        <div class="status">Connecting...</div>
+    </div>
+    <div id="input-area">
+        <textarea id="input" placeholder="Enter KIF or command (e.g., /query (instance ?X Cat))..."></textarea>
+        <button id="clear-button">Clear</button>
+        <button id="send-button">Send</button>
+    </div>
+</div>
+
+<div class="modal" id="dialogue-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h4>Dialogue Request</h4>
+            <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
         </div>
-        <div id="input-area">
-            <textarea id="input" placeholder="Enter KIF or command (e.g., /query (instance ?X Cat))..."></textarea>
-            <button id="clear-button">Clear</button>
-            <button id="send-button">Send</button>
+        <div class="modal-body">
+            <p id="dialogue-prompt"></p>
+            <input id="dialogue-input" placeholder="Enter your response..." type="text">
+        </div>
+        <div class="modal-footer">
+            <button id="dialogue-cancel-button">Cancel</button>
+            <button id="dialogue-send-button">Send Response</button>
         </div>
     </div>
+</div>
 
-    <div id="dialogue-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h4>Dialogue Request</h4>
-                <span class="modal-close" id="dialogue-modal-close" title="Close">×</span>
-            </div>
-            <div class="modal-body">
-                <p id="dialogue-prompt"></p>
-                <input type="text" id="dialogue-input" placeholder="Enter your response...">
-            </div>
-            <div class="modal-footer">
-                <button id="dialogue-cancel-button">Cancel</button>
-                <button id="dialogue-send-button">Send Response</button>
-            </div>
-        </div>
-    </div>
-
-    <script type="module" src="../client.js"></script>
-    <script type="module" src="index.js"></script>
+<script src="../client.js" type="module"></script>
+<script src="index.js" type="module"></script>
 </body>
 </html>

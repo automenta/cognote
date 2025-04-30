@@ -3,7 +3,6 @@ package dumb.cognote;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
 import dumb.cognote.util.Events;

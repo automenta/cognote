@@ -13,7 +13,8 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 - Persistent Queries: `Note`s can act as ongoing search interests.
 - Semantic Matching: `Note`s capture meaning and intent.
 - Notifications: The app receives matches to shared `Note`s as replies.
-- Real vs. Imaginary: Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary things - effecting the realization of imagination.
+- Real vs. Imaginary: Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary
+  things - effecting the realization of imagination.
 
 ## Components
 

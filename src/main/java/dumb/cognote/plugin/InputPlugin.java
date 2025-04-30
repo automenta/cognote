@@ -7,10 +7,11 @@ import java.util.List;
 import java.util.Set;
 
 import static dumb.cognote.Cog.DEFAULT_RULE_PRIORITY;
-import static dumb.cognote.Protocol.KB_CLIENT_INPUT;
 import static dumb.cognote.util.Log.message;
 
 public class InputPlugin extends Plugin.BasePlugin {
+
+    private static final String KB_CLIENT_INPUT = "kb-client-input";
 
     @Override
     public void start(Events e, Cognition ctx) {

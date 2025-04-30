@@ -50,4 +50,5 @@ public class Protocol {
     public static final String DIALOGUE_RESPONSE_KEY_CHOICE = "choice";
 
     public static final String OP_ASK_USER = "ask-user";
+    public static final String PRED_REQUEST = "pred-request";
 }
