@@ -334,6 +334,9 @@ function handleCommand(commandString) {
                 // does not handle 'command' signals, this will fail.
                 // The backend WebSocketPlugin needs to be updated to receive SIGNAL_TYPE_COMMAND
                 // and route it to the RequestProcessorPlugin or appropriate handler.
+                // The REPL's /query, /tool, /wait, /retract commands are currently
+                // handled by the RequestProcessorPlugin which listens for assertions
+                // in kb://client-input. This handler is for future direct commands.
                 websocketClient.sendCommand(commandName, parameters)
                     .then(response => { /* Handled by generic response listener */ })
                     .catch(error => { /* Handled by generic response listener */ });
@@ -431,7 +434,10 @@ The response you provide will be returned as the result of the query.
     // NOTE: The backend RequestProcessorPlugin (or similar) needs to be updated
     // to listen for uiAction assertions in kb://ui-actions and call the
     // appropriate Cog methods (addNote, updateNoteText, updateNoteStatus).
+    // The Note UI relies on NoteAddedEvent, NoteUpdatedEvent, NoteStatusEvent etc.
+    // being emitted by the backend after these actions are processed.
     exampleNotes.forEach(noteData => {
+        // Send actions sequentially for each note
         websocketClient.sendUiAction('addNote', { noteId: noteData.id, title: noteData.title })
             .then(() => websocketClient.sendUiAction('updateNoteText', { noteId: noteData.id, newText: noteData.text }))
             .then(() => websocketClient.sendUiAction('updateNoteStatus', { noteId: noteData.id, newStatus: noteData.status }))

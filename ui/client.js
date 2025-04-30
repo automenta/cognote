@@ -173,7 +173,9 @@ class WebSocketClient {
 
         // Based on Protocol.java, 'response' signals are sent in reply to 'input', 'command', 'initial_state_request', 'dialogue_response'.
         // 'initial_state' is a special case handled directly by _onMessage.
-        const expectsResponse = ['input', 'command', 'dialogue_response'].includes(type);
+        // UI_ACTION also expects a response according to WebSocketPlugin.java
+        const expectsResponse = ['input', 'command', 'dialogue_response', 'ui_action'].includes(type);
+
 
         if (expectsResponse) {
             return new Promise((resolve, reject) => {
@@ -218,7 +220,8 @@ class WebSocketClient {
             this.responseListeners.delete(signalId);
 
             if (responseSignal.payload && responseSignal.payload.status === 'success') {
-                resolve(responseSignal.payload.result ?? responseSignal.payload.message); // Resolve with result or message
+                // Resolve with result, message, or the whole payload if they are missing
+                resolve(responseSignal.payload.result ?? responseSignal.payload.message ?? responseSignal.payload);
             } else {
                 // Reject with an error containing status and message
                 const errorMsg = `Signal ${signalId} failed: Status=${responseSignal.payload?.status}, Message=${responseSignal.payload?.message}`;
@@ -233,7 +236,7 @@ class WebSocketClient {
 
     /**
      * Subscribes a listener function to a specific event type.
-     * @param {string} eventType - The type of event (e.g., 'AssertedEvent', 'TaskUpdateEvent', 'connected', 'disconnected', 'error', 'initialState', 'dialogueRequest', 'response').
+     * @param {string} eventType - The type of event (e.g., 'AssertedEvent', 'TaskUpdateEvent', 'connected', 'disconnected', 'error', 'initialState', 'dialogueRequest', 'response', 'NoteStatusEvent', 'NoteAddedEvent', 'NoteUpdatedEvent', 'NoteDeletedEvent').
      * @param {function} listener - The function to call when the event occurs.
      */
     on(eventType, listener) {
@@ -327,13 +330,14 @@ class WebSocketClient {
      * Sends a 'ui_action' signal.
      * @param {string} actionType - The type of UI action.
      * @param {object} [actionData] - Optional action data.
-     * @returns {Promise<void>}
+     * @returns {Promise<object|void>} A promise that resolves with the response payload.
      */
     sendUiAction(actionType, actionData = {}) {
         const payload = {
             actionType: actionType,
             actionData: actionData,
         };
+        // UI Actions are expected to get a response from the backend
         return this.sendSignal('ui_action', payload);
     }
 
@@ -341,13 +345,14 @@ class WebSocketClient {
      * Sends an 'interaction_feedback' signal.
      * @param {string} feedbackType - The type of feedback.
      * @param {object} [feedbackData] - Optional feedback data.
-     * @returns {Promise<void>}
+     * @returns {Promise<object|void>} A promise that resolves with the response payload.
      */
     sendInteractionFeedback(feedbackType, feedbackData = {}) {
         const payload = {
             feedbackType: feedbackType,
             feedbackData: feedbackData,
         };
+        // Assuming interaction feedback might also get an acknowledgement
         return this.sendSignal('interaction_feedback', payload);
     }
 

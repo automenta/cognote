@@ -590,7 +590,8 @@ class App {
              if (updatedNoteData) {
                  // Merge updated fields, preserving fields not in the event if necessary
                  Object.assign(this.notes[noteIndex], updatedNoteData);
-                 this.notes[noteIndex].updated = Date.now(); // Update client-side timestamp for UI responsiveness
+                 // Use timestamp from event if available, otherwise client time for responsiveness
+                 this.notes[noteIndex].updated = updatedNoteData.updated || Date.now();
 
                  this.sidebar.updateNote(this.notes[noteIndex]);
                  if (this.notes[noteIndex].id === this.currentId) {
@@ -606,6 +607,7 @@ class App {
          } else {
              console.warn('NoteUpdatedEvent for unknown note ID:', event.noteId);
              // If an update arrives for a note not in our list, request a full state refresh
+             // This might happen if the note was added by another client/plugin
              websocketClient.sendInitialStateRequest();
          }
     }
@@ -714,6 +716,7 @@ class App {
 
             if (changed) {
                 // Update local state immediately for responsiveness
+                // Backend will send NoteUpdatedEvent with correct timestamp later
                 n.updated = Date.now();
 
                 // Send update action to backend
