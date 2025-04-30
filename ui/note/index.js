@@ -1,5 +1,3 @@
-import {websocketClient} from '../client.js';
-
 const Utils = {
     debounce(func, wait) {
         let t;
@@ -44,16 +42,11 @@ class Component {
     constructor(app, elSelector) {
         this.app = app;
         this.el = document.querySelector(elSelector);
-        if (!this.el) {
-            console.error(`Component failed to find element: ${elSelector}`);
-        }
+        this.el || console.error(`Component failed to find element: ${elSelector}`);
     }
 
-    render() {
-    }
-
-    bindEvents() {
-    }
+    render() {}
+    bindEvents() {}
 
     destroy() {
         if (this.el) {
@@ -130,16 +123,14 @@ class NoteList extends Component {
     render(notes, currentId) {
         this.el.innerHTML = '';
         this.items = {};
-        if (notes?.length) {
+        notes?.length ?
             notes.forEach(n => {
                 const i = new NoteItem(this.app, n);
                 this.items[n.id] = i;
                 this.el.appendChild(i.el);
-                if (n.id === currentId) i.setActive(true);
-            });
-        } else {
+                n.id === currentId && i.setActive(true);
+            }) :
             this.el.innerHTML = '<p style="text-align:center;color:var(--text-muted);margin-top:20px;">No notes.</p>';
-        }
     }
 
     updateItem(note) {
@@ -161,9 +152,8 @@ class NoteList extends Component {
             const container = this.el;
             const itemTop = itemEl.offsetTop;
             const itemBottom = itemTop + itemEl.offsetHeight;
-            if (itemTop < container.scrollTop || itemBottom > container.scrollTop + container.clientHeight) {
-                container.scrollTop = itemTop - container.clientHeight / 2 + itemEl.offsetHeight / 2;
-            }
+            (itemTop < container.scrollTop || itemBottom > container.scrollTop + container.clientHeight) &&
+                (container.scrollTop = itemTop - container.clientHeight / 2 + itemEl.offsetHeight / 2);
         }
     }
 }
@@ -323,9 +313,7 @@ class Editor extends Component {
 
     setSaveStatus(status) {
         this.saveStatusEl.textContent = status;
-        if (status === 'Saved') {
-            setTimeout(() => this.saveStatusEl.textContent = '', 2000);
-        }
+        status === 'Saved' && setTimeout(() => this.saveStatusEl.textContent = '', 2000);
     }
 }
 
@@ -383,7 +371,7 @@ class ActionIcon {
     createMarkup() {
         const div = document.createElement('div');
         div.classList.add('action-icon');
-        if (this.data.urgent) div.classList.add('urgent');
+        this.data.urgent && div.classList.add('urgent');
         div.dataset.type = this.data.type;
         div.title = `${this.data.type}: ${this.data.details}`;
         div.innerHTML = `
@@ -396,11 +384,7 @@ class ActionIcon {
 
     bindEvents() {
         this.el.addEventListener('click', (e) => {
-            if (e.target.classList.contains('hide-btn')) {
-                this.hide();
-            } else {
-                this.app.showDock(this.data);
-            }
+            e.target.classList.contains('hide-btn') ? this.hide() : this.app.showDock(this.data);
         });
     }
 
@@ -434,17 +418,13 @@ class ActionArea extends Component {
 
     bindEvents() {
         document.addEventListener('click', (e) => {
-            const isClickInside = this.el.contains(e.target);
-            if (!isClickInside && this.dockEl.classList.contains('visible')) {
-                this.hideDock();
-            }
+            !this.el.contains(e.target) && this.dockEl.classList.contains('visible') && this.hideDock();
         });
     }
 
     renderIcons(actionDataArray) {
         this.clearIcons();
-        if (!actionDataArray || actionDataArray.length === 0) return;
-        actionDataArray.forEach(d => this.icons.push(new ActionIcon(this.app, this.iconsEl, d)));
+        actionDataArray?.length && actionDataArray.forEach(d => this.icons.push(new ActionIcon(this.app, this.iconsEl, d)));
     }
 
     clearIcons() {
@@ -455,20 +435,13 @@ class ActionArea extends Component {
 
     showDock(data) {
         let html = `<h5>${Utils.sanitizeHTML(data.type)} Details</h5><ul>`;
-        // Assuming data.details can be an array or string
-        if (Array.isArray(data.details)) {
-            data.details.forEach(detail => {
-                html += `<li>${Utils.sanitizeHTML(detail)}</li>`;
-            });
-        } else {
+        Array.isArray(data.details) ?
+            data.details.forEach(detail => html += `<li>${Utils.sanitizeHTML(detail)}</li>`) :
             html += `<li>${Utils.sanitizeHTML(data.details)}</li>`;
-        }
 
-        // Add actions if present in data
         if (data.actions && Array.isArray(data.actions)) {
              html += `</ul><h5>Actions</h5><ul>`;
              data.actions.forEach(action => {
-                 // Assuming action is an object { label: string, command: string, params: object }
                  html += `<li><button class="dock-action-button" data-command="${Utils.sanitizeHTML(action.command)}" data-params='${JSON.stringify(action.params)}'>${Utils.sanitizeHTML(action.label)}</button></li>`;
              });
         }
@@ -477,14 +450,13 @@ class ActionArea extends Component {
         this.dockContentEl.innerHTML = html;
         this.dockEl.classList.add('visible');
 
-        // Bind events for action buttons within the dock
         this.dockContentEl.querySelectorAll('.dock-action-button').forEach(button => {
             button.addEventListener('click', (e) => {
                 const cmd = e.currentTarget.dataset.command;
                 const params = JSON.parse(e.currentTarget.dataset.params);
                 console.log(`Dock action: ${cmd} with params`, params);
-                this.app.sendCommand(cmd, params); // Delegate command sending to App
-                this.hideDock(); // Hide dock after action
+                this.app.sendCommand(cmd, params);
+                this.hideDock();
             });
         });
     }
@@ -567,7 +539,7 @@ class SettingsModal extends Component {
             tab.addEventListener('click', (e) => this.switchTab(e.currentTarget));
         });
         this.el.addEventListener('click', (e) => {
-            if (e.target === this.el) this.hide();
+            e.target === this.el && this.hide();
         });
     }
 
@@ -613,8 +585,7 @@ class DialogueManager extends Component {
     constructor(app, elSelector) {
         super(app, elSelector);
         this.modalEl = this.el;
-        this.render(); // Call render to add HTML content
-        // Get element references *after* rendering
+        this.render();
         this.promptEl = this.el.querySelector('#dialogue-prompt');
         this.inputEl = this.el.querySelector('#dialogue-input');
         this.sendButton = this.el.querySelector('#dialogue-send-button');
@@ -626,7 +597,6 @@ class DialogueManager extends Component {
     }
 
     render() {
-        // Add the HTML structure for the dialogue modal content
         this.el.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">
@@ -646,25 +616,15 @@ class DialogueManager extends Component {
     }
 
     bindEvents() {
-        // Ensure elements exist before adding listeners
-        if (this.sendButton) this.sendButton.addEventListener('click', () => this.sendResponse());
-        if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.cancelDialogue());
-        if (this.closeButton) this.closeButton.addEventListener('click', () => this.cancelDialogue());
-        if (this.inputEl) {
-            this.inputEl.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.sendResponse();
-                }
-            });
-        }
-        if (this.modalEl) {
-            this.modalEl.addEventListener('click', (e) => {
-                if (e.target === this.modalEl) {
-                    this.cancelDialogue();
-                }
-            });
-        }
+        this.sendButton?.addEventListener('click', () => this.sendResponse());
+        this.cancelButton?.addEventListener('click', () => this.cancelDialogue());
+        this.closeButton?.addEventListener('click', () => this.cancelDialogue());
+        this.inputEl?.addEventListener('keypress', (e) => {
+            e.key === 'Enter' && (e.preventDefault(), this.sendResponse());
+        });
+        this.modalEl?.addEventListener('click', (e) => {
+            e.target === this.modalEl && this.cancelDialogue();
+        });
     }
 
     show(dialogueRequest) {
@@ -680,39 +640,33 @@ class DialogueManager extends Component {
         }
 
         this.currentDialogueId = dialogueRequest.dialogueId;
-        if (this.promptEl) this.promptEl.textContent = dialogueRequest.prompt;
+        this.promptEl && (this.promptEl.textContent = dialogueRequest.prompt);
         if (this.inputEl) {
             this.inputEl.value = '';
             this.inputEl.focus();
         }
-        if (this.modalEl) this.modalEl.classList.add('visible');
+        this.modalEl && this.modalEl.classList.add('visible');
     }
 
     hide() {
-        if (this.modalEl) this.modalEl.classList.remove('visible');
+        this.modalEl?.classList.remove('visible');
         this.currentDialogueId = null;
-        if (this.promptEl) this.promptEl.textContent = '';
-        if (this.inputEl) this.inputEl.value = '';
+        this.promptEl && (this.promptEl.textContent = '');
+        this.inputEl && (this.inputEl.value = '');
     }
 
     sendResponse() {
         if (!this.currentDialogueId || !this.inputEl) return;
 
         const responseText = this.inputEl.value.trim();
-
         console.log(`Sending dialogue response for ${this.currentDialogueId}: "${responseText}"`);
-        // Use sendRequest for dialogueResponse command
+
         websocketClient.sendRequest('dialogueResponse', {
             dialogueId: this.currentDialogueId,
-            responseData: { text: responseText } // Assuming text_input type
+            responseData: { text: responseText }
         })
-            .then(response => {
-                console.log('Dialogue response acknowledged by backend:', response);
-            })
-            .catch(err => {
-                console.error('Failed to send dialogue response:', err);
-                Notifier.error('Failed to send dialogue response.');
-            });
+            .then(response => console.log('Dialogue response acknowledged by backend:', response))
+            .catch(err => (console.error('Failed to send dialogue response:', err), Notifier.error('Failed to send dialogue response.')));
 
         this.hide();
     }
@@ -721,15 +675,9 @@ class DialogueManager extends Component {
         if (!this.currentDialogueId) return;
 
         console.log(`Cancelling dialogue ${this.currentDialogueId}`);
-        // Use sendRequest for cancelDialogue command
         websocketClient.sendRequest('cancelDialogue', { dialogueId: this.currentDialogueId })
-            .then(response => {
-                 console.log('Dialogue cancellation acknowledged by backend:', response);
-            })
-            .catch(err => {
-                 console.error('Failed to send cancelDialogue command:', err);
-                 Notifier.error('Failed to cancel dialogue.');
-            });
+            .then(response => console.log('Dialogue cancellation acknowledged by backend:', response))
+            .catch(err => (console.error('Failed to send cancelDialogue command:', err), Notifier.error('Failed to cancel dialogue.')));
 
         this.hide();
     }
@@ -743,7 +691,6 @@ class DialogueManager extends Component {
     }
 }
 
-
 class App {
     constructor(elSelector) {
         this.el = document.querySelector(elSelector);
@@ -754,17 +701,9 @@ class App {
         this.bindWebSocketEvents();
         console.log("Netention Note App Ready");
 
-        // Request initial state immediately if connected, otherwise wait for 'connected' event
-        if (websocketClient.isConnected) {
-            console.log('WS already connected, requesting initial state...');
-            this.requestInitialState()
-                .catch(err => {
-                    console.error('Failed to request initial state on ready WS:', err);
-                    Notifier.error('Failed to load initial state.');
-                });
-        } else {
+        websocketClient.isConnected ?
+            (console.log('WS already connected, requesting initial state...'), this.requestInitialState().catch(err => (console.error('Failed to request initial state on ready WS:', err), Notifier.error('Failed to load initial state.')))) :
             console.log('WS not connected, waiting for connection...');
-        }
     }
 
     initComps() {
@@ -790,21 +729,15 @@ class App {
         websocketClient.on('connected', () => {
             console.log('WS Connected');
             Notifier.info('Connected to backend.');
-            // Request initial state upon connection
-            this.requestInitialState()
-                .catch(err => {
-                    console.error('Failed to request initial state:', err);
-                    Notifier.error('Failed to load initial state.');
-                });
+            this.requestInitialState().catch(err => (console.error('Failed to request initial state:', err), Notifier.error('Failed to load initial state.')));
         });
 
         websocketClient.on('disconnected', (e) => {
             console.warn('WS Disconnected', e);
             Notifier.error('Disconnected from backend.');
-            // Clear UI state on disconnection
             this.notes = [];
             this.currentId = null;
-            this.sortAndFilter(); // Render empty list
+            this.sortAndFilter();
             this.editor.clear();
             this.actionArea.clearIcons();
             this.editor.metaEl.textContent = 'Disconnected. Attempting to reconnect...';
@@ -821,21 +754,15 @@ class App {
             Notifier.error('WebSocket error occurred.');
         });
 
-        // Listen for specific update types emitted by the client
         websocketClient.on('initialState', (state) => this.handleInitialState(state));
         websocketClient.on('NoteStatusEvent', (event) => this.handleNoteStatusEvent(event));
         websocketClient.on('NoteUpdatedEvent', (event) => this.handleNoteUpdatedEvent(event));
         websocketClient.on('NoteDeletedEvent', (event) => this.handleNoteDeletedEvent(event));
-        websocketClient.on('AddedEvent', (event) => this.handleNoteAddedEvent(event)); // AddedEvent is still used for new notes
+        websocketClient.on('AddedEvent', (event) => this.handleNoteAddedEvent(event));
         websocketClient.on('dialogueRequest', (request) => this.dialogueManager.show(request));
-        // Generic 'event' listener can be used for debugging or unhandled events
-        // websocketClient.on('event', (event) => { console.log('Received generic event:', event); });
-        // Generic 'response' listener is less useful now that responses are handled by Promises
-        // websocketClient.on('response', (response) => { console.log('Received generic response:', response); });
     }
 
     requestInitialState() {
-        // Use sendRequest for initialStateRequest command
         return websocketClient.sendRequest('initialStateRequest', {});
     }
 
@@ -849,11 +776,9 @@ class App {
             this.sortAndFilter();
             const sorted = this.getSortedFiltered();
             if (sorted.length) {
-                // Try to re-select the previously selected note if it exists, otherwise select the first one
                 const noteToSelect = this.currentId ? this.notes.find(n => n.id === this.currentId) : sorted[0];
                 this.selectNote(noteToSelect ? noteToSelect.id : sorted[0].id);
             } else {
-                // No notes received, clear UI
                 this.currentId = null;
                 this.editor.clear();
                 this.sidebar.setActive(null);
@@ -861,9 +786,8 @@ class App {
             }
         } else {
             console.warn('Initial state received without notes data or notes array is empty.');
-            // If notes array is explicitly empty or missing, treat as no notes
             this.notes = [];
-            this.sortAndFilter(); // Render empty list
+            this.sortAndFilter();
             this.currentId = null;
             this.editor.clear();
             this.sidebar.setActive(null);
@@ -873,62 +797,47 @@ class App {
 
     handleNoteStatusEvent(event) {
         console.log('Received NoteStatusEvent:', event);
-        // NoteStatusEvent payload contains the updated note object
         const updatedNote = event.note;
-        if (!updatedNote || !updatedNote.id) {
+        if (!updatedNote?.id) {
              console.warn('NoteStatusEvent received without valid note data.');
              return;
         }
 
         const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id);
         if (noteIndex !== -1) {
-            // Update existing note object with new data from the event
             Object.assign(this.notes[noteIndex], updatedNote);
             this.sidebar.updateItem(this.notes[noteIndex]);
-            if (this.notes[noteIndex].id === this.currentId) {
-                this.editor.updateMeta(this.notes[noteIndex]);
-            }
-            this.sortAndFilter(); // Re-sort/filter as status might affect sorting
+            this.notes[noteIndex].id === this.currentId && this.editor.updateMeta(this.notes[noteIndex]);
+            this.sortAndFilter();
         } else {
             console.warn('NoteStatusEvent for unknown note ID:', updatedNote.id);
-            // As a fallback, request full state if an event for an unknown note arrives
-            this.requestInitialState()
-                .catch(err => console.error('Failed to request initial state after unknown NoteStatusEvent:', err));
+            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteStatusEvent:', err));
         }
     }
 
     handleNoteUpdatedEvent(event) {
         console.log('Received NoteUpdatedEvent:', event);
-        // NoteUpdatedEvent payload contains the updated note object
         const updatedNote = event.updatedNote;
-         if (!updatedNote || !updatedNote.id) {
+         if (!updatedNote?.id) {
              console.warn('NoteUpdatedEvent received without valid note data.');
              return;
          }
 
         const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id);
         if (noteIndex !== -1) {
-            // Update existing note object with new data from the event
             Object.assign(this.notes[noteIndex], updatedNote);
-
             this.sidebar.updateItem(this.notes[noteIndex]);
-            if (this.notes[noteIndex].id === this.currentId) {
-                this.editor.load(this.notes[noteIndex]); // Reload editor if it's the current note
-            }
-            this.sortAndFilter(); // Re-sort/filter as title, priority, updated might have changed
-            // Assuming action data is part of the updated note payload
-            this.actionArea.renderIcons(this.notes[noteIndex].actions); // Update action icons
+            this.notes[noteIndex].id === this.currentId && this.editor.load(this.notes[noteIndex]);
+            this.sortAndFilter();
+            this.actionArea.renderIcons(this.notes[noteIndex].actions);
         } else {
             console.warn('NoteUpdatedEvent for unknown note ID:', updatedNote.id);
-            // As a fallback, request full state if an event for an unknown note arrives
-            this.requestInitialState()
-                .catch(err => console.error('Failed to request initial state after unknown NoteUpdatedEvent:', err));
+            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteUpdatedEvent:', err));
         }
     }
 
     handleNoteDeletedEvent(event) {
         console.log('Received NoteDeletedEvent:', event);
-        // NoteDeletedEvent payload contains the noteId
         const noteId = event.noteId;
         if (!noteId) {
              console.warn('NoteDeletedEvent received without noteId.');
@@ -938,71 +847,53 @@ class App {
         const noteIndex = this.notes.findIndex(n => n.id === noteId);
         if (noteIndex !== -1) {
             const deletedNoteTitle = this.notes[noteIndex].title || 'Untitled';
-            this.notes.splice(noteIndex, 1); // Remove from local array
-            this.sidebar.removeItem(noteId); // Remove from sidebar UI
+            this.notes.splice(noteIndex, 1);
+            this.sidebar.removeItem(noteId);
 
             if (noteId === this.currentId) {
-                // If the deleted note was the current one, clear the editor
                 this.currentId = null;
                 this.editor.clear();
                 this.sidebar.setActive(null);
                 this.actionArea.clearIcons();
             }
-            this.sortAndFilter(); // Update list view
+            this.sortAndFilter();
             Notifier.success(`Note "${deletedNoteTitle}" deleted.`);
         } else {
             console.warn('NoteDeletedEvent for unknown note ID:', noteId);
-            // As a fallback, request full state if an event for an unknown note arrives
-            this.requestInitialState()
-                .catch(err => console.error('Failed to request initial state after unknown NoteDeletedEvent:', err));
+            this.requestInitialState().catch(err => console.error('Failed to request initial state after unknown NoteDeletedEvent:', err));
         }
     }
 
     handleNoteAddedEvent(event) {
         console.log('Received AddedEvent:', event);
-        // AddedEvent payload contains the new note object
         const newNote = event.note;
-        if (!newNote || !newNote.id) {
+        if (!newNote?.id) {
              console.warn('AddedEvent received without valid note data.');
              return;
         }
 
-        // Check if the note already exists in our local state (might happen on reconnect/initial state)
         if (!this.notes.some(n => n.id === newNote.id)) {
             console.log('Adding new note to local state:', newNote.id);
-            this.notes.unshift(newNote); // Add to the beginning of the array
-            this.sortAndFilter(); // Update list view
-            this.selectNote(newNote.id); // Select the newly added note
-            this.editor.focusTitle(); // Focus the title field
+            this.notes.unshift(newNote);
+            this.sortAndFilter();
+            this.selectNote(newNote.id);
+            this.editor.focusTitle();
             Notifier.success(`New note "${newNote.title || 'Untitled'}" created.`);
         } else {
-            console.warn('AddedEvent received for a note already in the list:', newNote.id);
-            // If it already exists, maybe just select it if it's not already?
-            // Or update it if the event contains updated data? The current backend event
-            // seems to only contain the new note, not updates.
-            // For now, if it exists, just select it.
-             if (this.currentId !== newNote.id) {
-                 this.selectNote(newNote.id);
-             }
+             this.currentId !== newNote.id && this.selectNote(newNote.id);
         }
     }
-
 
     getSortedFiltered() {
         const sort = this.sidebar.getSort(), search = this.sidebar.getSearch().toLowerCase();
         let filtered = this.notes.filter(n => (n.title || '').toLowerCase().includes(search) || Utils.extractText(n.content).toLowerCase().includes(search));
         return filtered.sort((a, b) => {
             switch (sort) {
-                case 'priority':
-                    return (b.priority || 0) - (a.priority || 0);
-                case 'updated':
-                    return b.updated - a.updated;
-                case 'created':
-                    return b.created - a.created;
-                case 'title':
-                    return (a.title || '').localeCompare(b.title || '');
-                default:
-                    return (b.priority || 0) - (a.priority || 0);
+                case 'priority': return (b.priority || 0) - (a.priority || 0);
+                case 'updated': return b.updated - a.updated;
+                case 'created': return b.created - a.created;
+                case 'title': return (a.title || '').localeCompare(b.title || '');
+                default: return (b.priority || 0) - (a.priority || 0);
             }
         });
     }
@@ -1012,147 +903,87 @@ class App {
     }
 
     selectNote(id) {
-        // Save current note before switching
-        if (this.currentId !== null && this.currentId !== id) {
-             this.saveCurrentNote();
-        }
-
-        if (id === this.currentId && id !== null) return; // Already selected
+        this.currentId !== null && this.currentId !== id && this.saveCurrentNote();
+        if (id === this.currentId && id !== null) return;
 
         const n = this.notes.find(n => n.id === id);
         if (n) {
             this.currentId = id;
-            this.editor.load(n); // Load note data into editor
-            this.sidebar.setActive(id); // Highlight in sidebar
-            // Assuming action data is part of the note object
-            this.actionArea.renderIcons(n.actions); // Render action icons for this note
+            this.editor.load(n);
+            this.sidebar.setActive(id);
+            this.actionArea.renderIcons(n.actions);
         } else {
             console.error(`Note ${id} not found in local state.`);
-            // If selected note is somehow missing from local state, clear UI
             this.currentId = null;
             this.editor.clear();
             this.sidebar.setActive(null);
             this.actionArea.clearIcons();
             Notifier.warning(`Note ${id} not found.`);
-            // Optionally request a full state refresh here as a last resort
             this.requestInitialState().catch(err => console.error('Failed to request initial state after selecting unknown note:', err));
         }
     }
 
     saveCurrentNote() {
-        if (this.currentId === null) return false; // No note selected
+        if (this.currentId === null) return false;
         const n = this.notes.find(n => n.id === this.currentId);
         if (n) {
             const d = this.editor.getData();
-            let changed = false;
-            // Check if title or content has actually changed
-            if (n.title !== d.title) {
-                // n.title = d.title; // Update local state immediately for responsiveness - now done by event
-                changed = true;
-            }
-            if (n.content !== d.content) {
-                // n.content = d.content; // Update local state immediately - now done by event
-                changed = true;
-            }
+            const changed = n.title !== d.title || n.content !== d.content;
 
             if (changed) {
-                // Update local timestamp immediately for responsiveness - now done by event
-                // n.updated = Date.now();
-
                 this.editor.setSaveStatus('Saving...');
-                // this.sidebar.updateNote(n); // Update sidebar preview/meta immediately - now done by event
-                // this.editor.updateMeta(n); // Update editor meta immediately - now done by event
-
-                // Send update command to backend
                 websocketClient.sendRequest('updateNote', {
                     noteId: n.id,
-                    title: d.title, // Send the potentially changed title
-                    content: d.content, // Send the potentially changed content
-                    state: n.state, // Include state and priority in update payload
+                    title: d.title,
+                    content: d.content,
+                    state: n.state,
                     priority: n.priority,
-                    color: n.color // Include color
+                    color: n.color
                 }).then(response => {
                     console.log(`Backend acknowledged update for ${n.id}:`, response);
                     this.editor.setSaveStatus('Saved');
-                    // NoteUpdatedEvent from backend will provide the definitive state update
                 }).catch(err => {
                     console.error(`Failed to send update for ${n.id}:`, err);
                     this.editor.setSaveStatus('Save Failed');
                     Notifier.error(`Failed to save note "${n.title || 'Untitled'}".`);
-                    // Error handling: Could revert local state or mark as unsaved
-                    // Reverting local state is tricky with async updates, might need a more robust sync mechanism (CRDTs!)
                 });
-
-                // this.sortAndFilter(); // Re-sort/filter as title/updated might have changed - now done by event
                 console.log(`Attempted save for ${n.id}`);
-                return true; // Indicates a save action was initiated
+                return true;
             } else {
-                this.editor.setSaveStatus(''); // Clear status if no changes
+                this.editor.setSaveStatus('');
             }
         }
-        return false; // No note or no changes
+        return false;
     }
 
     createNewNote() {
-        this.saveCurrentNote(); // Save the currently selected note first
+        this.saveCurrentNote();
 
         const newNoteData = {
             title: "Untitled Note",
             content: "",
-            state: this.settings.defaultState || 'Private', // Use default state from settings
-            color: `hsl(${Math.random() * 360}, 60%, 85%)` // Assign a random color
+            state: this.settings.defaultState || 'Private',
+            color: `hsl(${Math.random() * 360}, 60%, 85%)`
         };
 
-        // Clear UI immediately for perceived responsiveness
         this.editor.clear();
         this.currentId = null;
         this.sidebar.setActive(null);
         this.actionArea.clearIcons();
-        this.editor.metaEl.textContent = 'Requesting new note...'; // Indicate pending action
+        this.editor.metaEl.textContent = 'Requesting new note...';
 
-        // Send addNote command to backend
         websocketClient.sendRequest('addNote', newNoteData)
-            .then(response => {
-                console.log('Backend acknowledged new note creation:', response);
-                Notifier.info("New note creation requested.");
-                // AddedEvent from backend will add the note to local state and select it
-            })
-            .catch(err => {
-                console.error('Failed to send new note command:', err);
-                Notifier.error("Failed to create new note.");
-                this.editor.metaEl.textContent = 'Failed to create new note. Select or create a note.'; // Restore default message
-                // If creation fails, the UI remains cleared, waiting for user action
-            });
+            .then(response => (console.log('Backend acknowledged new note creation:', response), Notifier.info("New note creation requested.")))
+            .catch(err => (console.error('Failed to send new note command:', err), Notifier.error("Failed to create new note."), this.editor.metaEl.textContent = 'Failed to create new note. Select or create a note.'));
     }
 
     updateNotePriority(id, delta) {
         const n = this.notes.find(n => n.id === id);
         if (n) {
-            const oldPriority = n.priority || 0;
-            const newPriority = oldPriority + delta;
-            // n.priority = newPriority; // Update local state immediately - now done by event
-            // n.updated = Date.now(); // Update local timestamp - now done by event
-
-            // this.sidebar.updateNote(n); // Update sidebar preview/meta immediately - now done by event
-            // if (id === this.currentId) {
-            //     this.editor.updateMeta(n); // Update editor meta immediately - now done by event
-            // }
-            // this.sortAndFilter(); // Re-sort/filter as priority/updated changed - now done by event
-
-            // Send updateNote command with only priority changed
-            websocketClient.sendRequest('updateNote', {
-                noteId: id,
-                priority: newPriority
-            }).then(response => {
-                console.log(`Backend acknowledged priority update for ${id}:`, response);
-                // NoteUpdatedEvent from backend will provide the definitive state
-            }).catch(err => {
-                console.error(`Failed to send priority update for ${id}:`, err);
-                Notifier.error(`Failed to update priority for "${n.title || 'Untitled'}".`);
-                // Error handling: Could revert local state
-                // Reverting local state is tricky with async updates
-            });
-
+            const newPriority = (n.priority || 0) + delta;
+            websocketClient.sendRequest('updateNote', { noteId: id, priority: newPriority })
+                .then(response => console.log(`Backend acknowledged priority update for ${id}:`, response))
+                .catch(err => (console.error(`Failed to send priority update for ${id}:`, err), Notifier.error(`Failed to update priority for "${n.title || 'Untitled'}".`)));
             Notifier.info(`Priority update requested for "${n.title || 'Untitled'}"`);
         } else {
             console.warn(`Attempted to update priority for unknown note ID: ${id}`);
@@ -1161,130 +992,61 @@ class App {
     }
 
     handleMenu(action) {
-        this.saveCurrentNote(); // Save current note before performing menu action
+        this.saveCurrentNote();
         const n = this.currentId ? this.notes.find(n => n.id === this.currentId) : null;
 
         switch (action) {
             case 'undo':
-                if (this.currentId && this.editor.contentEl.isContentEditable) {
-                    document.execCommand('undo');
-                    // Note: Undo/Redo on contenteditable doesn't trigger 'input',
-                    // so manual save might be needed or rely on next auto-save.
-                    // For simplicity, we'll rely on the next auto-save or manual save.
-                } else {
-                    Notifier.warning('Select a note and focus the editor to undo.');
-                }
+                this.currentId && this.editor.contentEl.isContentEditable ? document.execCommand('undo') : Notifier.warning('Select a note and focus the editor to undo.');
                 break;
             case 'redo':
-                if (this.currentId && this.editor.contentEl.isContentEditable) {
-                    document.execCommand('redo');
-                } else {
-                    Notifier.warning('Select a note and focus the editor to redo.');
-                }
+                this.currentId && this.editor.contentEl.isContentEditable ? document.execCommand('redo') : Notifier.warning('Select a note and focus the editor to redo.');
                 break;
             case 'clone':
-                if (n) {
-                    // Use sendRequest for cloneNote command
-                    websocketClient.sendRequest('cloneNote', {noteId: n.id})
-                        .then(response => {
-                            console.log('Backend acknowledged note clone:', response);
-                            Notifier.info('Note cloning requested.');
-                            // AddedEvent from backend will handle adding the cloned note
-                        })
-                        .catch(err => {
-                            console.error('Failed to send clone note command:', err);
-                            Notifier.error('Failed to clone note.');
-                        });
-                } else Notifier.warning('Select note to clone.');
+                n ? websocketClient.sendRequest('cloneNote', {noteId: n.id})
+                        .then(response => (console.log('Backend acknowledged note clone:', response), Notifier.info('Note cloning requested.')))
+                        .catch(err => (console.error('Failed to send clone note command:', err), Notifier.error('Failed to clone note.')))
+                    : Notifier.warning('Select note to clone.');
                 break;
             case 'insert':
-                if (this.currentId && this.editor.contentEl.isContentEditable) {
-                    this.editor.insertField();
-                    // Inserting field modifies content, which triggers 'input' and auto-save
-                } else {
-                    Notifier.warning('Select a note and focus the editor to insert a field.');
-                }
+                this.currentId && this.editor.contentEl.isContentEditable ? this.editor.insertField() : Notifier.warning('Select a note and focus the editor to insert a field.');
                 break;
-            case 'publish':
-                this.updateNoteState(n, 'ACTIVE'); // Assuming 'Published' maps to 'ACTIVE' status
-                break;
-            case 'set-private':
-                this.updateNoteState(n, 'IDLE'); // Assuming 'Private' maps to 'IDLE' status
-                break;
+            case 'publish': this.updateNoteState(n, 'ACTIVE'); break;
+            case 'set-private': this.updateNoteState(n, 'IDLE'); break;
             case 'enhance':
             case 'summary':
-                if (n) {
-                    // Send runTool command to backend
-                    websocketClient.sendRequest('runTool', {name: action, parameters: { note_id: n.id }});
-                } else Notifier.warning(`Select note to run ${action} tool.`);
+                n ? websocketClient.sendRequest('runTool', {name: action, parameters: { note_id: n.id }})
+                    : Notifier.warning(`Select note to run ${action} tool.`);
                 break;
             case 'delete':
-                if (n && confirm(`Delete "${n.title || 'Untitled Note'}"?`)) {
-                    // Send deleteNote command to backend
+                n && confirm(`Delete "${n.title || 'Untitled Note'}"?`) ?
                     websocketClient.sendRequest('deleteNote', {noteId: n.id})
-                        .then(response => {
-                            console.log('Backend acknowledged note deletion:', response);
-                            Notifier.success('Note deletion requested.');
-                            // NoteDeletedEvent from backend will handle removing the note from UI
-                        })
-                        .catch(err => {
-                            console.error('Failed to send delete note command:', err);
-                            Notifier.error('Failed to delete note.');
-                        });
-                } else if (!n) Notifier.warning('Select note to delete.');
+                        .then(response => (console.log('Backend acknowledged note deletion:', response), Notifier.success('Note deletion requested.')))
+                        .catch(err => (console.error('Failed to send delete note command:', err), Notifier.error('Failed to delete note.')))
+                    : !n && Notifier.warning('Select note to delete.');
                 break;
             case 'view-source':
-                if (n) alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\nCreated: ${new Date(n.created).toLocaleString()}\nUpdated: ${new Date(n.updated).toLocaleString()}\n\nContent:\n${n.content}`); else Notifier.warning('Select note to view source.');
+                n ? alert(`ID: ${n.id}\nTitle: ${n.title}\nState: ${n.state}\nPrio: ${n.priority}\nCreated: ${new Date(n.created).toLocaleString()}\nUpdated: ${new Date(n.updated).toLocaleString()}\n\nContent:\n${n.content}`) : Notifier.warning('Select note to view source.');
                 break;
-            case 'settings':
-                this.settingsModal.show();
-                break;
-            default:
-                console.warn(`Unknown menu action: ${action}`);
+            case 'settings': this.settingsModal.show(); break;
+            default: console.warn(`Unknown menu action: ${action}`);
         }
     }
 
     updateNoteState(note, newState) {
-        if (note) {
-            const oldState = note.state;
-            // note.state = newState; // Update local state immediately - now done by event
-            // note.updated = Date.now(); // Update local timestamp - now done by event
-
-            // this.editor.updateMeta(note); // Update editor meta immediately - now done by event
-            // this.sidebar.updateNote(note); // Update sidebar preview/meta immediately - now done by event
-            // this.sortAndFilter(); // Re-sort/filter as state/updated changed - now done by event
-
-            // Send updateNote command with only state changed
-            websocketClient.sendRequest('updateNote', {
-                noteId: note.id,
-                state: newState
-            }).then(response => {
-                console.log(`Backend acknowledged state update for ${note.id}:`, response);
-                // NoteStatusEvent from backend will provide the definitive state
-            }).catch(err => {
-                console.error(`Failed to send state update for ${note.id}:`, err);
-                Notifier.error(`Failed to set note state to ${newState}.`);
-                // Error handling: Revert local state on failure
-                // Reverting local state is tricky with async updates
-            });
-
-            Notifier.info(`Note "${note.title || 'Untitled'}" set to ${newState}.`);
-        } else Notifier.warning(`Select a note to set ${newState}.`);
+        note ?
+            (websocketClient.sendRequest('updateNote', { noteId: note.id, state: newState })
+                .then(response => console.log(`Backend acknowledged state update for ${note.id}:`, response))
+                .catch(err => (console.error(`Failed to send state update for ${note.id}:`, err), Notifier.error(`Failed to set note state to ${newState}.`))),
+             Notifier.info(`Note "${note.title || 'Untitled'}" set to ${newState}.`))
+            : Notifier.warning(`Select a note to set ${newState}.`);
     }
 
     updateSettings(settings) {
         this.settings = settings;
-
-        // Send updateSettings command to backend
         websocketClient.sendRequest('updateSettings', {settings: settings})
-            .then(response => {
-                console.log('Backend acknowledged settings update:', response);
-                // NoteUpdatedEvent for config note will update UI if needed
-            })
-            .catch(err => {
-                console.error('Failed to send settings update command:', err);
-                Notifier.error('Failed to save settings.');
-            });
+            .then(response => console.log('Backend acknowledged settings update:', response))
+            .catch(err => (console.error('Failed to send settings update command:', err), Notifier.error('Failed to save settings.')));
     }
 
     showDock(d) {
@@ -1292,23 +1054,12 @@ class App {
     }
 
     sendCommand(commandName, parameters = {}) {
-        // This method is used by ActionArea dock buttons
-        // These are generic commands, map them to sendRequest
         websocketClient.sendRequest(commandName, parameters)
-            .then(response => {
-                console.log(`Backend acknowledged command '${commandName}':`, response);
-                Notifier.info(`Command '${commandName}' requested.`);
-                // Backend events/responses related to the command will update UI
-            })
-            .catch(err => {
-                console.error(`Failed to run command '${commandName}'.`);
-                Notifier.error(`Failed to run command '${commandName}'.`);
-            });
+            .then(response => (console.log(`Backend acknowledged command '${commandName}':`, response), Notifier.info(`Command '${commandName}' requested.`)))
+            .catch(err => (console.error(`Failed to run command '${commandName}'.`), Notifier.error(`Failed to run command '${commandName}'.`)));
     }
 
     cancelDialogue(dialogueId) {
-        // This method is used by DialogueManager
-        // Map to sendRequest with cancelDialogue command
         websocketClient.sendRequest('cancelDialogue', {dialogueId: dialogueId})
             .then(response => console.log(`Backend acknowledged dialogue cancellation ${dialogueId}:`, response))
             .catch(err => console.error(`Failed to send cancelDialogue command ${dialogueId}:`, err));

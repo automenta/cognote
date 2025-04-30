@@ -124,8 +124,6 @@ public class Cog {
                 Thread.currentThread().interrupt();
                 error("Main thread interrupted.");
             }
-
-
         } catch (Exception e) {
             error("Initialization/Startup failed: " + e.getMessage());
             e.printStackTrace();
@@ -175,7 +173,6 @@ public class Cog {
         plugins.add(new RetractionPlugin());
         plugins.add(new TmsPlugin());
         plugins.add(new UserFeedbackPlugin());
-
         plugins.add(new TaskDecomposePlugin());
 
         reasoner.add(new Reason.ForwardChainingReasonerPlugin());
@@ -189,7 +186,6 @@ public class Cog {
         tools.add(new RetractTool(this));
         tools.add(new QueryTool(this));
         tools.add(new LogMessageTool(this));
-
         tools.add(new SummarizeTool(this));
         tools.add(new IdentifyConceptsTool(this));
         tools.add(new GenerateQuestionsTool(this));
@@ -215,7 +211,6 @@ public class Cog {
         if (notes.putIfAbsent(note.id(), note) == null) {
             events.emit(new Event.AddedEvent(note));
             message("Added note: " + note.title() + " [" + note.id() + "]");
-            // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
         } else {
             message("Note with ID " + note.id() + " already exists.");
         }
@@ -229,12 +224,10 @@ public class Cog {
 
         ofNullable(notes.remove(noteId)).ifPresent(note -> {
             events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
-            events.emit(new Event.RemovedEvent(note)); // Deprecated, will be replaced by NoteDeletedEvent
-            events.emit(new Event.NoteDeletedEvent(noteId)); // New event for deletion
+            events.emit(new Event.NoteDeletedEvent(noteId));
             context.removeNoteKb(noteId, "CogNote-Remove");
             context.removeActiveNote(noteId);
             message("Removed note: " + note.title() + " [" + note.id() + "]");
-            // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
         });
     }
 
@@ -243,7 +236,7 @@ public class Cog {
             if (note.status() != newStatus) {
                 var oldStatus = note.status();
                 note.status = newStatus;
-                note.updated = System.currentTimeMillis(); // Update timestamp on status change
+                note.updated = System.currentTimeMillis();
 
                 switch (newStatus) {
                     case ACTIVE -> context.addActiveNote(noteId);
@@ -303,8 +296,8 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.text.equals(newText)) {
                 note.text = newText;
-                note.updated = System.currentTimeMillis(); // Update timestamp on text change
-                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                note.updated = System.currentTimeMillis();
+                events.emit(new Event.NoteUpdatedEvent(note));
                 message("Updated text for note [" + note.id() + "]");
             }
         });
@@ -314,8 +307,8 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!note.title.equals(newTitle)) {
                 note.title = newTitle;
-                note.updated = System.currentTimeMillis(); // Update timestamp on title change
-                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                note.updated = System.currentTimeMillis();
+                events.emit(new Event.NoteUpdatedEvent(note));
                 message("Updated title for note [" + note.id() + "]");
             }
         });
@@ -325,8 +318,8 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (note.pri != newPriority) {
                 note.pri = newPriority;
-                note.updated = System.currentTimeMillis(); // Update timestamp on priority change
-                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                note.updated = System.currentTimeMillis();
+                events.emit(new Event.NoteUpdatedEvent(note));
                 message("Updated priority for note [" + note.id() + "] to " + newPriority);
             }
         });
@@ -336,8 +329,8 @@ public class Cog {
         ofNullable(notes.get(noteId)).ifPresent(note -> {
             if (!Objects.equals(note.color, newColor)) {
                 note.color = newColor;
-                note.updated = System.currentTimeMillis(); // Update timestamp on color change
-                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event
+                note.updated = System.currentTimeMillis();
+                events.emit(new Event.NoteUpdatedEvent(note));
                 message("Updated color for note [" + note.id() + "] to " + newColor);
             }
         });
@@ -355,8 +348,7 @@ public class Cog {
                 changed = true;
             }
             if (state != null && note.status() != state) {
-                updateNoteStatus(noteId, state); // Use existing status update logic
-                // updateNoteStatus emits its own event, no need to set changed = true here for NoteUpdatedEvent
+                updateNoteStatus(noteId, state);
             }
             if (priority != null && note.pri != priority) {
                 note.pri = priority;
@@ -367,36 +359,29 @@ public class Cog {
                 changed = true;
             }
 
-            // Only emit NoteUpdatedEvent if fields other than status changed,
-            // as updateNoteStatus already emits NoteStatusEvent.
-            // Or, emit NoteUpdatedEvent always with the latest state if any field changed.
-            // Let's emit NoteUpdatedEvent if title, content, priority, or color changed.
             if (changed) {
-                note.updated = System.currentTimeMillis(); // Update timestamp if any field changed
+                note.updated = System.currentTimeMillis();
                 events.emit(new Event.NoteUpdatedEvent(note));
                 message("Updated note [" + note.id() + "]");
             }
         });
     }
 
-
     public void cloneNote(String noteId) {
-        var n = notes.get(noteId);
-        ofNullable(n).ifPresentOrElse(originalNote -> {
+        ofNullable(notes.get(noteId)).ifPresentOrElse(originalNote -> {
             var c = new Note(
                     Cog.id(Cog.ID_PREFIX_NOTE),
                     "Clone of " + originalNote.title(),
                     originalNote.text(),
-                    Note.Status.IDLE // Cloned notes start as IDLE
+                    Note.Status.IDLE
             );
-            c.pri = n.pri;
-            c.color = n.color;
+            c.pri = originalNote.pri;
+            c.color = originalNote.color;
             c.updated = System.currentTimeMillis();
-            addNote(c); // addNote emits AddedEvent
+            addNote(c);
             message("Cloned note [" + noteId + "] to [" + c.id() + "]");
         }, () -> error("Attempted to clone unknown note ID: " + noteId));
     }
-
 
     public synchronized void clear() {
         message("Clearing all knowledge...");
@@ -428,7 +413,6 @@ public class Cog {
         setPaused(false);
         message("Knowledge cleared.");
         events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
-        // assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // UI will update from events
     }
 
     public boolean updateConfig(String newConfigJsonText) {
@@ -437,8 +421,8 @@ public class Cog {
             applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
                 note.text = Json.str(newConfig);
-                note.updated = System.currentTimeMillis(); // Update timestamp on config change
-                events.emit(new Event.NoteUpdatedEvent(note)); // Emit update event for config note
+                note.updated = System.currentTimeMillis();
+                events.emit(new Event.NoteUpdatedEvent(note));
                 message("Configuration updated.");
             });
             lm.reconfigure();
@@ -464,44 +448,17 @@ public class Cog {
                 globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
     }
 
-    // assertUiAction is likely deprecated with the new protocol,
-    // as UI updates should come from events wrapped in 'update' signals.
-    // Keeping it for now but marking for review.
-    public void assertUiAction(String actionType, JsonNode actionData) {
-        var uiActionTerm = new Term.Lst(
-                Term.Atom.of(Protocol.PRED_UI_ACTION),
-                Term.Atom.of(actionType),
-                Term.Atom.of(Json.str(actionData)) // Storing JSON as a string atom
-        );
-
-        context.tryCommit(new Assertion.PotentialAssertion(
-                uiActionTerm,
-                Cog.INPUT_ASSERTION_BASE_PRIORITY,
-                java.util.Set.of(),
-                "backend:ui-action",
-                false, false, false,
-                Protocol.KB_UI_ACTIONS,
-                Logic.AssertionType.GROUND,
-                List.of(),
-                0
-        ), "backend:ui-action");
-    }
-
-
     public void start() {
         if (!running.get()) {
             error("Cannot restart a stopped system.");
-        } else {
-            paused.set(true);
-            status("Initializing");
+            return;
         }
+        paused.set(true);
+        status("Initializing");
 
         load();
-
         lm.reconfigure();
-
         plugins.initializeAll();
-
         reasoner.initializeAll();
 
         notes.values().stream()
@@ -517,18 +474,6 @@ public class Cog {
     }
 
     public void stop() {
-
-        dialogue.clear();
-
-        reasoner.shutdownAll();
-
-        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
-        lm.activeLlmTasks.clear();
-
-        save();
-
-        plugins.shutdownAll();
-
         if (!running.compareAndSet(true, false)) return;
         message("Stopping system...");
         status("Stopping");
@@ -536,6 +481,13 @@ public class Cog {
         synchronized (pauseLock) {
             pauseLock.notifyAll();
         }
+
+        dialogue.clear();
+        reasoner.shutdownAll();
+        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
+        lm.activeLlmTasks.clear();
+        save();
+        plugins.shutdownAll();
 
         shutdownExecutor(mainExecutor, "Main Executor");
         events.shutdown();
@@ -625,11 +577,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<Event> listener = e -> {
-            if (e instanceof Answer.AnswerEvent) {
-                var result = ((Answer.AnswerEvent) e).result();
-                if (result.queryId().equals(queryID)) {
-                    answerFuture.complete(result);
-                }
+            if (e instanceof Answer.AnswerEvent resultEvent && resultEvent.result().queryId().equals(queryID)) {
+                answerFuture.complete(resultEvent.result());
             }
         };
         @SuppressWarnings("unchecked")
@@ -671,7 +620,6 @@ public class Cog {
     interface DoubleDoublePredicate {
         boolean test(double a, double b);
     }
-
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Configuration(

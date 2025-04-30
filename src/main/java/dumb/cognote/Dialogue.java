@@ -13,9 +13,7 @@ import static java.util.Optional.ofNullable;
 public class Dialogue {
 
     private final Cog cog;
-
     private final ConcurrentMap<String, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
-
     private final long requestTimeoutSeconds = 60;
 
     public Dialogue(Cog cog) {

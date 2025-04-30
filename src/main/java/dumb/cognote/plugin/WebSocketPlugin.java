@@ -44,8 +44,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             public void onOpen(WebSocket conn, ClientHandshake handshake) {
                 clients.add(conn);
                 message("WebSocket client connected: " + conn.getRemoteSocketAddress());
-                // Initial state is now sent only upon explicit request from the client
-                // sendInitialState(conn);
             }
 
             @Override
@@ -73,12 +71,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         };
         server.start();
 
-        // Listen for all events and wrap them in update signals
         events.on(Event.class, this::broadcastEventAsUpdate);
-        // Specific handlers for events that become 'response', 'initialState', 'dialogueRequest' updates
         events.on(Answer.AnswerEvent.class, this::broadcastAnswerEventAsUpdate);
         events.on(Events.DialogueRequestEvent.class, this::broadcastDialogueRequestEventAsUpdate);
-        // Log messages are also events, handled by broadcastEventAsUpdate
     }
 
     @Override
@@ -122,7 +117,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 return;
             }
 
-            // Handle REQUEST signal
             String command = payload.get("command") != null ? payload.get("command").asText() : null;
             JsonNode parameters = payload.get("parameters");
 
@@ -148,60 +142,21 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             String sourceId = "client:" + conn.getRemoteSocketAddress().toString();
 
             switch (command) {
-                case COMMAND_GET_INITIAL_STATE:
-                    sendInitialState(conn, requestId);
-                    break;
-
-                case COMMAND_ASSERT_KIF:
-                    handleAssertKifRequest(conn, requestId, parameters, sourceId);
-                    break;
-
-                case COMMAND_RUN_TOOL:
-                    handleRunToolRequest(conn, requestId, parameters, sourceId);
-                    break;
-
-                case COMMAND_RUN_QUERY:
-                    handleRunQueryRequest(conn, requestId, parameters, sourceId);
-                    break;
-
-                case COMMAND_WAIT:
-                    handleWaitRequest(conn, requestId, parameters, sourceId);
-                    break;
-
-                case COMMAND_RETRACT:
-                    handleRetractRequest(conn, requestId, parameters, sourceId);
-                    break;
-
-                case COMMAND_CANCEL_DIALOGUE:
-                    handleCancelDialogueRequest(conn, requestId, parameters);
-                    break;
-
-                case COMMAND_DIALOGUE_RESPONSE:
-                    handleDialogueResponseRequest(conn, requestId, parameters);
-                    break;
-
-                // Note Management Commands
-                case COMMAND_ADD_NOTE:
-                    handleAddNoteRequest(conn, requestId, parameters);
-                    break;
-                case COMMAND_UPDATE_NOTE:
-                    handleUpdateNoteRequest(conn, requestId, parameters);
-                    break;
-                case COMMAND_DELETE_NOTE:
-                    handleDeleteNoteRequest(conn, requestId, parameters);
-                    break;
-                case COMMAND_CLONE_NOTE:
-                    handleCloneNoteRequest(conn, requestId, parameters);
-                    break;
-                case COMMAND_CLEAR_ALL:
-                    handleClearAllRequest(conn, requestId);
-                    break;
-                case COMMAND_UPDATE_SETTINGS:
-                    handleUpdateSettingsRequest(conn, requestId, parameters);
-                    break;
-
-                default:
-                    sendFailureResponse(conn, requestId, "Unknown command: " + command);
+                case COMMAND_GET_INITIAL_STATE -> sendInitialState(conn, requestId);
+                case COMMAND_ASSERT_KIF -> handleAssertKifRequest(conn, requestId, parameters, sourceId);
+                case COMMAND_RUN_TOOL -> handleRunToolRequest(conn, requestId, parameters, sourceId);
+                case COMMAND_RUN_QUERY -> handleRunQueryRequest(conn, requestId, parameters, sourceId);
+                case COMMAND_WAIT -> handleWaitRequest(conn, requestId, parameters, sourceId);
+                case COMMAND_RETRACT -> handleRetractRequest(conn, requestId, parameters, sourceId);
+                case COMMAND_CANCEL_DIALOGUE -> handleCancelDialogueRequest(conn, requestId, parameters);
+                case COMMAND_DIALOGUE_RESPONSE -> handleDialogueResponseRequest(conn, requestId, parameters);
+                case COMMAND_ADD_NOTE -> handleAddNoteRequest(conn, requestId, parameters);
+                case COMMAND_UPDATE_NOTE -> handleUpdateNoteRequest(conn, requestId, parameters);
+                case COMMAND_DELETE_NOTE -> handleDeleteNoteRequest(conn, requestId, parameters);
+                case COMMAND_CLONE_NOTE -> handleCloneNoteRequest(conn, requestId, parameters);
+                case COMMAND_CLEAR_ALL -> handleClearAllRequest(conn, requestId);
+                case COMMAND_UPDATE_SETTINGS -> handleUpdateSettingsRequest(conn, requestId, parameters);
+                default -> sendFailureResponse(conn, requestId, "Unknown command: " + command);
             }
         } catch (Exception e) {
             error("Error processing command '" + command + "' for request " + requestId + ": " + e.getMessage());
@@ -220,7 +175,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         var noteId = noteIdNode != null && noteIdNode.isTextual() ? noteIdNode.asText() : null;
-
         var successCount = 0;
         var errorMessages = new StringBuilder();
 
@@ -233,17 +187,15 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             try {
                 var terms = KifParser.parseKif(kifString);
                 for (var term : terms) {
-                    // Asserting directly into the global KB or a specified note's KB
-                    // This bypasses the old KB_CLIENT_INPUT mechanism for direct assertions
-                    var targetKb = noteId != null ? noteId : Cog.GLOBAL_KB_NOTE_ID; // Default to global KB if no noteId
+                    var targetKb = noteId != null ? noteId : Cog.GLOBAL_KB_NOTE_ID;
                     var potentialAssertion = new Assertion.PotentialAssertion(
-                            (Lst) term, // Assert the parsed term directly
+                            (Lst) term,
                             INPUT_ASSERTION_BASE_PRIORITY,
                             Set.of(),
                             sourceId,
                             false, false, false,
                             targetKb,
-                            Logic.AssertionType.GROUND, // Assuming ground for direct assertions
+                            Logic.AssertionType.GROUND,
                             List.of(),
                             0
                     );
@@ -268,7 +220,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     private void handleRunToolRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) throws JsonProcessingException {
         var toolNameNode = parameters.get("name");
-        var toolParamsNode = parameters.get("parameters"); // Expecting a JSON object
+        var toolParamsNode = parameters.get("parameters");
 
         if (toolNameNode == null || !toolNameNode.isTextual() || toolNameNode.asText().isBlank() || toolParamsNode == null || !toolParamsNode.isObject()) {
             sendFailureResponse(conn, requestId, "Invalid parameters for '" + COMMAND_RUN_TOOL + "': missing 'name' (string) or 'parameters' (object).");
@@ -276,7 +228,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         var toolName = toolNameNode.asText();
-
         Map<String, Object> toolParams = Json.obj(Json.str(toolParamsNode), Map.class);
 
         cog.tools.get(toolName).ifPresentOrElse(tool -> {
@@ -287,12 +238,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     sendErrorResponse(conn, requestId, "Tool execution failed for '" + toolName + "': " + ex.getMessage());
                 } else {
                     message("Tool '" + toolName + "' executed successfully for request " + requestId + ".");
-                    // Tool execution might produce events, which are broadcast separately.
-                    // A simple success response here acknowledges the command was received and started.
                     sendSuccessResponse(conn, requestId, null, "Tool '" + toolName + "' execution started.");
                 }
             }, cog.events.exe);
-
         }, () -> sendFailureResponse(conn, requestId, "Tool not found: " + toolName));
     }
 
@@ -300,7 +248,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var queryTypeNode = parameters.get("queryType");
         var patternStringNode = parameters.get("pattern");
         var targetKbIdNode = parameters.get("targetKbId");
-        var queryParamsNode = parameters.get("parameters"); // Expecting a JSON object
+        var queryParamsNode = parameters.get("parameters");
 
         if (queryTypeNode == null || !queryTypeNode.isTextual() || queryTypeNode.asText().isBlank() ||
                 patternStringNode == null || !patternStringNode.isTextual() || patternStringNode.asText().isBlank()) {
@@ -313,7 +261,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var targetKbId = targetKbIdNode != null && targetKbIdNode.isTextual() ? targetKbIdNode.asText() : null;
         Map<String, Object> queryParams = queryParamsNode != null && queryParamsNode.isObject() ? Json.obj(Json.str(queryParamsNode), Map.class) : Map.of();
 
-
         try {
             var queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
             var terms = KifParser.parseKif(patternString);
@@ -324,10 +271,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             var queryId = Cog.id(Cog.ID_PREFIX_QUERY);
             var query = new Query(queryId, queryType, pattern, targetKbId, queryParams);
 
-            // Query execution is asynchronous and results in an AnswerEvent
-            // The AnswerEvent will be broadcast as an 'update' signal with type 'response'
-            // and inReplyToId matching the queryId.
-            // We send an immediate success response acknowledging the query submission.
             cog.events.emit(new Query.QueryEvent(query));
             message("Processed RunQuery request: Submitted query " + queryId + " for request " + requestId);
             sendSuccessResponse(conn, requestId, Json.node().put("queryId", queryId), "Query submitted.");
@@ -344,16 +287,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void handleWaitRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) throws JsonProcessingException {
-        // Wait command is typically handled by asserting a request that a plugin processes.
-        // With direct commands, we could implement a blocking wait here, but that's generally
-        // bad for a WebSocket server. A better approach is to assert a temporary goal
-        // or use a backend mechanism that notifies when the condition is met.
-        // For now, let's assert a request term into a specific KB that a plugin listens to.
-        // This keeps the WebSocket handler non-blocking.
-        // This is similar to the old RequestProcessorPlugin approach but triggered by a direct command.
-
         var conditionStringNode = parameters.get("condition");
-        var waitParamsNode = parameters.get("parameters"); // Expecting a JSON object
+        var waitParamsNode = parameters.get("parameters");
 
         if (conditionStringNode == null || !conditionStringNode.isTextual() || conditionStringNode.asText().isBlank()) {
             sendFailureResponse(conn, requestId, "Invalid parameters for '" + COMMAND_WAIT + "': missing 'condition' (string KIF).");
@@ -363,21 +298,11 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var conditionString = conditionStringNode.asText();
         Map<String, Object> waitParams = waitParamsNode != null && waitParamsNode.isObject() ? Json.obj(Json.str(waitParamsNode), Map.class) : Map.of();
 
-
         try {
             var terms = KifParser.parseKif(conditionString);
             if (terms.size() != 1 || !(terms.getFirst() instanceof Lst conditionTerm)) {
                 throw new KifParser.ParseException("Wait condition must be a single KIF list.");
             }
-
-            // Create a request term for the backend to process the wait condition
-            // This assumes a backend plugin (like RequestProcessorPlugin, adapted)
-            // listens for (request wait ...) terms in a specific KB.
-            // The response to the wait would need to be sent back using the requestId.
-            // This requires a mechanism for the backend plugin to signal back to the WebSocket connection.
-            // A simpler approach for Phase 1 might be to just acknowledge the wait request submission.
-            // A true 'wait' command needs more complex backend coordination.
-            // Let's acknowledge submission for now.
 
             message("Processed Wait request: Condition '" + conditionString + "' for request " + requestId);
             sendSuccessResponse(conn, requestId, null, "Wait condition submission acknowledged. Backend processing required.");
@@ -394,7 +319,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void handleRetractRequest(WebSocket conn, String requestId, JsonNode parameters, String sourceId) {
         var typeNode = parameters.get("type");
         var targetNode = parameters.get("target");
-        var noteIdNode = parameters.get("noteId"); // Optional note context
+        var noteIdNode = parameters.get("noteId");
 
         if (typeNode == null || !typeNode.isTextual() || typeNode.asText().isBlank() ||
                 targetNode == null || !targetNode.isTextual() || targetNode.asText().isBlank()) {
@@ -408,7 +333,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         try {
             Logic.RetractionType typeEnum = Logic.RetractionType.valueOf(typeStr.toUpperCase());
-            // Emit RetractionRequestEvent directly
             events.emit(new Event.RetractionRequestEvent(target, typeEnum, sourceId, noteId));
             message("Processed Retract request: Type=" + typeStr + ", Target='" + target + "' for request " + requestId);
             sendSuccessResponse(conn, requestId, null, "Retraction request emitted.");
@@ -449,7 +373,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         cog.dialogue.handleResponse(dialogueId, responseDataNode)
                 .ifPresentOrElse(
                         future -> {
-                            // Response handled, future will complete the original request
                             message("Processed DialogueResponse request for ID " + dialogueId + " (request " + requestId + ")");
                             sendSuccessResponse(conn, requestId, null, "Dialogue response processed.");
                         },
@@ -482,11 +405,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var priority = priorityNode != null && priorityNode.isInt() ? priorityNode.asInt() : 0;
         var color = colorNode != null && colorNode.isTextual() ? colorNode.asText() : null;
 
-
         var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, content, state);
         newNote.pri = priority;
         newNote.color = color;
-        cog.addNote(newNote); // addNote emits AddedEvent
+        cog.addNote(newNote);
 
         message("Processed AddNote request: " + title + " (request " + requestId + ")");
         sendSuccessResponse(conn, requestId, Json.node().put("noteId", newNote.id()), "Note added.");
@@ -520,10 +442,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var priority = priorityNode != null && priorityNode.isInt() ? priorityNode.asInt() : null;
         var color = colorNode != null && colorNode.isTextual() ? colorNode.asText() : null;
 
-
         Note.Status STATE = state;
         cog.note(noteId).ifPresentOrElse(note -> {
-            cog.updateNote(noteId, title, content, STATE, priority, color); // updateNote emits NoteUpdatedEvent/NoteStatusEvent
+            cog.updateNote(noteId, title, content, STATE, priority, color);
             message("Processed UpdateNote request for ID: " + noteId + " (request " + requestId + ")");
             sendSuccessResponse(conn, requestId, null, "Note updated.");
         }, () -> sendFailureResponse(conn, requestId, "Note not found: " + noteId));
@@ -538,7 +459,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
 
         var noteId = noteIdNode.asText();
-        cog.removeNote(noteId); // removeNote emits RetractionRequestEvent and NoteDeletedEvent
+        cog.removeNote(noteId);
 
         message("Processed DeleteNote request for ID: " + noteId + " (request " + requestId + ")");
         sendSuccessResponse(conn, requestId, null, "Note deletion requested.");
@@ -554,30 +475,29 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         var noteId = noteIdNode.asText();
         cog.note(noteId).ifPresentOrElse(originalNote -> {
-            cog.cloneNote(noteId); // cloneNote emits AddedEvent for the new note
+            cog.cloneNote(noteId);
             message("Processed CloneNote request for ID: " + noteId + " (request " + requestId + ")");
             sendSuccessResponse(conn, requestId, null, "Note cloning requested.");
         }, () -> sendFailureResponse(conn, requestId, "Note not found: " + noteId));
     }
 
     private void handleClearAllRequest(WebSocket conn, String requestId) {
-        cog.clear(); // clear emits events for removed notes and added system notes
+        cog.clear();
         message("Processed ClearAll request (request " + requestId + ")");
         sendSuccessResponse(conn, requestId, null, "System clear initiated.");
     }
 
     private void handleUpdateSettingsRequest(WebSocket conn, String requestId, JsonNode parameters) {
-        var settingsNode = parameters.get("settings"); // Expecting a JSON object
+        var settingsNode = parameters.get("settings");
 
         if (settingsNode == null || !settingsNode.isObject()) {
             sendFailureResponse(conn, requestId, "Invalid parameters for '" + COMMAND_UPDATE_SETTINGS + "': missing 'settings' (object).");
             return;
         }
 
-        // Convert settings JsonNode to JSON string and pass to updateConfig
         var settingsJsonText = Json.str(settingsNode);
 
-        if (cog.updateConfig(settingsJsonText)) { // updateConfig emits NoteUpdatedEvent for config note
+        if (cog.updateConfig(settingsJsonText)) {
             message("Processed UpdateSettings request (request " + requestId + ")");
             sendSuccessResponse(conn, requestId, null, "Settings updated.");
         } else {
@@ -585,15 +505,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
     }
 
-
-    // --- Broadcasting Events as Updates ---
-
     private void broadcastEventAsUpdate(Event event) {
-        // Filter out events that are handled by specific broadcast methods
-        // NoteUpdatedEvent, NoteDeletedEvent, NoteStatusEvent are now handled here
-        if (event instanceof Answer.AnswerEvent || event instanceof Events.DialogueRequestEvent) {
-            return;
-        }
+        if (event instanceof Answer.AnswerEvent || event instanceof Events.DialogueRequestEvent) return;
 
         var eventJson = Json.node(event);
         if (eventJson == null || eventJson.isNull()) {
@@ -605,7 +518,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 .put("type", SIGNAL_TYPE_UPDATE)
                 .put("id", UUID.randomUUID().toString())
                 .put("updateType", UPDATE_TYPE_EVENT)
-                .set("payload", eventJson); // The event object is the payload
+                .set("payload", eventJson);
 
         broadcast(Json.str(update));
     }
@@ -615,9 +528,9 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         ObjectNode update = Json.node()
                 .put("type", SIGNAL_TYPE_UPDATE)
                 .put("id", UUID.randomUUID().toString())
-                .put("updateType", UPDATE_TYPE_RESPONSE) // Answers are responses to queries
-                .put("inReplyToId", event.result().queryId()) // Link back to the query ID
-                .set("payload", answerJson); // The answer result is the payload
+                .put("updateType", UPDATE_TYPE_RESPONSE)
+                .put("inReplyToId", event.result().queryId())
+                .set("payload", answerJson);
         broadcast(Json.str(update));
     }
 
@@ -627,22 +540,17 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 .put("type", SIGNAL_TYPE_UPDATE)
                 .put("id", UUID.randomUUID().toString())
                 .put("updateType", UPDATE_TYPE_DIALOGUE_REQUEST)
-                .set("payload", dialogueJson); // The dialogue request object is the payload
+                .set("payload", dialogueJson);
         broadcast(Json.str(update));
     }
-
-
-    // --- Sending Responses as Updates ---
 
     private void sendInitialState(WebSocket conn, String requestId) {
         var snapshot = cog.getSystemStateSnapshot();
         var payload = Json.node();
 
-        // Include system status and configuration directly in the initial state payload
         payload.set("systemStatus", Json.node(new Event.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
         payload.set("configuration", Json.node(snapshot.configuration()));
 
-        // Include notes, assertions, rules
         var notesArray = Json.the.createArrayNode();
         snapshot.notes().stream().map(Json::node).forEach(notesArray::add);
         payload.set("notes", notesArray);
@@ -655,28 +563,22 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         snapshot.rules().stream().map(Json::node).forEach(rulesArray::add);
         payload.set("rules", rulesArray);
 
-        // Tasks are not part of snapshot currently, send empty array
         payload.set("tasks", Json.the.createArrayNode());
 
         ObjectNode update = Json.node()
                 .put("type", SIGNAL_TYPE_UPDATE)
                 .put("id", UUID.randomUUID().toString())
                 .put("updateType", UPDATE_TYPE_INITIAL_STATE)
-                .put("inReplyToId", requestId) // Link back to the initial state request
+                .put("inReplyToId", requestId)
                 .set("payload", payload);
 
         if (conn.isOpen()) conn.send(Json.str(update));
     }
 
     private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JsonNode result, @Nullable String message) {
-        var payload = Json.node()
-                .put("status", status);
-        if (result != null) {
-            payload.set("result", result);
-        }
-        if (message != null) {
-            payload.put("message", message);
-        }
+        var payload = Json.node().put("status", status);
+        if (result != null) payload.set("result", result);
+        if (message != null) payload.put("message", message);
 
         ObjectNode update = Json.node()
                 .put("type", SIGNAL_TYPE_UPDATE)

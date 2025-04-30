@@ -60,7 +60,6 @@ public final class Note {
         return status;
     }
 
-
     public enum Status {
         IDLE, ACTIVE, PAUSED, COMPLETED
     }

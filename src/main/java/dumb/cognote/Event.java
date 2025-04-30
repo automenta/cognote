@@ -30,7 +30,6 @@ import static java.util.Objects.requireNonNull;
         @Type(value = Event.TaskUpdateEvent.class, name = "TaskUpdateEvent"),
         @Type(value = Event.SystemStatusEvent.class, name = "SystemStatusEvent"),
         @Type(value = Event.AddedEvent.class, name = "AddedEvent"),
-        @Type(value = Event.RemovedEvent.class, name = "RemovedEvent"), // Deprecated, use NoteDeletedEvent
         @Type(value = Event.ExternalInputEvent.class, name = "ExternalInputEvent"),
         @Type(value = Event.RetractionRequestEvent.class, name = "RetractionRequestEvent"),
         @Type(value = Events.LogMessageEvent.class, name = "LogMessageEvent"),
@@ -39,8 +38,8 @@ import static java.util.Objects.requireNonNull;
         @Type(value = Answer.AnswerEvent.class, name = "AnswerEvent"),
         @Type(value = Query.QueryEvent.class, name = "QueryEvent"),
         @Type(value = Event.NoteStatusEvent.class, name = "NoteStatusEvent"),
-        @Type(value = Event.NoteUpdatedEvent.class, name = "NoteUpdatedEvent"), // Added
-        @Type(value = Event.NoteDeletedEvent.class, name = "NoteDeletedEvent") // Added
+        @Type(value = Event.NoteUpdatedEvent.class, name = "NoteUpdatedEvent"),
+        @Type(value = Event.NoteDeletedEvent.class, name = "NoteDeletedEvent")
 })
 public interface Event {
 
@@ -203,16 +202,6 @@ public interface Event {
         }
     }
 
-    // Deprecated: Use NoteDeletedEvent instead
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record RemovedEvent(Note note) implements NoteEvent {
-
-        @Override
-        public String getEventType() {
-            return "RemovedEvent";
-        }
-    }
-
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record ExternalInputEvent(@JsonProperty("termJson") Term term, String sourceId,
                               @Nullable String noteId) implements NoteIDEvent {
@@ -253,7 +242,6 @@ public interface Event {
         }
     }
 
-    // Added NoteUpdatedEvent
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record NoteUpdatedEvent(Note updatedNote) implements NoteEvent {
         public NoteUpdatedEvent {
@@ -271,7 +259,6 @@ public interface Event {
         }
     }
 
-    // Added NoteDeletedEvent
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record NoteDeletedEvent(String noteId) implements NoteIDEvent {
         public NoteDeletedEvent {
