@@ -492,6 +492,19 @@ public class Logic {
                     .filter(a -> activeNoteIds.contains(a.kb()) || activeNoteIds.contains(a.sourceNoteId()));
         }
 
+        public List<Note> getAllNotes() {
+            return cog.getAllNotes();
+        }
+
+        public Collection<Assertion> getAllAssertions() {
+            if (truth instanceof Truths.BasicTMS basicTMS) {
+                return basicTMS.getAllAssertionsInternal();
+            } else {
+                error("Cognition.getAllAssertions() requires BasicTMS implementation.");
+                return Collections.emptyList();
+            }
+        }
+
 
         @Nullable
         public String commonSourceNodeId(Set<String> supportIds) {

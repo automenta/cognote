@@ -38,8 +38,8 @@ public class PersistenceManager {
 
     public void save(String filePath) {
         var snapshot = new SystemStateSnapshot(
-                cog.getAllNotes(),
-                tms.getAllAssertionsInternal(),
+                context.getAllNotes(),
+                context.getAllAssertions(),
                 context.rules(),
                 new Cog.Configuration(cog)
         );
@@ -84,7 +84,6 @@ public class PersistenceManager {
         cog.applyConfig(snapshot.configuration());
 
         // Load notes
-        snapshot.notes().forEach(cog::addNote); // addNote handles saving, maybe disable during load? Or just save once at the end. Let's add directly to map and then re-add system notes.
         snapshot.notes().forEach(note -> cog.notes.put(note.id(), note));
 
         // Ensure system notes exist
