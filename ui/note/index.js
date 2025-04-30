@@ -903,6 +903,14 @@ class App {
             color: `hsl(${Math.random() * 360}, 60%, 85%)` // Client-side color for now
         };
 
+        // Clear editor and show a waiting message
+        this.editor.clear();
+        this.currentId = null; // Clear current selection
+        this.sidebar.setActive(null);
+        this.actionArea.clearIcons();
+        this.editor.$meta.html('Requesting new note... If it doesn\'t appear, try "Refresh Notes" from the menu.');
+
+
         // Send add action to backend
         websocketClient.sendUiAction('addNote', newNoteData)
             .then(response => {
@@ -910,10 +918,12 @@ class App {
                 // Backend should send an event (like NoteAddedEvent)
                 // which will trigger the UI update and selection of the new note.
                 Notifier.info("New note creation requested.");
+                // The meta text will be updated when NoteAddedEvent arrives or on refresh
             })
             .catch(err => {
                 console.error('Failed to send new note action:', err);
                 Notifier.error("Failed to create new note.");
+                this.editor.$meta.text('Failed to create new note. Select or create a note.'); // Revert meta text on error
             });
 
         // Do NOT immediately add to local notes array or select.
@@ -1046,11 +1056,13 @@ class App {
                 break;
             case 'refresh-notes': // Handle the new refresh action
                 console.log('Refreshing notes...');
+                this.editor.$meta.text('Refreshing notes...'); // Indicate refresh is happening
                 websocketClient.sendInitialStateRequest()
                     .then(() => Notifier.info('Notes refreshed.'))
                     .catch(err => {
                         console.error('Failed to refresh notes:', err);
                         Notifier.error('Failed to refresh notes.');
+                        this.editor.$meta.text('Failed to refresh notes. Select or create a note.'); // Revert meta text on error
                     });
                 break;
             default:
