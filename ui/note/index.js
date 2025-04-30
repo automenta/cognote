@@ -291,7 +291,7 @@ class MenuBar extends Component {
     }
 
     render() {
-        this.$el.html(` <div class="group"> <span data-action="undo" title="Undo last action">Undo</span> <span data-action="redo" title="Redo last action">Redo</span> <span data-action="clone" title="Create a copy of the current note">Clone</span> </div> <div class="group"> <span data-action="insert" title="Insert structured data field">Insert Field</span> </div> <div class="group"> <span data-action="publish" title="Publish note to P2P network">Publish</span> <span data-action="set-private" title="Make note Private">Set Private</span> </div> <div class="group"> <span>Tools:</span> <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span> <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span> </div> <div class="group"> <span data-action="delete" title="Delete current note">Delete</span> <span data-action="view-source" title="View raw note data">View source</span> <span data-action="settings" title="Open application settings">Settings</span> </div>`);
+        this.$el.html(` <div class="group"> <span data-action="undo" title="Undo last action">Undo</span> <span data-action="redo" title="Redo last action">Redo</span> <span data-action="clone" title="Create a copy of the current note">Clone</span> </div> <div class="group"> <span data-action="insert" title="Insert structured data field">Insert Field</span> </div> <div class="group"> <span data-action="publish" title="Publish note to P2P network">Publish</span> <span data-action="set-private" title="Make note Private">Set Private</span> </div> <div class="group"> <span>Tools:</span> <span data-action="enhance" title="Apply LLM enhancement (Stub)">Enhance</span> <span data-action="summary" title="Apply LLM summarization (Stub)">Summary</span> </div> <div class="group"> <span data-action="delete" title="Delete current note">Delete</span> <span data-action="view-source" title="View raw note data">View source</span> <span data-action="settings" title="Open application settings">Settings</span> <span data-action="refresh-notes" title="Refresh note list from backend">Refresh Notes</span> </div>`);
     }
 
     bindEvents() {
@@ -773,20 +773,22 @@ class App {
 
     handleNoteAddedEvent(event) {
          console.log('Received NoteAddedEvent:', event);
+         console.log('NoteAddedEvent payload:', JSON.stringify(event, null, 2)); // Log the full payload
          const newNote = event.newNote; // Assuming event.newNote contains the full new note object
-         if (newNote && !this.notes.some(n => n.id === newNote.id)) {
+         if (newNote && newNote.id && !this.notes.some(n => n.id === newNote.id)) {
+             console.log('Adding new note to local state:', newNote.id);
              this.notes.unshift(newNote); // Add to the beginning of the local array
              this.sortAndFilter(); // Re-render sidebar list with the new note
              this.selectNote(newNote.id); // Select the newly added note
              this.editor.focusTitle(); // Focus the title field
              Notifier.success(`New note "${newNote.title || 'Untitled'}" created.`);
-         } else if (newNote) {
+         } else if (newNote && newNote.id) {
              console.warn('NoteAddedEvent received for a note already in the list:', newNote.id);
              // Note already exists, maybe it was a clone we were waiting for?
              // Re-select it to ensure UI is consistent.
              this.selectNote(newNote.id);
          } else {
-             console.warn('NoteAddedEvent received without new note data.');
+             console.warn('NoteAddedEvent received without valid new note data.');
          }
     }
 
@@ -860,7 +862,7 @@ class App {
                 websocketClient.sendUiAction('updateNote', {
                     noteId: n.id,
                     title: n.title,
-                    content: n.content,
+                    content: d.content, // Send the raw HTML content from the editor
                     // Include other properties that might be edited via UI later
                     state: n.state,
                     priority: n.priority,
@@ -1041,6 +1043,15 @@ class App {
                 break;
             case 'settings':
                 this.settingsModal.show();
+                break;
+            case 'refresh-notes': // Handle the new refresh action
+                console.log('Refreshing notes...');
+                websocketClient.sendInitialStateRequest()
+                    .then(() => Notifier.info('Notes refreshed.'))
+                    .catch(err => {
+                        console.error('Failed to refresh notes:', err);
+                        Notifier.error('Failed to refresh notes.');
+                    });
                 break;
             default:
                 console.warn(`Unknown menu action: ${action}`);
