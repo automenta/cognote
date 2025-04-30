@@ -22,34 +22,20 @@ import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
 import static dumb.cognote.Protocol.*;
+import static dumb.cognote.Term.Atom;
+import static dumb.cognote.Term.Lst;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
     private final InetSocketAddress address;
     private final Set<WebSocket> clients = new CopyOnWriteArraySet<>();
-    private final Map<String, BiConsumer<WebSocket, JsonNode>> commandHandlers = new ConcurrentHashMap<>();
     private final Map<String, BiConsumer<WebSocket, JsonNode>> feedbackHandlers = new ConcurrentHashMap<>();
     private WebSocketServer server;
 
     public WebSocketPlugin(InetSocketAddress address, Cog cog) {
         this.address = address;
-        this.cog = cog; // Initialize cog here as well, though BasePlugin.start will also set it
-        setupCommandHandlers();
+        this.cog = cog;
         setupFeedbackHandlers();
-    }
-
-    private void setupCommandHandlers() {
-        commandHandlers.put(COMMAND_ADD_NOTE, this::handleAddNoteCommand);
-        commandHandlers.put(COMMAND_REMOVE_NOTE, this::handleRemoveNoteCommand);
-        commandHandlers.put(COMMAND_START_NOTE, this::handleStartNoteCommand);
-        commandHandlers.put(COMMAND_PAUSE_NOTE, this::handlePauseNoteCommand);
-        commandHandlers.put(COMMAND_COMPLETE_NOTE, this::handleCompleteNoteCommand);
-        commandHandlers.put(COMMAND_RUN_TOOL, this::handleRunToolCommand);
-        commandHandlers.put(COMMAND_RUN_QUERY, this::handleRunQueryCommand);
-        commandHandlers.put(COMMAND_CLEAR_ALL, this::handleClearAllCommand);
-        commandHandlers.put(COMMAND_SET_CONFIG, this::handleSetConfigCommand);
-        commandHandlers.put(COMMAND_GET_INITIAL_STATE, this::handleGetInitialStateCommand);
-        commandHandlers.put(COMMAND_SAVE_NOTES, this::handleSaveNotesCommand);
     }
 
     private void setupFeedbackHandlers() {
@@ -61,7 +47,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
     @Override
     public void start(Events e, Logic.Cognition ctx) {
-        super.start(e, ctx); // This will also set the cog field
+        super.start(e, ctx);
         server = new WebSocketServer(address) {
             @Override
             public void onOpen(WebSocket conn, ClientHandshake handshake) {
@@ -96,9 +82,11 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         server.start();
 
         events.on(CogEvent.class, this::broadcastEvent);
+        events.on(Answer.AnswerEvent.class, this::broadcastAnswerEvent);
+        events.on(CogEvent.TaskUpdateEvent.class, this::broadcastTaskUpdateEvent);
+        events.on(Events.DialogueRequestEvent.class, this::broadcastDialogueRequestEvent);
 
-        // Listen for UI Action assertions to broadcast them
-        cog.events.on(new Term.Lst(Term.Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
+        cog.events.on(new Lst(Atom.of(PRED_UI_ACTION), Term.Var.of("?type"), Term.Var.of("?data")), this::handleUiActionAssertion);
     }
 
     @Override
@@ -150,7 +138,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         } catch (JsonProcessingException e) {
             error("Failed to parse incoming WebSocket message as JSON: " + message.substring(0, Math.min(message.length(), MAX_WS_PARSE_PREVIEW)) + "... Error: " + e.getMessage());
-            // Attempt to send a generic error if parsing failed before getting the ID
             try {
                 conn.send(Json.str(Json.node()
                         .put("type", SIGNAL_TYPE_RESPONSE)
@@ -174,31 +161,116 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var commandTypeNode = payload.get("commandType");
         var parametersNode = payload.get("parameters");
 
-        if (commandTypeNode == null || !commandTypeNode.isTextual() || parametersNode == null || !parametersNode.isObject()) {
-            sendFailureResponse(conn, commandId, "Invalid command format: missing commandType (string) or parameters (object).");
-            return;
+        if (commandTypeNode == null || !commandTypeNode.isTextual() || commandTypeNode.asText().isBlank()) {
+             sendFailureResponse(conn, commandId, "Invalid command format: missing commandType (string).");
+             return;
         }
         var commandType = commandTypeNode.asText();
 
-        var handler = commandHandlers.get(commandType);
-        if (handler != null) {
-            try {
-                handler.accept(conn, payload); // Handlers are responsible for sending response
-            } catch (Exception e) {
-                error("Error executing command '" + commandType + "': " + e.getMessage());
-                e.printStackTrace();
-                sendErrorResponse(conn, commandId, "Error executing command: " + e.getMessage());
-            }
-        } else {
-            sendErrorResponse(conn, commandId, "Unknown command type: " + commandType);
+        Lst requestKif;
+        try {
+            requestKif = commandJsonToKif(commandType, parametersNode);
+        } catch (IllegalArgumentException e) {
+            sendFailureResponse(conn, commandId, "Invalid command parameters: " + e.getMessage());
+            return;
         }
+
+        var potentialAssertion = new Assertion.PotentialAssertion(
+                requestKif,
+                Cog.INPUT_ASSERTION_BASE_PRIORITY,
+                Set.of(),
+                "client:" + conn.getRemoteSocketAddress().toString(),
+                false, false, false,
+                KB_CLIENT_INPUT,
+                Logic.AssertionType.GROUND,
+                List.of(),
+                0
+        );
+
+        context.kb(KB_CLIENT_INPUT).tryCommit(potentialAssertion, "client:" + conn.getRemoteSocketAddress().toString());
+
+        sendSuccessResponse(conn, commandId, null, "Command received and queued for processing.");
     }
+
+    private Lst commandJsonToKif(String commandType, @Nullable JsonNode parametersNode) {
+        Lst requestPayload;
+        switch (commandType) {
+            case COMMAND_ADD_NOTE -> {
+                var title = parametersNode != null && parametersNode.has("title") ? parametersNode.get("title").asText("") : "";
+                var text = parametersNode != null && parametersNode.has("text") ? parametersNode.get("text").asText("") : "";
+                requestPayload = new Lst(Atom.of(REQUEST_ADD_NOTE), new Lst(Atom.of("title"), Atom.of(title)), new Lst(Atom.of("text"), Atom.of(text)));
+            }
+            case COMMAND_REMOVE_NOTE -> {
+                var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
+                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for remove_note.");
+                requestPayload = new Lst(Atom.of(REQUEST_REMOVE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
+            }
+            case COMMAND_START_NOTE -> {
+                var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
+                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for start_note.");
+                requestPayload = new Lst(Atom.of(REQUEST_START_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
+            }
+            case COMMAND_PAUSE_NOTE -> {
+                var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
+                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for pause_note.");
+                requestPayload = new Lst(Atom.of(REQUEST_PAUSE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
+            }
+            case COMMAND_COMPLETE_NOTE -> {
+                var noteId = parametersNode != null && parametersNode.has("noteId") ? parametersNode.get("noteId").asText("") : "";
+                 if (noteId.isBlank()) throw new IllegalArgumentException("noteId is required for complete_note.");
+                requestPayload = new Lst(Atom.of(REQUEST_COMPLETE_NOTE), new Lst(Atom.of("noteId"), Atom.of(noteId)));
+            }
+            case COMMAND_RUN_TOOL -> {
+                var toolName = parametersNode != null && parametersNode.has("toolName") ? parametersNode.get("toolName").asText("") : "";
+                var toolParamsJson = parametersNode != null && parametersNode.has("parameters") ? parametersNode.get("parameters") : Json.node();
+                 if (toolName.isBlank()) throw new IllegalArgumentException("toolName is required for run_tool.");
+                Lst toolParamsKif = new Lst(Atom.of("params"));
+                if (toolParamsJson.isObject()) {
+                    toolParamsJson.fields().forEachRemaining(entry -> {
+                        var key = entry.getKey();
+                        var valueNode = entry.getValue();
+                        toolParamsKif.terms.add(new Lst(Atom.of(key), Atom.of(valueNode.asText())));
+                    });
+                }
+                requestPayload = new Lst(Atom.of(REQUEST_RUN_TOOL), new Lst(Atom.of("toolName"), Atom.of(toolName)), new Lst(Atom.of("parameters"), toolParamsKif));
+            }
+            case COMMAND_RUN_QUERY -> {
+                var queryType = parametersNode != null && parametersNode.has("queryType") ? parametersNode.get("queryType").asText("") : "";
+                var patternString = parametersNode != null && parametersNode.has("patternString") ? parametersNode.get("patternString").asText("") : "";
+                var targetKbId = parametersNode != null && parametersNode.has("targetKbId") ? parametersNode.get("targetKbId").asText("") : "";
+                var queryParamsJson = parametersNode != null && parametersNode.has("parameters") ? parametersNode.get("parameters") : Json.node();
+                 if (queryType.isBlank() || patternString.isBlank()) throw new IllegalArgumentException("queryType and patternString are required for run_query.");
+
+                 Lst queryParamsKif = new Lst(Atom.of("params"));
+                 if (queryParamsJson.isObject()) {
+                     queryParamsJson.fields().forEachRemaining(entry -> {
+                         var key = entry.getKey();
+                         var valueNode = entry.getValue();
+                         queryParamsKif.terms.add(new Lst(Atom.of(key), Atom.of(valueNode.asText())));
+                     });
+                 }
+
+                requestPayload = new Lst(Atom.of(REQUEST_RUN_QUERY), new Lst(Atom.of("queryType"), Atom.of(queryType)), new Lst(Atom.of("patternString"), Atom.of(patternString)), new Lst(Atom.of("targetKbId"), Atom.of(targetKbId)), new Lst(Atom.of("parameters"), queryParamsKif));
+            }
+            case COMMAND_CLEAR_ALL -> requestPayload = new Lst(Atom.of(REQUEST_CLEAR_ALL));
+            case COMMAND_SET_CONFIG -> {
+                var configJsonText = parametersNode != null && parametersNode.has("configJsonText") ? parametersNode.get("configJsonText").asText("") : "";
+                 if (configJsonText.isBlank()) throw new IllegalArgumentException("configJsonText is required for set_config.");
+                requestPayload = new Lst(Atom.of(REQUEST_SET_CONFIG), new Lst(Atom.of("configJsonText"), Atom.of(configJsonText)));
+            }
+            case COMMAND_GET_INITIAL_STATE -> requestPayload = new Lst(Atom.of(REQUEST_GET_INITIAL_STATE));
+            case COMMAND_SAVE_NOTES -> requestPayload = new Lst(Atom.of(REQUEST_SAVE_NOTES));
+            default -> throw new IllegalArgumentException("Unknown command type: " + commandType);
+        }
+        return new Lst(Atom.of(PRED_REQUEST), requestPayload);
+    }
+
 
     private void handleFeedback(WebSocket conn, String feedbackId, @Nullable String inReplyToId, JsonNode payload) {
         var feedbackTypeNode = payload.get("feedbackType");
         var feedbackDataNode = payload.get("feedbackData");
 
-        if (feedbackTypeNode == null || !feedbackTypeNode.isTextual() || feedbackDataNode == null || !feedbackDataNode.isObject()) {
+        if (feedbackTypeNode == null || !feedbackTypeNode.isTextual() || feedbackTypeNode.asText().isBlank() || feedbackDataNode == null || !feedbackDataNode.isObject()) {
             sendFailureResponse(conn, feedbackId, "Invalid feedback format: missing feedbackType (string) or feedbackData (object).");
             return;
         }
@@ -207,7 +279,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var handler = feedbackHandlers.get(feedbackType);
         if (handler != null) {
             try {
-                handler.accept(conn, payload); // Handlers are responsible for sending response
+                handler.accept(conn, payload);
             } catch (Exception e) {
                 error("Error processing feedback '" + feedbackType + "': " + e.getMessage());
                 e.printStackTrace();
@@ -222,7 +294,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var dialogueIdNode = payload.get("dialogueId");
         var responseDataNode = payload.get("responseData");
 
-        if (dialogueIdNode == null || !dialogueIdNode.isTextual() || responseDataNode == null) {
+        if (dialogueIdNode == null || !dialogueIdNode.isTextual() || dialogueIdNode.asText().isBlank() || responseDataNode == null) {
             sendErrorResponse(conn, responseId, "Invalid dialogue response format: missing dialogueId (string) or responseData.");
             return;
         }
@@ -230,19 +302,17 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         cog.dialogue.handleResponse(dialogueId, responseDataNode)
                 .ifPresentOrElse(
-                        future -> sendSuccessResponse(conn, responseId, null, "Dialogue response processed."),
+                        future -> { /* Response handled by Dialogue */ },
                         () -> sendErrorResponse(conn, responseId, "No pending dialogue request found for ID: " + dialogueId)
                 );
     }
 
 
     private void broadcastEvent(CogEvent event) {
-        // Don't broadcast LogMessageEvents back to clients, they are handled by the server's Log class
-        if (event instanceof Events.LogMessageEvent) return;
+        if (event instanceof Events.LogMessageEvent || event instanceof Answer.AnswerEvent || event instanceof CogEvent.TaskUpdateEvent || event instanceof Events.DialogueRequestEvent) {
+            return;
+        }
 
-        // Assuming CogEvent has a method to get its data as a serializable object or JsonNode
-        // If not, we might need to add one or serialize the event object itself.
-        // Let's assume we serialize the event object directly.
         var eventJson = Json.node(event);
         if (eventJson == null || eventJson.isNull()) {
             error("Failed to serialize CogEvent to JSON: " + event.getClass().getName());
@@ -252,10 +322,39 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         ObjectNode signal = Json.node()
                 .put("type", SIGNAL_TYPE_EVENT)
                 .put("id", UUID.randomUUID().toString())
-                .set("payload", eventJson); // Use set for JsonNode
+                .set("payload", eventJson);
 
         broadcast(Json.str(signal));
     }
+
+    private void broadcastAnswerEvent(Answer.AnswerEvent event) {
+        var answerJson = Json.node(event.result());
+        ObjectNode signal = Json.node()
+                .put("type", SIGNAL_TYPE_RESPONSE)
+                .put("id", UUID.randomUUID().toString())
+                .put("inReplyToId", event.result().queryId())
+                .set("payload", answerJson);
+        broadcast(Json.str(signal));
+    }
+
+    private void broadcastTaskUpdateEvent(CogEvent.TaskUpdateEvent event) {
+        var taskJson = Json.node(event);
+        ObjectNode signal = Json.node()
+                .put("type", SIGNAL_TYPE_EVENT)
+                .put("id", UUID.randomUUID().toString())
+                .set("payload", taskJson);
+        broadcast(Json.str(signal));
+    }
+
+    private void broadcastDialogueRequestEvent(Events.DialogueRequestEvent event) {
+         var dialogueJson = Json.node(event);
+         ObjectNode signal = Json.node()
+                 .put("type", SIGNAL_TYPE_DIALOGUE_REQUEST)
+                 .put("id", UUID.randomUUID().toString())
+                 .set("payload", dialogueJson);
+         broadcast(Json.str(signal));
+    }
+
 
     private void broadcast(String message) {
         clients.forEach(client -> {
@@ -266,23 +365,22 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void sendInitialState(WebSocket conn) {
         var payload = Json.node();
 
-        // Serialize various state components to JsonNode
         payload.set("systemStatus", Json.node(new CogEvent.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
         payload.set("configuration", Json.node(new Cog.Configuration(cog)));
 
         var notesArray = Json.the.createArrayNode();
-        cog.getAllNotes().stream().map(Json::node).forEach(notesArray::add); // Assuming Note has toJsonNode()
+        cog.getAllNotes().stream().map(Json::node).forEach(notesArray::add);
 
         var assertionsArray = Json.the.createArrayNode();
-        cog.context.truth.getAllActiveAssertions().stream().map(Json::node).forEach(assertionsArray::add); // Assuming Assertion has toJsonNode()
+        cog.context.truth.getAllActiveAssertions().stream().map(Json::node).forEach(assertionsArray::add);
 
         var rulesArray = Json.the.createArrayNode();
-        cog.context.rules().stream().map(Json::node).forEach(rulesArray::add); // Assuming Rule has toJsonNode()
+        cog.context.rules().stream().map(Json::node).forEach(rulesArray::add);
 
         payload.set("notes", notesArray);
         payload.set("assertions", assertionsArray);
         payload.set("rules", rulesArray);
-        payload.set("tasks", Json.the.createArrayNode()); // Tasks can be an empty array initially
+        payload.set("tasks", Json.the.createArrayNode());
 
         ObjectNode initialState = Json.node()
                 .put("type", SIGNAL_TYPE_INITIAL_STATE)
@@ -326,7 +424,6 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     private void handleUiActionAssertion(CogEvent event, Map<Term.Var, Term> bindings) {
         if (!(event instanceof CogEvent.AssertedEvent assertedEvent)) return;
         var assertion = assertedEvent.assertion();
-        // Only process UI actions asserted into the dedicated KB
         if (!assertion.kb().equals(KB_UI_ACTIONS) || !assertion.isActive()) return;
 
         var kif = assertion.kif();
@@ -338,23 +435,17 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var typeTerm = kif.get(1);
         var dataTerm = kif.get(2);
 
-        // Check if both are Atoms and extract values within the successful branch
-        if (typeTerm instanceof Term.Atom(var typeValueString) && dataTerm instanceof Term.Atom(
+        if (typeTerm instanceof Atom(var typeValueString) && dataTerm instanceof Atom(
                 var dataValueString
         )) {
-            // Now typeValueString and dataValueString are in scope
-
             JsonNode uiActionDataNode;
             try {
-                // Attempt to parse the data atom's value as JSON
                 uiActionDataNode = Json.obj(dataValueString, JsonNode.class);
                 if (uiActionDataNode == null || uiActionDataNode.isNull()) {
-                    // If parsing results in null/empty, treat it as a simple string value
                     uiActionDataNode = Json.node().put("value", dataValueString);
                 }
             } catch (JsonProcessingException e) {
                 logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataValueString + ". Treating as simple string value. Error: " + e.getMessage());
-                // If data is not valid JSON, send it as a string instead
                 uiActionDataNode = Json.node().put("value", dataValueString);
             }
 
@@ -370,213 +461,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             broadcast(Json.str(signal));
 
         } else {
-            // This is the case where one or both are NOT Atoms
             logWarning("Invalid uiAction assertion arguments (must be atoms): " + kif.toKif());
         }
     }
 
-
-    // --- Command Handlers ---
-
-    private void handleAddNoteCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var titleNode = payload.get("title");
-        var textNode = payload.get("text");
-
-        if (titleNode == null || !titleNode.isTextual() || titleNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "Note title cannot be empty.");
-            return;
-        }
-        var title = titleNode.asText();
-        var text = textNode != null && textNode.isTextual() ? textNode.asText() : "";
-
-        var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, text, Note.Status.IDLE);
-        cog.addNote(newNote);
-        sendSuccessResponse(conn, commandId, Json.node(newNote), "Note added."); // Assuming Note has toJsonNode()
-    }
-
-    private void handleRemoveNoteCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var noteIdNode = payload.get("noteId");
-
-        if (noteIdNode == null || !noteIdNode.isTextual() || noteIdNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "Note ID is required.");
-            return;
-        }
-        var noteId = noteIdNode.asText();
-
-        cog.removeNote(noteId);
-        sendSuccessResponse(conn, commandId, null, "Note removal requested.");
-    }
-
-    private void handleStartNoteCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var noteIdNode = payload.get("noteId");
-
-        if (noteIdNode == null || !noteIdNode.isTextual() || noteIdNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "Note ID is required.");
-            return;
-        }
-        var noteId = noteIdNode.asText();
-
-        cog.startNote(noteId);
-        sendSuccessResponse(conn, commandId, null, "Note start requested.");
-    }
-
-    private void handlePauseNoteCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var noteIdNode = payload.get("noteId");
-
-        if (noteIdNode == null || !noteIdNode.isTextual() || noteIdNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "Note ID is required.");
-            return;
-        }
-        var noteId = noteIdNode.asText();
-
-        cog.pauseNote(noteId);
-        sendSuccessResponse(conn, commandId, null, "Note pause requested.");
-    }
-
-    private void handleCompleteNoteCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var noteIdNode = payload.get("noteId");
-
-        if (noteIdNode == null || !noteIdNode.isTextual() || noteIdNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "Note ID is required.");
-            return;
-        }
-        var noteId = noteIdNode.asText();
-
-        cog.completeNote(noteId);
-        sendSuccessResponse(conn, commandId, null, "Note completion requested.");
-    }
-
-    private void handleRunToolCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var toolNameNode = payload.get("toolName");
-        var parametersNode = payload.get("parameters");
-
-        if (toolNameNode == null || !toolNameNode.isTextual() || toolNameNode.asText().isBlank() || parametersNode == null || !parametersNode.isObject()) {
-            sendFailureResponse(conn, commandId, "Invalid run_tool command: missing toolName (string) or parameters (object).");
-            return;
-        }
-        var toolName = toolNameNode.asText();
-
-        cog.tools.get(toolName).ifPresentOrElse(tool -> {
-            // Convert JsonNode parameters to Map<String, Object>
-            Map<String, Object> paramMap;
-            try {
-                paramMap = Json.the.convertValue(parametersNode, Map.class);
-            } catch (IllegalArgumentException e) {
-                sendFailureResponse(conn, commandId, "Invalid tool parameters format: " + e.getMessage());
-                return;
-            }
-
-            tool.execute(paramMap).whenCompleteAsync((result, ex) -> {
-                if (ex != null) {
-                    error("Error executing tool '" + toolName + "': " + ex.getMessage());
-                    ex.printStackTrace();
-                    sendErrorResponse(conn, commandId, "Error executing tool: " + ex.getMessage());
-                } else {
-                    // Convert tool result to JsonNode
-                    var resultJson = Json.node(result);
-                    sendSuccessResponse(conn, commandId, resultJson, "Tool executed successfully.");
-                }
-            }, cog.events.exe); // Use events executor for tool result handling
-
-        }, () -> sendFailureResponse(conn, commandId, "Tool not found: " + toolName));
-    }
-
-    private void handleRunQueryCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var queryId = payload.get("queryId") != null ? payload.get("queryId").asText() : Cog.id(Cog.ID_PREFIX_QUERY);
-        var queryTypeNode = payload.get("queryType");
-        var patternStringNode = payload.get("patternString");
-        var targetKbIdNode = payload.get("targetKbId");
-        var parametersNode = payload.get("parameters"); // This is already JsonNode
-
-        if (queryTypeNode == null || !queryTypeNode.isTextual() || patternStringNode == null || !patternStringNode.isTextual()) {
-            sendFailureResponse(conn, commandId, "Invalid run_query command: missing queryType (string) or patternString (string).");
-            return;
-        }
-        var queryTypeStr = queryTypeNode.asText();
-        var patternString = patternStringNode.asText();
-        var targetKbId = targetKbIdNode != null && targetKbIdNode.isTextual() ? targetKbIdNode.asText() : null;
-
-        try {
-            var queryType = Cog.QueryType.valueOf(queryTypeStr.toUpperCase());
-            var terms = KifParser.parseKif(patternString);
-            if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst pattern)) {
-                throw new KifParser.ParseException("Query pattern must be a single KIF list.");
-            }
-
-            // Convert JsonNode parameters to Map<String, Object>
-            Map<String, Object> paramMap = Map.of(); // Default empty map
-            if (parametersNode != null && parametersNode.isObject()) {
-                try {
-                    paramMap = Json.the.convertValue(parametersNode, Map.class);
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("Invalid query parameters format: " + e.getMessage(), e);
-                }
-            }
-
-
-            var query = new Query(queryId, queryType, pattern, targetKbId, paramMap);
-
-            // Emit the query event for the ReasonerManager to handle asynchronously
-            cog.events.emit(new Query.QueryEvent(query));
-
-            // Send an immediate success response indicating the query was submitted
-            sendSuccessResponse(conn, commandId, Json.node().put("queryId", queryId), "Query submitted.");
-
-        } catch (IllegalArgumentException e) {
-            sendFailureResponse(conn, commandId, "Invalid queryType or parameters: " + e.getMessage());
-        } catch (KifParser.ParseException e) {
-            sendFailureResponse(conn, commandId, "Failed to parse query pattern KIF: " + e.getMessage());
-        } catch (Exception e) {
-            error("Error submitting query: " + e.getMessage());
-            e.printStackTrace();
-            sendErrorResponse(conn, commandId, "Error submitting query: " + e.getMessage());
-        }
-    }
-
-    private void handleClearAllCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        cog.clear();
-        sendSuccessResponse(conn, commandId, null, "Clear all requested.");
-    }
-
-    private void handleSetConfigCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        var configJsonTextNode = payload.get("configJsonText");
-
-        if (configJsonTextNode == null || !configJsonTextNode.isTextual() || configJsonTextNode.asText().isBlank()) {
-            sendFailureResponse(conn, commandId, "configJsonText parameter (string) is required.");
-            return;
-        }
-        var configJsonText = configJsonTextNode.asText();
-
-        if (cog.updateConfig(configJsonText)) {
-            sendSuccessResponse(conn, commandId, Json.node(new Cog.Configuration(cog)), "Configuration updated.");
-        } else {
-            sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
-        }
-    }
-
-    private void handleGetInitialStateCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        sendInitialState(conn);
-        sendSuccessResponse(conn, commandId, null, "Initial state sent.");
-    }
-
-    private void handleSaveNotesCommand(WebSocket conn, JsonNode payload) {
-        var commandId = payload.get("id") != null ? payload.get("id").asText() : null;
-        cog.save();
-        sendSuccessResponse(conn, commandId, null, "Notes saved.");
-    }
-
-
-    // --- Feedback Handlers ---
 
     private void handleUserAssertedKifFeedback(WebSocket conn, JsonNode payload) {
         var feedbackId = payload.get("id") != null ? payload.get("id").asText() : null;
@@ -604,12 +492,10 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                 sendFailureResponse(conn, feedbackId, "No KIF terms parsed from input.");
                 return;
             }
-            // Emit ExternalInputEvent for each parsed term
             terms.forEach(term -> events.emit(new CogEvent.ExternalInputEvent(term, "client:" + conn.getRemoteSocketAddress().toString(), noteId)));
 
-            // Also assert the feedback itself into the user feedback KB
-            var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_ASSERTED_KIF), Term.Atom.of(noteId), Term.Atom.of(kifString));
-            context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+            var feedbackTerm = new Lst(Atom.of(PRED_USER_ASSERTED_KIF), Atom.of(noteId), Atom.of(kifString));
+            context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
             sendSuccessResponse(conn, feedbackId, null, "KIF asserted.");
 
@@ -643,9 +529,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         cog.updateNoteText(noteId, text);
 
-        // Assert the feedback into the user feedback KB
-        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TEXT), Term.Atom.of(noteId), Term.Atom.of(text));
-        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        var feedbackTerm = new Lst(Atom.of(PRED_USER_EDITED_NOTE_TEXT), Atom.of(noteId), Atom.of(text));
+        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "Note text updated.");
     }
@@ -671,9 +556,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         cog.updateNoteTitle(noteId, title);
 
-        // Assert the feedback into the user feedback KB
-        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_EDITED_NOTE_TITLE), Term.Atom.of(noteId), Term.Atom.of(title));
-        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        var feedbackTerm = new Lst(Atom.of(PRED_USER_EDITED_NOTE_TITLE), Atom.of(noteId), Atom.of(title));
+        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "Note title updated.");
     }
@@ -695,9 +579,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         }
         var elementId = elementIdNode.asText();
 
-        // Assert the feedback into the user feedback KB
-        var feedbackTerm = new Term.Lst(Term.Atom.of(PRED_USER_CLICKED), Term.Atom.of(elementId));
-        context.tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
+        var feedbackTerm = new Lst(Atom.of(PRED_USER_CLICKED), Atom.of(elementId));
+        context.kb(KB_USER_FEEDBACK).tryCommit(new Assertion.PotentialAssertion(feedbackTerm, Cog.INPUT_ASSERTION_BASE_PRIORITY, Set.of(), "client-feedback:" + conn.getRemoteSocketAddress().toString(), false, false, false, KB_USER_FEEDBACK, Logic.AssertionType.GROUND, List.of(), 0), "client-feedback");
 
         sendSuccessResponse(conn, feedbackId, null, "User clicked feedback processed.");
     }

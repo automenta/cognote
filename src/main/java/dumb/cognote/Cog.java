@@ -83,7 +83,7 @@ public class Cog {
 
         this.dialogue = new Dialogue(this);
         this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
-        this.plugins = new Plugins(events, context);
+        this.plugins = new Plugins(this.events, this.context);
         this.persistenceManager = new PersistenceManager(this, context, tms);
 
         this.lm = new LM(this);
@@ -173,6 +173,7 @@ public class Cog {
         plugins.add(new RetractionPlugin());
         plugins.add(new TmsPlugin());
         plugins.add(new UserFeedbackPlugin());
+        plugins.add(new RequestProcessorPlugin());
 
         plugins.add(new TaskDecomposePlugin());
 
@@ -254,7 +255,7 @@ public class Cog {
                     );
                     context.rules().stream()
                             .filter(rule -> noteId.equals(rule.sourceNoteId()))
-                            .toList() // Collect to avoid concurrent modification
+                            .toList()
                             .forEach(rule -> events.emit(new CogEvent.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
                 }
             }
@@ -405,7 +406,7 @@ public class Cog {
             status("Initializing");
         }
 
-        load(); // Load state before initializing plugins/reasoners that might depend on it
+        load();
 
         lm.reconfigure();
 

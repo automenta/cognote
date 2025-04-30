@@ -15,17 +15,22 @@ public class Protocol {
     public static final String RESPONSE_STATUS_FAILURE = "failure";
     public static final String RESPONSE_STATUS_ERROR = "error";
 
-    public static final String COMMAND_ADD_NOTE = "add_note";
-    public static final String COMMAND_REMOVE_NOTE = "remove_note";
-    public static final String COMMAND_START_NOTE = "start_note";
-    public static final String COMMAND_PAUSE_NOTE = "pause_note";
-    public static final String COMMAND_COMPLETE_NOTE = "complete_note";
-    public static final String COMMAND_RUN_TOOL = "run_tool";
-    public static final String COMMAND_RUN_QUERY = "run_query";
-    public static final String COMMAND_CLEAR_ALL = "clear_all";
-    public static final String COMMAND_SET_CONFIG = "set_config";
-    public static final String COMMAND_GET_INITIAL_STATE = "get_initial_state";
-    public static final String COMMAND_SAVE_NOTES = "save_notes";
+    // KIF Predicate for client requests
+    public static final String PRED_REQUEST = "request";
+
+    // KIF Request Types (match command names)
+    public static final String REQUEST_ADD_NOTE = "add_note";
+    public static final String REQUEST_REMOVE_NOTE = "remove_note";
+    public static final String REQUEST_START_NOTE = "start_note";
+    public static final String REQUEST_PAUSE_NOTE = "pause_note";
+    public static final String REQUEST_COMPLETE_NOTE = "complete_note";
+    public static final String REQUEST_RUN_TOOL = "run_tool";
+    public static final String REQUEST_RUN_QUERY = "run_query";
+    public static final String REQUEST_CLEAR_ALL = "clear_all";
+    public static final String REQUEST_SET_CONFIG = "set_config";
+    public static final String REQUEST_GET_INITIAL_STATE = "get_initial_state";
+    public static final String REQUEST_SAVE_NOTES = "save_notes";
+
 
     public static final String FEEDBACK_USER_ASSERTED_KIF = "user_asserted_kif";
     public static final String FEEDBACK_USER_EDITED_NOTE_TEXT = "user_edited_note_text";
