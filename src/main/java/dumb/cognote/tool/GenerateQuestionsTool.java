@@ -9,15 +9,13 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.CogNote;
-import dumb.cognote.JsonUtil;
+import dumb.cognote.Json;
 import dumb.cognote.Tool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
@@ -67,7 +65,7 @@ public class GenerateQuestionsTool implements Tool {
                 .thenApply(AiMessage::text)
                 .thenApply(jsonString -> {
                     try {
-                        JsonNode jsonNode = JsonUtil.fromJsonString(jsonString, JsonNode.class);
+                        JsonNode jsonNode = Json.obj(jsonString, JsonNode.class);
 
                         if (jsonNode == null || !jsonNode.isArray()) {
                             throw new ToolExecutionException("LLM returned invalid JSON format (not an array): " + jsonString);

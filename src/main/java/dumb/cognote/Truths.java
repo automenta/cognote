@@ -2,7 +2,6 @@ package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,7 +46,7 @@ public interface Truths {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
     }
 
@@ -266,7 +265,7 @@ public interface Truths {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

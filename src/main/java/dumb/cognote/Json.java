@@ -5,23 +5,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import static dumb.cognote.Log.error;
 
-public class JsonUtil {
-    private static final ObjectMapper MAPPER = JsonMapper.builder()
+public class Json {
+
+    public static final ObjectMapper the = JsonMapper.builder()
             .addModule(new JavaTimeModule()) // Add support for Java 8 Date/Time types
             .enable(SerializationFeature.INDENT_OUTPUT) // Pretty print JSON
             .build();
 
-    public static ObjectMapper getMapper() {
-        return MAPPER;
-    }
-
-    public static String toJsonString(Object obj) {
+    public static String str(Object obj) {
         try {
-            return MAPPER.writeValueAsString(obj);
+            return the.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
             error("Error serializing object to JSON: " + e.getMessage());
             e.printStackTrace();
@@ -29,21 +27,25 @@ public class JsonUtil {
         }
     }
 
-    public static JsonNode toJsonNode(Object obj) {
+    public static JsonNode node(Object obj) {
         try {
-            return MAPPER.valueToTree(obj);
+            return the.valueToTree(obj);
         } catch (IllegalArgumentException e) {
             error("Error converting object to JsonNode: " + e.getMessage());
             e.printStackTrace();
-            return MAPPER.createObjectNode(); // Return empty object node on error
+            return the.createObjectNode(); // Return empty object node on error
         }
     }
 
-    public static <T> T fromJsonString(String json, Class<T> valueType) throws JsonProcessingException {
-        return MAPPER.readValue(json, valueType);
+    public static <T> T obj(String json, Class<T> valueType) throws JsonProcessingException {
+        return the.readValue(json, valueType);
     }
 
-    public static <T> T fromJsonNode(JsonNode json, Class<T> valueType) throws JsonProcessingException {
-        return MAPPER.treeToValue(json, valueType);
+    public static <T> T obj(JsonNode json, Class<T> valueType) throws JsonProcessingException {
+        return the.treeToValue(json, valueType);
+    }
+
+    public static ObjectNode node() {
+        return the.createObjectNode();
     }
 }

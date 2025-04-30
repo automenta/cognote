@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -91,7 +90,7 @@ public class Cog {
                 DEFAULT_REASONING_DEPTH,
                 DEFAULT_BROADCAST_INPUT
         );
-        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, JsonUtil.toJsonString(config), Note.Status.IDLE);
+        return new Note(CONFIG_NOTE_ID, CONFIG_NOTE_TITLE, Json.str(config), Note.Status.IDLE);
     }
 
     public void start() {
@@ -109,7 +108,7 @@ public class Cog {
         status("Stopping");
         paused.set(false);
         synchronized (pauseLock) {
-                pauseLock.notifyAll();
+            pauseLock.notifyAll();
         }
 
         shutdownExecutor(mainExecutor, "Main Executor");
@@ -201,8 +200,7 @@ public class Cog {
         var queryID = query.id();
         Consumer<CogEvent> listener = e -> {
             // Replaced pattern matching instanceof with traditional check and cast
-            if (e instanceof Answer.AnswerEvent) {
-                Answer.AnswerEvent answerEvent = (Answer.AnswerEvent) e;
+            if (e instanceof Answer.AnswerEvent answerEvent) {
                 Answer result = answerEvent.result();
                 if (result.query().equals(queryID)) {
                     answerFuture.complete(result);
@@ -312,7 +310,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -330,7 +328,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -347,7 +345,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -360,7 +358,7 @@ public class Cog {
     public record AssertionStateEvent(String assertionId, boolean isActive, String kbId) implements CogEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -380,13 +378,13 @@ public class Cog {
 
         @JsonProperty("bindingsJson") // Map bindings field to bindingsJson
         public JsonNode getBindingsJson() {
-            var jsonBindings = JsonUtil.getMapper().createObjectNode();
+            var jsonBindings = Json.node();
             bindings.forEach((var, term) -> jsonBindings.set(var.name(), term.toJson()));
             return jsonBindings;
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -404,7 +402,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -422,7 +420,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -435,7 +433,7 @@ public class Cog {
     public record TaskUpdateEvent(String taskId, TaskStatus status, String content) implements CogEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -449,7 +447,7 @@ public class Cog {
                                     int ruleCount) implements CogEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -462,7 +460,7 @@ public class Cog {
     public record AddedEvent(Note note) implements NoteEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -475,7 +473,7 @@ public class Cog {
     public record RemovedEvent(Note note) implements NoteEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -498,7 +496,7 @@ public class Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -512,7 +510,7 @@ public class Cog {
                                          @Nullable String noteId) implements NoteIDEvent {
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

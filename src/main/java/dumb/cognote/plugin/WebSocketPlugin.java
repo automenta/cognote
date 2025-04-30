@@ -18,7 +18,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
 import static dumb.cognote.Log.error;
@@ -125,7 +124,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         String inReplyToId;
 
         try {
-            signal = JsonUtil.fromJsonString(message, JsonNode.class);
+            signal = Json.obj(message, JsonNode.class);
 
             if (signal == null || !signal.isObject()) {
                 sendErrorResponse(conn, null, "Invalid signal format: not a JSON object.");
@@ -152,21 +151,17 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         } catch (JsonProcessingException e) {
             error("Failed to parse incoming WebSocket message as JSON: " + message.substring(0, Math.min(message.length(), MAX_WS_PARSE_PREVIEW)) + "... Error: " + e.getMessage());
-            // If id is null, we can't send a response back related to the message
-            if (id != null) {
-                sendErrorResponse(conn, id, "Failed to parse JSON: " + e.getMessage());
-            } else {
-                // Attempt to send a generic error if parsing failed before getting the ID
-                try {
-                    conn.send(JsonUtil.toJsonString(JsonUtil.getMapper().createObjectNode()
-                            .put("type", SIGNAL_TYPE_RESPONSE)
-                            .put("id", UUID.randomUUID().toString())
-                            .put("status", RESPONSE_STATUS_ERROR)
-                            .put("message", "Failed to parse incoming JSON message.")));
-                } catch (Exception ex) {
-                    error("Failed to send generic JSON parse error response: " + ex.getMessage());
-                }
+            // Attempt to send a generic error if parsing failed before getting the ID
+            try {
+                conn.send(Json.str(Json.node()
+                        .put("type", SIGNAL_TYPE_RESPONSE)
+                        .put("id", UUID.randomUUID().toString())
+                        .put("status", RESPONSE_STATUS_ERROR)
+                        .put("message", "Failed to parse incoming JSON message.")));
+            } catch (Exception ex) {
+                error("Failed to send generic JSON parse error response: " + ex.getMessage());
             }
+
         } catch (Exception e) {
             error("Error handling incoming WebSocket message: " + e.getMessage());
             e.printStackTrace();
@@ -249,18 +244,18 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         // Assuming CogEvent has a method to get its data as a serializable object or JsonNode
         // If not, we might need to add one or serialize the event object itself.
         // Let's assume we serialize the event object directly.
-        JsonNode eventJson = JsonUtil.toJsonNode(event);
+        JsonNode eventJson = Json.node(event);
         if (eventJson == null || eventJson.isNull()) {
-             error("Failed to serialize CogEvent to JSON: " + event.getClass().getName());
-             return;
+            error("Failed to serialize CogEvent to JSON: " + event.getClass().getName());
+            return;
         }
 
-        ObjectNode signal = JsonUtil.getMapper().createObjectNode()
+        ObjectNode signal = Json.node()
                 .put("type", SIGNAL_TYPE_EVENT)
                 .put("id", UUID.randomUUID().toString())
                 .set("payload", eventJson); // Use set for JsonNode
 
-        broadcast(JsonUtil.toJsonString(signal));
+        broadcast(Json.str(signal));
     }
 
     private void broadcast(String message) {
@@ -270,36 +265,36 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     private void sendInitialState(WebSocket conn) {
-        ObjectNode payload = JsonUtil.getMapper().createObjectNode();
+        ObjectNode payload = Json.node();
 
         // Serialize various state components to JsonNode
-        payload.set("systemStatus", JsonUtil.toJsonNode(new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
-        payload.set("configuration", JsonUtil.toJsonNode(new CogNote.Configuration(cog)));
+        payload.set("systemStatus", Json.node(new Cog.SystemStatusEvent(cog.status, cog.context.kbCount(), cog.context.kbTotalCapacity(), cog.lm.activeLlmTasks.size(), cog.context.ruleCount())));
+        payload.set("configuration", Json.node(new CogNote.Configuration(cog)));
 
-        ArrayNode notesArray = JsonUtil.getMapper().createArrayNode();
-        cog.getAllNotes().stream().map(Note::toJsonNode).forEach(notesArray::add); // Assuming Note has toJsonNode()
+        ArrayNode notesArray = Json.the.createArrayNode();
+        cog.getAllNotes().stream().map(Json::node).forEach(notesArray::add); // Assuming Note has toJsonNode()
 
-        ArrayNode assertionsArray = JsonUtil.getMapper().createArrayNode();
-        cog.context.truth.getAllActiveAssertions().stream().map(Assertion::toJsonNode).forEach(assertionsArray::add); // Assuming Assertion has toJsonNode()
+        ArrayNode assertionsArray = Json.the.createArrayNode();
+        cog.context.truth.getAllActiveAssertions().stream().map(Json::node).forEach(assertionsArray::add); // Assuming Assertion has toJsonNode()
 
-        ArrayNode rulesArray = JsonUtil.getMapper().createArrayNode();
-        cog.context.rules().stream().map(Rule::toJsonNode).forEach(rulesArray::add); // Assuming Rule has toJsonNode()
+        ArrayNode rulesArray = Json.the.createArrayNode();
+        cog.context.rules().stream().map(Json::node).forEach(rulesArray::add); // Assuming Rule has toJsonNode()
 
         payload.set("notes", notesArray);
         payload.set("assertions", assertionsArray);
         payload.set("rules", rulesArray);
-        payload.set("tasks", JsonUtil.getMapper().createArrayNode()); // Tasks can be an empty array initially
+        payload.set("tasks", Json.the.createArrayNode()); // Tasks can be an empty array initially
 
-        ObjectNode initialState = JsonUtil.getMapper().createObjectNode()
+        ObjectNode initialState = Json.node()
                 .put("type", SIGNAL_TYPE_INITIAL_STATE)
                 .put("id", UUID.randomUUID().toString())
                 .set("payload", payload);
 
-        conn.send(JsonUtil.toJsonString(initialState));
+        conn.send(Json.str(initialState));
     }
 
     private void sendResponse(WebSocket conn, String inReplyToId, String status, @Nullable JsonNode result, @Nullable String message) {
-        ObjectNode payload = JsonUtil.getMapper().createObjectNode()
+        ObjectNode payload = Json.node()
                 .put("status", status);
         if (result != null) {
             payload.set("result", result);
@@ -308,13 +303,13 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             payload.put("message", message);
         }
 
-        ObjectNode response = JsonUtil.getMapper().createObjectNode()
+        ObjectNode response = Json.node()
                 .put("type", SIGNAL_TYPE_RESPONSE)
                 .put("id", UUID.randomUUID().toString())
                 .put("inReplyToId", inReplyToId)
                 .set("payload", payload);
 
-        if (conn.isOpen()) conn.send(JsonUtil.toJsonString(response));
+        if (conn.isOpen()) conn.send(Json.str(response));
     }
 
     private void sendSuccessResponse(WebSocket conn, String inReplyToId, @Nullable JsonNode result, @Nullable String message) {
@@ -345,33 +340,35 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var dataTerm = kif.get(2);
 
         // Check if both are Atoms and extract values within the successful branch
-        if (typeTerm instanceof Term.Atom(String typeValueString) && dataTerm instanceof Term.Atom(String dataValueString)) {
+        if (typeTerm instanceof Term.Atom(String typeValueString) && dataTerm instanceof Term.Atom(
+                String dataValueString
+        )) {
             // Now typeValueString and dataValueString are in scope
 
             JsonNode uiActionDataNode;
             try {
                 // Attempt to parse the data atom's value as JSON
-                uiActionDataNode = JsonUtil.fromJsonString(dataValueString, JsonNode.class);
+                uiActionDataNode = Json.obj(dataValueString, JsonNode.class);
                 if (uiActionDataNode == null || uiActionDataNode.isNull()) {
-                     // If parsing results in null/empty, treat it as a simple string value
-                     uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
+                    // If parsing results in null/empty, treat it as a simple string value
+                    uiActionDataNode = Json.node().put("value", dataValueString);
                 }
             } catch (JsonProcessingException e) {
                 logError("Failed to parse uiAction data JSON from assertion " + assertion.id() + ": " + dataValueString + ". Treating as simple string value. Error: " + e.getMessage());
                 // If data is not valid JSON, send it as a string instead
-                uiActionDataNode = JsonUtil.getMapper().createObjectNode().put("value", dataValueString);
+                uiActionDataNode = Json.node().put("value", dataValueString);
             }
 
-            ObjectNode payload = JsonUtil.getMapper().createObjectNode()
+            ObjectNode payload = Json.node()
                     .put("uiActionType", typeValueString)
                     .set("uiActionData", uiActionDataNode);
 
-            ObjectNode signal = JsonUtil.getMapper().createObjectNode()
+            ObjectNode signal = Json.node()
                     .put("type", SIGNAL_TYPE_UI_ACTION)
                     .put("id", UUID.randomUUID().toString())
                     .set("payload", payload);
 
-            broadcast(JsonUtil.toJsonString(signal));
+            broadcast(Json.str(signal));
 
         } else {
             // This is the case where one or both are NOT Atoms
@@ -396,7 +393,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
 
         var newNote = new Note(Cog.id(Cog.ID_PREFIX_NOTE), title, text, Note.Status.IDLE);
         cog.addNote(newNote);
-        sendSuccessResponse(conn, commandId, newNote.toJsonNode(), "Note added."); // Assuming Note has toJsonNode()
+        sendSuccessResponse(conn, commandId, Json.node(newNote), "Note added."); // Assuming Note has toJsonNode()
     }
 
     private void handleRemoveNoteCommand(WebSocket conn, JsonNode payload) {
@@ -470,7 +467,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             // Convert JsonNode parameters to Map<String, Object>
             Map<String, Object> paramMap;
             try {
-                paramMap = JsonUtil.getMapper().convertValue(parametersNode, Map.class);
+                paramMap = Json.the.convertValue(parametersNode, Map.class);
             } catch (IllegalArgumentException e) {
                 sendFailureResponse(conn, commandId, "Invalid tool parameters format: " + e.getMessage());
                 return;
@@ -483,7 +480,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
                     sendErrorResponse(conn, commandId, "Error executing tool: " + ex.getMessage());
                 } else {
                     // Convert tool result to JsonNode
-                    JsonNode resultJson = JsonUtil.toJsonNode(result);
+                    JsonNode resultJson = Json.node(result);
                     sendSuccessResponse(conn, commandId, resultJson, "Tool executed successfully.");
                 }
             }, cog.events.exe); // Use events executor for tool result handling
@@ -517,11 +514,11 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             // Convert JsonNode parameters to Map<String, Object>
             Map<String, Object> paramMap = Map.of(); // Default empty map
             if (parametersNode != null && parametersNode.isObject()) {
-                 try {
-                    paramMap = JsonUtil.getMapper().convertValue(parametersNode, Map.class);
-                 } catch (IllegalArgumentException e) {
-                     throw new IllegalArgumentException("Invalid query parameters format: " + e.getMessage(), e);
-                 }
+                try {
+                    paramMap = Json.the.convertValue(parametersNode, Map.class);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Invalid query parameters format: " + e.getMessage(), e);
+                }
             }
 
 
@@ -531,7 +528,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
             cog.events.emit(new Query.QueryEvent(query));
 
             // Send an immediate success response indicating the query was submitted
-            sendSuccessResponse(conn, commandId, JsonUtil.getMapper().createObjectNode().put("queryId", queryId), "Query submitted.");
+            sendSuccessResponse(conn, commandId, Json.node().put("queryId", queryId), "Query submitted.");
 
         } catch (IllegalArgumentException e) {
             sendFailureResponse(conn, commandId, "Invalid queryType or parameters: " + e.getMessage());
@@ -561,7 +558,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var configJsonText = configJsonTextNode.asText();
 
         if (cog.updateConfig(configJsonText)) {
-            sendSuccessResponse(conn, commandId, JsonUtil.toJsonNode(new CogNote.Configuration(cog)), "Configuration updated.");
+            sendSuccessResponse(conn, commandId, Json.node(new CogNote.Configuration(cog)), "Configuration updated.");
         } else {
             sendFailureResponse(conn, commandId, "Failed to update configuration. Invalid JSON?");
         }
@@ -587,8 +584,8 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
         var feedbackDataNode = payload.get("feedbackData");
 
         if (feedbackDataNode == null || !feedbackDataNode.isObject()) {
-             sendFailureResponse(conn, feedbackId, "Invalid user_asserted_kif feedback: missing feedbackData (object).");
-             return;
+            sendFailureResponse(conn, feedbackId, "Invalid user_asserted_kif feedback: missing feedbackData (object).");
+            return;
         }
 
         var noteIdNode = feedbackDataNode.get("noteId");

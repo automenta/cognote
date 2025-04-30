@@ -1,11 +1,9 @@
 package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -128,7 +126,7 @@ public class Op {
 
         @Override
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -164,17 +162,16 @@ public class Op {
         @Override
         public CompletableFuture<Term> exe(Term.Lst arguments, Reason.Reasoning context) {
             // Replaced pattern matching instanceof with traditional check and cast
-            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom)) {
+            if (arguments.size() != 2 || !(arguments.get(1) instanceof Term.Atom promptAtom)) {
                 Log.error("Invalid arguments for (ask-user): Expected (ask-user \"Prompt string\"). Found: " + arguments.toKif());
                 return CompletableFuture.completedFuture(null); // Fail the goal if arguments are invalid
             }
-            Term.Atom promptAtom = (Term.Atom) arguments.get(1);
             String value = promptAtom.value();
 
 
             var dialogueId = Cog.id("dialogue_");
-            var options = JsonUtil.getMapper().createObjectNode(); // Use Jackson ObjectNode
-            var dialogueContext = JsonUtil.getMapper().createObjectNode(); // Use Jackson ObjectNode
+            var options = Json.node(); // Use Jackson ObjectNode
+            var dialogueContext = Json.node(); // Use Jackson ObjectNode
             // Add context if needed, e.g., related assertion IDs
 
             // Request dialogue from the UI via DialogueManager
@@ -200,7 +197,7 @@ public class Op {
 
         @Override
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

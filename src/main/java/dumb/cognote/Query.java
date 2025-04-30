@@ -35,7 +35,7 @@ public record Query(String id, Cog.QueryType type, Term pattern, @Nullable Strin
     }
 
     public JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     public record QueryEvent(Query query) implements Cog.CogEvent {
@@ -49,7 +49,7 @@ public record Query(String id, Cog.QueryType type, Term pattern, @Nullable Strin
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

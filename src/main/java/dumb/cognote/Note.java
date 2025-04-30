@@ -31,17 +31,28 @@ public class Note {
     }
 
     // Getters for Jackson (if fields were private)
-    public String getId() { return id; }
-    public String getText() { return text; }
-    public String getTitle() { return title; }
-    public Status getStatus() { return status; }
+    public String getId() {
+        return id;
+    }
+
+    public String getText() {
+        return text;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public Status getStatus() {
+        return status;
+    }
 
     public Note withStatus(Status newStatus) {
         return new Note(this.id, this.title, this.text, newStatus);
     }
 
     public JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     @Override

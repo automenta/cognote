@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>Agentic Note Management</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css" rel="stylesheet">
     <style>
         :root {
             --bg-main: #f0f0f0;
@@ -245,7 +245,8 @@
                 <option value="title">Sort by Title</option>
             </select>
         </div>
-        <input type="search" id="search-notes" placeholder="Filter/Search Notes..." style="width: 100%; padding: 5px; margin-bottom: 10px;">
+        <input id="search-notes" placeholder="Filter/Search Notes..." style="width: 100%; padding: 5px; margin-bottom: 10px;"
+               type="search">
         <div class="note-list" id="note-list">
             <!-- Note items will be loaded here -->
         </div>
@@ -281,20 +282,20 @@
         <!-- Editor Area -->
         <div class="editor-area">
             <div class="editor-header">
-                <input type="text" class="editor-title" id="note-title" placeholder="Note Title">
+                <input class="editor-title" id="note-title" placeholder="Note Title" type="text">
                 <div class="editor-meta" id="note-meta">Created: N/A | Updated: N/A</div>
             </div>
             <div class="editor-toolbar">
-                <button data-command="bold" class="icon">B</button>
-                <button data-command="italic" class="icon">I</button>
-                <button data-command="underline" class="icon">U</button>
-                <button data-command="insertUnorderedList" class="icon">UL</button>
-                <button data-command="insertOrderedList" class="icon">OL</button>
-                <button data-command="find" class="icon">Find</button>
-                <button data-action="insert-field" class="icon">+</button> <!-- For Tag/Field/Template -->
+                <button class="icon" data-command="bold">B</button>
+                <button class="icon" data-command="italic">I</button>
+                <button class="icon" data-command="underline">U</button>
+                <button class="icon" data-command="insertUnorderedList">UL</button>
+                <button class="icon" data-command="insertOrderedList">OL</button>
+                <button class="icon" data-command="find">Find</button>
+                <button class="icon" data-action="insert-field">+</button> <!-- For Tag/Field/Template -->
             </div>
             <div class="editor-content-wrapper">
-                <div class="editor-content" id="note-content" contenteditable="true">
+                <div class="editor-content" contenteditable="true" id="note-content">
                     <!-- Note content will be loaded here -->
                 </div>
             </div>
@@ -304,17 +305,17 @@
         <div class="action-area">
             <div class="action-icons-container" id="action-icons">
                 <!-- Action icons will be added here -->
-                <div class="action-icon" data-type="Question" data-details="Is the budget sufficient?">
+                <div class="action-icon" data-details="Is the budget sufficient?" data-type="Question">
                     ?
                     <span class="hide-btn">x</span>
                     <span class="tooltip">Question: Is the budget sufficient?</span>
                 </div>
-                <div class="action-icon urgent" data-type="Error" data-details="Cost exceeds limit!">
+                <div class="action-icon urgent" data-details="Cost exceeds limit!" data-type="Error">
                     !
                     <span class="hide-btn">x</span>
                     <span class="tooltip">Error: Cost exceeds limit!</span>
                 </div>
-                <div class="action-icon" data-type="Suggestion" data-details="Consider alternative brands.">
+                <div class="action-icon" data-details="Consider alternative brands." data-type="Suggestion">
                     S
                     <span class="hide-btn">x</span>
                     <span class="tooltip">Suggestion: Consider alternative brands.</span>
@@ -337,7 +338,7 @@
 </div>
 
 <!-- Settings Modal -->
-<div id="settings-modal" class="modal">
+<div class="modal" id="settings-modal">
     <div class="modal-content">
         <div class="modal-header">
             <h4>Application Settings</h4>
@@ -356,12 +357,15 @@
                 <h5>General Settings</h5>
                 <p>Configure general application behavior...</p>
                 <label>Default Note State:</label>
-                <select><option>Private</option><option>Published</option></select>
+                <select>
+                    <option>Private</option>
+                    <option>Published</option>
+                </select>
             </div>
             <div class="modal-tab-content" id="tab-account">
                 <h5>Account/Identity</h5>
                 <p>Manage your user identity...</p>
-                <label>User ID:</label> <input type="text" value="user123" disabled>
+                <label>User ID:</label> <input disabled type="text" value="user123">
             </div>
             <div class="modal-tab-content" id="tab-network">
                 <h5>Network (P2P) Settings</h5>
@@ -372,18 +376,25 @@ wss://relay.snort.social</textarea>
             <div class="modal-tab-content" id="tab-ontology">
                 <h5>Ontology Settings</h5>
                 <p>Manage semantic types, fields, and templates...</p>
-                <button>Import Ontology</button> <button>Export Ontology</button>
+                <button>Import Ontology</button>
+                <button>Export Ontology</button>
             </div>
             <div class="modal-tab-content" id="tab-llm">
                 <h5>LLM Tools Settings</h5>
                 <p>Configure API keys and models for Enhance/Summary...</p>
-                <label>LLM Provider:</label> <select><option>OpenAI</option><option>Local</option></select><br>
+                <label>LLM Provider:</label> <select>
+                <option>OpenAI</option>
+                <option>Local</option>
+            </select><br>
                 <label>API Key:</label> <input type="password">
             </div>
             <div class="modal-tab-content" id="tab-appearance">
                 <h5>Appearance Settings</h5>
                 <p>Customize the look and feel...</p>
-                <label>Theme:</label> <select><option>Light</option><option>Dark</option></select>
+                <label>Theme:</label> <select>
+                <option>Light</option>
+                <option>Dark</option>
+            </select>
             </div>
         </div>
         <div class="modal-footer">

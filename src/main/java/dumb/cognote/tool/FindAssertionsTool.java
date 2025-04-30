@@ -3,13 +3,12 @@ package dumb.cognote.tool;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import dumb.cognote.CogNote;
-import dumb.cognote.JsonUtil;
+import dumb.cognote.Json;
 import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Log.error;
 
@@ -42,12 +41,12 @@ public class FindAssertionsTool implements Tool {
 
                 var matchingAssertionIds = cog.context.kb(targetKbId).findInstancesOf(pattern)
                         .map(dumb.cognote.Assertion::id)
-                        .collect(Collectors.toList());
+                        .toList();
 
-                ArrayNode jsonArray = JsonUtil.getMapper().createArrayNode();
+                ArrayNode jsonArray = Json.the.createArrayNode();
                 matchingAssertionIds.forEach(jsonArray::add);
 
-                return JsonUtil.toJsonString(jsonArray);
+                return Json.str(jsonArray);
 
             } catch (KifParser.ParseException e) {
                 error("FindAssertionsTool parse error: " + e.getMessage());

@@ -59,7 +59,7 @@ sealed public interface Term permits Term.Atom, Term.Var, Term.Lst {
     String getType();
 
     default JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     @JsonTypeName("var")

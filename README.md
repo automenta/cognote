@@ -13,11 +13,13 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 - **Persistent Queries:** `Note`s can act as ongoing search interests.
 - **Semantic Matching:** `Note`s capture meaning and intent.
 - **Notifications:** The app receives matches to shared `Note`s as replies.
-- **Real vs. Imaginary:** Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary things - effecting the realization of imagination.
+- **Real vs. Imaginary:** Matches factual descriptions of real things to hypothetical (acceptable) descriptions of
+  imaginary things - effecting the realization of imagination.
 
 ## Components
 
 ### Logic engine
+
 - Prolog-based logic and reasoning
 - Coordinates system proceses and manages prioritizable resources
 - Develops and executes plans
@@ -25,28 +27,32 @@ Organize, prioritize, and grow thoughts into actionable results with real-time c
 - Framework managing notifications and events, used in implementing app features
 
 ### TODO List (App)
+
 - Conventional "TODO List" editor
 - Semantic Ontology: fields/forms/templates inserted by menu, or suggested
 - WYSIWYG editor
 - List: Sort, Search, Filter
 
 ### Mind Map (App)
+
 - Free-form Note editor and organization tool
 - Node/Edge Graph editing
 
 ### Semantic Simulator (Plugin)
+
 - Narrates real-world simulated community interactions
 - Semi-supervised tool for developing ontology, matching heuristics, and performance testing
 
 ### P2P Network (Plugin)
+
 - **Decentralized**
 - **Secure**
-  - End-to-end encryption protects private data.
-  - Crypto-signing ensures `Note` integrity and provenance.
+    - End-to-end encryption protects private data.
+    - Crypto-signing ensures `Note` integrity and provenance.
 - Networks:
-  1. Nostr
-  2. LibP2P
-  3. etc...
+    1. Nostr
+    2. LibP2P
+    3. etc...
 
 ----
 

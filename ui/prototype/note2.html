@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>Agentic Note Management v2</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css" rel="stylesheet">
     <style>
         :root {
             --bg-main: #f0f0f0;
@@ -176,7 +176,8 @@
                 <option value="title">Sort by Title</option>
             </select>
         </div>
-        <input type="search" id="search-notes" placeholder="Filter/Search Notes..." style="width: 100%; padding: 5px; margin-bottom: 10px;">
+        <input id="search-notes" placeholder="Filter/Search Notes..." style="width: 100%; padding: 5px; margin-bottom: 10px;"
+               type="search">
         <div class="note-list" id="note-list">
             <!-- Note items will be rendered here by Sidebar component -->
         </div>
@@ -212,27 +213,27 @@
         <!-- Editor Area -->
         <div class="editor-area" id="editor-component">
             <div class="editor-header">
-                <input type="text" class="editor-title" id="note-title" placeholder="Note Title">
+                <input class="editor-title" id="note-title" placeholder="Note Title" type="text">
                 <div class="editor-meta" id="note-meta">Created: N/A | Updated: N/A | State: N/A</div>
             </div>
             <div class="editor-toolbar">
-                <button data-command="bold" class="icon">B</button>
-                <button data-command="italic" class="icon">I</button>
-                <button data-command="underline" class="icon">U</button>
-                <button data-command="insertUnorderedList" class="icon">UL</button>
-                <button data-command="insertOrderedList" class="icon">OL</button>
-                <button data-command="find" class="icon">Find</button>
-                <button id="insert-semantic-btn" class="icon">+</button> <!-- For Tag/Field/Template -->
+                <button class="icon" data-command="bold">B</button>
+                <button class="icon" data-command="italic">I</button>
+                <button class="icon" data-command="underline">U</button>
+                <button class="icon" data-command="insertUnorderedList">UL</button>
+                <button class="icon" data-command="insertOrderedList">OL</button>
+                <button class="icon" data-command="find">Find</button>
+                <button class="icon" id="insert-semantic-btn">+</button> <!-- For Tag/Field/Template -->
             </div>
             <div class="editor-content-wrapper">
-                <div class="editor-content" id="note-content" contenteditable="true">
+                <div class="editor-content" contenteditable="true" id="note-content">
                     <!-- Note content will be loaded here -->
                 </div>
             </div>
             <!-- Semantic Insertion Popup -->
             <div id="semantic-popup">
                 <h5 id="semantic-popup-title">Insert Semantic Element</h5>
-                <input type="hidden" id="semantic-element-id"> <!-- For editing existing elements -->
+                <input id="semantic-element-id" type="hidden"> <!-- For editing existing elements -->
                 <label for="semantic-type">Type:</label>
                 <select id="semantic-type">
                     <option value="Tag">Tag</option>
@@ -240,14 +241,14 @@
                     <option value="Template">Template</option>
                 </select>
 
-                <div id="semantic-details-tag" class="hidden">
+                <div class="hidden" id="semantic-details-tag">
                     <label for="tag-value">Tag Value:</label>
-                    <input type="text" id="tag-value" placeholder="e.g., important, project-x">
+                    <input id="tag-value" placeholder="e.g., important, project-x" type="text">
                 </div>
 
-                <div id="semantic-details-field" class="hidden">
+                <div class="hidden" id="semantic-details-field">
                     <label for="field-name">Field Name:</label>
-                    <input type="text" id="field-name" placeholder="e.g., Cost, DueDate">
+                    <input id="field-name" placeholder="e.g., Cost, DueDate" type="text">
                     <label for="field-type">Data Type:</label>
                     <select id="field-type">
                         <option value="text">Text</option>
@@ -261,15 +262,18 @@
                     </select>
                     <label>Mode:</label>
                     <div class="radio-group">
-                        <label><input type="radio" name="field-mode" value="Real" checked> Real (Fact)</label>
-                        <label><input type="radio" name="field-mode" value="Imaginary"> Imaginary (Preference/Condition)</label>
+                        <label><input checked name="field-mode" type="radio" value="Real"> Real (Fact)</label>
+                        <label><input name="field-mode" type="radio" value="Imaginary"> Imaginary (Preference/Condition)</label>
                     </div>
                     <label for="field-value">Value:</label>
-                    <textarea id="field-value" rows="2" placeholder="Enter value or predicate (e.g., < 20, = 'urgent', BETWEEN 2024-01-01 AND 2024-12-31)"></textarea>
-                    <div class="predicate-help hidden">Use operators like <, >, =, <=, >=, CONTAINS, BETWEEN, IN (...) with AND/OR/NOT for Imaginary mode.</div>
+                    <textarea id="field-value" placeholder="Enter value or predicate (e.g., < 20, = 'urgent', BETWEEN 2024-01-01 AND 2024-12-31)"
+                              rows="2"></textarea>
+                    <div class="predicate-help hidden">Use operators like <, >, =, <=, >=, CONTAINS, BETWEEN, IN (...)
+                        with AND/OR/NOT for Imaginary mode.
+                    </div>
                 </div>
 
-                <div id="semantic-details-template" class="hidden">
+                <div class="hidden" id="semantic-details-template">
                     <label for="template-select">Choose Template:</label>
                     <select id="template-select">
                         <!-- Templates loaded dynamically -->
@@ -303,7 +307,7 @@
 </div>
 
 <!-- Settings Modal -->
-<div id="settings-modal" class="modal">
+<div class="modal" id="settings-modal">
     <!-- Modal structure remains the same, managed by SettingsModal component -->
     <div class="modal-content">
         <div class="modal-header">
@@ -323,12 +327,15 @@
                 <h5>General Settings</h5>
                 <p>Configure general application behavior...</p>
                 <label>Default Note State:</label>
-                <select><option>Private</option><option>Published</option></select>
+                <select>
+                    <option>Private</option>
+                    <option>Published</option>
+                </select>
             </div>
             <div class="modal-tab-content" id="tab-account">
                 <h5>Account/Identity</h5>
                 <p>Manage your user identity...</p>
-                <label>User ID:</label> <input type="text" value="user123" disabled>
+                <label>User ID:</label> <input disabled type="text" value="user123">
             </div>
             <div class="modal-tab-content" id="tab-network">
                 <h5>Network (P2P) Settings</h5>
@@ -339,19 +346,27 @@ wss://relay.snort.social</textarea>
             <div class="modal-tab-content" id="tab-ontology">
                 <h5>Ontology Settings</h5>
                 <p>Manage semantic types, fields, and templates...</p>
-                <button>Import Ontology</button> <button>Export Ontology</button>
-                <h6>Defined Templates:</h6> <ul id="ontology-template-list"></ul>
+                <button>Import Ontology</button>
+                <button>Export Ontology</button>
+                <h6>Defined Templates:</h6>
+                <ul id="ontology-template-list"></ul>
             </div>
             <div class="modal-tab-content" id="tab-llm">
                 <h5>LLM Tools Settings</h5>
                 <p>Configure API keys and models for Enhance/Summary...</p>
-                <label>LLM Provider:</label> <select><option>OpenAI</option><option>Local</option></select><br>
+                <label>LLM Provider:</label> <select>
+                <option>OpenAI</option>
+                <option>Local</option>
+            </select><br>
                 <label>API Key:</label> <input type="password">
             </div>
             <div class="modal-tab-content" id="tab-appearance">
                 <h5>Appearance Settings</h5>
                 <p>Customize the look and feel...</p>
-                <label>Theme:</label> <select><option>Light</option><option>Dark</option></select>
+                <label>Theme:</label> <select>
+                <option>Light</option>
+                <option>Dark</option>
+            </select>
             </div>
         </div>
         <div class="modal-footer">

@@ -3,12 +3,10 @@ package dumb.cognote;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
@@ -41,9 +39,9 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
     @JsonProperty("bindingsJson") // Add bindingsJson property to JSON
     public JsonNode getBindingsJson() {
         if (bindings.isEmpty()) return null;
-        var jsonBindings = JsonUtil.getMapper().createArrayNode();
+        var jsonBindings = Json.the.createArrayNode();
         bindings.forEach(bindingMap -> {
-            var jsonBinding = JsonUtil.getMapper().createObjectNode();
+            var jsonBinding = Json.node();
             bindingMap.forEach((var, term) -> jsonBinding.set(var.name(), term.toJson()));
             jsonBindings.add(jsonBinding);
         });
@@ -51,7 +49,7 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
     }
 
     public JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     public record AnswerEvent(Answer result) implements Cog.CogEvent {
@@ -60,7 +58,7 @@ public record Answer(String query, Cog.QueryStatus status, List<Map<Term.Var, Te
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

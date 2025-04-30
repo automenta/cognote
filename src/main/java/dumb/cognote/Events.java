@@ -1,9 +1,6 @@
 package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Map;
@@ -81,7 +78,7 @@ public class Events {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override
@@ -91,7 +88,8 @@ public class Events {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JsonNode options, // Use JsonNode
+    public record DialogueRequestEvent(String dialogueId, String requestType, String prompt, JsonNode options,
+                                       // Use JsonNode
                                        JsonNode context) implements Cog.CogEvent { // Use JsonNode
         public DialogueRequestEvent {
             requireNonNull(dialogueId);
@@ -102,7 +100,7 @@ public class Events {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

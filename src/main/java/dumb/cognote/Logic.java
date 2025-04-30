@@ -184,7 +184,7 @@ public class Logic {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Explanation(String details) {
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
     }
 

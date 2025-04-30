@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static dumb.cognote.Logic.AssertionType.UNIVERSAL;
 import static java.util.Objects.requireNonNull;
@@ -95,7 +94,7 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
     }
 
     public JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     public record PotentialAssertion(Term.Lst kif, double pri, Set<String> support, String sourceId, boolean isEquality,

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
 
@@ -18,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.stream.IntStream;
 
 import static dumb.cognote.Log.error;
 import static dumb.cognote.Log.message;
@@ -122,7 +120,7 @@ public class CogNote extends Cog {
 
         try {
             // Use Jackson to write the list of Note objects directly
-            JsonUtil.getMapper().writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
+            Json.the.writeValue(Paths.get(NOTES_FILE).toFile(), toSave);
             message("Notes saved to " + NOTES_FILE);
         } catch (IOException e) {
             error("Error saving notes to " + NOTES_FILE + ": " + e.getMessage());
@@ -137,7 +135,8 @@ public class CogNote extends Cog {
         }
         try {
             // Use Jackson to read the list of Note objects directly
-            return JsonUtil.getMapper().readValue(path.toFile(), new TypeReference<List<Note>>() {});
+            return Json.the.readValue(path.toFile(), new TypeReference<>() {
+            });
         } catch (IOException e) {
             error("Error loading notes from " + NOTES_FILE + ": " + e.getMessage());
             e.printStackTrace();
@@ -195,7 +194,7 @@ public class CogNote extends Cog {
             save();
             message("Added note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
         } else {
             message("Note with ID " + note.id + " already exists.");
         }
@@ -214,7 +213,7 @@ public class CogNote extends Cog {
             save();
             message("Removed note: " + note.title + " [" + note.id + "]");
             // Signal UI to update note list
-            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
+            assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
         });
     }
 
@@ -339,17 +338,17 @@ public class CogNote extends Cog {
         // Emit status event reflecting the cleared state
         events.emit(new SystemStatusEvent(status, context.kbCount(), globalKbCapacity, lm.activeLlmTasks.size(), context.ruleCount()));
         // Signal UI to update note list
-        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, JsonUtil.getMapper().createObjectNode()); // Use Jackson ObjectNode
+        assertUiAction(Protocol.UI_ACTION_UPDATE_NOTE_LIST, Json.node()); // Use Jackson ObjectNode
     }
 
     public boolean updateConfig(String newConfigJsonText) {
         try {
             // Use Jackson to read the config from JSON string
-            var newConfig = JsonUtil.fromJsonString(newConfigJsonText, Configuration.class);
+            var newConfig = Json.obj(newConfigJsonText, Configuration.class);
             applyConfig(newConfig);
             note(CONFIG_NOTE_ID).ifPresent(note -> {
                 // Use Jackson to write the config back to JSON string (pretty printed)
-                note.text = JsonUtil.toJsonString(newConfig);
+                note.text = Json.str(newConfig);
                 save();
                 message("Configuration updated and saved.");
             });
@@ -378,7 +377,7 @@ public class CogNote extends Cog {
         if (configNoteOpt.isPresent()) {
             try {
                 // Use Jackson to parse config from note text
-                config = JsonUtil.fromJsonString(configNoteOpt.get().text, Configuration.class);
+                config = Json.obj(configNoteOpt.get().text, Configuration.class);
                 message("Configuration note found and parsed.");
             } catch (Exception e) { // Catch JsonProcessingException
                 error("Error parsing configuration note, using defaults and creating a new one: " + e.getMessage());
@@ -427,7 +426,7 @@ public class CogNote extends Cog {
         var uiActionTerm = new Term.Lst(
                 Term.Atom.of(Protocol.PRED_UI_ACTION),
                 Term.Atom.of(actionType),
-                Term.Atom.of(JsonUtil.toJsonString(actionData)) // Store JSON string in an atom
+                Term.Atom.of(Json.str(actionData)) // Store JSON string in an atom
         );
 
         context.tryCommit(new Assertion.PotentialAssertion(
@@ -492,7 +491,7 @@ public class CogNote extends Cog {
         }
 
         public JsonNode toJson() {
-            return JsonUtil.toJsonNode(this);
+            return Json.node(this);
         }
 
         @Override

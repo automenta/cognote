@@ -91,7 +91,7 @@ public record Rule(String id, Term.Lst form, Term antecedent, Term consequent, d
     }
 
     public JsonNode toJson() {
-        return JsonUtil.toJsonNode(this);
+        return Json.node(this);
     }
 
     @Override
