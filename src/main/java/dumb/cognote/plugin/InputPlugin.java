@@ -23,6 +23,10 @@ public class InputPlugin extends Plugin.BasePlugin {
         var sourceId = event.sourceId();
         var noteId = event.noteId();
 
+        if (sourceId != null && sourceId.startsWith("client:")) {
+            return;
+        }
+
         log("Processing external input from " + sourceId + (noteId != null ? " for note " + noteId : "") + ": " + term.toKif());
 
         if (term instanceof Term.Lst termList) {
