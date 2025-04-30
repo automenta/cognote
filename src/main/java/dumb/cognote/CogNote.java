@@ -423,12 +423,15 @@ public class CogNote extends Cog {
      * @param actionData A JsonNode containing data for the UI action.
      */
     public void assertUiAction(String actionType, JsonNode actionData) { // Use JsonNode
+        // Create the UI action term using the provided JsonNode data
+        var uiActionTerm = new Term.Lst(
+                Term.Atom.of(Protocol.PRED_UI_ACTION),
+                Term.Atom.of(actionType),
+                Term.Atom.of(JsonUtil.toJsonString(actionData)) // Store JSON string in an atom
+        );
+
         context.tryCommit(new Assertion.PotentialAssertion(
-                new Term.Lst(
-                        Term.Atom.of(Protocol.PRED_UI_ACTION),
-                        Term.Atom.of(actionType),
-                        Term.Atom.of(JsonUtil.toJsonString(actionData)) // Store JSON string in an atom
-                ),
+                uiActionTerm,
                 Cog.INPUT_ASSERTION_BASE_PRIORITY, // Use a base priority
                 java.util.Set.of(), // No justifications needed for a UI action
                 "backend:ui-action", // Source
