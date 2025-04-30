@@ -1,9 +1,13 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.*;
+import dumb.cognote.Cognition;
+import dumb.cognote.Event;
+import dumb.cognote.Plugin;
+import dumb.cognote.Term;
+import dumb.cognote.util.Events;
 
-import static dumb.cognote.Log.message;
 import static dumb.cognote.Protocol.KB_USER_FEEDBACK;
+import static dumb.cognote.util.Log.message;
 
 /**
  * Plugin that listens for assertions in the user feedback KB and processes them.
@@ -13,7 +17,7 @@ public class UserFeedbackPlugin extends Plugin.BasePlugin {
     private static final String PRED_USER_ASSERTED_KIF = "asserted", PRED_USER_EDITED_NOTE_TEXT = "edited_text", PRED_USER_EDITED_NOTE_TITLE = "asserted_title", PRED_USER_CLICKED = "clicked";
 
     @Override
-    public void start(Events ev, Logic.Cognition ctx) {
+    public void start(Events ev, Cognition ctx) {
         super.start(ev, ctx);
         // Listen for any assertion being added
         events.on(Event.AssertedEvent.class, this::handleAssertionAdded);

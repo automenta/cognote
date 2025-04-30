@@ -6,6 +6,8 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonSubTypes.Type;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
+import dumb.cognote.util.Events;
+import dumb.cognote.util.Json;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;

@@ -1,16 +1,16 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.Events;
-import dumb.cognote.Logic;
+import dumb.cognote.Cognition;
 import dumb.cognote.Plugin;
 import dumb.cognote.Truths;
+import dumb.cognote.util.Events;
 
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.message;
 
 public class TmsPlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(Events e, Logic.Cognition ctx) {
+    public void start(Events e, Cognition ctx) {
         super.start(e, ctx);
         events.on(Truths.ContradictionDetectedEvent.class, this::handleContradictionDetected);
         log("TmsPlugin started.");

@@ -1,18 +1,19 @@
 package dumb.cognote.plugin;
 
 import dumb.cognote.*;
+import dumb.cognote.util.Events;
 
 import java.util.List;
 import java.util.Set;
 
 import static dumb.cognote.Cog.DEFAULT_RULE_PRIORITY;
-import static dumb.cognote.Log.message;
 import static dumb.cognote.Protocol.KB_CLIENT_INPUT;
+import static dumb.cognote.util.Log.message;
 
 public class InputPlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(dumb.cognote.Events e, Logic.Cognition ctx) {
+    public void start(Events e, Cognition ctx) {
         super.start(e, ctx);
         events.on(Event.ExternalInputEvent.class, this::handleExternalInput);
         log("InputPlugin started.");

@@ -1,5 +1,7 @@
 package dumb.cognote;
 
+import dumb.cognote.util.Events;
+import dumb.cognote.util.Log;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Set;
@@ -8,11 +10,11 @@ import java.util.concurrent.CompletableFuture;
 public interface Plugin {
     String id();
 
-    default void start(Logic.Cognition c) {
+    default void start(Cognition c) {
         start(c.cog.events, c);
     }
 
-    void start(Events e, Logic.Cognition c);
+    void start(Events e, Cognition c);
 
     default void stop() {
     }
@@ -27,14 +29,14 @@ public interface Plugin {
         Set<Cog.Feature> getSupportedFeatures();
 
         @Override
-        default void start(Events events, Logic.Cognition ctx) {
+        default void start(Events events, Cognition ctx) {
         }
     }
 
     abstract class BasePlugin implements Plugin {
         protected final String id = Cog.id(Cog.ID_PREFIX_PLUGIN + getClass().getSimpleName().replace("Plugin", "").toLowerCase() + "_");
         protected Events events;
-        protected Logic.Cognition context;
+        protected Cognition context;
         protected Cog cog;
 
         @Override
@@ -43,7 +45,7 @@ public interface Plugin {
         }
 
         @Override
-        public void start(Events e, Logic.Cognition ctx) {
+        public void start(Events e, Cognition ctx) {
             this.events = e;
             this.context = ctx;
             this.cog = ctx.cog;

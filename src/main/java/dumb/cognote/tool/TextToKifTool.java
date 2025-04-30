@@ -6,15 +6,15 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dumb.cognote.Cog;
 import dumb.cognote.Event;
-import dumb.cognote.KifParser;
 import dumb.cognote.Tool;
+import dumb.cognote.util.KifParser;
 
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class TextToKifTool implements Tool {
 

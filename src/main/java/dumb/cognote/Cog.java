@@ -6,6 +6,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import dumb.cognote.plugin.*;
 import dumb.cognote.tool.*;
+import dumb.cognote.util.Events;
+import dumb.cognote.util.Json;
+import dumb.cognote.util.KifParser;
+import dumb.cognote.util.Log;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,9 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
 import static dumb.cognote.Note.Status.IDLE;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
@@ -48,7 +52,7 @@ public class Cog {
     private static final String STATE_FILE = "cognote_state.json";
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
     private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    public final Logic.Cognition context;
+    public final Cognition context;
     public final LM lm;
     public final Dialogue dialogue;
     public final Events events;
@@ -61,7 +65,7 @@ public class Cog {
     final AtomicBoolean paused = new AtomicBoolean(true);
     final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
     private final Object pauseLock = new Object();
-    private final PersistenceManager persistenceManager;
+    private final Persist persistenceManager;
     public volatile String status = "Initializing";
     public volatile boolean broadcastInputAssertions;
     public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
@@ -73,12 +77,12 @@ public class Cog {
         this.tools = new Tools();
 
         var tms = new Truths.BasicTMS(events);
-        this.context = new Logic.Cognition(globalKbCapacity, tms, this);
+        this.context = new Cognition(globalKbCapacity, tms, this);
 
         this.dialogue = new Dialogue(this);
         this.reasoner = new Reason.ReasonerManager(events, context, dialogue);
         this.plugins = new Plugins(this.events, this.context);
-        this.persistenceManager = new PersistenceManager(this, context, tms);
+        this.persistenceManager = new Persist(this, context, tms);
 
         this.lm = new LM(this);
 

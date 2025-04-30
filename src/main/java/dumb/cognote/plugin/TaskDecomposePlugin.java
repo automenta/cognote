@@ -1,6 +1,10 @@
 package dumb.cognote.plugin;
 
-import dumb.cognote.*;
+import dumb.cognote.Cognition;
+import dumb.cognote.Event;
+import dumb.cognote.Plugin;
+import dumb.cognote.Term;
+import dumb.cognote.util.Events;
 
 import java.util.Map;
 
@@ -10,7 +14,7 @@ import java.util.Map;
 public class TaskDecomposePlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(Events ev, Logic.Cognition ctx) {
+    public void start(Events ev, Cognition ctx) {
         super.start(ev, ctx);
         // Listen for ExternalInputEvents that are KifLists starting with "goal"
         ev.on(new Term.Lst(Term.Atom.of("goal"), Term.Var.of("?_")), this::handleGoalAssertion);

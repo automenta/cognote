@@ -3,6 +3,7 @@ package dumb.cognote;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import dumb.cognote.util.Json;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
@@ -20,10 +21,6 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
                         List<Term.Var> quantifiedVars, int derivationDepth, boolean isActive,
                         String kb) implements Comparable<Assertion> {
     public Assertion {
-        requireNonNull(id);
-        requireNonNull(kif);
-        requireNonNull(type);
-        requireNonNull(kb);
         justificationIds = Set.copyOf(requireNonNull(justificationIds));
         quantifiedVars = List.copyOf(requireNonNull(quantifiedVars));
         if (negated != kif.op().filter(Logic.KIF_OP_NOT::equals).isPresent())
@@ -31,7 +28,7 @@ public record Assertion(String id, Term.Lst kif, double pri, long timestamp, @Nu
         if (type == UNIVERSAL && (kif.op().filter(Logic.KIF_OP_FORALL::equals).isEmpty() || quantifiedVars.isEmpty()))
             throw new IllegalArgumentException("Universal assertion must be (forall ...) with quantified vars: " + kif.toKif());
         if (type != UNIVERSAL && !quantifiedVars.isEmpty())
-            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKIF());
+            throw new IllegalArgumentException("Only Universal assertions should have quantified vars: " + kif.toKif());
     }
 
     private static void collectPredicatesRecursive(Term term, Set<Term.Atom> predicates) {

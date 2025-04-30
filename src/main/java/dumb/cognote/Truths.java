@@ -2,6 +2,8 @@ package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
+import dumb.cognote.util.Events;
+import dumb.cognote.util.Json;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,8 +13,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import static dumb.cognote.Cog.id;
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 

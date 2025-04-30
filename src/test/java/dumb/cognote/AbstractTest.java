@@ -1,8 +1,9 @@
 package dumb.cognote;
 
-import dumb.cognote.KifParser.ParseException;
 import dumb.cognote.Logic.AssertionType;
 import dumb.cognote.Logic.RetractionType;
+import dumb.cognote.util.KifParser;
+import dumb.cognote.util.KifParser.ParseException;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +26,7 @@ abstract class AbstractTest {
     private static final long TEST_WAIT_DEFAULT_INTERVAL_MILLIS = 100;
     private static final Pattern PARSE_ERROR_LOCATION_PATTERN = Pattern.compile(" at line (\\d+) col (\\d+)$");
     protected Cog cog;
-    private Logic.Cognition context;
+    private Cognition context;
     private String testKbId;
 
     @BeforeEach

@@ -1,4 +1,4 @@
-package dumb.cognote;
+package dumb.cognote.util;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
-import static dumb.cognote.Log.error;
+import static dumb.cognote.util.Log.error;
 
 public class Json {
 

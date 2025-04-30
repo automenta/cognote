@@ -8,8 +8,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class Tools {
     private final Map<String, dumb.cognote.Tool> tools = new ConcurrentHashMap<>();

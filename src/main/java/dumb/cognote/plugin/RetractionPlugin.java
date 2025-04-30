@@ -1,17 +1,19 @@
 package dumb.cognote.plugin;
 
+import dumb.cognote.Cognition;
 import dumb.cognote.Event;
-import dumb.cognote.Logic;
 import dumb.cognote.Plugin;
 import dumb.cognote.Term;
+import dumb.cognote.util.Events;
+import dumb.cognote.util.KifParser;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class RetractionPlugin extends Plugin.BasePlugin {
 
     @Override
-    public void start(dumb.cognote.Events e, Logic.Cognition ctx) {
+    public void start(Events e, Cognition ctx) {
         super.start(e, ctx);
         events.on(Event.RetractionRequestEvent.class, this::handleRetractionRequest);
         log("RetractionPlugin started.");
@@ -50,7 +52,7 @@ public class RetractionPlugin extends Plugin.BasePlugin {
                         return;
                     }
                     try {
-                        var terms = dumb.cognote.KifParser.parseKif(target);
+                        var terms = KifParser.parseKif(target);
                         if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst ruleForm)) {
                             logWarning("RetractionPlugin: BY_RULE_FORM target is not a single KIF list: " + target);
                             return;
@@ -60,7 +62,7 @@ public class RetractionPlugin extends Plugin.BasePlugin {
                         } else {
                             logWarning("RetractionPlugin: No rule found matching form: " + target);
                         }
-                    } catch (dumb.cognote.KifParser.ParseException e) {
+                    } catch (KifParser.ParseException e) {
                         logError("RetractionPlugin: Failed to parse KIF rule form for retraction: " + target + " Error: " + e.getMessage());
                     }
                 }
@@ -70,7 +72,7 @@ public class RetractionPlugin extends Plugin.BasePlugin {
                         return;
                     }
                     try {
-                        var terms = dumb.cognote.KifParser.parseKif(target);
+                        var terms = KifParser.parseKif(target);
                         if (terms.size() != 1 || !(terms.getFirst() instanceof Term.Lst kif)) {
                             logWarning("RetractionPlugin: BY_KIF target is not a single KIF list: " + target);
                             return;
@@ -82,7 +84,7 @@ public class RetractionPlugin extends Plugin.BasePlugin {
                                         () -> logWarning("RetractionPlugin: No active assertion found matching KIF: " + target + (noteId != null ? " in KB " + noteId : ""))
                                 );
                         message("RetractionPlugin: Retraction by KIF requested for: " + target);
-                    } catch (dumb.cognote.KifParser.ParseException e) {
+                    } catch (KifParser.ParseException e) {
                         logError("RetractionPlugin: Failed to parse target KIF for retraction: " + target + " Error: " + e.getMessage());
                     }
                 }

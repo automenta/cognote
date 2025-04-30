@@ -869,7 +869,7 @@ Here are some concrete ideas and steps to evolve Cognote into an awesome self-pr
    ```java name=SelfModificationPlugin.java
    package dumb.cognote.plugin;
 
-   import dumb.cognote.Event;import dumb.cognote.Cog;import dumb.cognote.Events;
+   import dumb.cognote.Event;import dumb.cognote.Cog;import dumb.cognote.util.Events;
    import java.util.concurrent.CompletableFuture;
 
    public class SelfModificationPlugin implements Cog.Plugin {

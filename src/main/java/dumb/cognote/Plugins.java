@@ -1,19 +1,21 @@
 package dumb.cognote;
 
+import dumb.cognote.util.Events;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class Plugins {
     private final Events events;
-    private final Logic.Cognition context;
+    private final Cognition context;
     private final List<Plugin> plugins = new CopyOnWriteArrayList<>();
     private final AtomicBoolean initialized = new AtomicBoolean(false);
 
-    Plugins(Events events, Logic.Cognition context) {
+    Plugins(Events events, Cognition context) {
         this.events = events;
         this.context = context;
     }

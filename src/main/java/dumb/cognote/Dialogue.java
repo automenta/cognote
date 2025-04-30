@@ -1,12 +1,13 @@
 package dumb.cognote;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dumb.cognote.util.Events;
 
 import java.util.Optional;
 import java.util.concurrent.*;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 import static java.util.Optional.ofNullable;
 
 public class Dialogue {

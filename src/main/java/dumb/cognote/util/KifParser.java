@@ -1,5 +1,6 @@
-package dumb.cognote;
+package dumb.cognote.util;
 
+import dumb.cognote.Term;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;

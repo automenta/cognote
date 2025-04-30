@@ -1,4 +1,4 @@
-package dumb.cognote;
+package dumb.cognote.util;
 
 import static java.util.Objects.requireNonNull;
 

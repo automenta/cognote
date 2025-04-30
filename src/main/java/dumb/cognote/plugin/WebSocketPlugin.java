@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dumb.cognote.*;
+import dumb.cognote.util.Events;
+import dumb.cognote.util.Json;
+import dumb.cognote.util.KifParser;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -17,10 +20,10 @@ import java.util.concurrent.CopyOnWriteArraySet;
 
 import static dumb.cognote.Cog.INPUT_ASSERTION_BASE_PRIORITY;
 import static dumb.cognote.Cog.MAX_WS_PARSE_PREVIEW;
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
 import static dumb.cognote.Protocol.*;
 import static dumb.cognote.Term.Lst;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class WebSocketPlugin extends Plugin.BasePlugin {
 
@@ -34,7 +37,7 @@ public class WebSocketPlugin extends Plugin.BasePlugin {
     }
 
     @Override
-    public void start(Events e, Logic.Cognition ctx) {
+    public void start(Events e, Cognition ctx) {
         super.start(e, ctx);
         server = new WebSocketServer(address) {
             @Override

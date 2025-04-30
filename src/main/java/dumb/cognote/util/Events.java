@@ -1,7 +1,10 @@
-package dumb.cognote;
+package dumb.cognote.util;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
+import dumb.cognote.Event;
+import dumb.cognote.Logic;
+import dumb.cognote.Term;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

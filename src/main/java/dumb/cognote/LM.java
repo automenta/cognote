@@ -14,11 +14,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 
 public class LM {
-    public static final double LLM_ASSERTION_BASE_PRIORITY = 15.0;
     static final String DEFAULT_LLM_URL = "http://localhost:11434";
     static final String DEFAULT_LLM_MODEL = "hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q8_0";
     static final int HTTP_TIMEOUT_SECONDS = 90;

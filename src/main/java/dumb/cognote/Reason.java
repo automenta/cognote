@@ -1,7 +1,7 @@
 package dumb.cognote;
 
-import dumb.cognote.Op.Operator;
 import dumb.cognote.Term.Var;
+import dumb.cognote.util.Events;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -16,16 +16,16 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static dumb.cognote.Cog.*;
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
 import static dumb.cognote.Logic.*;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 import static java.util.Optional.ofNullable;
 
 public class Reason {
     private static final int MAX_BACKWARD_CHAIN_DEPTH = 8;
     private static final int MAX_DERIVED_TERM_WEIGHT = 150;
 
-    public record Reasoning(Logic.Cognition ctx, Events events, Dialogue dialogue) {
+    public record Reasoning(Cognition ctx, Events events, Dialogue dialogue) {
         Knowledge getKb(@Nullable String noteId) {
             return ctx.kb(noteId);
         }
@@ -53,7 +53,7 @@ public class Reason {
         private final List<Plugin.ReasonerPlugin> plugins = new CopyOnWriteArrayList<>();
         private final AtomicBoolean initialized = new AtomicBoolean(false);
 
-        ReasonerManager(Events events, Logic.Cognition ctx, Dialogue dialogue) {
+        ReasonerManager(Events events, Cognition ctx, Dialogue dialogue) {
             this.events = events;
             this.reasoning = new Reasoning(ctx, events, dialogue);
         }
@@ -195,7 +195,7 @@ public class Reason {
             return context.getTMS();
         }
 
-        protected Logic.Cognition getCogNoteContext() {
+        protected Cognition getCogNoteContext() {
             return context.ctx();
         }
 

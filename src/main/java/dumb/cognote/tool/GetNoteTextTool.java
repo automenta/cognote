@@ -6,7 +6,7 @@ import dumb.cognote.Tool;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import static dumb.cognote.Log.error;
+import static dumb.cognote.util.Log.error;
 
 public class GetNoteTextTool implements Tool {
 

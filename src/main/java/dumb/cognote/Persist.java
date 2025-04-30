@@ -2,6 +2,7 @@ package dumb.cognote;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dumb.cognote.util.Json;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -9,18 +10,18 @@ import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.List;
 
-import static dumb.cognote.Log.error;
-import static dumb.cognote.Log.message;
+import static dumb.cognote.util.Log.error;
+import static dumb.cognote.util.Log.message;
 import static java.util.Objects.requireNonNull;
 
-public class PersistenceManager {
+public class Persist {
 
     private final Cog cog;
-    private final Logic.Cognition context;
+    private final Cognition context;
     private final Truths.BasicTMS tms;
     private final ObjectMapper mapper;
 
-    public PersistenceManager(Cog cog, Logic.Cognition context, Truths truths) {
+    public Persist(Cog cog, Cognition context, Truths truths) {
         this.cog = requireNonNull(cog);
         this.context = requireNonNull(context);
         if (!(truths instanceof Truths.BasicTMS)) {

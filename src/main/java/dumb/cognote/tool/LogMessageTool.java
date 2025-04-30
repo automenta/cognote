@@ -1,13 +1,18 @@
 package dumb.cognote.tool;
 
 
-import dumb.cognote.*;
+import dumb.cognote.Cog;
+import dumb.cognote.Protocol;
+import dumb.cognote.Term;
+import dumb.cognote.Tool;
+import dumb.cognote.util.Json;
+import dumb.cognote.util.Log;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import static dumb.cognote.Log.error;
+import static dumb.cognote.util.Log.error;
 
 public class LogMessageTool implements Tool {
 
