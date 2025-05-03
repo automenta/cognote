@@ -4,47 +4,48 @@ This document outlines the strategic plan for implementing the `dumb.cogthought`
 
 **Overall Approach:**
 
-The core strategy is to build the minimal, generic Java kernel first (Phase 1). This kernel provides the fundamental mechanisms for data storage, logic interpretation, primitive action execution, and interaction translation. Once the kernel is stable, the system's entire reality (ontology, tools, rules, settings) will be defined as data within the KB (Phase 2). Subsequently, all complex behaviors and application-specific logic will be implemented by writing more data (rules, tool definitions) that the generic kernel processes (Phase 3). Finally, external components (UI, P2P, Simulator) will be built to interact with the system's data-driven core via the defined API (Phase 4), followed by refinement and self-optimization (Phase 5).
+The core strategy is to build the minimal, generic Java kernel first (Phase 1). This kernel provides the fundamental mechanisms for data storage, logic interpretation, primitive action execution, and interaction translation. **Crucially, this kernel will be built by refactoring and adapting the existing `dumb.cognote` codebase.** Once the kernel is stable, the system's entire reality (ontology, tools, rules, settings) will be defined as data within the KB (Phase 2). Subsequently, all complex behaviors and application-specific logic will be implemented by writing more data (rules, tool definitions) that the generic kernel processes (Phase 3). Finally, external components (UI, P2P, Simulator) will be built to interact with the system's data-driven core via the defined API (Phase 4), followed by refinement and self-optimization (Phase 5).
 
-**Leveraging Existing `dumb.cognote` Code:**
+**Leveraging Existing `dumb.cognote` Code (Revised Approach):**
 
-The existing `dumb.cognote` codebase provides valuable starting points and concepts. The following elements can be copied and adapted for use in `dumb.cogthought`:
+Instead of building from scratch, the existing `dumb.cognote` codebase will serve as the *foundation* for `dumb.cogthought`. The following elements will be directly adapted and refactored:
 
-*   **Data Structures:** `Term.java`, `Rule.java`, `Assertion.java`, `Note.java` (needs significant enhancement for universal entity representation), `Logic.java` (for constants like KIF operators and basic logic helpers like Unifier, Skolemizer, Trivial check).
-*   **Utilities:** `Json.java`, `KifParser.java`, `Log.java`, `Events.java`. These provide essential functionality for parsing, serialization, logging, and event handling. `Log.java` and `Events.java` will need adaptation to assert data into the new KB structure.
-*   **Interfaces:** `Tool.java`. This interface defines the contract for tools and can be reused directly.
-*   **Component Concepts:** The *ideas* behind `Cog.java` (entry point), `Cognition.java` (knowledge management), `Reason.java` (logic processing), `Tools.java` (tool registry), `Persist.java` (persistence), `LM.java` (LLM wrapper), `Protocol.java` (API definition) are relevant, but their specific implementations in `cognote` are not designed for the minimal, generic, data-driven approach of `cogthought` and should not be directly reused as full classes. Instead, they inform the design of the new, minimal classes in `cogthought`.
+*   **Starting Point:** The `src/main/java/dumb/cognote` package will be the initial codebase.
+*   **Core Components:** The existing classes (`Cog`, `Cognition`, `Reason`, `Tools`, `Persist`, `LM`, `Protocol`, `Term`, `Rule`, `Assertion`, `Note`, `Logic`, `Json`, `KifParser`, `Log`, `Events`, `Tool`) will be systematically refactored and adapted. Their implementations will be modified to fit the `cogthought` architecture's interfaces and data-driven model.
+*   **Refactoring Logic to Data:** Logic that currently defines specific behaviors within the Java code (e.g., specific reasoning steps in `Reason`, hardcoded tool registration in `Tools`, specific API handling in `Protocol`/`Cog`) will be identified and refactored out. This logic will be replaced by generic mechanisms that interpret behavior defined as data (Rules, Tool Definitions, Ontology) stored in the KB.
+*   **Adapting Data Structures:** Existing data structures (`Term`, `Rule`, `Assertion`, `Note`, `Logic`) will be refined to fully support the `cogthought` vision (e.g., enhancing `Note` with `metadata`, `graph`, `associatedTerms`, defining `Relationship`).
+*   **Adapting Utilities:** Utilities (`Json`, `KifParser`, `Log`, `Events`) will be adapted, particularly `Log` and `Events`, to assert information into the new KB structure.
+*   **Renaming/Restructuring:** Classes and packages will be renamed and restructured as needed (e.g., `Cognition` refactored into/delegating to `KnowledgeBase`, `Reason` refactored into `TermLogicEngine`, `Tools` refactored into `ToolRegistry`) to align with the `cogthought` conceptual model, while preserving and adapting the underlying implementation details.
 
-**Phase Breakdown (Based on `README.md`):**
+**Phase Breakdown (Adapted from Original PLAN.md):**
 
-**Phase 1: Minimal Generic Kernel Implementation (Java)**
+**Phase 1: Refactor dumb.cognote into Minimal Generic Kernel (Java)**
 
-*   **Focus:** Build the core Java classes that form the fixed, minimal kernel. These classes implement the *mechanisms* of the system (storage, interpretation, execution, translation), not specific behaviors.
+*   **Focus:** Transform the existing `dumb.cognote` codebase into the minimal, generic `cogthought` kernel by refactoring its components to be data-driven and generic. This is the most complex phase and requires detailed design *before* significant coding.
 *   **Key Steps:**
-    1.  Set up the `dumb.cogthought` package structure.
-    2.  Copy and adapt `Term`, `Rule`, `Assertion`, `Note`, `Logic` (for constants/helpers) into `dumb.cogthought.data`. Enhance `Note` to include `metadata`, `graph`, `associatedTerms` and support universal entity representation. Define `Relationship` structure.
-    3.  Copy `Json`, `KifParser`, `Log`, `Events` into `dumb.cogthought.util`. Adapt `Log` and `Events` to prepare for KB assertion (initial versions might just log/emit, KB assertion added once `KnowledgeBase` is available).
-    4.  Implement `Persistence` (`dumb.cogthought.kb.Persistence`) using a chosen key-value store and vector store library.
-    5.  Implement `KnowledgeBase` (`dumb.cogthought.kb.KnowledgeBase`) as the unified KB interface, delegating to `Persistence`. Implement indexing structures (adapt `cognote.Logic.Path.PathIndex` ideas) for efficient querying of Terms and Relationships.
-    6.  Implement `TermLogicEngine` (`dumb.cogthought.engine.TermLogicEngine`) with generic unification and rule matching/action generation algorithms. It interacts *only* with `KnowledgeBase`.
-    7.  Implement `ToolRegistry` (`dumb.cogthought.tools.ToolRegistry`) to load definitions from KB and manage Java `Tool` instances. Copy `Tool.java` interface.
-    8.  Implement the minimal set of Java Primitive Tools (`dumb.cogthought.tools.primitive.*`). These tools interact *only* with `KnowledgeBase`, `LLMService`, `ApiGateway`, `Events`, `Log`, or the OS.
-    9.  Implement `LLMService` (`dumb.cogthought.external.LLMService`) as a minimal LLM client wrapper, used *only* by `_CallLLMTool`.
-    10. Implement `ApiGateway` (`dumb.cogthought.api.ApiGateway`) as the minimal API translator, using `Protocol.java` (copied from `cognote`). It translates API messages to/from KB Terms/data.
-    11. Implement `SystemControl` (`dumb.cogthought.engine.SystemControl`) to manage the recursive processing loop.
-    12. Implement `Cog` (`dumb.cogthought.Cog`) as the main entry point, initializing and connecting kernel components.
-    13. Refine `Log` and `Events` to assert Terms into the KB using the initialized `KnowledgeBase`.
-    14. Systematically remove all redundant backend code from `dumb.cognote` and `doc/prototypes`.
+    1.  Establish the `dumb.cogthought` package structure (or decide to refactor `cognote` in place and rename later).
+    2.  Review and refine existing data structures (`Term`, `Rule`, `Assertion`, `Note`, `Logic`) to ensure they fully support the `cogthought` vision (e.g., enhance `Note` with `metadata`, `graph`, `associatedTerms`, define `Relationship`).
+    3.  Review and refine utilities (`Json`, `KifParser`, `Log`, `Events`). Adapt `Log` and `Events` implementations to prepare for KB assertion (initial versions might just log/emit, KB assertion added once `KnowledgeBase` is refactored).
+    4.  Refactor `Persist` and related parts of `Cognition` to implement the `KnowledgeBase` interface (`dumb.cogthought.kb.KnowledgeBase`). This involves making the KB interaction generic (schema-agnostic CRUD/query) and integrating persistence details (key-value, vector store). Adapt existing indexing structures (like `Logic.Path.PathIndex`) within this refactored `KnowledgeBase`.
+    5.  Refactor `Reason` to implement the `TermLogicEngine` interface (`dumb.cogthought.engine.TermLogicEngine`). This involves making the unification and rule matching/action generation algorithms generic, ensuring they load Rules *from the refactored KnowledgeBase* and interact *only* with the `KnowledgeBase` and `ToolRegistry`. **Systematically identify and remove any hardcoded specific reasoning logic (e.g., distinct reasoner plugins, specific handling of KIF operators within the engine logic) and replace it with generic rule interpretation.**
+    6.  Refactor `Tools` to implement the `ToolRegistry` interface (`dumb.cogthought.tools.ToolRegistry`). Adapt its implementation to load `ToolDefinition` data *from the refactored KnowledgeBase* and manage Java `Tool` instances based on that data, rather than hardcoding the registry contents. Ensure it uses the existing `Tool.java` interface.
+    7.  Identify and implement the minimal set of Java Primitive Tools (`dumb.cogthought.tools.primitive.*`) by extracting atomic operations from existing `cognote` logic or creating new minimal classes. These tools must interact *only* with the refactored `KnowledgeBase`, `LLMService`, `ApiGateway`, `Events`, `Log`, or the OS. **Ensure that complex behaviors currently implemented directly in Java are *not* turned into Primitive Tools unless they are truly atomic and cannot be composed via Rules.**
+    8.  Refactor `LM` to implement the `LLMService` interface (`dumb.cogthought.external.LLMService`), ensuring it's a minimal wrapper used *only* by the `_CallLLMTool`.
+    9.  Refactor `Protocol` and related parts of `Cog`/`Cognition` to implement the `ApiGateway` interface (`dumb.cogthought.api.ApiGateway`). This involves making it a minimal translator that converts API messages to/from KB Terms/data, asserting requests into the KB and monitoring the KB for responses/updates. **Remove any hardcoded API command handling logic from Java code.**
+    10. Refactor `Cog` and potentially parts of `Cognition` to implement the `SystemControl` interface (`dumb.cogthought.engine.SystemControl`). This component will manage the recursive processing loop, querying the KB for new data and feeding it to the `TermLogicEngine`.
+    11. Refactor `Cog` to be the main entry point, initializing and connecting the refactored kernel components (`KnowledgeBase`, `TermLogicEngine`, `ToolRegistry`, `ApiGateway`, `LLMService`, `SystemControl`).
+    12. Complete the adaptation of `Log` and `Events` to assert Terms into the KB using the refactored `KnowledgeBase`.
+    13. Systematically remove all redundant or hardcoded behavior logic from the refactored Java classes, ensuring the kernel is minimal and generic. Remove any remaining redundant code from `doc/prototypes`.
 
 **Phase 2: Bootstrap Universal Reality (Data - KB Content)**
 
-*   **Focus:** Define the system's initial state and fundamental behavior by creating the necessary data (Notes, Terms, Relationships) in the KB. This phase involves writing data files, not Java code (except for the bootstrap loading logic in `Cog`/`SystemControl`).
+*   **Focus:** Define the system's initial state and fundamental behavior by creating the necessary data (Notes, Terms, Relationships) in the KB. This phase involves writing data files, loaded by the refactored kernel.
 *   **Key Steps:**
     1.  Define the complete System Ontology as data files (e.g., KIF or JSON). This includes Note types, Relationship types, Term predicates/functions, and potentially schema definitions.
     2.  Define `ToolDefinition` Notes for all Primitive Tools as data files.
     3.  Define `Setting` Notes for default configuration as data files.
     4.  Define `RuleDefinition` Notes for the minimal bootstrap rules (API handling, basic event processing, loop triggering) as data files.
-    5.  Implement the bootstrap loading logic in `Cog`/`SystemControl` to load these data files into the `KnowledgeBase` on startup.
+    5.  Implement the bootstrap loading logic in the refactored `Cog`/`SystemControl` to load these data files into the `KnowledgeBase` on startup.
 
 **Phase 3: Implement Data-Driven Behaviors (Data - Rules & ToolDefs)**
 
@@ -67,7 +68,7 @@ The existing `dumb.cognote` codebase provides valuable starting points and conce
 
 *   **Focus:** Refine the system, ensure robustness, document everything, and implement advanced self-management and self-optimization using the data-driven architecture.
 *   **Key Steps:**
-    1.  Optimize the generic Java kernel components.
+    1.  Optimize the refactored generic Java kernel components.
     2.  Optimize the data (Ontology, Rules, Tool Definitions) for efficiency and clarity.
     3.  Implement comprehensive testing, including data-driven tests defined as Rules.
     4.  Enhance error handling via Rules acting on `Error` Terms.
@@ -77,7 +78,7 @@ The existing `dumb.cognote` codebase provides valuable starting points and conce
     8.  Implement advanced self-optimization mechanisms via Rules acting on system state/metrics in the KB.
     9.  Prepare for deployment.
 
-This plan provides a strategic roadmap for building `dumb.cogthought` according to the principles of minimalism, elegance, and self-unification, leveraging existing `dumb.cognote` components where appropriate for the Java kernel implementation.
+This revised plan provides a strategic roadmap for building `dumb.cogthought` by refactoring the existing `dumb.cognote` codebase, aligning it with the principles of minimalism, elegance, and self-unification, and shifting behavior definition into the Knowledge Base data. Phase 1 is the most critical and complex, requiring careful design and execution to transform the existing components into the generic kernel.
 
 ----
 
@@ -87,171 +88,171 @@ The Ultimate Development Plan: The Elegant, Minimal, Self-Unifying Netention Spe
 
 1. Core Architectural Principles
 
-• Knowledge Base as Universal Reality: The persistent KB is the only source of truth and definition for everything in the system:   
-user data, system state, configuration, the System Ontology itself, tool definitions, rule definitions, active tasks, historical  
-events, performance metrics, and even aspects of the system's own structure and capabilities.                                     
-• Minimal Fixed Java Kernel: The Java codebase is a small, unchanging, generic kernel. It contains only the fundamental algorithms  
-and interfaces required to:                                                                                                       
-• Manage the persistent KB (KnowledgeBase).                                                                                      
-• Interpret the Term logic and execute rules (TermLogicEngine).                                                                  
-• Execute a fixed, minimal set of atomic primitive actions (ToolRegistry + Primitive Tools).                                     
-• Translate external interactions (API, Events, Logs) into KB data (ApiGateway, Events, Log).                                    
-• Run the recursive processing loop (SystemControl).                                                                             
-• Recursive Self-Unification Loop: The system's dynamic behavior is driven by a single, continuous loop managed by SystemControl.   
-This loop:                                                                                                                        
-1 Monitors the KB for new or changed data (Terms, Notes, Relationships).                                                         
-2 Feeds relevant changes (represented as System Ontology Terms) to the TermLogicEngine.                                          
-3 The Engine finds matching Rules (defined as data in the KB).                                                                   
-4 Fired Rules produce new data (derived assertions, action Terms, new Notes, new Relationships, updated Notes/Relationships) or  
-trigger primitive Tools.                                                                                                       
-5 Action Terms are executed by the ToolRegistry, which invokes Primitive Tools.                                                  
-6 Primitive Tools modify the KB or interact with the environment.                                                                
+• Knowledge Base as Universal Reality: The persistent KB is the only source of truth and definition for everything in the system:
+user data, system state, configuration, the System Ontology itself, tool definitions, rule definitions, active tasks, historical
+events, performance metrics, and even aspects of the system's own structure and capabilities.
+• Minimal Fixed Java Kernel: The Java codebase is a small, unchanging, generic kernel. It contains only the fundamental algorithms
+and interfaces required to:
+• Manage the persistent KB (KnowledgeBase).
+• Interpret the Term logic and execute rules (TermLogicEngine).
+• Execute a fixed, minimal set of atomic primitive actions (ToolRegistry + Primitive Tools).
+• Translate external interactions (API, Events, Logs) into KB data (ApiGateway, Events, Log).
+• Run the recursive processing loop (SystemControl).
+• Recursive Self-Unification Loop: The system's dynamic behavior is driven by a single, continuous loop managed by SystemControl.
+This loop:
+1 Monitors the KB for new or changed data (Terms, Notes, Relationships).
+2 Feeds relevant changes (represented as System Ontology Terms) to the TermLogicEngine.
+3 The Engine finds matching Rules (defined as data in the KB).
+4 Fired Rules produce new data (derived assertions, action Terms, new Notes, new Relationships, updated Notes/Relationships) or
+trigger primitive Tools.
+5 Action Terms are executed by the ToolRegistry, which invokes Primitive Tools.
+6 Primitive Tools modify the KB or interact with the environment.
 7 KB modifications or external interactions generate new data/events, which are asserted back into the KB, restarting the cycle.
-The system processes and modifies itself solely based on the data in its KB, using its own logic engine.                       
+The system processes and modifies itself solely based on the data in its KB, using its own logic engine.
 • Behavior as Data: All system behaviors, from handling a user command to optimizing resource allocation or learning a new rule, are
 defined exclusively as Rules and Tool definitions stored as data in the KB. No specific system behavior logic is hardcoded in the
-Java kernel beyond the generic interpretation/execution algorithms.                                                               
-• Primitive Tools: A fixed, minimal set of Java Tools exists to perform the absolute atomic operations that cannot be expressed as  
-rules acting on other tools or as pure data transformations within the KB. These are the only points where Java code performs     
+Java kernel beyond the generic interpretation/execution algorithms.
+• Primitive Tools: A fixed, minimal set of Java Tools exists to perform the absolute atomic operations that cannot be expressed as
+rules acting on other tools or as pure data transformations within the KB. These are the only points where Java code performs
 specific side effects or interacts directly with underlying systems (persistence, OS, external APIs, external services like LLMs).
-• System Ontology: A formal, comprehensive vocabulary within the Term language, combined with standard Note types and Relationship  
+• System Ontology: A formal, comprehensive vocabulary within the Term language, combined with standard Note types and Relationship
 types, to represent every concept in the system (user data, system components, state, behavior definitions, history) in a unified,
-elegant way across both Term and Graph representations. This ontology is also defined as data in the KB.                          
+elegant way across both Term and Graph representations. This ontology is also defined as data in the KB.
 • API as KB Interface: The WebSocket API is a thin layer that translates external messages into System Ontology Terms asserted into
-the KB, and translates relevant KB data (Terms, Notes, Relationships) into external messages. It is a window into the system's    
+the KB, and translates relevant KB data (Terms, Notes, Relationships) into external messages. It is a window into the system's
 internal state and processing.
 
 2. Knowledge Base Specification (KB Content - Data Defines Reality)
 
-• Notes: The universal entity container. Any distinct "thing" in the system is a Note.                                              
-• Types (Note.type): Defined as data in the System Ontology (e.g., "UserData", "RuleDefinition", "ToolDefinition", "Setting",    
-"Task", "SystemMetric", "P2PPeer", "SimulatorAgent", "EventLog", "ErrorLog", "OntologyConcept", "ApiEndpoint").                
-• Fields: id, type, title, text, status, priority, color, updated, metadata (Map<String, Object>), graph (List<Relationship>),   
-associatedTerms. These fields provide a standard structure for any entity Note.                                                
-• Relationships: Directed links between Notes, stored within Note.graph or managed by KnowledgeBase.                                
-• Types (Relationship.type): Defined as data in the System Ontology (e.g., "parent", "dependsOn", "processedBy", "generated",    
-"monitors", "configures", "defines", "implements", "input", "output").                                                         
-• Fields: targetId, type, metadata.                                                                                              
-• Terms: Universal knowledge representation units (Atom, Var, Lst). Used for assertions, rule forms, queries, and representing      
+• Notes: The universal entity container. Any distinct "thing" in the system is a Note.
+• Types (Note.type): Defined as data in the System Ontology (e.g., "UserData", "RuleDefinition", "ToolDefinition", "Setting",
+"Task", "SystemMetric", "P2PPeer", "SimulatorAgent", "EventLog", "ErrorLog", "OntologyConcept", "ApiEndpoint").
+• Fields: id, type, title, text, status, priority, color, updated, metadata (Map<String, Object>), graph (List<Relationship>),
+associatedTerms. These fields provide a standard structure for any entity Note.
+• Relationships: Directed links between Notes, stored within Note.graph or managed by KnowledgeBase.
+• Types (Relationship.type): Defined as data in the System Ontology (e.g., "parent", "dependsOn", "processedBy", "generated",
+"monitors", "configures", "defines", "implements", "input", "output").
+• Fields: targetId, type, metadata.
+• Terms: Universal knowledge representation units (Atom, Var, Lst). Used for assertions, rule forms, queries, and representing
 structured data within Notes/Relationships/Tool parameters. The vocabulary of Atoms (predicates, functions, constants) is defined
-as data in the System Ontology.                                                                                                   
-• Rules: Define conditional behavior. Stored as RuleDefinition Notes.                                                               
-• Fields: id, form (Term.Lst), antecedent (Term), consequent (Term), pri, sourceNoteId.                                          
-• Rules can query and manipulate any data in the KB (Notes, Terms, Relationships) using predicates defined in the System         
-Ontology.                                                                                                                      
-• Assertions: Represent factual knowledge derived or asserted. Stored in the KB. Fields: id, kif (Term.Lst), pri, timestamp,        
-sourceNoteId, justificationIds, type, flags, quantifiedVars, derivationDepth, isActive, kb.                                       
-• System Ontology: Defined as data in the KB. This includes:                                                                        
-• Notes of type "OntologyConcept" representing key concepts.                                                                     
-• Relationships between OntologyConcept Notes (e.g., "isA", "partOf").                                                           
-• Assertions defining the predicates, functions, standard Note types, and standard Relationship types used in the system's       
-vocabulary.                                                                                                                    
+as data in the System Ontology.
+• Rules: Define conditional behavior. Stored as RuleDefinition Notes.
+• Fields: id, form (Term.Lst), antecedent (Term), consequent (Term), pri, sourceNoteId.
+• Rules can query and manipulate any data in the KB (Notes, Terms, Relationships) using predicates defined in the System
+Ontology.
+• Assertions: Represent factual knowledge derived or asserted. Stored in the KB. Fields: id, kif (Term.Lst), pri, timestamp,
+sourceNoteId, justificationIds, type, flags, quantifiedVars, derivationDepth, isActive, kb.
+• System Ontology: Defined as data in the KB. This includes:
+• Notes of type "OntologyConcept" representing key concepts.
+• Relationships between OntologyConcept Notes (e.g., "isA", "partOf").
+• Assertions defining the predicates, functions, standard Note types, and standard Relationship types used in the system's
+vocabulary.
 • Assertions defining the structure/schema of different Note types or Term structures.
 
 3. Minimal Generic Java Kernel Specification (Java Code - The Interpreter)
 
-• Cog.java: Minimal entry point. Initializes the fixed set of core components (KnowledgeBase, TermLogicEngine, ToolRegistry,        
-ApiGateway, SystemControl). Manages core executors. Its primary role is bootstrapping the system from the persistent KB and       
-starting the SystemControl loop.                                                                                                  
-• KnowledgeBase.java: The only interface for Java code to interact with the persistent KB. Provides generic, schema-agnostic CRUD   
+• Cog.java: Minimal entry point. Initializes the fixed set of core components (KnowledgeBase, TermLogicEngine, ToolRegistry,
+ApiGateway, SystemControl). Manages core executors. Its primary role is bootstrapping the system from the persistent KB and
+starting the SystemControl loop. **(This will be the refactored `dumb.cognote.Cog`)**
+• KnowledgeBase.java: The only interface for Java code to interact with the persistent KB. Provides generic, schema-agnostic CRUD
 and query methods for Note, Term, Rule, Assertion, Relationship. Manages underlying persistence details (key-value, vector store).
-Does not contain logic specific to Note types, Term predicates, or Relationship types.                                            
-• TermLogicEngine.java: Minimal, generic interpreter. Contains algorithms for unification, rule matching                            
-(forward/backward/rewrite/UI), and action generation. Takes Terms as input, finds matching Rules (loaded from KB via              
-KnowledgeBase), performs unification, generates action Terms. Does not contain hardcoded behavior logic. Its predicates for       
-querying the KB are generic (e.g., (assertion ?term), (note ?id ?field ?value), (relationship ?source ?type ?target)).            
-• ToolRegistry.java: Minimal manager. Loads ToolDefinition Notes from KB. Maps Tool names (from action Terms) to Java Tool          
-instances. Provides getTool(name).                                                                                                
-• Tool.java: Minimal interface. execute(parameters: Term, context: ToolContext): CompletableFuture<Term>. ToolContext provides      
-access to KnowledgeBase, LLMService, ApiGateway (for sending messages), Events (for emitting Java events that become KB Terms).   
-• Primitive Tools (Java Classes): A fixed, minimal set of Java classes implementing Tool.java. These are the only tools with        
-hardcoded side effects or external interactions. They perform atomic operations on the KB or environment.                         
-• _AssertTool(Term): Adds Term to KB via KnowledgeBase.                                                                          
-• _RetractTool(Term): Removes Term from KB via KnowledgeBase.                                                                    
-• _UpdateNoteTool(NoteId, UpdateTerm): Updates Note fields/metadata via KnowledgeBase.                                           
-• _AddRelationshipTool(SourceId, TargetId, Type, MetadataTerm): Adds Relationship via KnowledgeBase.                             
-• _DeleteRelationshipTool(SourceId, TargetId, Type): Deletes Relationship via KnowledgeBase.                                     
+Does not contain logic specific to Note types, Term predicates, or Relationship types. **(This will be refactored from `dumb.cognote.Cognition` and `dumb.cognote.Persist`)**
+• TermLogicEngine.java: Minimal, generic interpreter. Contains algorithms for unification, rule matching
+(forward/backward/rewrite/UI), and action generation. Takes Terms as input, finds matching Rules (loaded from KB via
+KnowledgeBase), performs unification, generates action Terms. Does not contain hardcoded behavior logic. Its predicates for
+querying the KB are generic (e.g., (assertion ?term), (note ?id ?field ?value), (relationship ?source ?type ?target)). **(This will be refactored from `dumb.cognote.Reason`)**
+• ToolRegistry.java: Minimal manager. Loads ToolDefinition Notes from KB. Maps Tool names (from action Terms) to Java Tool
+instances. Provides getTool(name). **(This will be refactored from `dumb.cognote.Tools`)**
+• Tool.java: Minimal interface. execute(parameters: Term, context: ToolContext): CompletableFuture<Term>. ToolContext provides
+access to KnowledgeBase, LLMService, ApiGateway (for sending messages), Events (for emitting Java events that become KB Terms). **(The existing `dumb.cognote.Tool` interface will be used/adapted)**
+• Primitive Tools (Java Classes): A fixed, minimal set of Java classes implementing Tool.java. These are the only tools with
+hardcoded side effects or external interactions. They perform atomic operations on the KB or environment. **(These will be extracted/created from existing `dumb.cognote` logic or written new)**
+• _AssertTool(Term): Adds Term to KB via KnowledgeBase.
+• _RetractTool(Term): Removes Term from KB via KnowledgeBase.
+• _UpdateNoteTool(NoteId, UpdateTerm): Updates Note fields/metadata via KnowledgeBase.
+• _AddRelationshipTool(SourceId, TargetId, Type, MetadataTerm): Adds Relationship via KnowledgeBase.
+• _DeleteRelationshipTool(SourceId, TargetId, Type): Deletes Relationship via KnowledgeBase.
 • _QueryKBTool(QueryTerm): Queries KB (Terms, Notes, Relationships) via KnowledgeBase, returns results as a Term (e.g., a list).
-• _CallLLMTool(PromptTerm): Calls LLMService, returns result Term.                                                               
-• _SendApiMessageTool(MessageTypeTerm, PayloadTerm): Sends message via ApiGateway.                                               
-• _ExecuteOSCommandTool(CommandTerm): Executes OS command, returns result Term. (Optional, potentially risky).                   
-• _AskUserTool(PromptTerm): Takes prompt/options Term, asserts DialogueRequest Term into KB, waits for DialogueResponse Term,    
-returns response Term.                                                                                                         
+• _CallLLMTool(PromptTerm): Calls LLMService, returns result Term.
+• _SendApiMessageTool(MessageTypeTerm, PayloadTerm): Sends message via ApiGateway.
+• _ExecuteOSCommandTool(CommandTerm): Executes OS command, returns result Term. (Optional, potentially risky).
+• _AskUserTool(PromptTerm): Takes prompt/options Term, asserts DialogueRequest Term into KB, waits for DialogueResponse Term,
+returns response Term.
 • Minimal Set: Identify the absolute minimum set required to build all other functionality via Rules. Aim for ~10-15 primitives.
 • ApiGateway.java: Minimal translator. Receives WebSocket messages, translates to ApiRequest Terms, asserts into KB. Monitors KB for
-ApiResponse, Event, NoteUpdate, RelationshipUpdate Terms/Notes/Relationships, translates to API messages, sends via WebSocket.    
-• Persistence.java: Minimal storage implementation. Manages low-level key-value and vector store libraries. Provides simple         
-read/write methods used only by KnowledgeBase.                                                                                    
-• LLMService.java: Minimal external service wrapper. Manages connection/calls to LLM provider. Provides methods used only by        
-_CallLLMTool.                                                                                                                     
-• Events.java: Minimal event bus. Allows Java components to emit events. Automatically converts events to Event Terms and asserts   
-into KB via KnowledgeBase.                                                                                                        
-• Log.java: Minimal logging utility. Logs messages. Automatically converts log messages to Error or LogMessage Terms and asserts    
-into KB via KnowledgeBase.                                                                                                        
-• SystemControl.java: Minimal loop manager. Runs thread(s) that continuously query the KB for new/changed Terms (especially         
-ApiRequest, Event, Task Terms), feeds them to TermLogicEngine, and ensures action Terms are executed by the ToolRegistry.
+ApiResponse, Event, NoteUpdate, RelationshipUpdate Terms/Notes/Relationships, translates to API messages, sends via WebSocket. **(This will be refactored from `dumb.cognote.Protocol` and related `Cog` logic)**
+• Persistence.java: Minimal storage implementation. Manages low-level key-value and vector store libraries. Provides simple
+read/write methods used only by KnowledgeBase. **(This will be refactored from `dumb.cognote.Persist`)**
+• LLMService.java: Minimal external service wrapper. Manages connection/calls to LLM provider. Provides methods used only by
+_CallLLMTool. **(This will be refactored from `dumb.cognote.LM`)**
+• Events.java: Minimal event bus. Allows Java components to emit events. Automatically converts events to Event Terms and asserts
+into KB via KnowledgeBase. **(The existing `dumb.cognote.util.Events` will be adapted)**
+• Log.java: Minimal logging utility. Logs messages. Automatically converts log messages to Error or LogMessage Terms and asserts
+into KB via KnowledgeBase. **(The existing `dumb.cognote.util.Log` will be adapted)**
+• SystemControl.java: Minimal loop manager. Runs thread(s) that continuously query the KB for new/changed Terms (especially
+ApiRequest, Event, Task Terms), feeds them to TermLogicEngine, and ensures action Terms are executed by the ToolRegistry. **(This will be refactored from `dumb.cognote.Cog`'s main loop logic)**
 
 4. System Flows (Data-Driven Execution)
 
 • Recursive Processing Loop: SystemControl drives the loop: Monitor KB -> Feed Terms to Engine -> Engine fires Rules (defined in KB)
--> Rules produce data/action Terms -> SystemControl/Engine executes actions via ToolRegistry -> Primitive Tools modify            
-KB/environment -> New data/events asserted into KB -> Loop continues.                                                             
-• API Request Flow: ApiGateway translates API message to ApiRequest Term -> Asserted into KB -> Rules matching ApiRequest fire ->   
-Rules trigger Primitive Tools (e.g., _AssertTool, _QueryKBTool, _SendApiMessageTool) -> Results/Responses asserted into KB ->     
-ApiGateway monitors KB for ApiResponse Terms -> Translates to API message -> Sends to client.                                     
+-> Rules produce data/action Terms -> SystemControl/Engine executes actions via ToolRegistry -> Primitive Tools modify
+KB/environment -> New data/events asserted into KB -> Loop continues.
+• API Request Flow: ApiGateway translates API message to ApiRequest Term -> Asserted into KB -> Rules matching ApiRequest fire ->
+Rules trigger Primitive Tools (e.g., _AssertTool, _QueryKBTool, _SendApiMessageTool) -> Results/Responses asserted into KB ->
+ApiGateway monitors KB for ApiResponse Terms -> Translates to API message -> Sends to client.
 • Event Handling Flow: Internal Java event -> Events.java translates to Event Term -> Asserted into KB -> Rules matching Event fire
 -> Rules trigger Primitive Tools (e.g., _LogMessageTool, _UpdateNoteTool, _SendApiMessageTool).
 
 5. Development Phases
 
-• Phase 1: Minimal Generic Kernel Implementation (Java)                                                                             
-• Implement the canonical Note, Relationship, Term, Rule, Assertion structures.                                                  
-• Implement KifParser and Json.                                                                                                  
-• Implement the Persistence layer and KnowledgeBase interface.                                                                   
-• Implement the minimal, generic TermLogicEngine shell.                                                                          
-• Implement the ToolRegistry shell.                                                                                              
-• Implement the Events system (including conversion to Event Terms).                                                             
-• Implement the ApiGateway shell (translation to/from ApiRequest/ApiResponse Terms).                                             
-• Implement LLMService shell, SystemControl shell.                                                                               
-• Implement core utilities (Log, ID generation).                                                                                 
-• Implement the minimal set of Java Primitive Tools.                                                                             
-• Implement Cog to bootstrap these components and start SystemControl.                                                           
-• Remove prototype backend code.                                                                                                 
-• Phase 2: Bootstrap Universal Reality (Data - KB Content)                                                                          
-• Bootstrap the persistent KB with the complete System Ontology definitions (Note types, Relationship types, Term                
-predicates/structures). This data defines the system's vocabulary.                                                             
-• Bootstrap the KB with initial ToolDefinition Notes for all Primitive Tools.                                                    
-• Bootstrap the KB with initial Setting Notes (default configuration).                                                           
-• Bootstrap the KB with the minimal set of RuleDefinition Notes required for the system to start, process basic API requests,    
-handle events, and run the recursive loop.                                                                                     
-• Phase 3: Implement Data-Driven Behaviors (Data - Rules & ToolDefs)                                                                
+• Phase 1: Refactor dumb.cognote into Minimal Generic Kernel (Java)
+• **This phase involves significant refactoring of the existing `dumb.cognote` classes.**
+• Implement the canonical Note, Relationship, Term, Rule, Assertion structures (refining existing ones).
+• Implement KifParser and Json (adapting existing ones).
+• Implement the Persistence layer and KnowledgeBase interface (refactoring `Persist` and parts of `Cognition`).
+• Implement the minimal, generic TermLogicEngine (refactoring `Reason`).
+• Implement the ToolRegistry (refactoring `Tools`).
+• Implement the Events system (adapting `Events.java`, including conversion to Event Terms).
+• Implement the ApiGateway (refactoring `Protocol` and `Cog`'s API handling).
+• Implement LLMService (refactoring `LM`), SystemControl (refactoring `Cog`'s loop), and core utilities (adapting `Log`, ID generation).
+• Implement the minimal set of Java Primitive Tools (extracting/creating).
+• Implement Cog to bootstrap these refactored components and start SystemControl.
+• Remove prototype backend code.
+• Phase 2: Bootstrap Universal Reality (Data - KB Content)
+• Bootstrap the persistent KB with the complete System Ontology definitions (Note types, Relationship types, Term
+predicates/structures). This data defines the system's vocabulary.
+• Bootstrap the KB with initial ToolDefinition Notes for all Primitive Tools.
+• Bootstrap the KB with initial Setting Notes (default configuration).
+• Bootstrap the KB with the minimal set of RuleDefinition Notes required for the system to start, process basic API requests,
+handle events, and run the recursive loop.
+• Phase 3: Implement Data-Driven Behaviors (Data - Rules & ToolDefs)
 • Write RuleDefinition Notes (and define new non-primitive Java Tools if absolutely necessary, adding their ToolDefinition Notes)
-to implement all complex system behaviors: full reasoning strategies, planning, prioritization, resource management,           
-application-specific logic, self-monitoring, self-management. This phase is primarily data entry and rule writing, leveraging  
-the generic engine, primitive tools, System Ontology, and both Term/Graph data.                                                
-• Phase 4: Implement External Components (UI, P2P, Simulator)                                                                       
-• Implement the Frontend UI to interact with the KB only via the API, visualizing the Note graph and System Ontology.            
-• Implement the P2P Network component to interact with the KB only via asserting P2P Terms/Relationships and calling primitive   
-tools.                                                                                                                         
+to implement all complex system behaviors: full reasoning strategies, planning, prioritization, resource management,
+application-specific logic, self-monitoring, self-management. This phase is primarily data entry and rule writing, leveraging
+the generic engine, primitive tools, System Ontology, and both Term/Graph data.
+• Phase 4: Implement External Components (UI, P2P, Simulator)
+• Implement the Frontend UI to interact with the KB only via the API, visualizing the Note graph and System Ontology.
+• Implement the P2P Network component to interact with the KB only via asserting P2P Terms/Relationships and calling primitive
+tools.
 • Implement the Community Simulator component to interact with the KB only via asserting simulation Terms/Notes/Relationships and
-calling primitive tools.                                                                                                       
-• Phase 5: Refinement, Optimization, Testing, Documentation, and Self-Optimization                                                  
-• Optimize the generic TermLogicEngine and the processing loop.                                                                  
-• Implement comprehensive testing (including data-driven tests defined as Rules).                                                
-• Enhance error handling (via Rules acting on Error Terms).                                                                      
-• Implement security and privacy (potentially via Rules and Ontology).                                                           
-• Refine UI/UX.                                                                                                                  
-• Write complete documentation (crucially documenting the System Ontology, all defined Rules, all defined Tools).                
-• Implement advanced self-optimization mechanisms via Rules acting on system state/metrics/performance data in the KB.           
+calling primitive tools.
+• Phase 5: Refinement, Optimization, Testing, Documentation, and Self-Optimization
+• Optimize the refactored generic TermLogicEngine and the processing loop.
+• Implement comprehensive testing (including data-driven tests defined as Rules).
+• Enhance error handling (via Rules acting on Error Terms).
+• Implement security and privacy (potentially via Rules and Ontology).
+• Refine UI/UX.
+• Write complete documentation (crucially documenting the System Ontology, all defined Rules, all defined Tools).
+• Implement advanced self-optimization mechanisms via Rules acting on system state/metrics/performance data in the KB.
 • Prepare for deployment.
 
 6. Code Reduction and Functionality Expansion
 
 • Code Reduction: Achieved by making the Java codebase a minimal, fixed, generic kernel. All specific behaviors are defined as data
 (Rules, Tool Definitions, Ontology) in the KB. The Java code implements the mechanism (interpret, execute, store, translate), not
-the behavior.                                                                                                                     
-• Functionality Expansion: Achieved by simply adding new RuleDefinition and ToolDefinition Notes (and potentially new               
-Note/Relationship types for the Ontology) to the KB. The generic engine automatically picks up and executes the new behavior      
-defined in the data. This allows for potentially massive and rapid expansion of capabilities by leveraging the combined power of  
-Term logic and Graph structures, driven by the recursive self-unification loop.                                                   
+the behavior. This is achieved by systematically refactoring existing `dumb.cognote` code to remove hardcoded behavior.
+• Functionality Expansion: Achieved by simply adding new RuleDefinition and ToolDefinition Notes (and potentially new
+Note/Relationship types for the Ontology) to the KB. The generic engine automatically picks up and executes the new behavior
+defined in the data. This allows for potentially massive and rapid expansion of capabilities by leveraging the combined power of
+Term logic and Graph structures, driven by the recursive self-unification loop.
 
