@@ -1,780 +1,269 @@
 package dumb.cogthought;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
-import dumb.cogthought.plugin.*;
-import dumb.cogthought.tool.*;
+import dumb.cogthought.persistence.FilePersistence;
+import dumb.cogthought.tool.LogMessageTool; // Example Primitive Tool
 import dumb.cogthought.util.Events;
-import dumb.cogthought.util.Json;
-import dumb.cogthought.util.KifParser;
 import dumb.cogthought.util.Log;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.BindException;
-import java.net.InetSocketAddress;
-import java.net.URLConnection;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
-import static dumb.cogthought.Note.Status.IDLE;
+import static java.util.Objects.requireNonNull;
 import static dumb.cogthought.util.Log.error;
-import static dumb.cogthought.util.Log.message;
-import static java.util.Optional.ofNullable;
+import static dumb.cogthought.util.Log.info;
 
+// Refactored from dumb.cognote.Cog to be the minimal entry point
 public class Cog {
 
-    public static final String ID_PREFIX_NOTE = "note-";
-    public static final String ID_PREFIX_LLM_ITEM = "llm_";
-    public static final String ID_PREFIX_QUERY = "query_";
-    public static final String ID_PREFIX_LLM_RESULT = "llmres_";
-    public static final String ID_PREFIX_RULE = "rule_";
-    public static final String ID_PREFIX_INPUT_ITEM = "input_";
-    public static final String ID_PREFIX_PLUGIN = "plugin_";
-    public static final String GLOBAL_KB_NOTE_ID = "kb://global";
-    public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge";
-    public static final String CONFIG_NOTE_ID = "note-config";
-    public static final String CONFIG_NOTE_TITLE = "System Configuration";
-    public static final double INPUT_ASSERTION_BASE_PRIORITY = 10;
-    public static final int MAX_WS_PARSE_PREVIEW = 100;
-    public static final double DEFAULT_RULE_PRIORITY = 1;
-    public static final AtomicLong id = new AtomicLong(System.currentTimeMillis());
-    static final int KB_SIZE_THRESHOLD_WARN_PERCENT = 90;
-    static final int KB_SIZE_THRESHOLD_HALT_PERCENT = 98;
-    static final double DERIVED_PRIORITY_DECAY = 0.95;
-    static final int DEFAULT_KB_CAPACITY = 64 * 1024;
-    static final int DEFAULT_REASONING_DEPTH = 4;
-    static final boolean DEFAULT_BROADCAST_INPUT = false;
-    private static final String STATE_FILE = "cognote_state.json"; // Keep for now, will be refactored
-    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 2;
-    private static final int MAX_KIF_PARSE_PREVIEW = 50;
-    public final Cognition context;
-    public final LM lm;
-    public final Dialogue dialogue;
-    public final Events events;
-    public final Tools tools;
-    public final ScheduledExecutorService mainExecutor =
-            Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors(), Thread.ofVirtual().factory());
-    protected final Reason.ReasonerManager reasoner;
-    final Plugins plugins;
-    final AtomicBoolean running = new AtomicBoolean(true);
-    final AtomicBoolean paused = new AtomicBoolean(true);
-    final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>();
-    private final Object pauseLock = new Object();
-    private final Persist persistenceManager; // Keep for now, will be refactored
-    public volatile String status = "Initializing";
-    public volatile boolean broadcastInputAssertions;
-    public volatile int globalKbCapacity = DEFAULT_KB_CAPACITY;
-    public volatile int reasoningDepthLimit = DEFAULT_REASONING_DEPTH;
+    // --- Constants (potentially moved to KB Ontology later) ---
+    public static final String GLOBAL_KB_NOTE_ID = "global-kb";
+    public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge Base";
+    public static final String CONFIG_NOTE_ID = "system-config";
+    public static final String ID_PREFIX_PLUGIN = "plugin:"; // Still needed for plugin IDs? Or are plugins also KB data?
+    public static final String ID_PREFIX_TOOL = "tool:"; // Used for tool IDs/names
+    public static final String ID_PREFIX_AGENT = "agent:"; // Used for agent IDs?
+    public static final String ID_PREFIX_ASSERTION = "assertion:"; // Used for assertion IDs
+    public static final String ID_PREFIX_RULE = "rule:"; // Used for rule IDs
+    public static final double DERIVED_PRIORITY_DECAY = 0.9; // Example decay factor
 
-    public Cog() {
-        this.events = new Events(Cog.this.mainExecutor);
-        Log.setEvents(this.events);
-        this.tools = new Tools();
+    // --- Core Components (Minimal Kernel) ---
+    private final KnowledgeBase knowledgeBase; // The central KB
+    private final TermLogicEngine termLogicEngine; // The generic interpreter
+    private final ToolRegistry toolRegistry; // Manages tool implementations
+    // private final ApiGateway apiGateway; // To be implemented
+    // private final SystemControl systemControl; // To be implemented
 
-        var tms = new Truths.BasicTMS(events); // Keep for now, will be refactored
-        this.context = new Cognition(globalKbCapacity, tms, this); // Keep for now, will be refactored
+    // Keep for now, will be refactored or removed
+    public final Events events; // Event bus, asserts into KB
+    // public final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>(); // Removed: Notes managed by KB
 
-        this.dialogue = new Dialogue(this); // Keep for now, will be refactored
-        this.reasoner = new Reason.ReasonerManager(events, context, dialogue); // Keep for now, will be refactored
-        this.plugins = new Plugins(this.events, this.context); // Keep for now, will be refactored
-        this.persistenceManager = new Persist(this, context, tms); // Keep for now, will be refactored
+    // Old components to be removed or refactored into the above
+    // private final JVM jvm; // Refactored into a Tool?
+    // private final ScheduledExecutorService executor; // Managed by SystemControl?
+    // private final Map<String, Agent> agents; // Managed by SystemControl/KB?
+    // private final Map<Object, ScheduledFuture<?>> scheduledTasks; // Managed by SystemControl?
+    // private final LM lm; // Refactored into LLMService used by a Tool?
+    // private final Tools tools; // Refactored into ToolRegistry?
+    // private final Persist persist; // Removed, replaced by Persistence interface used by KB
+    // private final Cognition cognition; // Removed
 
-        this.lm = new LM(this); // Keep for now, will be refactored
+    // Configuration (potentially loaded from KB)
+    private Configuration config;
 
-        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+    // Unique ID generator (potentially moved to KB or SystemControl)
+    private final AtomicLong idCounter = new AtomicLong(System.currentTimeMillis());
 
-        initPlugins();
+    public Cog(String persistencePath) {
+        // Initialize core components
+        // Events needs to assert into KB, but KB needs Events for status updates.
+        // This is a circular dependency issue.
+        // Temporary solution: Initialize Events first, then KB, then set KB on Events/Log.
+        // A better solution might involve passing a KB provider or using a message queue.
+        this.events = new Events(Executors.newCachedThreadPool()); // Events will assert into KB
+
+        // Initialize Persistence and KnowledgeBase
+        var persistence = new FilePersistence(persistencePath);
+        this.knowledgeBase = new KnowledgeBaseImpl(persistence);
+
+        // Set KB dependency for Log and Events
+        Log.setKnowledgeBase(this.knowledgeBase);
+        // events.setKnowledgeBase(this.knowledgeBase); // Need to add setKnowledgeBase to Events
+
+        // Initialize ToolRegistry
+        this.toolRegistry = new ToolRegistryImpl(knowledgeBase);
+
+        // Register Primitive Tools (defined in Java)
+        registerPrimitiveTools();
+
+        // Initialize TermLogicEngine
+        this.termLogicEngine = new TermLogicEngine(knowledgeBase, toolRegistry);
+
+        // Initialize ApiGateway (to be implemented)
+        // this.apiGateway = new ApiGateway(knowledgeBase);
+
+        // Initialize SystemControl (to be implemented)
+        // this.systemControl = new SystemControl(knowledgeBase, termLogicEngine, toolRegistry, apiGateway);
+
+        // Load configuration from KB or use default
+        this.config = knowledgeBase.loadNote(CONFIG_NOTE_ID)
+                                   .map(this::loadConfigFromNote)
+                                   .orElseGet(() -> {
+                                       info("Config note not found. Using default configuration.");
+                                       var defaultConfig = new Configuration();
+                                       // Create and save default config note
+                                       var configNote = createDefaultConfigNote(defaultConfig);
+                                       knowledgeBase.saveNote(configNote);
+                                       return defaultConfig;
+                                   });
+
+        // Old initialization logic removed/refactored:
+        // this.jvm = new JVM();
+        // this.executor = Executors.newScheduledThreadPool(config.concurrency); // Use config
+        // this.agents = new ConcurrentHashMap<>();
+        // this.scheduledTasks = new ConcurrentHashMap<>();
+        // this.lm = new LM(this);
+        // this.tools = new Tools(this);
+        // this.cognition = new Cognition(config.globalKbCapacity, new Truths.BasicTMS(events), this); // Old KB/TMS
+        // this.persist = new Persist(this, cognition, cognition.truth); // Old persistence
+
+        // Load initial state (now handled by KnowledgeBaseImpl constructor)
+        // persist.load(config.persistenceFilePath);
+
+        // Start SystemControl loop (to be implemented)
+        // systemControl.start();
+
+        info("Cog initialized.");
     }
 
-    public static void main(String[] args) {
-        String rulesFile = null;
-        var httpPort = 8080; // Default port for HTTP static files
-        var wsPort = 8081; // Default port for WebSocket
-        String staticDir = "ui"; // Directory containing static files
-
-        for (var i = 0; i < args.length; i++) {
-            try {
-                switch (args[i]) {
-                    case "-r", "--rules" -> rulesFile = args[++i];
-                    case "-p", "--http-port" -> httpPort = Integer.parseInt(args[++i]); // Use -p for HTTP port
-                    case "-w", "--ws-port" -> wsPort = Integer.parseInt(args[++i]); // Add -w for WS port
-                    case "-s", "--static-dir" -> staticDir = args[++i];
-                    default -> Log.warning("Unknown option: " + args[i] + ". Config via JSON.");
-                }
-            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
-                error(String.format("Error parsing argument for %s: %s", (i > 0 ? args[i - 1] : args[i]), e.getMessage()));
-                printUsageAndExit();
-            }
-        }
-
-        HttpServer httpServer = null;
-        Cog cogInstance = null;
-
-        try {
-            // Start HTTP Server for static files
-            Log.message("Attempting to start HTTP server on port " + httpPort + ", serving from '" + staticDir + "'");
-            httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
-            String STATIC = staticDir;
-            httpServer.createContext("/", new HttpHandler() {
-                @Override
-                public void handle(HttpExchange exchange) throws IOException {
-                    String requestPath = exchange.getRequestURI().getPath();
-                    if (requestPath.equals("/")) {
-                        requestPath = "/index.html"; // Serve index.html for root
-                    }
-
-                    // Strip leading slash for path resolution relative to staticDir
-                    String filePathString = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
-
-                    java.nio.file.Path filePath = Paths.get(STATIC, filePathString).normalize();
-
-                    // Basic security check: prevent directory traversal
-                    if (!filePath.startsWith(Paths.get(STATIC).normalize())) {
-                        exchange.sendResponseHeaders(403, -1); // Forbidden
-                        return;
-                    }
-
-                    if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
-                        String contentType = URLConnection.guessContentTypeFromName(filePath.toString());
-                        if (contentType == null) {
-                            contentType = "application/octet-stream"; // Default if unknown
-                        }
-                        exchange.getResponseHeaders().set("Content-Type", contentType);
-                        exchange.sendResponseHeaders(200, Files.size(filePath));
-                        try (OutputStream os = exchange.getResponseBody()) {
-                            Files.copy(filePath, os);
-                        }
-                    } else {
-                        exchange.sendResponseHeaders(404, -1); // Not Found
-                    }
-                }
-            });
-            httpServer.setExecutor(null); // Use default executor
-            httpServer.start();
-            Log.message("HTTP server started successfully on port " + httpPort);
-
-
-            cogInstance = new Cog();
-            // Start WebSocket server on a different port
-            // The WebSocketPlugin will log its startup port in its onStart method
-            cogInstance.plugins.add(new dumb.cogthought.plugin.WebSocketPlugin(new java.net.InetSocketAddress(wsPort), cogInstance));
-
-            cogInstance.start();
-
-            if (rulesFile != null) {
-                cogInstance.loadRules(rulesFile);
-            }
-
-            try {
-                // Keep the main thread alive while servers run
-                Thread.currentThread().join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                error("Main thread interrupted.");
-            }
-
-        } catch (BindException e) {
-            error("Failed to start server: Address already in use.");
-            error(String.format("Port %d or %d is already in use.", httpPort, wsPort));
-            error("Please check if another instance of the application is running or if another program is using these ports.");
-            error("You can specify different ports using the -p <http_port> and -w <ws_port> command-line arguments.");
-            e.printStackTrace();
-            System.exit(1);
-        }
-        catch (Exception e) {
-            error("Initialization/Startup failed: " + e.getMessage());
-            e.printStackTrace();
-            System.exit(1);
-        } finally {
-             // Ensure servers are stopped on shutdown
-             if (httpServer != null) {
-                 httpServer.stop(0); // Stop immediately
-                 Log.message("HTTP server stopped.");
-             }
-             if (cogInstance != null) {
-                 cogInstance.stop(); // Cog's stop handles WebSocketPlugin shutdown
-             }
-        }
+    // Register Java-defined Primitive Tools
+    private void registerPrimitiveTools() {
+        info("Registering Primitive Tools...");
+        toolRegistry.registerTool(new LogMessageTool(knowledgeBase)); // Example tool
+        // Register other primitive tools here...
+        // toolRegistry.registerTool(new AssertTool(knowledgeBase)); // Example
+        // toolRegistry.registerTool(new RetractTool(knowledgeBase)); // Example
+        // toolRegistry.registerTool(new QueryKBTool(knowledgeBase)); // Example
+        // toolRegistry.registerTool(new CallLLMTool(...)); // Needs LLMService
+        // toolRegistry.registerTool(new SendApiMessageTool(...)); // Needs ApiGateway
+        // toolRegistry.registerTool(new AskUserTool(...)); // Needs ApiGateway/Dialogue
+        info("Primitive Tools registration complete.");
     }
 
-    private static void printUsageAndExit() {
-        System.err.printf("Usage: java %s [-p http_port] [-w ws_port] [-r rules_file.kif] [-s static_directory]%n", Cog.class.getName());
-        System.err.println("Defaults: http_port=8080, ws_port=8081, static_directory=ui");
-        System.err.println("Note: Most configuration is now managed via the Configuration note and persisted in " + STATE_FILE);
-        System.exit(1);
+
+    // --- Public API (Minimal, interacts with KB/SystemControl) ---
+
+    public KnowledgeBase getKnowledgeBase() {
+        return knowledgeBase;
     }
 
-    static Note createDefaultConfigNote() {
-        // Note structure updated
-        return new Note(CONFIG_NOTE_ID, "Configuration", CONFIG_NOTE_TITLE, Json.str(new Configuration(
-                LM.DEFAULT_LLM_URL,
-                LM.DEFAULT_LLM_MODEL,
-                DEFAULT_KB_CAPACITY,
-                DEFAULT_REASONING_DEPTH,
-                DEFAULT_BROADCAST_INPUT
-        )), Note.Status.IDLE.name(), null, null, Instant.now(), Map.of(), List.of(), List.of());
+    public TermLogicEngine getTermLogicEngine() {
+        return termLogicEngine;
     }
+
+    public ToolRegistry getToolRegistry() {
+        return toolRegistry;
+    }
+
+    // Placeholder for getting notes - Notes should be queried from KB
+    // This method is temporary and should be removed once UI/API uses KB directly
+    public Collection<Note> getAllNotes() {
+        // This is inefficient; should be replaced by KB query/streaming
+        List<Note> allNotes = new ArrayList<>();
+        knowledgeBase.listNoteIds().forEach(id -> knowledgeBase.loadNote(id).ifPresent(allNotes::add));
+        return allNotes;
+    }
+
+    // Placeholder for getting config - Config should be queried from KB
+    // This method is temporary and should be removed once config is fully KB-driven
+    public Configuration getConfig() {
+        // Reload config from KB note if it might have changed externally?
+        // For now, return the loaded config.
+        return config;
+    }
+
+    // Placeholder for applying config - Config updates should be done by updating the KB note
+    // This method is temporary and should be removed
+    public void applyConfig(Configuration newConfig) {
+        this.config = newConfig;
+        // TODO: Update system behavior based on new config (e.g., executor pool size, LM settings)
+        // This logic should ideally be driven by rules reacting to config note changes in the KB.
+        info("Applied new configuration.");
+    }
+
+    // Placeholder for creating default config note - Should be part of KB bootstrap
+    // This method is temporary
+    public static Note createDefaultConfigNote(Configuration defaultConfig) {
+        var configNote = new Note(
+            CONFIG_NOTE_ID,
+            "Configuration", // Type defined in Ontology
+            "System Configuration",
+            "Contains system settings.",
+            Note.Status.IDLE.name(), // Status defined in Ontology
+            null, null, Instant.now(),
+            new HashMap<>(Map.of(
+                "persistenceFilePath", defaultConfig.persistenceFilePath(),
+                "globalKbCapacity", defaultConfig.globalKbCapacity(), // This might become irrelevant
+                "llmModel", defaultConfig.llmModel(),
+                "llmTemperature", defaultConfig.llmTemperature(),
+                "concurrency", defaultConfig.concurrency()
+                // Add other default settings here
+            )),
+            List.of(), List.of()
+        );
+        return configNote;
+    }
+
+    // Placeholder for loading config from note - Should be part of KB bootstrap/SystemControl
+    // This method is temporary
+    private Configuration loadConfigFromNote(Note configNote) {
+        var metadata = configNote.metadata();
+        var persistenceFilePath = (String) metadata.getOrDefault("persistenceFilePath", "data/kb");
+        var globalKbCapacity = (Integer) metadata.getOrDefault("globalKbCapacity", 10000); // Might be ignored
+        var llmModel = (String) metadata.getOrDefault("llmModel", "gpt-4o-mini");
+        var llmTemperature = (Double) metadata.getOrDefault("llmTemperature", 0.7);
+        var concurrency = (Integer) metadata.getOrDefault("concurrency", 4);
+
+        var loadedConfig = new Configuration(persistenceFilePath, globalKbCapacity, llmModel, llmTemperature, concurrency);
+        info("Loaded configuration from KB note: " + loadedConfig);
+        return loadedConfig;
+    }
+
+
+    // --- Utility Methods (potentially moved or refactored) ---
 
     public static String id(String prefix) {
-        return prefix + id.incrementAndGet();
+        // Simple ID generation, potentially replaced by a more robust KB-based ID service
+        return prefix + UUID.randomUUID();
     }
 
-    private static void shutdownExecutor(ExecutorService executor, String name) {
-        if (executor == null || executor.isShutdown()) return;
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                error(name + " did not terminate gracefully, forcing shutdown.");
-                executor.shutdownNow();
-                if (!executor.awaitTermination(1, TimeUnit.SECONDS))
-                    error(name + " did not terminate after forced shutdown.");
-            }
-        } catch (InterruptedException e) {
-            error("Interrupted while waiting for " + name + " shutdown.");
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
+    // Old methods removed:
+    // public JVM jvm() { return jvm; }
+    // public ScheduledExecutorService executor() { return executor; }
+    // public Map<String, Agent> agents() { return agents; }
+    // public Map<Object, ScheduledFuture<?>> scheduledTasks() { return scheduledTasks; }
+    // public LM lm() { return lm; }
+    // public Tools tools() { return tools; }
+    // public Persist persist() { return persist; }
+    // public Cognition cognition() { return cognition; } // Removed
 
-    protected void initPlugins() {
-        plugins.add(new InputPlugin());
-        plugins.add(new RetractionPlugin());
-        plugins.add(new TmsPlugin());
-        plugins.add(new UserFeedbackPlugin());
-        plugins.add(new TaskDecomposePlugin());
-
-        reasoner.add(new Reason.ForwardChainingReasonerPlugin());
-        reasoner.add(new Reason.RewriteRuleReasonerPlugin());
-        reasoner.add(new Reason.UniversalInstantiationReasonerPlugin());
-        reasoner.add(new Reason.BackwardChainingReasonerPlugin());
-
-        // Tools will need refactoring to use ToolContext and Term parameters
-        tools.add(new AssertKIFTool(this));
-        tools.add(new GetNoteTextTool(this));
-        tools.add(new FindAssertionsTool(this));
-        tools.add(new RetractTool(this));
-        tools.add(new QueryTool(this));
-        tools.add(new LogMessageTool(this));
-        tools.add(new SummarizeTool(this));
-        tools.add(new IdentifyConceptsTool(this));
-        tools.add(new GenerateQuestionsTool(this));
-        tools.add(new TextToKifTool(this));
-        tools.add(new DecomposeGoalTool(this));
-        tools.add(new EnhanceTool(this));
-    }
-
-    public void status(String status) {
-        this.status = status;
-        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
-    }
-
-    public Optional<Note> note(String id) {
-        return ofNullable(notes.get(id));
-    }
-
-    public List<Note> getAllNotes() {
-        return new ArrayList<>(notes.values());
-    }
-
-    public void addNote(Note note) {
-        if (notes.putIfAbsent(note.id(), note) == null) {
-            events.emit(new Event.AddedEvent(note));
-            message("Added note: " + note.title + " [" + note.id + "]"); // Use public fields
-        } else {
-            message("Note with ID " + note.id + " already exists."); // Use public fields
-        }
-    }
-
-    public void removeNote(String noteId) {
-        if ((noteId.equals(GLOBAL_KB_NOTE_ID) || noteId.equals(CONFIG_NOTE_ID))) {
-            error("Attempted to remove system note: " + noteId + ". Operation ignored.");
-            return;
-        }
-
-        ofNullable(notes.remove(noteId)).ifPresent(note -> {
-            events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "CogNote-Remove", noteId));
-            events.emit(new Event.NoteDeletedEvent(noteId));
-            context.removeNoteKb(noteId, "CogNote-Remove");
-            context.removeActiveNote(noteId);
-            message("Removed note: " + note.title + " [" + note.id + "]"); // Use public fields
-        });
-    }
-
-    public void updateNoteStatus(String noteId, Note.Status newStatus) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (!note.status.equals(newStatus.name())) {
-                var oldStatus = Note.Status.valueOf(note.status);
-                note.status = newStatus.name();
-                note.updated = Instant.now(); // Use Instant
-
-                switch (newStatus) {
-                    case ACTIVE -> context.addActiveNote(noteId);
-                    case IDLE, PAUSED, COMPLETED -> context.removeActiveNote(noteId);
-                }
-
-                events.emit(new Event.NoteStatusEvent(note, oldStatus, newStatus));
-                message("Updated note status for [" + note.id + "] to " + newStatus);
-
-                if (newStatus == Note.Status.ACTIVE) {
-                    // This logic needs refactoring to use the new KB interface
-                    // For now, keep the old logic but acknowledge it needs change
-                    context.kb(noteId).getAllAssertions().forEach(assertion ->
-                            events.emit(new Event.ExternalInputEvent(assertion.kif(), "note-start:" + noteId, noteId))
-                    );
-                    context.rules().stream()
-                            .filter(rule -> noteId.equals(rule.sourceNoteId()))
-                            .toList()
-                            .forEach(rule -> events.emit(new Event.ExternalInputEvent(rule.form(), "note-start:" + noteId, noteId)));
-                }
-            }
-        });
-    }
-
-    public void startNote(String noteId) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            var currentStatus = Note.Status.valueOf(note.status);
-            if (currentStatus == IDLE || currentStatus == Note.Status.PAUSED) {
-                message("Starting note: " + note.title + " [" + note.id + "]");
-                updateNoteStatus(noteId, Note.Status.ACTIVE);
-            } else {
-                message("Note " + note.title + " [" + note.id + "] is already " + currentStatus + ". Cannot start.");
-            }
-        });
-    }
-
-    public void pauseNote(String noteId) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (Note.Status.valueOf(note.status) == Note.Status.ACTIVE) {
-                message("Pausing note: " + note.title + " [" + note.id + "]");
-                updateNoteStatus(noteId, Note.Status.PAUSED);
-            } else {
-                message("Note " + note.title + " [" + note.id + "] is not ACTIVE. Cannot pause.");
-            }
-        });
-    }
-
-    public void completeNote(String noteId) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            var currentStatus = Note.Status.valueOf(note.status);
-            if (currentStatus == Note.Status.ACTIVE || currentStatus == Note.Status.PAUSED) {
-                message("Completing note: " + note.title + " [" + note.id + "]");
-                updateNoteStatus(noteId, Note.Status.COMPLETED);
-            } else {
-                message("Note " + note.title + " [" + note.id + "] is already " + currentStatus + ". Cannot complete.");
-            }
-        });
-    }
-
-    public void updateNoteText(String noteId, String newText) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (!note.text.equals(newText)) {
-                note.text = newText;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated text for note [" + note.id + "]");
-            }
-        });
-    }
-
-    public void updateNoteTitle(String noteId, String newTitle) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (!note.title.equals(newTitle)) {
-                note.title = newTitle;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated title for note [" + note.id + "]");
-            }
-        });
-    }
-
-    public void updateNotePriority(String noteId, int newPriority) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (note.priority == null || note.priority != newPriority) { // Handle null priority
-                note.priority = newPriority;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated priority for note [" + note.id + "] to " + newPriority);
-            }
-        });
-    }
-
-    public void updateNoteColor(String noteId, String newColor) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            // Use public fields
-            if (!Objects.equals(note.color, newColor)) {
-                note.color = newColor;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated color for note [" + note.id + "] to " + newColor);
-            }
-        });
-    }
-
-    public void updateNote(String noteId, @Nullable String title, @Nullable String content, @Nullable Note.Status state, @Nullable Integer priority, @Nullable String color) {
-        ofNullable(notes.get(noteId)).ifPresent(note -> {
-            boolean changed = false;
-            // Use public fields
-            if (title != null && !note.title.equals(title)) {
-                note.title = title;
-                changed = true;
-            }
-            if (content != null && !note.text.equals(content)) {
-                note.text = content;
-                changed = true;
-            }
-            if (state != null && !note.status.equals(state.name())) { // Compare with name()
-                updateNoteStatus(noteId, state); // This already updates 'updated' and emits event
-            } else if (changed) {
-                 // Only update timestamp and emit if other fields changed and status didn't
-                 note.updated = Instant.now(); // Use Instant
-                 events.emit(new Event.NoteUpdatedEvent(note));
-                 message("Updated note [" + note.id + "]");
-            }
-
-            if (priority != null && (note.priority == null || note.priority != priority)) { // Handle null priority
-                note.priority = priority;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated priority for note [" + note.id + "] to " + priority);
-            }
-            if (color != null && !Objects.equals(note.color, color)) {
-                note.color = color;
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Updated color for note [" + note.id + "] to " + color);
-            }
-        });
-    }
-
-    public void cloneNote(String noteId) {
-        ofNullable(notes.get(noteId)).ifPresentOrElse(originalNote -> {
-            // Use public fields
-            var c = new Note(
-                    Cog.id(Cog.ID_PREFIX_NOTE),
-                    originalNote.type, // Copy type
-                    "Clone of " + originalNote.title,
-                    originalNote.text,
-                    Note.Status.IDLE.name(), // Start as IDLE
-                    originalNote.priority,
-                    originalNote.color,
-                    Instant.now(), // New timestamp
-                    new HashMap<>(originalNote.metadata), // Copy metadata
-                    new ArrayList<>(originalNote.graph), // Copy graph (shallow)
-                    new ArrayList<>(originalNote.associatedTerms) // Copy associatedTerms
-            );
-            addNote(c);
-            message("Cloned note [" + noteId + "] to [" + c.id + "]");
-        }, () -> error("Attempted to clone unknown note ID: " + noteId));
-    }
-
-    public synchronized void clear() {
-        message("Clearing all knowledge...");
-        setPaused(true);
-        context.getAllNoteIds().stream()
-                .filter(noteId -> !noteId.equals(GLOBAL_KB_NOTE_ID) && !noteId.equals(CONFIG_NOTE_ID))
-                .forEach(noteId -> events.emit(new Event.RetractionRequestEvent(noteId, Logic.RetractionType.BY_NOTE, "System-ClearAll", noteId)));
-        context.kbGlobal().getAllAssertionIds().forEach(id -> context.truth.remove(id, "System-ClearAll"));
-        new HashSet<>(context.rules()).forEach(context::removeRule);
-
-        context.clear();
-
-        var configNote = notes.get(CONFIG_NOTE_ID);
-        var globalKbNote = notes.get(GLOBAL_KB_NOTE_ID);
-
-        notes.clear();
-
-        // Recreate system notes with default/cleared state but preserve IDs
-        var clearedGlobalKbNote = new Note(GLOBAL_KB_NOTE_ID, "KnowledgeBase", GLOBAL_KB_NOTE_TITLE, "Global KB Assertions", Note.Status.IDLE.name(), null, null, Instant.now(), Map.of(), List.of(), List.of());
-        var clearedConfigNote = createDefaultConfigNote(); // Use the factory method
-
-        notes.put(GLOBAL_KB_NOTE_ID, clearedGlobalKbNote);
-        notes.put(CONFIG_NOTE_ID, clearedConfigNote);
-
-
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-
-        events.emit(new Event.AddedEvent(notes.get(GLOBAL_KB_NOTE_ID)));
-        events.emit(new Event.AddedEvent(notes.get(CONFIG_NOTE_ID)));
-
-        status("Cleared");
-        setPaused(false);
-        message("Knowledge cleared.");
-        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
-    }
-
-    public boolean updateConfig(String newConfigJsonText) {
-        try {
-            var newConfig = Json.obj(newConfigJsonText, Configuration.class);
-            applyConfig(newConfig);
-            note(CONFIG_NOTE_ID).ifPresent(note -> {
-                // Use public fields
-                note.text = Json.str(newConfig);
-                note.updated = Instant.now(); // Use Instant
-                events.emit(new Event.NoteUpdatedEvent(note));
-                message("Configuration updated.");
-            });
-            lm.reconfigure();
-            return true;
-        } catch (Exception e) {
-            error("Failed to parse or apply new configuration JSON: " + e.getMessage());
-            e.printStackTrace();
-            return false;
-        }
-    }
-
-    private void load() {
-        persistenceManager.load(STATE_FILE);
-    }
-
-    void applyConfig(Configuration config) {
-        this.lm.llmApiUrl = config.llmApiUrl();
-        this.lm.llmModel = config.llmModel();
-        this.globalKbCapacity = config.globalKbCapacity();
-        this.reasoningDepthLimit = config.reasoningDepthLimit();
-        this.broadcastInputAssertions = config.broadcastInputAssertions();
-        message(String.format("System config applied: KBSize=%d, BroadcastInput=%b, LLM_URL=%s, LLM_Model=%s, MaxDepth=%d",
-                globalKbCapacity, broadcastInputAssertions, lm.llmApiUrl, lm.llmModel, reasoningDepthLimit));
-    }
-
-    public void start() {
-        if (!running.get()) {
-            error("Cannot restart a stopped system.");
-            return;
-        }
-        paused.set(true);
-        status("Initializing");
-
-        load();
-        lm.reconfigure();
-        plugins.initializeAll();
-        reasoner.initializeAll();
-
-        notes.values().stream()
-                // Use public fields
-                .filter(note -> Note.Status.valueOf(note.status) == Note.Status.ACTIVE)
-                .forEach(note -> context.addActiveNote(note.id));
-
-        context.addActiveNote(GLOBAL_KB_NOTE_ID);
-
-        setPaused(false);
-        status("Running");
-        message("System started.");
-        events.emit(new Event.SystemStatusEvent(status, context.kbCount(), context.kbTotalCapacity(), lm.activeLlmTasks.size(), context.ruleCount()));
-    }
-
-    public void stop() {
-        if (!running.compareAndSet(true, false)) return;
-        message("Stopping system...");
-        status("Stopping");
-        paused.set(false);
-        synchronized (pauseLock) {
-            pauseLock.notifyAll();
-        }
-
-        dialogue.clear();
-        reasoner.shutdownAll();
-        lm.activeLlmTasks.values().forEach(f -> f.cancel(true));
-        lm.activeLlmTasks.clear();
-        save();
-        plugins.shutdownAll();
-
-        shutdownExecutor(mainExecutor, "Main Executor");
-        events.shutdown();
-        status("Stopped");
-        message("System stopped.");
-    }
-    public void save() {
-        persistenceManager.save(STATE_FILE);
-    }
-
-    public boolean isPaused() {
-        return paused.get();
-    }
-
-    public void setPaused(boolean pause) {
-        if (paused.get() == pause || !running.get()) return;
-        paused.set(pause);
-        status(pause ? "Paused" : "Running");
-        if (!pause) {
-            synchronized (pauseLock) {
-                pauseLock.notifyAll();
-            }
-        }
-    }
-    public void loadRules(String filename) throws IOException {
-        message("Loading expressions from: " + filename);
-        var path = Paths.get(filename);
-        if (!Files.exists(path) || !Files.isReadable(path))
-            throw new IOException("File not found or not readable: " + filename);
-
-        var kifBuffer = new StringBuilder();
-        long[] counts = {0, 0, 0};
-        try (var reader = Files.newBufferedReader(path)) {
-            String line;
-            var parenDepth = 0;
-            while ((line = reader.readLine()) != null) {
-                counts[0]++;
-                var commentStart = line.indexOf(';');
-                if (commentStart != -1) line = line.substring(0, commentStart);
-                line = line.trim();
-                if (line.isEmpty()) continue;
-
-                parenDepth += line.chars().filter(c -> c == '(').count() - line.chars().filter(c -> c == ')').count();
-                kifBuffer.append(line).append(' ');
-
-                if (parenDepth == 0 && !kifBuffer.isEmpty()) {
-                    var kifText = kifBuffer.toString().trim();
-                    kifBuffer.setLength(0);
-                    if (!kifText.isEmpty()) {
-                        counts[1]++;
-                        try {
-                            KifParser.parseKif(kifText).forEach(term -> events.emit(new Event.ExternalInputEvent(term, "file:" + filename, null)));
-                            counts[2]++;
-                        } catch (Exception e) {
-                            error(String.format("File Processing Error (line ~%d): %s for '%s...'", counts[0], e.getMessage(), kifText.substring(0, Math.min(kifText.length(), MAX_KIF_PARSE_PREVIEW))));
-                            e.printStackTrace();
-                        }
-                    }
-                } else if (parenDepth < 0) {
-                    error(String.format("Mismatched parentheses near line %d: '%s'", counts[0], line));
-                    parenDepth = 0;
-                    kifBuffer.setLength(0);
-                }
-            }
-            if (parenDepth != 0) error("Warning: Unbalanced parentheses at end of file: " + filename);
-        }
-        message(String.format("Processed %d KIF blocks from %s, published %d input events.", counts[1], filename, counts[2]));
-    }
-
-    void waitIfPaused() {
-        synchronized (pauseLock) {
-            while (paused.get() && running.get()) {
-                try {
-                    pauseLock.wait();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    running.set(false);
-                }
-            }
-        }
-        if (!running.get()) throw new RuntimeException("System stopped");
-    }
-
-    public Answer querySync(Query query) {
-        var answerFuture = new CompletableFuture<Answer>();
-        var queryID = query.id();
-        Consumer<Event> listener = e -> {
-            if (e instanceof Answer.AnswerEvent resultEvent && resultEvent.result().queryId().equals(queryID)) {
-                answerFuture.complete(resultEvent.result());
-            }
-        };
-        @SuppressWarnings("unchecked")
-        var listeners = events.listeners.computeIfAbsent(Answer.AnswerEvent.class, k -> new CopyOnWriteArrayList<>());
-        listeners.add(listener);
-        try {
-            events.emit(new Query.QueryEvent(query));
-            return answerFuture.get(60, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Query execution interrupted", e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException("Error during query execution", e.getCause());
-        } catch (TimeoutException e) {
-            throw new RuntimeException("Query execution timed out after 60 seconds", e);
-        } finally {
-            listeners.remove(listener);
-        }
-    }
-
-    public SystemStateSnapshot getSystemStateSnapshot() {
-        return new SystemStateSnapshot(
-                getAllNotes(),
-                context.truth.getAllActiveAssertions(),
-                context.rules(),
-                new Configuration(this)
-        );
-    }
-
-    public enum QueryType {ASK_BINDINGS, ASK_TRUE_FALSE, ACHIEVE_GOAL}
-
-    public enum Feature {FORWARD_CHAINING, BACKWARD_CHAINING, TRUTH_MAINTENANCE, CONTRADICTION_DETECTION, UNCERTAINTY_HANDLING, OPERATOR_SUPPORT, REWRITE_RULES, UNIVERSAL_INSTANTIATION}
-
-    public enum QueryStatus {SUCCESS, FAILURE, TIMEOUT, ERROR}
-
-    public enum TaskStatus {IDLE, SENDING, PROCESSING, DONE, ERROR, CANCELLED}
-
-    @FunctionalInterface
-    interface DoubleDoublePredicate {
-        boolean test(double a, double b);
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    // --- Configuration Record (potentially defined as KB Ontology/Schema) ---
     public record Configuration(
-            @JsonProperty("llmApiUrl") String llmApiUrl,
-            @JsonProperty("llmModel") String llmModel,
-            @JsonProperty("globalKbCapacity") int globalKbCapacity,
-            @JsonProperty("reasoningDepthLimit") int reasoningDepthLimit,
-            @JsonProperty("broadcastInputAssertions") boolean broadcastInputAssertions
+            String persistenceFilePath,
+            int globalKbCapacity, // This might become irrelevant with generic KB
+            String llmModel,
+            double llmTemperature,
+            int concurrency // For executor pool size, etc.
     ) {
-        @JsonCreator
-        public Configuration(
-                @JsonProperty("llmApiUrl") String llmApiUrl,
-                @JsonProperty("llmModel") String llmModel,
-                @JsonProperty("globalKbCapacity") Integer globalKbCapacity,
-                @JsonProperty("reasoningDepthLimit") Integer reasoningDepthLimit,
-                @JsonProperty("broadcastInputAssertions") Boolean broadcastInputAssertions
-        ) {
-            this(
-                    llmApiUrl != null ? llmApiUrl : LM.DEFAULT_LLM_URL,
-                    llmModel != null ? llmModel : LM.DEFAULT_LLM_MODEL,
-                    globalKbCapacity != null ? globalKbCapacity : DEFAULT_KB_CAPACITY,
-                    reasoningDepthLimit != null ? reasoningDepthLimit : DEFAULT_REASONING_DEPTH,
-                    broadcastInputAssertions != null ? broadcastInputAssertions : DEFAULT_BROADCAST_INPUT
-            );
-        }
-
         public Configuration() {
-            this(LM.DEFAULT_LLM_URL, LM.DEFAULT_LLM_MODEL, DEFAULT_KB_CAPACITY, DEFAULT_REASONING_DEPTH, DEFAULT_BROADCAST_INPUT);
-        }
-
-        public Configuration(String llmApiUrl, String llmModel, int globalKbCapacity, int reasoningDepthLimit, boolean broadcastInputAssertions) {
-            this.llmApiUrl = llmApiUrl;
-            this.llmModel = llmModel;
-            this.globalKbCapacity = globalKbCapacity;
-            this.reasoningDepthLimit = reasoningDepthLimit;
-            this.broadcastInputAssertions = broadcastInputAssertions;
-        }
-
-        public Configuration(Cog cog) {
-            this(cog.lm.llmApiUrl, cog.lm.llmModel, cog.globalKbCapacity, cog.reasoningDepthLimit, cog.broadcastInputAssertions);
+            this("data/kb", 10000, "gpt-4o-mini", 0.7, 4);
         }
     }
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record SystemStateSnapshot(
-            List<Note> notes,
-            Collection<Assertion> assertions,
-            Collection<Rule> rules,
-            Cog.Configuration configuration
-    ) {
+    // --- Main Method (Entry Point) ---
+    public static void main(String[] args) {
+        info("Starting Cog...");
+        // The main method will initialize Cog and start the SystemControl loop
+        // For now, just initialize Cog.
+        var cog = new Cog("data/kb"); // Use default persistence path from config
+        // cog.systemControl.start(); // Start the main loop
+        info("Cog started.");
+
+        // Keep the application running (temporary, SystemControl will manage lifecycle)
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            error("Cog interrupted: " + e.getMessage());
+            Thread.currentThread().interrupt();
+        }
     }
 }
