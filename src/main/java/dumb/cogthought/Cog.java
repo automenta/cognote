@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -22,125 +23,91 @@ import static java.util.Objects.requireNonNull;
 import static dumb.cogthought.util.Log.error;
 import static dumb.cogthought.util.Log.info;
 
-// Refactored from dumb.cognote.Cog to be the minimal entry point
 public class Cog {
 
-    // --- Constants (potentially moved to KB Ontology later) ---
     public static final String GLOBAL_KB_NOTE_ID = "global-kb";
     public static final String GLOBAL_KB_NOTE_TITLE = "Global Knowledge Base";
     public static final String CONFIG_NOTE_ID = "system-config";
-    public static final String ID_PREFIX_PLUGIN = "plugin:"; // Still needed for plugin IDs? Or are plugins also KB data?
-    public static final String ID_PREFIX_TOOL = "tool:"; // Used for tool IDs/names
-    public static final String ID_PREFIX_AGENT = "agent:"; // Used for agent IDs?
-    public static final String ID_PREFIX_ASSERTION = "assertion:"; // Used for assertion IDs
-    public static final String ID_PREFIX_RULE = "rule:"; // Used for rule IDs
-    public static final double DERIVED_PRIORITY_DECAY = 0.9; // Example decay factor
+    public static final String ID_PREFIX_PLUGIN = "plugin:";
+    public static final String ID_PREFIX_TOOL = "tool:";
+    public static final String ID_PREFIX_AGENT = "agent:";
+    public static final String ID_PREFIX_ASSERTION = "assertion:";
+    public static final String ID_PREFIX_RULE = "rule:";
+    public static final double DERIVED_PRIORITY_DECAY = 0.9;
 
-    // --- Core Components (Minimal Kernel) ---
-    private final KnowledgeBase knowledgeBase; // The central KB
-    private final TermLogicEngine termLogicEngine; // The generic interpreter
-    private final ToolRegistry toolRegistry; // Manages tool implementations
-    // private final ApiGateway apiGateway; // To be implemented
-    // private final SystemControl systemControl; // To be implemented
+    private final KnowledgeBase knowledgeBase;
+    private final TermLogicEngine termLogicEngine;
+    private final ToolRegistry toolRegistry;
+    private final LLMService llmService;
+    private final ApiGateway apiGateway;
+    // private final SystemControl systemControl;
 
-    // Keep for now, will be refactored or removed
-    public final Events events; // Event bus, asserts into KB
-    // public final ConcurrentMap<String, Note> notes = new ConcurrentHashMap<>(); // Removed: Notes managed by KB
+    public final Events events;
 
-    // Old components to be removed or refactored into the above
-    // private final JVM jvm; // Refactored into a Tool?
-    // private final ScheduledExecutorService executor; // Managed by SystemControl?
-    // private final Map<String, Agent> agents; // Managed by SystemControl/KB?
-    // private final Map<Object, ScheduledFuture<?>> scheduledTasks; // Managed by SystemControl?
-    // private final LM lm; // Refactored into LLMService used by a Tool?
-    // private final Tools tools; // Refactored into ToolRegistry?
-    // private final Persist persist; // Removed, replaced by Persistence interface used by KB
-    // private final Cognition cognition; // Removed
-
-    // Configuration (potentially loaded from KB)
     private Configuration config;
 
-    // Unique ID generator (potentially moved to KB or SystemControl)
     private final AtomicLong idCounter = new AtomicLong(System.currentTimeMillis());
 
     public Cog(String persistencePath) {
-        // Initialize core components
-        // Events needs to assert into KB, but KB needs Events for status updates.
-        // This is a circular dependency issue.
-        // Temporary solution: Initialize Events first, then KB, then set KB on Events/Log.
-        // A better solution might involve passing a KB provider or using a message queue.
-        this.events = new Events(Executors.newCachedThreadPool()); // Events will assert into KB
+        ExecutorService kernelExecutor = Executors.newCachedThreadPool();
 
-        // Initialize Persistence and KnowledgeBase
-        var persistence = new FilePersistence(persistencePath);
-        this.knowledgeBase = new KnowledgeBaseImpl(persistence);
+        events = new Events(kernelExecutor);
 
-        // Set KB dependency for Log and Events
-        Log.setKnowledgeBase(this.knowledgeBase);
-        // events.setKnowledgeBase(this.knowledgeBase); // Need to add setKnowledgeBase to Events
+        Persistence persistence = new FilePersistence(persistencePath);
+        knowledgeBase = new KnowledgeBaseImpl(persistence);
 
-        // Initialize ToolRegistry
-        this.toolRegistry = new ToolRegistryImpl(knowledgeBase);
+        Log.setKnowledgeBase(knowledgeBase);
+        events.setKnowledgeBase(knowledgeBase); // Set KB dependency for Events
 
-        // Register Primitive Tools (defined in Java)
-        registerPrimitiveTools();
+        toolRegistry = new ToolRegistryImpl(knowledgeBase);
 
-        // Initialize TermLogicEngine
-        this.termLogicEngine = new TermLogicEngine(knowledgeBase, toolRegistry);
+        llmService = new LLMServiceImpl(kernelExecutor);
 
-        // Initialize ApiGateway (to be implemented)
-        // this.apiGateway = new ApiGateway(knowledgeBase);
+        apiGateway = new ApiGatewayImpl(knowledgeBase);
 
-        // Initialize SystemControl (to be implemented)
-        // this.systemControl = new SystemControl(knowledgeBase, termLogicEngine, toolRegistry, apiGateway);
+        // systemControl = new SystemControl(knowledgeBase, termLogicEngine, toolRegistry, apiGateway, llmService, events);
 
-        // Load configuration from KB or use default
-        this.config = knowledgeBase.loadNote(CONFIG_NOTE_ID)
+        // Load configuration early to configure LLM service
+        config = knowledgeBase.loadNote(CONFIG_NOTE_ID)
                                    .map(this::loadConfigFromNote)
                                    .orElseGet(() -> {
                                        info("Config note not found. Using default configuration.");
-                                       var defaultConfig = new Configuration();
-                                       // Create and save default config note
-                                       var configNote = createDefaultConfigNote(defaultConfig);
+                                       Configuration defaultConfig = new Configuration();
+                                       Note configNote = createDefaultConfigNote(defaultConfig);
                                        knowledgeBase.saveNote(configNote);
                                        return defaultConfig;
                                    });
 
-        // Old initialization logic removed/refactored:
-        // this.jvm = new JVM();
-        // this.executor = Executors.newScheduledThreadPool(config.concurrency); // Use config
-        // this.agents = new ConcurrentHashMap<>();
-        // this.scheduledTasks = new ConcurrentHashMap<>();
-        // this.lm = new LM(this);
-        // this.tools = new Tools(this);
-        // this.cognition = new Cognition(config.globalKbCapacity, new Truths.BasicTMS(events), this); // Old KB/TMS
-        // this.persist = new Persist(this, cognition, cognition.truth); // Old persistence
+        // Reconfigure LLM service based on loaded config
+        llmService.reconfigure(config.llmApiUrl(), config.llmModel(), config.llmTemperature(), config.llmTimeoutSeconds());
 
-        // Load initial state (now handled by KnowledgeBaseImpl constructor)
-        // persist.load(config.persistenceFilePath);
+        // Create ToolContext instance (can be reused or created per task)
+        ToolContext kernelToolContext = new ToolContext() {
+            @Override public KnowledgeBase getKnowledgeBase() { return knowledgeBase; }
+            @Override public LLMService getLlmService() { return llmService; }
+            @Override public ApiGateway getApiGateway() { return apiGateway; }
+            @Override public Events getEvents() { return events; }
+        };
 
-        // Start SystemControl loop (to be implemented)
-        // systemControl.start();
+        registerPrimitiveTools(kernelToolContext); // Pass context to tool registration
+
+        termLogicEngine = new TermLogicEngine(knowledgeBase, toolRegistry, llmService, apiGateway, events);
 
         info("Cog initialized.");
     }
 
-    // Register Java-defined Primitive Tools
-    private void registerPrimitiveTools() {
+    private void registerPrimitiveTools(ToolContext context) {
         info("Registering Primitive Tools...");
-        toolRegistry.registerTool(new LogMessageTool(knowledgeBase)); // Example tool
-        // Register other primitive tools here...
-        // toolRegistry.registerTool(new AssertTool(knowledgeBase)); // Example
-        // toolRegistry.registerTool(new RetractTool(knowledgeBase)); // Example
-        // toolRegistry.registerTool(new QueryKBTool(knowledgeBase)); // Example
-        // toolRegistry.registerTool(new CallLLMTool(...)); // Needs LLMService
-        // toolRegistry.registerTool(new SendApiMessageTool(...)); // Needs ApiGateway
-        // toolRegistry.registerTool(new AskUserTool(...)); // Needs ApiGateway/Dialogue
+        toolRegistry.registerTool(new LogMessageTool(knowledgeBase));
+        // Register other primitive tools here, passing the context
+        // toolRegistry.registerTool(new AssertTool(context)); // Example
+        // toolRegistry.registerTool(new RetractTool(context)); // Example
+        // toolRegistry.registerTool(new QueryKBTool(context)); // Example
+        // toolRegistry.registerTool(new CallLLMTool(context)); // Needs LLMService from context
+        // toolRegistry.registerTool(new SendApiMessageTool(context)); // Needs ApiGateway from context
+        // toolRegistry.registerTool(new AskUserTool(context)); // Needs ApiGateway/Dialogue from context
         info("Primitive Tools registration complete.");
     }
-
-
-    // --- Public API (Minimal, interacts with KB/SystemControl) ---
 
     public KnowledgeBase getKnowledgeBase() {
         return knowledgeBase;
@@ -154,111 +121,92 @@ public class Cog {
         return toolRegistry;
     }
 
-    // Placeholder for getting notes - Notes should be queried from KB
-    // This method is temporary and should be removed once UI/API uses KB directly
+    public LLMService getLlmService() {
+        return llmService;
+    }
+
+    public ApiGateway getApiGateway() {
+        return apiGateway;
+    }
+
     public Collection<Note> getAllNotes() {
-        // This is inefficient; should be replaced by KB query/streaming
         List<Note> allNotes = new ArrayList<>();
         knowledgeBase.listNoteIds().forEach(id -> knowledgeBase.loadNote(id).ifPresent(allNotes::add));
         return allNotes;
     }
 
-    // Placeholder for getting config - Config should be queried from KB
-    // This method is temporary and should be removed once config is fully KB-driven
     public Configuration getConfig() {
-        // Reload config from KB note if it might have changed externally?
-        // For now, return the loaded config.
         return config;
     }
 
-    // Placeholder for applying config - Config updates should be done by updating the KB note
-    // This method is temporary and should be removed
     public void applyConfig(Configuration newConfig) {
-        this.config = newConfig;
-        // TODO: Update system behavior based on new config (e.g., executor pool size, LM settings)
-        // This logic should ideally be driven by rules reacting to config note changes in the KB.
+        config = newConfig;
+        llmService.reconfigure(config.llmApiUrl(), config.llmModel(), config.llmTemperature(), config.llmTimeoutSeconds());
+        // TODO: Update other system behavior based on new config (e.g., executor pool size)
         info("Applied new configuration.");
     }
 
-    // Placeholder for creating default config note - Should be part of KB bootstrap
-    // This method is temporary
     public static Note createDefaultConfigNote(Configuration defaultConfig) {
-        var configNote = new Note(
+        Note configNote = new Note(
             CONFIG_NOTE_ID,
-            "Configuration", // Type defined in Ontology
+            "Configuration",
             "System Configuration",
             "Contains system settings.",
-            Note.Status.IDLE.name(), // Status defined in Ontology
+            Note.Status.IDLE.name(),
             null, null, Instant.now(),
             new HashMap<>(Map.of(
                 "persistenceFilePath", defaultConfig.persistenceFilePath(),
-                "globalKbCapacity", defaultConfig.globalKbCapacity(), // This might become irrelevant
+                "globalKbCapacity", defaultConfig.globalKbCapacity(),
+                "llmApiUrl", defaultConfig.llmApiUrl(),
                 "llmModel", defaultConfig.llmModel(),
                 "llmTemperature", defaultConfig.llmTemperature(),
+                "llmTimeoutSeconds", defaultConfig.llmTimeoutSeconds(),
                 "concurrency", defaultConfig.concurrency()
-                // Add other default settings here
             )),
             List.of(), List.of()
         );
         return configNote;
     }
 
-    // Placeholder for loading config from note - Should be part of KB bootstrap/SystemControl
-    // This method is temporary
     private Configuration loadConfigFromNote(Note configNote) {
-        var metadata = configNote.metadata();
-        var persistenceFilePath = (String) metadata.getOrDefault("persistenceFilePath", "data/kb");
-        var globalKbCapacity = (Integer) metadata.getOrDefault("globalKbCapacity", 10000); // Might be ignored
-        var llmModel = (String) metadata.getOrDefault("llmModel", "gpt-4o-mini");
-        var llmTemperature = (Double) metadata.getOrDefault("llmTemperature", 0.7);
-        var concurrency = (Integer) metadata.getOrDefault("concurrency", 4);
+        Map<String, Object> metadata = configNote.metadata();
+        String persistenceFilePath = (String) metadata.getOrDefault("persistenceFilePath", "data/kb");
+        int globalKbCapacity = (Integer) metadata.getOrDefault("globalKbCapacity", 10000);
+        String llmApiUrl = (String) metadata.getOrDefault("llmApiUrl", "http://localhost:11434");
+        String llmModel = (String) metadata.getOrDefault("llmModel", "gpt-4o-mini");
+        double llmTemperature = (Double) metadata.getOrDefault("llmTemperature", 0.7);
+        int llmTimeoutSeconds = (Integer) metadata.getOrDefault("llmTimeoutSeconds", 90);
+        int concurrency = (Integer) metadata.getOrDefault("concurrency", 4);
 
-        var loadedConfig = new Configuration(persistenceFilePath, globalKbCapacity, llmModel, llmTemperature, concurrency);
+        Configuration loadedConfig = new Configuration(persistenceFilePath, globalKbCapacity, llmApiUrl, llmModel, llmTemperature, llmTimeoutSeconds, concurrency);
         info("Loaded configuration from KB note: " + loadedConfig);
         return loadedConfig;
     }
 
-
-    // --- Utility Methods (potentially moved or refactored) ---
-
     public static String id(String prefix) {
-        // Simple ID generation, potentially replaced by a more robust KB-based ID service
         return prefix + UUID.randomUUID();
     }
 
-    // Old methods removed:
-    // public JVM jvm() { return jvm; }
-    // public ScheduledExecutorService executor() { return executor; }
-    // public Map<String, Agent> agents() { return agents; }
-    // public Map<Object, ScheduledFuture<?>> scheduledTasks() { return scheduledTasks; }
-    // public LM lm() { return lm; }
-    // public Tools tools() { return tools; }
-    // public Persist persist() { return persist; }
-    // public Cognition cognition() { return cognition; } // Removed
-
-    // --- Configuration Record (potentially defined as KB Ontology/Schema) ---
     public record Configuration(
             String persistenceFilePath,
-            int globalKbCapacity, // This might become irrelevant with generic KB
+            int globalKbCapacity,
+            String llmApiUrl,
             String llmModel,
             double llmTemperature,
-            int concurrency // For executor pool size, etc.
+            int llmTimeoutSeconds,
+            int concurrency
     ) {
         public Configuration() {
-            this("data/kb", 10000, "gpt-4o-mini", 0.7, 4);
+            this("data/kb", 10000, "http://localhost:11434", "gpt-4o-mini", 0.7, 90, 4);
         }
     }
 
-    // --- Main Method (Entry Point) ---
     public static void main(String[] args) {
         info("Starting Cog...");
-        // The main method will initialize Cog and start the SystemControl loop
-        // For now, just initialize Cog.
-        var cog = new Cog("data/kb"); // Use default persistence path from config
-        // cog.systemControl.start(); // Start the main loop
+        Cog cog = new Cog("data/kb");
+        // cog.systemControl.start();
         info("Cog started.");
 
-        // Keep the application running (temporary, SystemControl will manage lifecycle)
         try {
             Thread.currentThread().join();
         } catch (InterruptedException e) {
