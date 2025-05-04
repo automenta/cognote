@@ -40,11 +40,12 @@ public class Cog {
     private final KnowledgeBase knowledgeBase;
     private final TermLogicEngine termLogicEngine;
     private final ToolRegistry toolRegistry;
-    private final LLMService llmService;
+    private final LLMService llmService; // Use LLMService interface
     private final ApiGateway apiGateway;
-    private final SystemControl systemControl; // New SystemControl
+    private final SystemControl systemControl;
 
     public final Events events;
+    private final ExecutorService kernelExecutor; // Keep reference to the shared executor
 
     private Configuration config;
 
@@ -52,13 +53,13 @@ public class Cog {
 
     public Cog(String persistencePath) {
         // Use a shared executor for kernel tasks (KB, Tools, LLM, Events)
-        ExecutorService kernelExecutor = Executors.newCachedThreadPool();
+        kernelExecutor = Executors.newCachedThreadPool(); // Initialize the executor
 
         // Initialize core components
         events = new Events(kernelExecutor);
 
         Persistence persistence = new FilePersistence(persistencePath);
-        knowledgeBase = new KnowledgeBaseImpl(persistence);
+        knowledgeBase = new KnowledgeBaseImpl(persistence, kernelExecutor); // Pass executor to KB
 
         // Set KB dependency for Log and Events
         Log.setKnowledgeBase(knowledgeBase); // Log now asserts via KB
@@ -66,7 +67,7 @@ public class Cog {
 
         toolRegistry = new ToolRegistryImpl(knowledgeBase);
 
-        llmService = new LLMServiceImpl(kernelExecutor);
+        llmService = new LLMServiceImpl(kernelExecutor); // Use LLMServiceImpl implementing the interface
 
         apiGateway = new ApiGatewayImpl(knowledgeBase);
 
@@ -91,6 +92,7 @@ public class Cog {
             @Override public LLMService getLlmService() { return llmService; }
             @Override public ApiGateway getApiGateway() { return apiGateway; }
             @Override public Events getEvents() { return events; }
+            @Override public ExecutorService getExecutor() { return kernelExecutor; } // Provide the shared executor
         };
 
         registerPrimitiveTools(kernelToolContext); // Register core Java tools
@@ -149,6 +151,8 @@ public class Cog {
         return events;
     }
 
+    public ExecutorService getKernelExecutor() { return kernelExecutor; } // Added getter for executor
+
     // --- Configuration Management ---
 
     public Collection<Note> getAllNotes() {
@@ -194,7 +198,7 @@ public class Cog {
         Map<String, Object> metadata = configNote.metadata();
         // Use safe casting and default values
         String persistenceFilePath = (String) metadata.getOrDefault("persistenceFilePath", "data/kb");
-        int globalKbCapacity = (Integer) metadata.getOrDefault("globalKbCapacity", 10000);
+        int globalKbCapacity = ((Number) metadata.getOrDefault("globalKbCapacity", 10000)).intValue(); // Ensure int casting
         String llmApiUrl = (String) metadata.getOrDefault("llmApiUrl", "http://localhost:11434");
         String llmModel = (String) metadata.getOrDefault("llmModel", "gpt-4o-mini");
         // Need to handle potential Double vs Integer from JSON
@@ -254,6 +258,17 @@ public class Cog {
         } finally {
             // Ensure SystemControl is stopped on shutdown
             cog.systemControl.stop();
+            // Shutdown the kernel executor
+            cog.kernelExecutor.shutdown();
+            try {
+                if (!cog.kernelExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    cog.kernelExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                error("Kernel executor shutdown interrupted.");
+                cog.kernelExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
             info("Cog stopped.");
         }
     }

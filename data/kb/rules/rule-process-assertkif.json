@@ -1,0 +1,9 @@
+{
+  "id": "rule:process-assertkif",
+  "form": ["=>", ["ApiRequest", "?reqId", ["AssertKif", "?kif"]], ["_Assert", "?kif"]],
+  "antecedent": ["ApiRequest", "?reqId", ["AssertKif", "?kif"]],
+  "consequent": ["_Assert", "?kif"],
+  "pri": 1.0,
+  "antecedents": [["ApiRequest", "?reqId", ["AssertKif", "?kif"]]],
+  "sourceNoteId": "system-ontology"
+}

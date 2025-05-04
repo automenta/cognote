@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService; // Added import
 import java.util.stream.Stream;
 
 import static java.util.Objects.requireNonNull;
@@ -23,6 +24,7 @@ public class KnowledgeBaseImpl implements KnowledgeBase {
     private static final String RULES_PREFIX = "rules/";
 
     private final Persistence persistence;
+    private final ExecutorService executor; // Added executor field
 
     private final ConcurrentMap<String, Assertion> assertions = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<String>> justifications = new ConcurrentHashMap<>();
@@ -30,8 +32,9 @@ public class KnowledgeBaseImpl implements KnowledgeBase {
     private final ConcurrentMap<Term.Atom, Set<String>> predicateIndex = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Rule> rules = new ConcurrentHashMap<>();
 
-    public KnowledgeBaseImpl(Persistence persistence) {
+    public KnowledgeBaseImpl(Persistence persistence, ExecutorService executor) { // Added executor parameter
         this.persistence = requireNonNull(persistence);
+        this.executor = requireNonNull(executor); // Initialize executor
         loadAllFromPersistence();
     }
 
@@ -53,6 +56,8 @@ public class KnowledgeBaseImpl implements KnowledgeBase {
                     persistence.load(key, Rule.class).ifPresent(rule -> rules.put(rule.id(), rule));
                 });
 
+        // Notes are loaded on demand, but we can list them here if needed for initialization checks
+        info("Loaded " + assertions.size() + " assertions and " + rules.size() + " rules.");
         info("Knowledge Base loaded.");
     }
 
@@ -331,5 +336,10 @@ public class KnowledgeBaseImpl implements KnowledgeBase {
         persistence.clear();
         clearInternalState();
         info("Knowledge Base cleared.");
+    }
+
+    @Override
+    public ExecutorService getExecutor() { // Added implementation for getExecutor
+        return executor;
     }
 }

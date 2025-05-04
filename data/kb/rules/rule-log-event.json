@@ -1,0 +1,9 @@
+{
+  "id": "rule:log-event",
+  "form": ["=>", ["Event", "LogMessageEvent", ["ListElements", ["message", "?message"], ["level", "?level"]]], ["LogMessage", "?level", "?message"]],
+  "antecedent": ["Event", "LogMessageEvent", ["ListElements", ["message", "?message"], ["level", "?level"]]],
+  "consequent": ["LogMessage", "?level", "?message"],
+  "pri": 0.8,
+  "antecedents": [["Event", "LogMessageEvent", ["ListElements", ["message", "?message"], ["level", "?level"]]]],
+  "sourceNoteId": "system-ontology"
+}

@@ -13,7 +13,7 @@ import static java.util.Objects.requireNonNull;
 import static dumb.cogthought.util.Log.error;
 import static dumb.cogthought.util.Log.info;
 import static dumb.cogthought.util.Log.warn;
-import static dumb.cogthought.Protocol.*; // Import constants from old Protocol
+import static dumb.cogthought.ProtocolConstants.*; // Import constants from new ProtocolConstants
 
 /**
  * Implementation of the ApiGateway interface.
@@ -53,12 +53,12 @@ public class ApiGatewayImpl implements ApiGateway {
                 String command = msgNode.has("command") ? msgNode.get("command").asText() : null;
                 String requestId = msgNode.has("requestId") ? msgNode.get("requestId").asText() : Cog.id("api-req:");
 
-                if ("command".equals(messageType) && command != null) {
+                if (SIGNAL_TYPE_REQUEST.equals(messageType) && command != null) { // Use constant
                     Term commandTerm = null;
 
                     // Translate known commands into Term structures
                     switch (command) {
-                        case COMMAND_ASSERT_KIF:
+                        case COMMAND_ASSERT_KIF: // Use constant
                             if (msgNode.has("kif")) {
                                 String kifString = msgNode.get("kif").asText();
                                 try {
@@ -76,7 +76,7 @@ public class ApiGatewayImpl implements ApiGateway {
                                 warn("Received assertKif command without 'kif' field.");
                             }
                             break;
-                        case COMMAND_RUN_TOOL:
+                        case COMMAND_RUN_TOOL: // Use constant
                             if (msgNode.has("toolName") && msgNode.has("parameters")) {
                                 String toolName = msgNode.get("toolName").asText();
                                 JsonNode paramsNode = msgNode.get("parameters");
@@ -89,7 +89,7 @@ public class ApiGatewayImpl implements ApiGateway {
                                 warn("Received runTool command without 'toolName' or 'parameters' fields.");
                             }
                             break;
-                        case COMMAND_RUN_QUERY:
+                        case COMMAND_RUN_QUERY: // Use constant
                              if (msgNode.has("queryType") && msgNode.has("pattern")) {
                                  String queryType = msgNode.get("queryType").asText();
                                  String patternString = msgNode.get("pattern").asText();

@@ -1,0 +1,17 @@
+{
+  "id": "tool-assert",
+  "type": "ToolDefinition",
+  "title": "_Assert Tool",
+  "text": "Definition for the primitive _Assert tool.",
+  "status": "ACTIVE",
+  "priority": 100,
+  "color": null,
+  "updated": "2023-10-27T10:00:00Z",
+  "metadata": {
+    "toolName": "_Assert",
+    "description": "Asserts a KIF term into the Knowledge Base. Parameters: (<kif-term> [<source-note-id>] [<priority>])",
+    "isPrimitive": true
+  },
+  "graph": [],
+  "associatedTerms": []
+}

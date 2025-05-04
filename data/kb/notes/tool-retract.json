@@ -1,0 +1,17 @@
+{
+  "id": "tool-retract",
+  "type": "ToolDefinition",
+  "title": "_Retract Tool",
+  "text": "Definition for the primitive _Retract tool.",
+  "status": "ACTIVE",
+  "priority": 100,
+  "color": null,
+  "updated": "2023-10-27T10:00:00Z",
+  "metadata": {
+    "toolName": "_Retract",
+    "description": "Retracts assertions from the Knowledge Base by ID or KIF pattern. Parameters: (<target>)",
+    "isPrimitive": true
+  },
+  "graph": [],
+  "associatedTerms": []
+}

@@ -13,12 +13,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 
+import static java.util.Objects.requireNonNull;
 import static dumb.cogthought.util.Log.error;
 import static dumb.cogthought.util.Log.info;
 
+/**
+ * Implementation of the LLMService interface using LangChain4j and Ollama.
+ */
 public class LLMServiceImpl implements LLMService {
     private volatile ChatLanguageModel chatModel;
-    private volatile LlmService aiService;
+    private volatile LlmService aiService; // Internal LangChain4j service
     private final ExecutorService executor;
 
     public LLMServiceImpl(ExecutorService executor) {
@@ -36,6 +40,7 @@ public class LLMServiceImpl implements LLMService {
                 return;
             }
             String cleanedBaseUrl = baseUrl;
+            // Clean up common LangChain4j Ollama base URL suffixes
             if (cleanedBaseUrl.endsWith("/api/chat")) cleanedBaseUrl = cleanedBaseUrl.substring(0, cleanedBaseUrl.length() - "/api/chat".length());
             else if (cleanedBaseUrl.endsWith("/api")) cleanedBaseUrl = cleanedBaseUrl.substring(0, cleanedBaseUrl.length() - "/api".length());
 
@@ -52,8 +57,14 @@ public class LLMServiceImpl implements LLMService {
                 return;
             }
 
+            // Note: LangChain4j AiServices can bind tools. This LLMService implementation
+            // does NOT bind tools here. Tool execution triggered by LLM function calls
+            // should be handled by a dedicated Primitive Tool (_CallLLMTool) which
+            // would receive the tool call request from the LLM response and delegate
+            // execution back to the TermLogicEngine/ToolRegistry.
             aiService = AiServices.builder(LlmService.class)
                     .chatLanguageModel(chatModel)
+                    // .tools(...) // Do NOT bind tools here
                     .build();
 
             info("LLM AiService configured.");
@@ -76,6 +87,7 @@ public class LLMServiceImpl implements LLMService {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
+                // TODO: Add system pause/wait logic here if needed, similar to old Cog.waitIfPaused()
                 return aiService.chat(messages);
             } catch (Exception e) {
                 Throwable cause = (e instanceof CompletionException ce && ce.getCause() != null) ? ce.getCause() : e;
@@ -87,6 +99,7 @@ public class LLMServiceImpl implements LLMService {
         }, executor);
     }
 
+    // Internal interface used by LangChain4j AiServices
     interface LlmService {
         AiMessage chat(List<ChatMessage> messages);
     }

@@ -1,0 +1,9 @@
+{
+  "id": "rule:process-runtool",
+  "form": ["=>", ["ApiRequest", "?reqId", ["RunTool", "?toolName", "?params"]], ["ExecuteTool", "?toolName", "?params"]],
+  "antecedent": ["ApiRequest", "?reqId", ["RunTool", "?toolName", "?params"]],
+  "consequent": ["ExecuteTool", "?toolName", "?params"],
+  "pri": 1.0,
+  "antecedents": [["ApiRequest", "?reqId", ["RunTool", "?toolName", "?params"]]],
+  "sourceNoteId": "system-ontology"
+}

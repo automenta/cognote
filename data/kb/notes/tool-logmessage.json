@@ -1,0 +1,17 @@
+{
+  "id": "tool-logmessage",
+  "type": "ToolDefinition",
+  "title": "LogMessage Tool",
+  "text": "Definition for the primitive LogMessage tool.",
+  "status": "ACTIVE",
+  "priority": 100,
+  "color": null,
+  "updated": "2023-10-27T10:00:00Z",
+  "metadata": {
+    "toolName": "LogMessage",
+    "description": "Logs a message to the system log and asserts it into the KB. Parameters: (<level> <message>)",
+    "isPrimitive": true
+  },
+  "graph": [],
+  "associatedTerms": []
+}
