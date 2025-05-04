@@ -2,7 +2,9 @@ package dumb.cogthought;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import dumb.cogthought.util.Json;
 import dumb.cogthought.util.Log;
 
@@ -29,6 +31,7 @@ public class ApiGatewayImpl implements ApiGateway {
     private static final Term API_REQUEST_PREDICATE = Term.Atom.of("ApiRequest"); // Placeholder
     private static final Term API_RESPONSE_PREDICATE = Term.Atom.of("ApiResponse"); // Placeholder
     private static final Term COMMAND_PREDICATE = Term.Atom.of("Command"); // Placeholder
+    private static final Term QUERY_RESULT_PREDICATE = Term.Atom.of("QueryResult"); // Matches the term structure from _QueryKBTool
 
     public ApiGatewayImpl(KnowledgeBase knowledgeBase) {
         this.knowledgeBase = requireNonNull(knowledgeBase);
@@ -97,7 +100,7 @@ public class ApiGatewayImpl implements ApiGateway {
                                      Term patternTerm = Logic.KifParser.parse(patternString);
                                      // Command term: (RunQuery <query-type> <pattern-term>)
                                      commandTerm = new Term.Lst(List.of(Term.Atom.of("RunQuery"), Term.Atom.of(queryType), patternTerm));
-                                     // TODO: Include optional parameters like maxDepth
+                                     // TODO: Include optional parameters like maxDepth from JSON
                                  } catch (Logic.KifParser.ParseException e) {
                                      warn("Failed to parse pattern from query command: " + patternString + " Error: " + e.getMessage());
                                  }
@@ -151,6 +154,96 @@ public class ApiGatewayImpl implements ApiGateway {
     }
 
     /**
+     * Converts an ApiResponse assertion from the KB into an outgoing message string (e.g., JSON).
+     * Expected assertion KIF structure: (ApiResponse <requestId> <responseContentTerm>)
+     * where <responseContentTerm> is typically (QueryResult <query-type> <status> <results> [<explanation>])
+     * or other response structures defined by tools/rules.
+     *
+     * @param responseAssertion The assertion containing the ApiResponse term.
+     * @return A JSON string representing the outgoing message.
+     * @throws IllegalArgumentException if the assertion KIF does not match the expected ApiResponse structure.
+     */
+    public String convertApiResponseToMessage(Assertion responseAssertion) {
+        Term.Lst apiResponseTerm = responseAssertion.kif();
+        if (!(apiResponseTerm.op().filter(API_RESPONSE_PREDICATE.name()::equals).isPresent() && apiResponseTerm.size() >= 3)) {
+            throw new IllegalArgumentException("Assertion KIF is not a valid ApiResponse term: " + apiResponseTerm.toKif());
+        }
+
+        Term requestIdTerm = apiResponseTerm.get(1);
+        Term responseContentTerm = apiResponseTerm.get(2);
+
+        if (!(requestIdTerm instanceof Term.Atom requestIdAtom)) {
+             warn("ApiResponse term has non-Atom request ID: " + requestIdTerm.toKif());
+             // Proceed with a string representation or handle as error
+        }
+        String requestId = (requestIdTerm instanceof Term.Atom) ? ((Term.Atom) requestIdTerm).name() : requestIdTerm.toKif();
+
+
+        ObjectNode messageNode = mapper.createObjectNode();
+        messageNode.put("type", SIGNAL_TYPE_UPDATE); // Use constant
+        messageNode.put("updateType", UPDATE_TYPE_RESPONSE); // Use constant
+        messageNode.put("requestId", requestId);
+
+        // Convert the response content term to a JSON structure
+        messageNode.set("content", termToJsonNode(responseContentTerm));
+
+        try {
+            return mapper.writeValueAsString(messageNode);
+        } catch (Exception e) {
+            error("Failed to convert ApiResponse JSON node to string: " + e.getMessage());
+            e.printStackTrace();
+            // Fallback to a simple error message
+            return String.format("{\"type\":\"%s\",\"updateType\":\"%s\",\"requestId\":\"%s\",\"content\":{\"status\":\"%s\",\"message\":\"Error converting response term to JSON: %s\"}}",
+                SIGNAL_TYPE_UPDATE, UPDATE_TYPE_RESPONSE, requestId, RESPONSE_STATUS_ERROR, e.getMessage());
+        }
+    }
+
+    /**
+     * Converts a KIF Term into a simple JSONNode representation.
+     * This is a basic conversion and may need refinement based on the desired API JSON structure.
+     *
+     * @param term The KIF Term to convert.
+     * @return A JsonNode representing the term.
+     */
+    private JsonNode termToJsonNode(Term term) {
+        return switch (term) {
+            case Term.Atom atom -> {
+                // Attempt to parse as number or boolean, otherwise treat as string
+                try {
+                    return mapper.getNodeFactory().numberNode(Double.parseDouble(atom.name()));
+                } catch (NumberFormatException e) {
+                    if ("true".equalsIgnoreCase(atom.name())) yield mapper.getNodeFactory().booleanNode(true);
+                    if ("false".equalsIgnoreCase(atom.name())) yield mapper.getNodeFactory().booleanNode(false);
+                    yield mapper.getNodeFactory().textNode(atom.name());
+                }
+            }
+            case Term.Str str -> mapper.getNodeFactory().textNode(str.value());
+            case Term.Num num -> mapper.getNodeFactory().numberNode(num.value());
+            case Term.Var var -> mapper.getNodeFactory().textNode("?" + var.name()); // Represent variables as strings
+            case Term.Lst list -> {
+                // Convert list to a JSON array or object based on structure
+                // If the first element is an atom, treat it as an operator/predicate
+                if (!list.terms.isEmpty() && list.get(0) instanceof Term.Atom opAtom) {
+                    ObjectNode objNode = mapper.createObjectNode();
+                    objNode.put("op", opAtom.name());
+                    ArrayNode argsNode = mapper.createArrayNode();
+                    list.terms.stream().skip(1).forEach(arg -> argsNode.add(termToJsonNode(arg)));
+                    objNode.set("args", argsNode);
+                    yield objNode;
+                } else {
+                    // Otherwise, treat as a simple array of terms
+                    ArrayNode arrayNode = mapper.createArrayNode();
+                    list.terms.forEach(item -> arrayNode.add(termToJsonNode(item)));
+                    yield arrayNode;
+                }
+            }
+            // Add other Term types if necessary
+            default -> mapper.getNodeFactory().textNode(term.toKif()); // Fallback to KIF string
+        };
+    }
+
+
+    /**
      * Sends an outgoing message string to the connected client(s).
      * This method is called by other system components (e.g., SystemControl, Tools)
      * when an ApiResponse or Event term is generated in the KB that needs to be sent out.
@@ -166,7 +259,5 @@ public class ApiGatewayImpl implements ApiGateway {
 
     // TODO: Add a mechanism (likely in SystemControl) to monitor the KB for
     // ApiResponse and Event terms and call sendOutgoingMessage to send them.
-    // This would involve querying the KB for terms like (ApiResponse <requestId> <responseContent>)
-    // or (Event <EventDetails>) that haven't been sent yet, converting them to JSON,
-    // sending them, and marking them as sent in the KB.
+    // This is now partially implemented in SystemControl.
 }

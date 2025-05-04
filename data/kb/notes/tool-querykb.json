@@ -1,0 +1,17 @@
+{
+  "id": "tool-querykb",
+  "type": "ToolDefinition",
+  "title": "_QueryKB Tool",
+  "text": "Definition for the primitive _QueryKB tool.",
+  "status": "ACTIVE",
+  "priority": 100,
+  "color": null,
+  "updated": "2023-10-27T10:00:00Z",
+  "metadata": {
+    "toolName": "_QueryKB",
+    "description": "Queries the Knowledge Base. Parameters: (<query-type> <pattern> [<request-id>] [<options>]). Asserts result as (ApiResponse <request-id> (QueryResult ...)).",
+    "isPrimitive": true
+  },
+  "graph": [],
+  "associatedTerms": []
+}

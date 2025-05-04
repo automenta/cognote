@@ -1,0 +1,9 @@
+{
+  "id": "rule:process-runquery",
+  "form": ["=>", ["ApiRequest", "?reqId", ["RunQuery", "?queryType", "?pattern"]], ["_QueryKB", "?queryType", "?pattern", "?reqId"]],
+  "antecedent": ["ApiRequest", "?reqId", ["RunQuery", "?queryType", "?pattern"]],
+  "consequent": ["_QueryKB", "?queryType", "?pattern", "?reqId"],
+  "pri": 1.0,
+  "antecedents": [["ApiRequest", "?reqId", ["RunQuery", "?queryType", "?pattern"]]],
+  "sourceNoteId": "system-ontology"
+}

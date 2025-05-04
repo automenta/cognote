@@ -4,6 +4,7 @@ import dumb.cogthought.persistence.FilePersistence;
 import dumb.cogthought.tool.LogMessageTool; // Example Primitive Tool
 import dumb.cogthought.tool._AssertTool; // New Primitive Tool
 import dumb.cogthought.tool._RetractTool; // New Primitive Tool
+import dumb.cogthought.tool._QueryKBTool; // New Primitive Tool
 import dumb.cogthought.util.Events;
 import dumb.cogthought.util.Log;
 import org.jetbrains.annotations.Nullable;
@@ -116,7 +117,8 @@ public class Cog {
         toolRegistry.registerTool(new LogMessageTool(knowledgeBase)); // Already existed
         toolRegistry.registerTool(new _AssertTool(context)); // New Assert tool
         toolRegistry.registerTool(new _RetractTool(context)); // New Retract tool
-        // TODO: Register other primitive tools here (_QueryKBTool, _CallLLMTool, _SendApiMessageTool, _AskUserTool, etc.)
+        toolRegistry.registerTool(new _QueryKBTool(context)); // New QueryKB tool
+        // TODO: Register other primitive tools here (_CallLLMTool, _SendApiMessageTool, _AskUserTool, etc.)
         info("Primitive Tools registration complete.");
     }
 
