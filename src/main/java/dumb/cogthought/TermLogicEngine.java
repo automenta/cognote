@@ -21,9 +21,9 @@ public class TermLogicEngine {
 
     private final KnowledgeBase knowledgeBase;
     private final ToolRegistry toolRegistry;
-    private final LLMService llmService;
-    private final ApiGateway apiGateway;
-    private final Events events;
+    private final LLMService llmService; // Keep reference for ToolContext
+    private final ApiGateway apiGateway; // Keep reference for ToolContext
+    private final Events events; // Keep reference for ToolContext
 
     public TermLogicEngine(KnowledgeBase knowledgeBase, ToolRegistry toolRegistry, LLMService llmService, ApiGateway apiGateway, Events events) {
         this.knowledgeBase = knowledgeBase;
@@ -34,9 +34,16 @@ public class TermLogicEngine {
         info("TermLogicEngine initialized.");
     }
 
+    /**
+     * Processes an input term by finding matching rules and interpreting their consequent actions.
+     *
+     * @param inputTerm The term to process (e.g., an asserted fact, an API request term, an event term).
+     * @return A CompletableFuture that completes when all triggered actions have finished.
+     */
     public CompletableFuture<Void> processTerm(Term inputTerm) {
         info("Processing term: " + inputTerm.toKif());
 
+        // Find rules whose antecedent unifies with the input term
         var matchingRules = knowledgeBase.findMatchingRules(inputTerm);
 
         var futures = matchingRules.map(rule -> {
@@ -45,22 +52,36 @@ public class TermLogicEngine {
             return bindingsOpt.map(bindings -> {
                 info("Rule matched: " + rule.id() + " with bindings: " + bindings);
 
+                // Substitute variables in the consequent to get the action term
                 Term actionTerm = Logic.subst(rule.consequent(), bindings);
 
+                // Interpret and execute the action term
                 return interpretActionTerm(actionTerm, rule, bindings);
 
             }).orElseGet(() -> {
+                // This case should ideally not happen if findMatchingRules uses unification correctly,
+                // but included for robustness.
                 Log.warn("Rule " + rule.id() + " matched pattern but failed unification with " + inputTerm.toKif());
                 return CompletableFuture.completedFuture(null);
             });
-        }).toList();
+        }).toList(); // Collect futures to a list before combining
 
+        // Wait for all action futures to complete
         return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
     }
 
+    /**
+     * Interprets a term produced by a rule consequent as an action and executes it.
+     * Actions are typically calls to Primitive Tools.
+     *
+     * @param actionTerm The term representing the action (e.g., (Assert ...), (ExecuteTool ...)).
+     * @param sourceRule The rule that produced this action term.
+     * @param bindings   The bindings from the rule match.
+     * @return A CompletableFuture that completes when the action execution finishes.
+     */
     private CompletableFuture<Void> interpretActionTerm(Term actionTerm, Rule sourceRule, Map<Term.Var, Term> bindings) {
         if (!(actionTerm instanceof Term.Lst actionList) || actionList.terms.isEmpty()) {
-            Log.warn("Rule " + sourceRule.id() + " produced non-action term: " + actionTerm.toKif());
+            Log.warn("Rule " + sourceRule.id() + " produced non-list or empty action term: " + actionTerm.toKif());
             return CompletableFuture.completedFuture(null);
         }
 
@@ -71,130 +92,59 @@ public class TermLogicEngine {
         }
 
         String operator = opOpt.get().name();
+        // The parameters for the tool are the terms *after* the operator in the action list
+        Term parameters = actionList.size() > 1 ? new Term.Lst(actionList.terms.subList(1, actionList.size())) : Term.Lst.of();
 
-        return switch (operator) {
-            case "Assert" -> {
-                if (actionList.size() >= 2 && actionList.get(1) instanceof Term.Lst assertionKif) {
-                    var potentialAssertion = new Assertion.PotentialAssertion(
-                        assertionKif,
-                        sourceRule.pri(),
-                        Collections.singleton(sourceRule.id()),
-                        sourceRule.id(),
-                        Logic.isEquality(assertionKif),
-                        Logic.isNegated(assertionKif),
-                        Logic.isOrientedEquality(assertionKif),
-                        sourceRule.sourceNoteId(),
-                        Logic.determineAssertionType(assertionKif),
-                        Logic.collectQuantifiedVars(assertionKif),
-                        sourceRule.derivationDepth() + 1
-                    );
-                    knowledgeBase.saveAssertion(new Assertion(
-                        Cog.id(Cog.ID_PREFIX_ASSERTION),
-                        potentialAssertion.kif(),
-                        potentialAssertion.pri(),
-                        Instant.now(),
-                        potentialAssertion.sourceNoteId(),
-                        potentialAssertion.support(),
-                        potentialAssertion.derivedType(),
-                        potentialAssertion.isEquality(),
-                        potentialAssertion.isOrientatedEquality(),
-                        potentialAssertion.isNegated(),
-                        potentialAssertion.quantifiedVars(),
-                        potentialAssertion.derivationDepth(),
-                        true,
-                        potentialAssertion.sourceNoteId() != null ? potentialAssertion.sourceNoteId() : Cog.GLOBAL_KB_NOTE_ID
-                    ));
-                    info("Asserted: " + assertionKif.toKif());
-                    yield CompletableFuture.completedFuture(null);
-                } else {
-                    Log.warn("Rule " + sourceRule.id() + " produced invalid Assert action: " + actionTerm.toKif());
-                    yield CompletableFuture.completedFuture(null);
-                }
-            }
-            case "Retract" -> {
-                 if (actionList.size() >= 2) {
-                     Term target = actionList.get(1);
-                     if (target instanceof Term.Lst targetKif) {
-                         knowledgeBase.queryAssertions(targetKif)
-                                      .filter(a -> a.sourceNoteId() == null || a.sourceNoteId().equals(sourceRule.sourceNoteId()))
-                                      .findFirst()
-                                      .ifPresentOrElse(
-                                          assertionToRetract -> {
-                                              knowledgeBase.deleteAssertion(assertionToRetract.id());
-                                              info("Retracted assertion by KIF: " + targetKif.toKif());
-                                          },
-                                          () -> Log.warn("Rule " + sourceRule.id() + " attempted to retract non-existent assertion by KIF: " + targetKif.toKif())
-                                      );
-                     } else if (target instanceof Term.Atom targetId) {
-                         knowledgeBase.loadAssertion(targetId.name())
-                                      .ifPresentOrElse(
-                                          assertionToRetract -> {
-                                              knowledgeBase.deleteAssertion(assertionToRetract.id());
-                                              info("Retracted assertion by ID: " + targetId.name());
-                                          },
-                                          () -> Log.warn("Rule " + sourceRule.id() + " attempted to retract non-existent assertion by ID: " + targetId.name())
-                                      );
-                     } else {
-                         Log.warn("Rule " + sourceRule.id() + " produced invalid Retract action target: " + target.toKif());
-                     }
-                     yield CompletableFuture.completedFuture(null);
-                 } else {
-                     Log.warn("Rule " + sourceRule.id() + " produced invalid Retract action: " + actionTerm.toKif());
-                     yield CompletableFuture.completedFuture(null);
-                 }
-            }
-            case "ExecuteTool" -> {
-                if (actionList.size() >= 2 && actionList.get(1) instanceof Term.Atom toolNameAtom) {
-                    String toolName = toolNameAtom.name();
-                    Term parameters = actionList.size() > 2 ? actionList.get(2) : Term.Lst.of();
-
-                    return toolRegistry.getTool(toolName)
-                                       .map(tool -> {
-                                           info("Executing tool: " + toolName + " with parameters: " + parameters.toKif());
-                                           // Create and pass the proper ToolContext
-                                           ToolContext toolContext = new ToolContext() {
-                                               @Override public KnowledgeBase getKnowledgeBase() { return knowledgeBase; }
-                                               @Override public LLMService getLlmService() { return llmService; }
-                                               @Override public ApiGateway getApiGateway() { return apiGateway; }
-                                               @Override public Events getEvents() { return events; }
-                                           };
-                                           try {
-                                               return tool.execute(parameters, toolContext)
-                                                          .thenAccept(result -> {
-                                                              info("Tool execution complete: " + toolName + ". Result: " + result);
-                                                              // TODO: Assert tool result into KB as a Term (Phase 3)
-                                                          })
-                                                          .exceptionally(e -> {
-                                                              error("Tool execution failed for " + toolName + ": " + e.getMessage());
-                                                              e.printStackTrace();
-                                                              // TODO: Assert tool error into KB as a Term (Phase 3)
-                                                              return null;
-                                                          });
-                                           } catch (Exception e) {
-                                                error("Error calling tool.execute for " + toolName + ": " + e.getMessage());
-                                                e.printStackTrace();
-                                                // TODO: Assert tool error into KB
-                                                return CompletableFuture.completedFuture(null);
-                                           }
-                                       })
-                                       .orElseGet(() -> {
-                                           Log.warn("Rule " + sourceRule.id() + " attempted to execute unknown tool: " + toolName);
-                                           // TODO: Assert unknown tool error into KB
-                                           return CompletableFuture.completedFuture(null);
-                                       });
-                } else {
-                    Log.warn("Rule " + sourceRule.id() + " produced invalid ExecuteTool action: " + actionTerm.toKif());
-                    yield CompletableFuture.completedFuture(null);
-                }
-            }
-            default -> {
-                Log.warn("Rule " + sourceRule.id() + " produced unhandled action term: " + actionTerm.toKif());
-                yield CompletableFuture.completedFuture(null);
-            }
+        // Create ToolContext for the tool execution
+        ToolContext toolContext = new ToolContext() {
+            @Override public KnowledgeBase getKnowledgeBase() { return knowledgeBase; }
+            @Override public LLMService getLlmService() { return llmService; }
+            @Override public ApiGateway getApiGateway() { return apiGateway; }
+            @Override public Events getEvents() { return events; }
         };
+
+        // Delegate action execution to the ToolRegistry
+        return toolRegistry.getTool(operator)
+                           .map(tool -> {
+                               info("Executing tool '" + operator + "' triggered by rule " + sourceRule.id() + " with parameters: " + parameters.toKif());
+                               try {
+                                   return tool.execute(parameters, toolContext)
+                                              .thenAccept(result -> {
+                                                  info("Tool execution complete: " + operator + ". Result: " + result);
+                                                  // TODO: Assert tool result into KB as a Term (Phase 3)
+                                              })
+                                              .exceptionally(e -> {
+                                                  error("Tool execution failed for '" + operator + "' triggered by rule " + sourceRule.id() + ": " + e.getMessage());
+                                                  e.printStackTrace();
+                                                  // TODO: Assert tool error into KB as a Term (Phase 3)
+                                                  return null; // Return null to prevent cascading exceptions in allOf
+                                              });
+                               } catch (Exception e) {
+                                    error("Error calling tool.execute for '" + operator + "' triggered by rule " + sourceRule.id() + ": " + e.getMessage());
+                                    e.printStackTrace();
+                                    // TODO: Assert tool error into KB
+                                    return CompletableFuture.completedFuture(null); // Return completed future on immediate error
+                               }
+                           })
+                           .orElseGet(() -> {
+                               Log.warn("Rule " + sourceRule.id() + " produced action for unknown tool: " + operator);
+                               // TODO: Assert unknown tool error into KB
+                               return CompletableFuture.completedFuture(null); // Return completed future for unknown tool
+                           });
     }
 
+
+    // --- Placeholder/Refactoring Candidates ---
+    // These methods are remnants from the old Reasoner and need to be refactored
+    // or replaced by data-driven rules and primitive tools in Phase 3.
+
+    /**
+     * Placeholder for logical term simplification.
+     * This logic might be implemented by rules or a dedicated tool later.
+     */
     public static Term.Lst simplifyLogicalTerm(Term.Lst term) {
+        // TODO: Implement proper simplification logic or replace with rules/tools
+        Log.warn("Logical term simplification logic is a placeholder.");
         final var MAX_DEPTH = 5;
         Term current = term;
         for (var depth = 0; depth < MAX_DEPTH; depth++) {
@@ -224,17 +174,28 @@ public class TermLogicEngine {
         return changed ? new Term.Lst(newTerms) : term;
     }
 
+    /**
+     * Placeholder for Skolemization logic.
+     * This logic might be implemented by rules or a dedicated tool later.
+     */
     public static Term performSkolemization(Term existentialFormula, Map<Term.Var, Term> contextBindings) {
+        // TODO: Implement proper Skolemization logic or replace with rules/tools
         Log.warn("Skolemization logic is a placeholder.");
         if (existentialFormula instanceof Term.Lst list && list.size() == 3 &&
             (list.op().filter(Logic.KIF_OP_EXISTS::equals).isPresent() || list.op().filter(Logic.KIF_OP_FORALL::equals).isPresent())) {
+            // Return the body of the quantified formula as a simplification placeholder
             return list.get(2);
         }
         return existentialFormula;
     }
 
+    /**
+     * Placeholder for Variable Renaming logic.
+     * This logic might be implemented by rules or a dedicated tool later.
+     */
     public static Rule renameRuleVariables(Rule rule, int depth) {
+        // TODO: Implement proper Variable Renaming logic or replace with rules/tools
         Log.warn("Variable renaming logic is a placeholder.");
-        return rule;
+        return rule; // Return original rule as placeholder
     }
 }
