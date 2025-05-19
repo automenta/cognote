@@ -5,16 +5,14 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>dumb</groupId>
-    <artifactId>cognote</artifactId>
+    <artifactId>netention</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Define LangChain4j version -->
         <langchain4j.version>1.0.0-beta3</langchain4j.version>
-        <!-- Define Jackson version -->
         <jackson.version>2.18.3</jackson.version> <!-- Use a recent stable version -->
     </properties>
 
@@ -22,28 +20,21 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>2.0.16</version>
+            <version>2.1.0-alpha1</version>
         </dependency>
-
-        <!-- Logback Classic (SLF4J binding and implementation) -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>1.5.17</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.java-websocket</groupId>
-            <artifactId>Java-WebSocket</artifactId>
-            <version>1.6.0</version>
-        </dependency>
+
         <dependency>
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
             <version>26.0.2</version>
         </dependency>
 
-        <!-- Jackson Dependencies for JSON serialization/deserialization -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -55,7 +46,6 @@
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- LangChain4j Dependencies -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>
@@ -69,23 +59,24 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.8.1</version>
+            <version>5.11.1</version>
             <scope>test</scope>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/org.bouncycastle/bcprov-jdk18on -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
             <version>1.80</version>
         </dependency>
 
+
+        <!-- deprecated: use JDK's builtin WebSocket API -->
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>1.6.0</version>
+        </dependency>
+
+
     </dependencies>
 
-    <repositories>
-        <repository><id>central</id><url>https://repo1.maven.org/maven2/</url></repository>
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-    </repositories>
 </project>
