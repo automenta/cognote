@@ -26,20 +26,19 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import javax.swing.*;
-        import javax.swing.border.EmptyBorder;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionEvent;
 import java.awt.*;
-        import java.awt.event.*;
-        import java.awt.image.BufferedImage;
+import java.awt.event.*;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -49,22 +48,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.*;
-        import java.time.Duration;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-        import java.util.List;
+import java.util.List;
 import java.util.concurrent.*;
-        import java.util.function.BiConsumer;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static dumb.note2.Netention.CustomCryptoUtils.bigIntegerTo32BytesPadded;
-import static dumb.note2.Netention.CustomCryptoUtils.ensureCoordBytesAre32;
 import static java.util.Arrays.copyOfRange;
+import static java.util.Optional.empty;
 
 
 public class Netention {
@@ -78,277 +76,21 @@ public class Netention {
 
     public static void main(String[] args) {
         var core = new Core();
-        SwingUtilities.invokeLater(() -> new NetentionUI(core));
+        SwingUtilities.invokeLater(() -> new UI(core));
     }
 
-    public enum UIFieldType {TEXT_FIELD, TEXT_AREA, COMBO_BOX, CHECK_BOX, PASSWORD_FIELD}
+    public enum FieldType {TEXT_FIELD, TEXT_AREA, COMBO_BOX, CHECK_BOX, PASSWORD_FIELD}
 
-    @Retention(RetentionPolicy.RUNTIME)
-    @Target(ElementType.FIELD)
-    public @interface ConfigField {
+    @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.FIELD)
+    public @interface Field {
         String label();
-
         String tooltip() default "";
-
-        UIFieldType type() default UIFieldType.TEXT_FIELD;
-
+        FieldType type() default FieldType.TEXT_FIELD;
         String[] choices() default {};
-
         String group() default "General";
     }
 
-    public static class SchnorrUtil {
-        private static final BigInteger
-                EC_P = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16),
-                EC_N = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
-        private static final X9ECParameters SECP256K1_PARAMS = CustomNamedCurves.getByName("secp256k1");
-        private static final ECPoint EC_G = SECP256K1_PARAMS.getG();
-
-        private static byte[] getEncodedPoint(ECPoint p) {
-            return p.getEncoded(true);
-        }
-
-        private static byte[] sha256(byte[]... inputs) throws NoSuchAlgorithmException {
-            var digest = MessageDigest.getInstance("SHA-256");
-            for (var input : inputs) digest.update(input);
-            return digest.digest();
-        }
-
-        private static BigInteger liftX(BigInteger x) {
-            var ySq = x.pow(3).add(BigInteger.valueOf(7)).mod(EC_P);
-            var y = ySq.modPow(EC_P.add(BigInteger.ONE).divide(BigInteger.valueOf(4)), EC_P);
-            if (!y.modPow(BigInteger.TWO, EC_P).equals(ySq)) return null;
-            return y;
-        }
-
-        public static ECPoint liftXToPoint(byte[] xCoordBytes) {
-            var x = new BigInteger(1, xCoordBytes);
-            var y = liftX(x);
-            return y == null ? null : SECP256K1_PARAMS.getCurve().createPoint(x, y);
-        }
-
-        private static boolean hasEvenY(ECPoint p) { // Assumes p is normalized
-            return p.getAffineYCoord().toBigInteger().mod(BigInteger.TWO).equals(BigInteger.ZERO);
-        }
-
-        private static byte[] taggedHash(String tag, byte[] a, byte[] b, byte[] c) throws NoSuchAlgorithmException {
-            var abc = new byte[a.length + b.length + c.length];
-            System.arraycopy(a, 0, abc, 0, a.length);
-            System.arraycopy(b, 0, abc, a.length, b.length);
-            System.arraycopy(c, 0, abc, a.length + b.length, c.length);
-            return taggedHash(tag, abc);
-        }
-
-        private static byte[] taggedHash(String tag, byte[] msg) throws NoSuchAlgorithmException {
-            var tagHash = sha256(tag.getBytes(StandardCharsets.UTF_8));
-            return sha256(tagHash, tagHash, msg);
-        }
-
-        public static byte[] sign(byte[] msgHash, byte[] seckey, byte[] auxRand) throws NoSuchAlgorithmException {
-            var d0 = new BigInteger(1, seckey);
-            if (!(BigInteger.ONE.compareTo(d0) <= 0 && d0.compareTo(EC_N.subtract(BigInteger.ONE)) <= 0))
-                throw new IllegalArgumentException("Secret key is out of range.");
-
-            ECPoint P_point = EC_G.multiply(d0);
-            if (P_point.isInfinity()) throw new IllegalStateException("Public key point is infinity in sign");
-            ECPoint P_normalized = P_point.normalize();
-
-            var d = hasEvenY(P_normalized) ? d0 : EC_N.subtract(d0);
-
-            var k0 = new BigInteger(1, taggedHash("BIP0340/aux", auxRand)).mod(EC_N);
-            if (k0.equals(BigInteger.ZERO)) throw new RuntimeException("Auxiliary random data produced k=0.");
-
-            ECPoint R_point = EC_G.multiply(k0);
-            if (R_point.isInfinity()) throw new RuntimeException("Auxiliary random data produced R=infinity.");
-            ECPoint R_normalized = R_point.normalize();
-
-            var k = hasEvenY(R_normalized) ? k0 : EC_N.subtract(k0);
-
-            var rX = ensureCoordBytesAre32(R_normalized.getAffineXCoord().getEncoded());
-            var pX = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
-            var sBytes = bigIntegerTo32BytesPadded(k.add(new BigInteger(1, taggedHash("BIP0340/challenge", rX, pX, msgHash)).mod(EC_N).multiply(d)).mod(EC_N));
-
-            var sig = new byte[64];
-            System.arraycopy(rX, 0, sig, 0, 32);
-            System.arraycopy(sBytes, 0, sig, 32, 32);
-            return sig;
-        }
-
-        public static boolean verify(byte[] msgHash, byte[] pubkeyXOnly, byte[] sig) throws NoSuchAlgorithmException {
-            if (pubkeyXOnly.length != 32 || sig.length != 64) return false;
-
-            ECPoint P = liftXToPoint(pubkeyXOnly); // P is affine here
-            if (P == null) return false;
-            ECPoint P_normalized = P.normalize(); // Should be a no-op if P is already affine, but good for safety.
-
-            var r = new BigInteger(1, copyOfRange(sig, 0, 32));
-            var s = new BigInteger(1, copyOfRange(sig, 32, 64));
-
-            if (r.compareTo(EC_P) >= 0 || s.compareTo(EC_N) >= 0) return false;
-
-            var pXBytes = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
-            var rXBytes = bigIntegerTo32BytesPadded(r);
-
-            var e = new BigInteger(1, taggedHash("BIP0340/challenge", rXBytes, pXBytes, msgHash)).mod(EC_N);
-            var R_calc = EC_G.multiply(s).add(P_normalized.multiply(EC_N.subtract(e))); // Use P_normalized here
-            ECPoint R_calc_normalized = R_calc.normalize();
-
-            if (R_calc_normalized.isInfinity()) return false;
-
-            return hasEvenY(R_calc_normalized) && R_calc_normalized.getAffineXCoord().toBigInteger().equals(r);
-        }
-    }
-
-    public static class Bech32 {
-        private static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-        private static final int[] GENERATOR = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
-
-        private static int polymod(byte[] values) {
-            var chk = 1;
-            for (var v : values) {
-                var top = chk >> 25;
-                chk = (chk & 0x1ffffff) << 5 ^ v;
-                for (var i = 0; i < 5; ++i) if (((top >> i) & 1) == 1) chk ^= GENERATOR[i];
-            }
-            return chk;
-        }
-
-        private static byte[] expandHrp(String hrp) {
-            var l = hrp.length();
-            var ret = new byte[l * 2 + 1];
-            for (var i = 0; i < l; ++i) {
-                ret[i] = (byte) (hrp.charAt(i) >> 5);
-                ret[i + l + 1] = (byte) (hrp.charAt(i) & 0x1f);
-            }
-            ret[l] = 0;
-            return ret;
-        }
-
-        private static boolean verifyChecksum(String hrp, byte[] data) {
-            var exp = expandHrp(hrp);
-            var el = exp.length;
-            var dl = data.length;
-            var values = new byte[el + dl];
-            System.arraycopy(exp, 0, values, 0, el);
-            System.arraycopy(data, 0, values, el, dl);
-            return polymod(values) == 1;
-        }
-
-        private static byte[] createChecksum(String hrp, byte[] data) {
-            var exp = expandHrp(hrp);
-            var el = exp.length;
-            var dl = data.length;
-            var values = new byte[el + dl + 6];
-            System.arraycopy(exp, 0, values, 0, el);
-            System.arraycopy(data, 0, values, el, dl);
-            var mod = polymod(values) ^ 1;
-            var ret = new byte[6];
-            for (var i = 0; i < 6; ++i) ret[i] = (byte) ((mod >> (5 * (5 - i))) & 0x1f);
-            return ret;
-        }
-
-        public static String encode(String hrp, byte[] data) {
-            var checksum = createChecksum(hrp, data);
-            var combined = new byte[data.length + checksum.length];
-            System.arraycopy(data, 0, combined, 0, data.length);
-            System.arraycopy(checksum, 0, combined, data.length, checksum.length);
-            var sb = new StringBuilder(hrp).append('1');
-            for (var b : combined) sb.append(CHARSET.charAt(b));
-            return sb.toString();
-        }
-
-        public static Bech32Data decode(String bech) throws Exception {
-            if (!bech.equals(bech.toLowerCase(Locale.ROOT)) && !bech.equals(bech.toUpperCase(Locale.ROOT)))
-                throw new Exception("Mixed case in Bech32 string");
-            bech = bech.toLowerCase(Locale.ROOT);
-            var pos = bech.lastIndexOf('1');
-            var l = bech.length();
-            if (pos < 1 || pos + 7 > l || l > 90)
-                throw new Exception("Invalid Bech32 string structure or length");
-            var hrp = bech.substring(0, pos);
-            var data = new byte[l - 1 - pos];
-            for (int i = 0, j = pos + 1; j < l; ++i, ++j) {
-                var v = CHARSET.indexOf(bech.charAt(j));
-                if (v == -1) throw new Exception("Invalid character in Bech32 string data part");
-                data[i] = (byte) v;
-            }
-            if (!verifyChecksum(hrp, data)) throw new Exception("Bech32 checksum verification failed");
-            return new Bech32Data(hrp, copyOfRange(data, 0, data.length - 6));
-        }
-
-        private static byte[] convertBits(byte[] data, int fromBits, int toBits, boolean pad) throws Exception {
-            var acc = 0;
-            var bits = 0;
-            var ret = new ByteArrayOutputStream();
-            var maxv = (1 << toBits) - 1;
-            for (var value : data) {
-                var v = value & 0xff;
-                if ((v >> fromBits) != 0) throw new Exception("Invalid data range for bit conversion");
-                acc = (acc << fromBits) | v;
-                bits += fromBits;
-                while (bits >= toBits) {
-                    bits -= toBits;
-                    ret.write((acc >> bits) & maxv);
-                }
-            }
-            if (pad) {
-                if (bits > 0) ret.write((acc << (toBits - bits)) & maxv);
-            } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxv) != 0)
-                throw new Exception("Invalid padding in bit conversion");
-            return ret.toByteArray();
-        }
-
-        public static byte[] nip19Decode(String nip19String) throws Exception {
-            return convertBits(decode(nip19String).data, 5, 8, false);
-        }
-
-        public static String nip19Encode(String hrp, byte[] data32Bytes) throws Exception {
-            return encode(hrp, convertBits(data32Bytes, 8, 5, true));
-        }
-
-        public record Bech32Data(String hrp, byte[] data) {  }
-    }
-
-    public static class CustomNostrUtils {
-        private static final ObjectMapper json = new ObjectMapper()
-                .setSerializationInclusion(JsonInclude.Include.NON_NULL)
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-
-        public static String toJson(Object object) throws JsonProcessingException {
-            return json.writeValueAsString(object);
-        }
-
-        public static <T> T fromJson(String json, TypeReference<T> typeReference) throws JsonProcessingException {
-            return CustomNostrUtils.json.readValue(json, typeReference);
-        }
-
-        public static class NostrEvent {
-            public String id, pubkey;
-            public long created_at;
-            public int kind;
-            public List<List<String>> tags = new ArrayList<>();
-            public String content, sig;
-
-            public String getSerializedForSigning() throws JsonProcessingException {
-                return json.writeValueAsString(List.of(0, this.pubkey, this.created_at, this.kind, this.tags, this.content));
-            }
-
-            public void calculateId() throws NoSuchAlgorithmException, JsonProcessingException {
-                this.id = CustomCryptoUtils.bytesToHex(MessageDigest.getInstance("SHA-256").digest(getSerializedForSigning().getBytes(StandardCharsets.UTF_8)));
-            }
-
-            public void sign(byte[] privateKey32Bytes, byte[] auxRand32Bytes) throws GeneralSecurityException, JsonProcessingException {
-                if (this.id == null) calculateId();
-                this.sig = CustomCryptoUtils.bytesToHex(SchnorrUtil.sign(CustomCryptoUtils.hexToBytes(this.id), privateKey32Bytes, auxRand32Bytes));
-            }
-
-            public boolean verifySignature() throws GeneralSecurityException {
-                return this.id != null && this.pubkey != null && this.sig != null && SchnorrUtil.verify(CustomCryptoUtils.hexToBytes(this.id), CustomCryptoUtils.hexToBytes(this.pubkey), CustomCryptoUtils.hexToBytes(this.sig));
-            }
-        }
-    }
-
-    public static class CustomCryptoUtils {
+    public static class Crypto {
         private static final String PROVIDER_BC = BouncyCastleProvider.PROVIDER_NAME;
         private static final X9ECParameters SECP256K1_PARAMS = CustomNamedCurves.getByName("secp256k1");
         private static final ECCurve CURVE = SECP256K1_PARAMS.getCurve();
@@ -366,7 +108,7 @@ public class Netention {
 
         public static String bytesToHex(byte[] bytes) {
             if (bytes == null) return null;
-            var sb = new StringBuilder(bytes.length*2);
+            var sb = new StringBuilder(bytes.length * 2);
             for (var b : bytes)
                 sb.append(String.format("%02x", b));
             return sb.toString();
@@ -376,7 +118,7 @@ public class Netention {
             var privKey = new byte[32];
             secureRandom.nextBytes(privKey);
             // Ensure private key is not 0 and less than N (order of the curve)
-            BigInteger d = new BigInteger(1, privKey);
+            var d = new BigInteger(1, privKey);
             if (d.signum() == 0 || d.compareTo(SECP256K1_PARAMS.getN()) >= 0) {
                 // Extremely unlikely for 32 random bytes, but good to be robust
                 return generatePrivateKey(); // Recurse to try again
@@ -393,31 +135,33 @@ public class Netention {
         }
 
         public static byte[] bigIntegerTo32BytesPadded(BigInteger bi) {
-            byte[] bytes = bi.toByteArray();
+            var bytes = bi.toByteArray();
             var l = bytes.length;
             if (l == 32) return bytes;
-            byte[] res = new byte[32];
+            var res = new byte[32];
             if (l > 32) System.arraycopy(bytes, l - 32, res, 0, 32);
             else System.arraycopy(bytes, 0, res, 32 - l, l);
             return res;
         }
 
         public static byte[] getPublicKeyXOnly(byte[] privateKeyBytes) {
-            ECPoint p = G.multiply(new BigInteger(1, privateKeyBytes));
+            var p = G.multiply(new BigInteger(1, privateKeyBytes));
             if (p.isInfinity()) throw new IllegalArgumentException("Private key results in point at infinity");
             return ensureCoordBytesAre32(p.normalize().getAffineXCoord().getEncoded());
         }
 
         public static byte[] getPublicKeyCompressed(byte[] privateKeyBytes) {
-            ECPoint p = G.multiply(new BigInteger(1, privateKeyBytes));
-            if (p.isInfinity()) throw new IllegalArgumentException("Private key results in point at infinity for compressed pubkey");
+            var p = G.multiply(new BigInteger(1, privateKeyBytes));
+            if (p.isInfinity())
+                throw new IllegalArgumentException("Private key results in point at infinity for compressed pubkey");
             return p.getEncoded(true); // getEncoded handles normalization
         }
 
         public static byte[] getSharedSecret(byte[] myPrivateKeyBytes, byte[] theirPublicKeyCompressedBytes) {
-            ECPoint theirPublicKey = CURVE.decodePoint(theirPublicKeyCompressedBytes);
-            if (theirPublicKey.isInfinity()) throw new IllegalArgumentException("Their public key is point at infinity");
-            ECPoint sharedPoint = theirPublicKey.multiply(new BigInteger(1, myPrivateKeyBytes));
+            var theirPublicKey = CURVE.decodePoint(theirPublicKeyCompressedBytes);
+            if (theirPublicKey.isInfinity())
+                throw new IllegalArgumentException("Their public key is point at infinity");
+            var sharedPoint = theirPublicKey.multiply(new BigInteger(1, myPrivateKeyBytes));
             if (sharedPoint.isInfinity()) throw new IllegalArgumentException("Shared secret point is at infinity");
             return bigIntegerTo32BytesPadded(sharedPoint.normalize().getAffineXCoord().toBigInteger());
         }
@@ -445,6 +189,219 @@ public class Netention {
             var r = new byte[32];
             secureRandom.nextBytes(r);
             return r;
+        }
+
+        public static class Schnorr {
+            private static final BigInteger
+                    EC_P = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16),
+                    EC_N = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
+            private static final X9ECParameters SECP256K1_PARAMS = CustomNamedCurves.getByName("secp256k1");
+            private static final ECPoint EC_G = SECP256K1_PARAMS.getG();
+
+            private static byte[] getEncodedPoint(ECPoint p) {
+                return p.getEncoded(true);
+            }
+
+            private static byte[] sha256(byte[]... inputs) throws NoSuchAlgorithmException {
+                var digest = MessageDigest.getInstance("SHA-256");
+                for (var input : inputs) digest.update(input);
+                return digest.digest();
+            }
+
+            private static BigInteger liftX(BigInteger x) {
+                var ySq = x.pow(3).add(BigInteger.valueOf(7)).mod(EC_P);
+                var y = ySq.modPow(EC_P.add(BigInteger.ONE).divide(BigInteger.valueOf(4)), EC_P);
+                if (!y.modPow(BigInteger.TWO, EC_P).equals(ySq)) return null;
+                return y;
+            }
+
+            public static ECPoint liftXToPoint(byte[] xCoordBytes) {
+                var x = new BigInteger(1, xCoordBytes);
+                var y = liftX(x);
+                return y == null ? null : SECP256K1_PARAMS.getCurve().createPoint(x, y);
+            }
+
+            private static boolean hasEvenY(ECPoint p) { // Assumes p is normalized
+                return p.getAffineYCoord().toBigInteger().mod(BigInteger.TWO).equals(BigInteger.ZERO);
+            }
+
+            private static byte[] taggedHash(String tag, byte[] a, byte[] b, byte[] c) throws NoSuchAlgorithmException {
+                var abc = new byte[a.length + b.length + c.length];
+                System.arraycopy(a, 0, abc, 0, a.length);
+                System.arraycopy(b, 0, abc, a.length, b.length);
+                System.arraycopy(c, 0, abc, a.length + b.length, c.length);
+                return taggedHash(tag, abc);
+            }
+
+            private static byte[] taggedHash(String tag, byte[] msg) throws NoSuchAlgorithmException {
+                var tagHash = sha256(tag.getBytes(StandardCharsets.UTF_8));
+                return sha256(tagHash, tagHash, msg);
+            }
+
+            public static byte[] sign(byte[] msgHash, byte[] seckey, byte[] auxRand) throws NoSuchAlgorithmException {
+                var d0 = new BigInteger(1, seckey);
+                if (!(BigInteger.ONE.compareTo(d0) <= 0 && d0.compareTo(EC_N.subtract(BigInteger.ONE)) <= 0))
+                    throw new IllegalArgumentException("Secret key is out of range.");
+
+                var P_point = EC_G.multiply(d0);
+                if (P_point.isInfinity()) throw new IllegalStateException("Public key point is infinity in sign");
+                var P_normalized = P_point.normalize();
+
+                var d = hasEvenY(P_normalized) ? d0 : EC_N.subtract(d0);
+
+                var k0 = new BigInteger(1, taggedHash("BIP0340/aux", auxRand)).mod(EC_N);
+                if (k0.equals(BigInteger.ZERO)) throw new RuntimeException("Auxiliary random data produced k=0.");
+
+                var R_point = EC_G.multiply(k0);
+                if (R_point.isInfinity()) throw new RuntimeException("Auxiliary random data produced R=infinity.");
+                var R_normalized = R_point.normalize();
+
+                var k = hasEvenY(R_normalized) ? k0 : EC_N.subtract(k0);
+
+                var rX = ensureCoordBytesAre32(R_normalized.getAffineXCoord().getEncoded());
+                var pX = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
+                var sBytes = bigIntegerTo32BytesPadded(k.add(new BigInteger(1, taggedHash("BIP0340/challenge", rX, pX, msgHash)).mod(EC_N).multiply(d)).mod(EC_N));
+
+                var sig = new byte[64];
+                System.arraycopy(rX, 0, sig, 0, 32);
+                System.arraycopy(sBytes, 0, sig, 32, 32);
+                return sig;
+            }
+
+            public static boolean verify(byte[] msgHash, byte[] pubkeyXOnly, byte[] sig) throws NoSuchAlgorithmException {
+                if (pubkeyXOnly.length != 32 || sig.length != 64) return false;
+
+                var P = liftXToPoint(pubkeyXOnly); // P is affine here
+                if (P == null) return false;
+                var P_normalized = P.normalize(); // Should be a no-op if P is already affine, but good for safety.
+
+                var r = new BigInteger(1, copyOfRange(sig, 0, 32));
+                var s = new BigInteger(1, copyOfRange(sig, 32, 64));
+
+                if (r.compareTo(EC_P) >= 0 || s.compareTo(EC_N) >= 0) return false;
+
+                var pXBytes = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
+                var rXBytes = bigIntegerTo32BytesPadded(r);
+
+                var e = new BigInteger(1, taggedHash("BIP0340/challenge", rXBytes, pXBytes, msgHash)).mod(EC_N);
+                var R_calc = EC_G.multiply(s).add(P_normalized.multiply(EC_N.subtract(e))); // Use P_normalized here
+                var R_calc_normalized = R_calc.normalize();
+
+                if (R_calc_normalized.isInfinity()) return false;
+
+                return hasEvenY(R_calc_normalized) && R_calc_normalized.getAffineXCoord().toBigInteger().equals(r);
+            }
+        }
+
+        public static class Bech32 {
+            private static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+            private static final int[] GENERATOR = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
+
+            private static int polymod(byte[] values) {
+                var chk = 1;
+                for (var v : values) {
+                    var top = chk >> 25;
+                    chk = (chk & 0x1ffffff) << 5 ^ v;
+                    for (var i = 0; i < 5; ++i) if (((top >> i) & 1) == 1) chk ^= GENERATOR[i];
+                }
+                return chk;
+            }
+
+            private static byte[] expandHrp(String hrp) {
+                var l = hrp.length();
+                var ret = new byte[l * 2 + 1];
+                for (var i = 0; i < l; ++i) {
+                    ret[i] = (byte) (hrp.charAt(i) >> 5);
+                    ret[i + l + 1] = (byte) (hrp.charAt(i) & 0x1f);
+                }
+                ret[l] = 0;
+                return ret;
+            }
+
+            private static boolean verifyChecksum(String hrp, byte[] data) {
+                var exp = expandHrp(hrp);
+                var el = exp.length;
+                var dl = data.length;
+                var values = new byte[el + dl];
+                System.arraycopy(exp, 0, values, 0, el);
+                System.arraycopy(data, 0, values, el, dl);
+                return polymod(values) == 1;
+            }
+
+            private static byte[] createChecksum(String hrp, byte[] data) {
+                var exp = expandHrp(hrp);
+                var el = exp.length;
+                var dl = data.length;
+                var values = new byte[el + dl + 6];
+                System.arraycopy(exp, 0, values, 0, el);
+                System.arraycopy(data, 0, values, el, dl);
+                var mod = polymod(values) ^ 1;
+                var ret = new byte[6];
+                for (var i = 0; i < 6; ++i) ret[i] = (byte) ((mod >> (5 * (5 - i))) & 0x1f);
+                return ret;
+            }
+
+            public static String encode(String hrp, byte[] data) {
+                var checksum = createChecksum(hrp, data);
+                var combined = new byte[data.length + checksum.length];
+                System.arraycopy(data, 0, combined, 0, data.length);
+                System.arraycopy(checksum, 0, combined, data.length, checksum.length);
+                var sb = new StringBuilder(hrp).append('1');
+                for (var b : combined) sb.append(CHARSET.charAt(b));
+                return sb.toString();
+            }
+
+            public static Bech32Data decode(String bech) throws Exception {
+                if (!bech.equals(bech.toLowerCase(Locale.ROOT)) && !bech.equals(bech.toUpperCase(Locale.ROOT)))
+                    throw new Exception("Mixed case in Bech32 string");
+                bech = bech.toLowerCase(Locale.ROOT);
+                var pos = bech.lastIndexOf('1');
+                var l = bech.length();
+                if (pos < 1 || pos + 7 > l || l > 90)
+                    throw new Exception("Invalid Bech32 string structure or length");
+                var hrp = bech.substring(0, pos);
+                var data = new byte[l - 1 - pos];
+                for (int i = 0, j = pos + 1; j < l; ++i, ++j) {
+                    var v = CHARSET.indexOf(bech.charAt(j));
+                    if (v == -1) throw new Exception("Invalid character in Bech32 string data part");
+                    data[i] = (byte) v;
+                }
+                if (!verifyChecksum(hrp, data)) throw new Exception("Bech32 checksum verification failed");
+                return new Bech32Data(hrp, copyOfRange(data, 0, data.length - 6));
+            }
+
+            private static byte[] convertBits(byte[] data, int fromBits, int toBits, boolean pad) throws Exception {
+                var acc = 0;
+                var bits = 0;
+                var ret = new ByteArrayOutputStream();
+                var maxv = (1 << toBits) - 1;
+                for (var value : data) {
+                    var v = value & 0xff;
+                    if ((v >> fromBits) != 0) throw new Exception("Invalid data range for bit conversion");
+                    acc = (acc << fromBits) | v;
+                    bits += fromBits;
+                    while (bits >= toBits) {
+                        bits -= toBits;
+                        ret.write((acc >> bits) & maxv);
+                    }
+                }
+                if (pad) {
+                    if (bits > 0) ret.write((acc << (toBits - bits)) & maxv);
+                } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxv) != 0)
+                    throw new Exception("Invalid padding in bit conversion");
+                return ret.toByteArray();
+            }
+
+            public static byte[] nip19Decode(String nip19String) throws Exception {
+                return convertBits(decode(nip19String).data, 5, 8, false);
+            }
+
+            public static String nip19Encode(String hrp, byte[] data32Bytes) throws Exception {
+                return encode(hrp, convertBits(data32Bytes, 8, 5, true));
+            }
+
+            public record Bech32Data(String hrp, byte[] data) {
+            }
         }
     }
 
@@ -524,16 +481,15 @@ public class Netention {
 
     public static class Core {
         private static final Logger logger = LoggerFactory.getLogger(Core.class);
-        public final ObjectMapper json;
-        public final NoteService note;
-        public final ConfigService cfg;
-        public final NostrService net;
-        public final SyncService sync;
-        public final LMService lm;
+        public final Notes notes;
+        public final Config cfg;
+        public final Nostr net;
+        public final Sync sync;
+        public final LM lm;
         private final Map<String, Consumer<String>> events = new ConcurrentHashMap<>();
 
         public Core() {
-            this.json = new ObjectMapper().registerModule(new JavaTimeModule()).configure(SerializationFeature.INDENT_OUTPUT, true).configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+
             var dDir = Paths.get(System.getProperty("user.home"), ".netention", "data");
             try {
                 Files.createDirectories(dDir);
@@ -541,11 +497,12 @@ public class Netention {
                 logger.error("Failed to create data dir {}", dDir, e);
                 throw new RuntimeException("Init failed: data dir error.", e);
             }
-            this.note = new NoteService(dDir, json);
-            this.cfg = new ConfigService(note);
-            this.lm = new LMService(cfg);
-            this.net = new NostrService(cfg, this::handleIncomingNostrEvent, () -> cfg.net.publicKeyBech32);
-            this.sync = new SyncService(net);
+
+            this.notes = new Notes(dDir);
+            this.cfg = new Config(notes);
+            this.lm = new LM(cfg);
+            this.net = new Nostr(cfg, this::handleIncomingNostrEvent, () -> cfg.net.publicKeyBech32);
+            this.sync = new Sync(net);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 logger.info("Netention shutting down...");
                 sync.stop();
@@ -563,110 +520,120 @@ public class Netention {
         }
 
         @SuppressWarnings("unchecked")
-        private void handleIncomingNostrEvent(CustomNostrUtils.NostrEvent event) {
+        private void handleIncomingNostrEvent(Nostr.NostrEvent event) {
             logger.debug("Handling Nostr event: kind={},id={}", event.kind, event.id);
-            if (event.kind == 4) {
+            switch (event.kind) {
+                case 4 -> handleIncomingPrivateMessage(event);
+                case 1 -> handleIncomingPublicMessage(event);
+            }
+        }
+
+        private void handleIncomingPublicMessage(Nostr.NostrEvent event) {
+            logger.info("Public text note from {}: {}", event.pubkey.substring(0, 8), event.content.substring(0, Math.min(event.content.length(), 50)) + (event.content.length() > 50 ? "..." : ""));
+            var noteId = "nostr_event_" + event.id;
+            if (notes.get(noteId).isEmpty()) {
+                var pubN = new Note("Nostr: " + event.content.substring(0, Math.min(event.content.length(), 30)), event.content);
+                pubN.id = noteId;
+                pubN.tags.add("nostr_feed");
                 try {
-                    var senderPubKeyXOnlyBytes = CustomCryptoUtils.hexToBytes(event.pubkey);
-                    var decryptedContent = CustomCryptoUtils.nip04Decrypt(event.content, net.getSharedSecretWithRetry(Bech32.nip19Decode(net.getPrivateKeyBech32()), senderPubKeyXOnlyBytes));
-                    logger.info("Decrypted DM from {}: {}", event.pubkey.substring(0, 8), decryptedContent.substring(0, Math.min(decryptedContent.length(), 50)) + (decryptedContent.length() > 50 ? "..." : ""));
-                    var partnerNpub = Bech32.nip19Encode("npub", senderPubKeyXOnlyBytes);
-                    var chatId = "chat_" + partnerNpub;
-                    var chatNote = note.getNote(chatId).orElseGet(() -> {
-                        var nCN = new Note("Chat with " + partnerNpub.substring(0, 10) + "...", "");
-                        nCN.id = chatId;
-                        nCN.tags.addAll(List.of("chat", "nostr"));
-                        nCN.metadata.put("nostrPubKey", partnerNpub);
-                        nCN.content.put("messages", new ArrayList<Map<String, String>>());
-                        logger.info("Created new chat note for {}", partnerNpub);
-                        return nCN;
-                    });
-                    ((List<Map<String, String>>) chatNote.content.get("messages")).add(Map.of("sender", partnerNpub, "timestamp", Instant.ofEpochSecond(event.created_at).toString(), "text", decryptedContent));
-                    note.saveNote(chatNote);
-                    Optional.ofNullable(events.get(chatId)).ifPresent(l -> SwingUtilities.invokeLater(() -> l.accept(partnerNpub.substring(0, 8) + ": " + decryptedContent)));
+                    pubN.metadata.putAll(Map.of("nostrEventId", event.id, "nostrPubKey", Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(event.pubkey))));
                 } catch (Exception e) {
-                    logger.error("Error processing NIP04Event {}: {}", event.id, e.getMessage(), e);
+                    logger.warn("Could not encode incoming pubkey to npub", e);
                 }
-            } else if (event.kind == 1) {
-                logger.info("Public text note from {}: {}", event.pubkey.substring(0, 8), event.content.substring(0, Math.min(event.content.length(), 50)) + (event.content.length() > 50 ? "..." : ""));
-                var noteId = "nostr_event_" + event.id;
-                if (note.getNote(noteId).isEmpty()) {
-                    var pubN = new Note("Nostr: " + event.content.substring(0, Math.min(event.content.length(), 30)), event.content);
-                    pubN.id = noteId;
-                    pubN.tags.add("nostr_feed");
-                    try {
-                        pubN.metadata.putAll(Map.of("nostrEventId", event.id, "nostrPubKey", Bech32.nip19Encode("npub", CustomCryptoUtils.hexToBytes(event.pubkey))));
-                    } catch (Exception e) {
-                        logger.warn("Could not encode incoming pubkey to npub", e);
-                    }
-                    pubN.createdAt = Instant.ofEpochSecond(event.created_at);
-                    note.saveNote(pubN);
-                    logger.info("Saved public Nostr note {}", noteId);
-                }
+                pubN.createdAt = Instant.ofEpochSecond(event.created_at);
+                notes.save(pubN);
+                logger.info("Saved public Nostr note {}", noteId);
+            }
+        }
+
+        private void handleIncomingPrivateMessage(Nostr.NostrEvent event) {
+            try {
+                var senderPubKeyXOnlyBytes = Crypto.hexToBytes(event.pubkey);
+                var decryptedContent = Crypto.nip04Decrypt(event.content, net.getSharedSecretWithRetry(Crypto.Bech32.nip19Decode(net.getPrivateKeyBech32()), senderPubKeyXOnlyBytes));
+                logger.info("Decrypted DM from {}: {}", event.pubkey.substring(0, 8), decryptedContent.substring(0, Math.min(decryptedContent.length(), 50)) + (decryptedContent.length() > 50 ? "..." : ""));
+                var partnerNpub = Crypto.Bech32.nip19Encode("npub", senderPubKeyXOnlyBytes);
+                var chatId = "chat_" + partnerNpub;
+                var chatNote = notes.get(chatId).orElseGet(() -> {
+                    var nCN = new Note("Chat with " + partnerNpub.substring(0, 10) + "...", "");
+                    nCN.id = chatId;
+                    nCN.tags.addAll(List.of("chat", "nostr"));
+                    nCN.metadata.put("nostrPubKey", partnerNpub);
+                    nCN.content.put("messages", new ArrayList<Map<String, String>>());
+                    logger.info("Created new chat note for {}", partnerNpub);
+                    return nCN;
+                });
+                ((List<Map<String, String>>) chatNote.content.get("messages")).add(Map.of("sender", partnerNpub, "timestamp", Instant.ofEpochSecond(event.created_at).toString(), "text", decryptedContent));
+                notes.save(chatNote);
+                Optional.ofNullable(events.get(chatId)).ifPresent(l -> SwingUtilities.invokeLater(() -> l.accept(partnerNpub.substring(0, 8) + ": " + decryptedContent)));
+            } catch (Exception e) {
+                logger.error("Error processing NIP04Event {}: {}", event.id, e.getMessage(), e);
             }
         }
     }
 
-    public static class NoteService {
-        private static final Logger logger = LoggerFactory.getLogger(NoteService.class);
-        private final Path dataDir;
-        private final ObjectMapper objectMapper;
-        private final Map<String, Note> noteCache = new ConcurrentHashMap<>();
+    public static class Notes {
+        private static final Logger logger = LoggerFactory.getLogger(Notes.class);
+        private final Path dir;
+        private final ObjectMapper json;
+        private final Map<String, Note> cache = new ConcurrentHashMap<>();
 
-        public NoteService(Path dD, ObjectMapper om) {
-            this.dataDir = dD;
-            this.objectMapper = om;
-            loadAllNotes();
+        public Notes(Path dir) {
+            this.json = new ObjectMapper()
+                    .registerModule(new JavaTimeModule())
+                    .configure(SerializationFeature.INDENT_OUTPUT, true)
+                    .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+            this.dir = dir;
+            load();
         }
 
-        private void loadAllNotes() {
-            if (!Files.exists(dataDir)) {
-                logger.warn("Data dir {} not exist.", dataDir);
+        private void load() {
+            if (!Files.exists(dir)) {
+                logger.warn("Data dir {} not exist.", dir);
                 return;
             }
-            try (var ps = Files.walk(dataDir)) {
-                ps.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".json")).forEach(this::loadNoteFromFile);
-                logger.info("Loaded {} notes.", noteCache.size());
+            try (var ps = Files.walk(dir)) {
+                ps.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".json")).forEach(this::load);
+                logger.info("Loaded {} notes.", cache.size());
             } catch (IOException e) {
-                logger.error("Error walking data dir {}: {}", dataDir, e.getMessage(), e);
+                logger.error("Error walking data dir {}: {}", dir, e.getMessage(), e);
             }
         }
 
-        private void loadNoteFromFile(Path fp) {
+        private void load(Path fp) {
             try {
-                var n = objectMapper.readValue(fp.toFile(), Note.class);
-                noteCache.put(n.id, n);
+                var n = json.readValue(fp.toFile(), Note.class);
+                cache.put(n.id, n);
                 logger.debug("Loaded note {} from {}", n.id, fp);
             } catch (IOException e) {
                 logger.error("Failed to load note from {}: {}", fp, e.getMessage(), e);
             }
         }
 
-        public Optional<Note> getNote(String id) {
-            return Optional.ofNullable(noteCache.get(id));
+        public Optional<Note> get(String id) {
+            return Optional.ofNullable(cache.get(id));
         }
 
         public List<Note> getAllNotes() {
-            return new ArrayList<>(noteCache.values());
+            return new ArrayList<>(cache.values());
         }
 
-        public List<Note> findNotes(Predicate<Note> f) {
-            return noteCache.values().stream().filter(f).collect(Collectors.toList());
+        public List<Note> getAll(Predicate<Note> f) {
+            return cache.values().stream().filter(f).collect(Collectors.toList());
         }
 
-        public Note saveNote(Note n) {
+        public Note save(Note n) {
             n.updatedAt = Instant.now();
 
-            var isNew = !noteCache.containsKey(n.id);
+            var isNew = !cache.containsKey(n.id);
             if (isNew) {
                 n.createdAt = Instant.now();
                 n.version = 1;
             } else
-                n.version = noteCache.get(n.id).version + 1;
+                n.version = cache.get(n.id).version + 1;
 
-            noteCache.put(n.id, n);
+            cache.put(n.id, n);
             try {
-                objectMapper.writeValue(dataDir.resolve(n.id + ".json").toFile(), n);
+                json.writeValue(dir.resolve(n.id + ".json").toFile(), n);
                 logger.info("Saved note {}(v{}). New:{}", n.id, n.version, isNew);
             } catch (IOException e) {
                 logger.error("Failed to save note {}: {}", n.id, e.getMessage(), e);
@@ -674,14 +641,14 @@ public class Netention {
             return n;
         }
 
-        public boolean deleteNote(String id) {
-            if (!noteCache.containsKey(id)) {
+        public boolean delete(String id) {
+            if (!cache.containsKey(id)) {
                 logger.warn("Attempted delete non-existent note {}", id);
                 return false;
             }
-            noteCache.remove(id);
+            cache.remove(id);
             try {
-                Files.deleteIfExists(dataDir.resolve(id + ".json"));
+                Files.deleteIfExists(dir.resolve(id + ".json"));
                 logger.info("Deleted note {}", id);
                 return true;
             } catch (IOException e) {
@@ -691,53 +658,55 @@ public class Netention {
         }
     }
 
-    public static class ConfigService {
-        private static final Logger logger = LoggerFactory.getLogger(ConfigService.class);
+    public static class Config {
+        private static final Logger logger = LoggerFactory.getLogger(Config.class);
         private static final String CONFIG_NOTE_PREFIX = "netention_config_";
         public final NostrSettings net = new NostrSettings();
         public final UISettings ui = new UISettings();
         public final LMSettings lm = new LMSettings();
-        public final NoteService note;
+        public final Notes notes;
 
-        public ConfigService(NoteService noteService) {
-            this.note = noteService;
+        public Config(Notes notes) {
+            this.notes = notes;
             loadAllConfigs();
         }
 
         public void loadAllConfigs() {
-            loadConfigForObject(net, "nostr");
-            loadConfigForObject(ui, "ui");
-            loadConfigForObject(lm, "llm");
+            load(net, "nostr");
+            load(ui, "ui");
+            load(lm, "llm");
             logger.info("All configurations loaded/initialized using annotation-driven objects.");
         }
 
         public void saveAllConfigs() {
-            saveConfigForObject(net, "nostr");
-            saveConfigForObject(ui, "ui");
-            saveConfigForObject(lm, "llm");
+            save(net, "nostr");
+            save(ui, "ui");
+            save(lm, "llm");
             logger.info("All configurations persisted using annotation-driven objects.");
         }
 
         @SuppressWarnings("unchecked")
-        private void loadConfigForObject(Object configInstance, String typeKey) {
+        private void load(Object configInstance, String typeKey) {
             var noteId = CONFIG_NOTE_PREFIX + typeKey;
-            note.getNote(noteId).ifPresentOrElse(n -> {
+            notes.get(noteId).ifPresentOrElse(n -> {
                 logger.debug("{} config loaded from note {}", typeKey, noteId);
                 var savedValues = n.content;
                 for (var field : configInstance.getClass().getDeclaredFields()) {
-                    if (field.isAnnotationPresent(ConfigField.class)) {
+                    if (field.isAnnotationPresent(Field.class)) {
                         try {
                             field.setAccessible(true);
                             if (savedValues.containsKey(field.getName())) {
                                 var savedValue = savedValues.get(field.getName());
-                                Class<?> t = field.getType();
-                                if (t.isAssignableFrom(List.class) && savedValue instanceof List)
-                                    field.set(configInstance, new ArrayList<>((List<?>) savedValue));
-                                else if ((t == Boolean.class || t == boolean.class) && savedValue instanceof Boolean)
-                                    field.set(configInstance, savedValue);
-                                else if (t.isEnum() && savedValue instanceof String)
-                                    field.set(configInstance, Enum.valueOf((Class<Enum>) t, (String) savedValue));
-                                else field.set(configInstance, t.cast(savedValue));
+                                var t = field.getType();
+                                switch (savedValue) {
+                                    case List list when t.isAssignableFrom(List.class) ->
+                                            field.set(configInstance, new ArrayList<>(list));
+                                    case Boolean b when (t == Boolean.class || t == boolean.class) ->
+                                            field.set(configInstance, savedValue);
+                                    case String s when t.isEnum() ->
+                                            field.set(configInstance, Enum.valueOf((Class<Enum>) t, s));
+                                    case null, default -> field.set(configInstance, t.cast(savedValue));
+                                }
                             }
                         } catch (IllegalAccessException | ClassCastException e) {
                             logger.error("Error loading config field {} for {}: {}", field.getName(), typeKey, e.getMessage());
@@ -746,17 +715,17 @@ public class Netention {
                 }
             }, () -> {
                 logger.info("{} config note {} not found, using defaults and saving.", typeKey, noteId);
-                saveConfigForObject(configInstance, typeKey);
+                save(configInstance, typeKey);
             });
         }
 
-        public void saveConfigForObject(Object configInstance, String typeKey) {
+        public void save(Object configInstance, String typeKey) {
             var noteId = CONFIG_NOTE_PREFIX + typeKey;
-            var cfgNote = note.getNote(noteId).orElse(new Note());
+            var cfgNote = notes.get(noteId).orElse(new Note());
             cfgNote.id = noteId;
             cfgNote.content.clear();
             for (var field : configInstance.getClass().getDeclaredFields()) {
-                if (field.isAnnotationPresent(ConfigField.class)) {
+                if (field.isAnnotationPresent(Field.class)) {
                     try {
                         field.setAccessible(true);
                         cfgNote.content.put(field.getName(), field.get(configInstance));
@@ -768,17 +737,17 @@ public class Netention {
             var tags = cfgNote.tags;
             if (!tags.contains(typeKey + "_config")) tags.add(typeKey + "_config");
             if (!tags.contains("config")) tags.add("config");
-            note.saveNote(cfgNote);
+            notes.save(cfgNote);
             logger.info("Saved {} config to note {}", typeKey, noteId);
         }
 
         public String generateNewNostrKeysAndUpdateConfig() {
             try {
-                var privKeyRaw = CustomCryptoUtils.generatePrivateKey();
-                var pubKeyXOnlyRaw = CustomCryptoUtils.getPublicKeyXOnly(privKeyRaw);
-                net.privateKeyBech32 = Bech32.nip19Encode("nsec", privKeyRaw);
-                net.publicKeyBech32 = Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
-                saveConfigForObject(net, "nostr");
+                var privKeyRaw = Crypto.generatePrivateKey();
+                var pubKeyXOnlyRaw = Crypto.getPublicKeyXOnly(privKeyRaw);
+                net.privateKeyBech32 = Crypto.Bech32.nip19Encode("nsec", privKeyRaw);
+                net.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
+                save(net, "nostr");
                 return "nsec: " + net.privateKeyBech32 + "\nnpub: " + net.publicKeyBech32;
             } catch (Exception e) {
                 logger.error("Failed to generate Nostr keys", e);
@@ -787,41 +756,41 @@ public class Netention {
         }
 
         public static class NostrSettings {
-            @ConfigField(label = "Relays (one per line)", type = UIFieldType.TEXT_AREA, group = "Connection")
+            @Field(label = "Relays (one per line)", type = FieldType.TEXT_AREA, group = "Connection")
             public List<String> relays = new ArrayList<>(List.of("wss://relay.damus.io", "wss://nos.lol"));
-            @ConfigField(label = "Private Key (nsec)", tooltip = "Your Nostr secret key (nsec...)", type = UIFieldType.PASSWORD_FIELD, group = "Identity")
+            @Field(label = "Private Key (nsec)", tooltip = "Nostr secret key (nsec...)", type = FieldType.PASSWORD_FIELD, group = "Identity")
             public String privateKeyBech32 = "";
             public String publicKeyBech32 = "";
         }
 
         public static class UISettings {
-            @ConfigField(label = "Theme", type = UIFieldType.COMBO_BOX, choices = {"Default", "Dark"}, group = "Appearance")
+            @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Default", "Dark"}, group = "Appearance")
             public String theme = "Default";
-            @ConfigField(label = "Minimize to System Tray", tooltip = "If enabled, closing the window minimizes to tray instead of exiting.", group = "Behavior")
+            @Field(label = "Minimize to System Tray", tooltip = "If enabled, closing the window minimizes to tray instead of exiting.", group = "Behavior")
             public boolean minimizeToTray = true;
         }
 
         public static class LMSettings {
-            @ConfigField(label = "Provider", type = UIFieldType.COMBO_BOX, choices = {"NONE", "OLLAMA"}, group = "General")
+            @Field(label = "Provider", type = FieldType.COMBO_BOX, choices = {"NONE", "OLLAMA"})
             public String provider = "NONE";
-            @ConfigField(label = "Base URL", group = "Ollama")
+            @Field(label = "Base URL", group = "Ollama")
             public String ollamaBaseUrl = "http://localhost:11434";
-            @ConfigField(label = "Chat Model", group = "Ollama")
+            @Field(label = "Chat Model", group = "Ollama")
             public String ollamaChatModelName = "llama3";
-            @ConfigField(label = "Embedding Model", group = "Ollama")
+            @Field(label = "Embedding Model", group = "Ollama")
             public String ollamaEmbeddingModelName = "nomic-embed-text";
         }
     }
 
-    public static class LMService {
-        private static final Logger logger = LoggerFactory.getLogger(LMService.class);
-        private final ConfigService.LMSettings llmCfg;
-        private EmbeddingModel embeddingModel;
-        private ChatLanguageModel chatModel;
+    public static class LM {
+        private static final Logger logger = LoggerFactory.getLogger(LM.class);
+        private final Config.LMSettings cfg;
+        private EmbeddingModel embedding;
+        private ChatLanguageModel chat;
         private volatile boolean isInitialized = false, isReady = false;
 
-        public LMService(ConfigService cs) {
-            this.llmCfg = cs.lm;
+        public LM(Config cs) {
+            this.cfg = cs.lm;
         }
 
         public static double cosineSimilarity(float[] vA, float[] vB) {
@@ -842,13 +811,13 @@ public class Netention {
             }
             isInitialized = false;
             isReady = false;
-            var prov = llmCfg.provider;
+            var prov = cfg.provider;
             logger.info("Initializing LLMService with provider: {}", prov);
             try {
                 switch (prov.toUpperCase()) {
                     case "OLLAMA":
-                        embeddingModel = OllamaEmbeddingModel.builder().baseUrl(llmCfg.ollamaBaseUrl).modelName(llmCfg.ollamaEmbeddingModelName).timeout(Duration.ofSeconds(60)).build();
-                        chatModel = OllamaChatModel.builder().baseUrl(llmCfg.ollamaBaseUrl).modelName(llmCfg.ollamaChatModelName).timeout(Duration.ofSeconds(120)).build();
+                        embedding = OllamaEmbeddingModel.builder().baseUrl(cfg.ollamaBaseUrl).modelName(cfg.ollamaEmbeddingModelName).timeout(Duration.ofSeconds(60)).build();
+                        chat = OllamaChatModel.builder().baseUrl(cfg.ollamaBaseUrl).modelName(cfg.ollamaChatModelName).timeout(Duration.ofSeconds(120)).build();
                         break;
                     case "NONE":
                     default:
@@ -861,8 +830,8 @@ public class Netention {
                 logger.info("LLMService initialized successfully for provider: {}", prov);
             } catch (Exception e) {
                 logger.error("Failed to initialize LLM provider {}: {}. LLM features disabled.", prov, e.getMessage(), e);
-                embeddingModel = null;
-                chatModel = null;
+                embedding = null;
+                chat = null;
                 isReady = false;
             }
             isInitialized = true;
@@ -876,26 +845,26 @@ public class Netention {
         public Optional<float[]> generateEmbedding(String t) {
             if (!isReady()) {
                 logger.warn("LLM not ready, cannot gen embedding.");
-                return Optional.empty();
+                return empty();
             }
             try {
-                return Optional.of(embeddingModel.embed(t).content().vector());
+                return Optional.of(embedding.embed(t).content().vector());
             } catch (Exception e) {
                 logger.error("Error gen embedding: {}", e.getMessage(), e);
-                return Optional.empty();
+                return empty();
             }
         }
 
         public Optional<String> chat(String p) {
             if (!isReady()) {
                 logger.warn("LLM not ready, cannot chat.");
-                return Optional.empty();
+                return empty();
             }
             try {
-                return Optional.of(chatModel.chat(p));
+                return Optional.of(chat.chat(p));
             } catch (Exception e) {
                 logger.error("Error during chat: {}", e.getMessage(), e);
-                return Optional.empty();
+                return empty();
             }
         }
 
@@ -904,22 +873,22 @@ public class Netention {
         }
 
         public Optional<String> askAboutText(String t, String q) {
-            return (t == null || t.trim().isEmpty() || q == null || q.trim().isEmpty()) ? Optional.empty() : chat("Context:\n\"\"\"\n" + t + "\n\"\"\"\n\nQuestion: " + q + "\nAnswer:");
+            return (t == null || t.trim().isEmpty() || q == null || q.trim().isEmpty()) ? empty() : chat("Context:\n\"\"\"\n" + t + "\n\"\"\"\n\nQuestion: " + q + "\nAnswer:");
         }
 
         public Optional<List<String>> decomposeTask(String task) {
-            return (task == null || task.trim().isEmpty()) ? Optional.empty() : chat("Decompose into sub-tasks (prefix each with '- '):\n" + task).map(r -> Stream.of(r.split("\\n")).map(String::trim).filter(s -> s.startsWith("- ")).map(s -> s.substring(2).trim()).filter(s -> !s.isEmpty()).collect(Collectors.toList()));
+            return (task == null || task.trim().isEmpty()) ? empty() : chat("Decompose into sub-tasks (prefix each with '- '):\n" + task).map(r -> Stream.of(r.split("\\n")).map(String::trim).filter(s -> s.startsWith("- ")).map(s -> s.substring(2).trim()).filter(s -> !s.isEmpty()).collect(Collectors.toList()));
         }
     }
 
-    public static class SyncService {
-        private static final Logger logger = LoggerFactory.getLogger(SyncService.class);
-        private final NostrService net;
+    public static class Sync {
+        private static final Logger logger = LoggerFactory.getLogger(Sync.class);
+        private final Nostr net;
         private ScheduledExecutorService sched;
         private ScheduledFuture<?> syncTaskFut;
         private volatile boolean running = false;
 
-        public SyncService(NostrService n) {
+        public Sync(Nostr n) {
             this.net = n;
         }
 
@@ -971,18 +940,18 @@ public class Netention {
         }
     }
 
-    public static class NostrService {
-        private static final Logger logger = LoggerFactory.getLogger(NostrService.class);
-        private final ConfigService.NostrSettings cfg;
+    public static class Nostr {
+        private static final Logger logger = LoggerFactory.getLogger(Nostr.class);
+        private final Config.NostrSettings cfg;
         private final List<RelayConnection> relays = new CopyOnWriteArrayList<>();
         private final ConcurrentLinkedQueue<NostrAction> queue = new ConcurrentLinkedQueue<>();
-        private final Consumer<CustomNostrUtils.NostrEvent> events;
+        private final Consumer<NostrEvent> events;
         private final HttpClient http;
         private byte[] privateKeyRaw;
         private String publicKeyXOnlyHex;
         private volatile boolean enabled = false;
 
-        public NostrService(ConfigService cs, Consumer<CustomNostrUtils.NostrEvent> eh, java.util.function.Supplier<String> selfNpubSupplier) {
+        public Nostr(Config cs, Consumer<NostrEvent> eh, java.util.function.Supplier<String> selfNpubSupplier) {
             this.cfg = cs.net;
             this.events = eh;
             this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -999,10 +968,10 @@ public class Netention {
                 return;
             }
             try {
-                this.privateKeyRaw = Bech32.nip19Decode(cfg.privateKeyBech32);
-                publicKeyXOnlyRaw = CustomCryptoUtils.getPublicKeyXOnly(this.privateKeyRaw);
-                this.publicKeyXOnlyHex = CustomCryptoUtils.bytesToHex(publicKeyXOnlyRaw);
-                cfg.publicKeyBech32 = Bech32.nip19Encode("npub", publicKeyXOnlyRaw);
+                this.privateKeyRaw = Crypto.Bech32.nip19Decode(cfg.privateKeyBech32);
+                publicKeyXOnlyRaw = Crypto.getPublicKeyXOnly(this.privateKeyRaw);
+                this.publicKeyXOnlyHex = Crypto.bytesToHex(publicKeyXOnlyRaw);
+                cfg.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", publicKeyXOnlyRaw);
                 logger.info("Nostr identity loaded for pubkey: {}", cfg.publicKeyBech32);
             } catch (Exception e) {
                 logger.error("Failed to load Nostr identity from nsec: {}. Nostr unavailable.", e.getMessage(), e);
@@ -1069,7 +1038,7 @@ public class Netention {
         private void handleRelayMessage(String relayUri, String message) {
             logger.trace("Relay {} RX: {}", relayUri, message);
             try {
-                var msgList = CustomNostrUtils.fromJson(message, new TypeReference<List<Object>>() {
+                var msgList = NostrUtil.fromJson(message, new TypeReference<List<Object>>() {
                 });
                 var type = (String) msgList.get(0);
                 var n = msgList.size();
@@ -1086,8 +1055,8 @@ public class Netention {
             }
         }
 
-        private CustomNostrUtils.NostrEvent mapToNostrEvent(Map<String, Object> map) {
-            var e = new CustomNostrUtils.NostrEvent();
+        private NostrEvent mapToNostrEvent(Map<String, Object> map) {
+            var e = new NostrEvent();
             e.id = (String) map.get("id");
             e.pubkey = (String) map.get("pubkey");
             e.created_at = ((Number) map.get("created_at")).longValue();
@@ -1126,14 +1095,14 @@ public class Netention {
         }
 
         private void publishNoteInternal(Note note) throws GeneralSecurityException, JsonProcessingException {
-            var e = new CustomNostrUtils.NostrEvent();
+            var e = new NostrEvent();
             e.pubkey = this.publicKeyXOnlyHex;
             e.created_at = Instant.now().getEpochSecond();
             e.kind = 1;
             e.content = note.getTitle() + "\n\n" + note.getText();
             note.tags.forEach(t -> e.tags.add(List.of("t", t)));
-            e.sign(this.privateKeyRaw, CustomCryptoUtils.generateAuxRand());
-            broadcastToRelays(CustomNostrUtils.toJson(List.of("EVENT", e)));
+            e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
+            broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
             logger.info("Published Note (Kind 1): {}", e.id.substring(0, 8));
         }
 
@@ -1142,15 +1111,15 @@ public class Netention {
             theirCompressed02[0] = 0x02;
             System.arraycopy(theirXOnlyPubKeyBytes, 0, theirCompressed02, 1, 32);
             try {
-                CustomCryptoUtils.CURVE.decodePoint(theirCompressed02); // Test if it's a valid point on curve
-                return CustomCryptoUtils.getSharedSecret(myPrivKeyBytes, theirCompressed02);
+                Crypto.CURVE.decodePoint(theirCompressed02); // Test if it's a valid point on curve
+                return Crypto.getSharedSecret(myPrivKeyBytes, theirCompressed02);
             } catch (Exception e) {
                 var theirCompressed03 = new byte[33];
                 theirCompressed03[0] = 0x03;
                 System.arraycopy(theirXOnlyPubKeyBytes, 0, theirCompressed03, 1, 32);
                 try {
-                    CustomCryptoUtils.CURVE.decodePoint(theirCompressed03); // Test if it's a valid point on curve
-                    return CustomCryptoUtils.getSharedSecret(myPrivKeyBytes, theirCompressed03);
+                    Crypto.CURVE.decodePoint(theirCompressed03); // Test if it's a valid point on curve
+                    return Crypto.getSharedSecret(myPrivKeyBytes, theirCompressed03);
                 } catch (Exception e2) {
                     throw new GeneralSecurityException("Could not derive shared secret: Invalid recipient public key (x-only). " + e.getMessage() + " | " + e2.getMessage());
                 }
@@ -1158,16 +1127,16 @@ public class Netention {
         }
 
         private void sendDirectMessageInternal(String recipientNpub, String message) throws Exception {
-            var e = new CustomNostrUtils.NostrEvent();
+            var e = new NostrEvent();
             e.pubkey = this.publicKeyXOnlyHex;
             e.created_at = Instant.now().getEpochSecond();
             e.kind = 4;
-            var recipientXOnlyBytes = Bech32.nip19Decode(recipientNpub);
+            var recipientXOnlyBytes = Crypto.Bech32.nip19Decode(recipientNpub);
             var sharedSecret = getSharedSecretWithRetry(this.privateKeyRaw, recipientXOnlyBytes);
-            e.content = CustomCryptoUtils.nip04Encrypt(message, sharedSecret, recipientXOnlyBytes);
-            e.tags.add(List.of("p", CustomCryptoUtils.bytesToHex(recipientXOnlyBytes)));
-            e.sign(this.privateKeyRaw, CustomCryptoUtils.generateAuxRand());
-            broadcastToRelays(CustomNostrUtils.toJson(List.of("EVENT", e)));
+            e.content = Crypto.nip04Encrypt(message, sharedSecret, recipientXOnlyBytes);
+            e.tags.add(List.of("p", Crypto.bytesToHex(recipientXOnlyBytes)));
+            e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
+            broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
             logger.info("Sent DM (Kind 4) to {}: {}", recipientNpub.substring(0, 8), e.id.substring(0, 8));
         }
 
@@ -1229,8 +1198,8 @@ public class Netention {
                         var dmFilter = Map.of("kinds", List.of(4), "#p", List.of(selfPublicKeyXOnlyHexForReq));
                         var generalSubId = "myfeed-" + UUID.randomUUID().toString().substring(0, 8);
                         var generalFeedFilter = Map.of("kinds", List.of(1), "limit", 20);
-                        send(CustomNostrUtils.toJson(List.of("REQ", subId, dmFilter)));
-                        send(CustomNostrUtils.toJson(List.of("REQ", generalSubId, generalFeedFilter)));
+                        send(NostrUtil.toJson(List.of("REQ", subId, dmFilter)));
+                        send(NostrUtil.toJson(List.of("REQ", generalSubId, generalFeedFilter)));
                         logger.info("Sent REQ for DMs and Feed to relay {}", uri);
                     } else logger.warn("Cannot send REQ to relay {}: self public key hex not available.", uri);
                 } catch (Exception e) {
@@ -1283,12 +1252,52 @@ public class Netention {
             }
         }
 
-        private record NostrAction(NostrActionType t, Object p) {
+        record NostrAction(NostrActionType t, Object p) {
+        }
+
+        static class NostrUtil {
+            private static final ObjectMapper json = new ObjectMapper()
+                    .setSerializationInclusion(JsonInclude.Include.NON_NULL)
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+            public static String toJson(Object object) throws JsonProcessingException {
+                return json.writeValueAsString(object);
+            }
+
+            public static <T> T fromJson(String json, TypeReference<T> typeReference) throws JsonProcessingException {
+                return NostrUtil.json.readValue(json, typeReference);
+            }
+
+        }
+
+        public static class NostrEvent {
+            public String id, pubkey;
+            public long created_at;
+            public int kind;
+            public List<List<String>> tags = new ArrayList<>();
+            public String content, sig;
+
+            public String getSerializedForSigning() throws JsonProcessingException {
+                return NostrUtil.json.writeValueAsString(List.of(0, this.pubkey, this.created_at, this.kind, this.tags, this.content));
+            }
+
+            public void calculateId() throws NoSuchAlgorithmException, JsonProcessingException {
+                this.id = Crypto.bytesToHex(MessageDigest.getInstance("SHA-256").digest(getSerializedForSigning().getBytes(StandardCharsets.UTF_8)));
+            }
+
+            public void sign(byte[] privateKey32Bytes, byte[] auxRand32Bytes) throws GeneralSecurityException, JsonProcessingException {
+                if (this.id == null) calculateId();
+                this.sig = Crypto.bytesToHex(Crypto.Schnorr.sign(Crypto.hexToBytes(this.id), privateKey32Bytes, auxRand32Bytes));
+            }
+
+            public boolean verifySignature() throws GeneralSecurityException {
+                return this.id != null && this.pubkey != null && this.sig != null && Crypto.Schnorr.verify(Crypto.hexToBytes(this.id), Crypto.hexToBytes(this.pubkey), Crypto.hexToBytes(this.sig));
+            }
         }
     }
 
-    public static class NetentionUI extends JFrame {
-        private static final Logger logger = LoggerFactory.getLogger(NetentionUI.class);
+    public static class UI extends JFrame {
+        private static final Logger logger = LoggerFactory.getLogger(UI.class);
         private final Core core;
         private final JSplitPane contentInspectorSplit;
         private final NavPanel navPanel;
@@ -1298,7 +1307,7 @@ public class Netention {
         private TrayIcon trayIcon;
         private SystemTray tray;
 
-        public NetentionUI(Core core) {
+        public UI(Core core) {
             this.core = core;
             setTitle("Netention");
             setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
@@ -1434,7 +1443,7 @@ public class Netention {
                 navPanel.refreshNotes();
                 var editorPanel = (NoteEditorPanel) contentPanelHost.getComponent(0);
                 var savedNote = editorPanel.getCurrentNote();
-                statusPanel.updateStatus(savedNote == null || savedNote.id == null ? "Note created" : "Note saved: " + (savedNote != null ? savedNote.getTitle() : "New Note"));
+                statusPanel.updateStatus(savedNote == null || savedNote.id == null ? "Note created" : "Note saved: " + savedNote.getTitle());
                 inspectorPanel.setContextNote(savedNote);
             }), note);
         }
@@ -1509,28 +1518,19 @@ public class Netention {
                 }
             }));
             mb.add(fileM);
-            var viewM = new JMenu("View");
-            var toggleInspectorItem = new JCheckBoxMenuItem("Toggle Inspector Panel");
-            toggleInspectorItem.setSelected(inspectorPanel.isVisible());
-            toggleInspectorItem.addActionListener(e -> {
-                var show = toggleInspectorItem.isSelected();
-                inspectorPanel.setVisible(show);
-                contentInspectorSplit.setDividerLocation(show ? 0.8 : 1.0);
-                contentInspectorSplit.revalidate();
-            });
-            viewM.add(toggleInspectorItem);
+            var viewM = getMenu();
             mb.add(viewM);
             var nostrM = new JMenu("Nostr");
             var toggleNostr = new JCheckBoxMenuItem("Enable Nostr");
             toggleNostr.setSelected(core.net.isEnabled());
             toggleNostr.addActionListener(e -> {
-                boolean userWantsToEnable = toggleNostr.isSelected();
+                var userWantsToEnable = toggleNostr.isSelected();
                 String operationStatusMessage;
 
                 if (userWantsToEnable) {
-                    boolean keysConfigured = core.cfg.net.privateKeyBech32 != null && !core.cfg.net.privateKeyBech32.isEmpty();
+                    var keysConfigured = core.cfg.net.privateKeyBech32 != null && !core.cfg.net.privateKeyBech32.isEmpty();
                     if (!keysConfigured) {
-                        JOptionPane.showMessageDialog(NetentionUI.this,
+                        JOptionPane.showMessageDialog(UI.this,
                                 "Nostr private key (nsec) is not configured.\nPlease go to File > Settings > Nostr: Identity to set it up or generate new keys.",
                                 "Nostr Configuration Needed",
                                 JOptionPane.WARNING_MESSAGE);
@@ -1538,10 +1538,10 @@ public class Netention {
                     } else {
                         core.net.setEnabled(true);
                         if (core.net.isEnabled()) {
-                            JOptionPane.showMessageDialog(NetentionUI.this, "Nostr successfully enabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
+                            JOptionPane.showMessageDialog(UI.this, "Nostr successfully enabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
                             operationStatusMessage = "Nostr enabled.";
                         } else {
-                            JOptionPane.showMessageDialog(NetentionUI.this,
+                            JOptionPane.showMessageDialog(UI.this,
                                     "Failed to enable Nostr. Please check your Nostr key in Settings or view logs for details.",
                                     "Nostr Error",
                                     JOptionPane.ERROR_MESSAGE);
@@ -1550,7 +1550,7 @@ public class Netention {
                     }
                 } else {
                     core.net.setEnabled(false);
-                    JOptionPane.showMessageDialog(NetentionUI.this, "Nostr disabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(UI.this, "Nostr disabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
                     operationStatusMessage = "Nostr disabled by user.";
                 }
                 statusPanel.updateStatus(operationStatusMessage);
@@ -1560,25 +1560,25 @@ public class Netention {
             nostrM.add(new JMenuItem(new AbstractAction("Add Nostr Friend") {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    var pkNpub = JOptionPane.showInputDialog(NetentionUI.this, "Friend's Nostr public key (npub):");
+                    var pkNpub = JOptionPane.showInputDialog(UI.this, "Friend's Nostr public key (npub):");
                     if (pkNpub != null && !pkNpub.trim().isEmpty()) {
                         try {
-                            Bech32.nip19Decode(pkNpub.trim());
+                            Crypto.Bech32.nip19Decode(pkNpub.trim());
                             core.net.sendFriendRequest(pkNpub.trim());
                             var cId = "chat_" + pkNpub.trim();
-                            if (core.note.getNote(cId).isEmpty()) {
+                            if (core.notes.get(cId).isEmpty()) {
                                 var fn = new Note("Chat with " + pkNpub.trim().substring(0, 10) + "...", "");
                                 fn.id = cId;
                                 fn.tags.addAll(List.of("friend_profile", "chat", "nostr"));
                                 fn.metadata.put("nostrPubKey", pkNpub.trim());
                                 fn.content.put("messages", new ArrayList<Map<String, String>>());
-                                core.note.saveNote(fn);
+                                core.notes.save(fn);
                                 navPanel.refreshNotes();
-                                JOptionPane.showMessageDialog(NetentionUI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... added & intro DM sent.", "Friend Added", JOptionPane.INFORMATION_MESSAGE);
+                                JOptionPane.showMessageDialog(UI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... added & intro DM sent.", "Friend Added", JOptionPane.INFORMATION_MESSAGE);
                             } else
-                                JOptionPane.showMessageDialog(NetentionUI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... already exists.", "Friend Exists", JOptionPane.INFORMATION_MESSAGE);
+                                JOptionPane.showMessageDialog(UI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... already exists.", "Friend Exists", JOptionPane.INFORMATION_MESSAGE);
                         } catch (Exception ex) {
-                            JOptionPane.showMessageDialog(NetentionUI.this, "Invalid Nostr public key (npub): " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                            JOptionPane.showMessageDialog(UI.this, "Invalid Nostr public key (npub): " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                         }
                     }
                 }
@@ -1603,7 +1603,7 @@ public class Netention {
                 public void actionPerformed(ActionEvent e) {
                     core.lm.init();
                     var msg = "LLM Service " + (core.lm.isReady() ? "initialized." : "failed to initialize. Check settings/logs.");
-                    JOptionPane.showMessageDialog(NetentionUI.this, msg, "LLM Status", core.lm.isReady() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(UI.this, msg, "LLM Status", core.lm.isReady() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
                     statusPanel.updateStatus("LLM status updated.");
                     navPanel.updateLLMButtonStates();
                     var c = contentPanelHost.getComponentCount() > 0 ? contentPanelHost.getComponent(0) : null;
@@ -1616,631 +1616,647 @@ public class Netention {
             mb.add(llmM);
             return mb;
         }
-    }
 
-    public static class NavPanel extends JPanel {
-        private final Core core;
-        private final DefaultListModel<Note> listModel = new DefaultListModel<>();
-        private final JList<Note> noteJList = new JList<>(listModel);
-        private final JTextField searchField = new JTextField(15);
-        private final JButton semanticSearchButton;
-
-        public NavPanel(Core core, Consumer<Note> onShowNote, Consumer<Note> onShowChat, Runnable onSettings, Runnable onNewNote) {
-            this.core = core;
-            setLayout(new BorderLayout(5, 5));
-            setBorder(new EmptyBorder(5, 5, 5, 5));
-            noteJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            noteJList.addListSelectionListener((ListSelectionEvent e) -> {
-                if (!e.getValueIsAdjusting()) {
-                    var sel = noteJList.getSelectedValue();
-                    if (sel != null) (sel.tags.contains("chat") ? onShowChat : onShowNote).accept(sel);
-                    else onShowNote.accept(null);
-                }
+        private @NotNull JMenu getMenu() {
+            var viewM = new JMenu("View");
+            var toggleInspectorItem = new JCheckBoxMenuItem("Toggle Inspector Panel");
+            toggleInspectorItem.setSelected(inspectorPanel.isVisible());
+            toggleInspectorItem.addActionListener(e -> {
+                var show = toggleInspectorItem.isSelected();
+                inspectorPanel.setVisible(show);
+                contentInspectorSplit.setDividerLocation(show ? 0.8 : 1.0);
+                contentInspectorSplit.revalidate();
             });
-            add(new JScrollPane(noteJList), BorderLayout.CENTER);
-            var searchPanel = new JPanel(new BorderLayout(5, 0));
-            searchPanel.add(new JLabel("Search:"), BorderLayout.WEST);
-            searchPanel.add(searchField, BorderLayout.CENTER);
-            searchField.getDocument().addDocumentListener(new FieldUpdateListener(e -> refreshNotes()));
-            semanticSearchButton = new JButton("AI");
-            semanticSearchButton.setToolTipText("Semantic Search (AI)");
-            semanticSearchButton.addActionListener(e -> performSemanticSearch());
-            var combinedSearchPanel = new JPanel(new BorderLayout());
-            combinedSearchPanel.add(searchPanel, BorderLayout.CENTER);
-            combinedSearchPanel.add(semanticSearchButton, BorderLayout.EAST);
-            var topControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
-            var newNoteBtn = new JButton("+Note");
-            newNoteBtn.setToolTipText("Create New Note");
-            newNoteBtn.addActionListener(e -> onNewNote.run());
-            topControls.add(newNoteBtn);
-            var settingsBtn = new JButton("Prefs");
-            settingsBtn.setToolTipText("Open Settings");
-            settingsBtn.addActionListener(e -> onSettings.run());
-            topControls.add(settingsBtn);
-            var northPanel = new JPanel(new BorderLayout(0, 5));
-            northPanel.add(topControls, BorderLayout.NORTH);
-            northPanel.add(combinedSearchPanel, BorderLayout.CENTER);
-            add(northPanel, BorderLayout.NORTH);
-            refreshNotes();
-            updateLLMButtonStates();
+            viewM.add(toggleInspectorItem);
+            return viewM;
         }
 
-        public void updateLLMButtonStates() {
-            semanticSearchButton.setEnabled(core.lm.isReady());
-        }
+        public static class NavPanel extends JPanel {
+            private final Core core;
+            private final DefaultListModel<Note> listModel = new DefaultListModel<>();
+            private final JList<Note> noteJList = new JList<>(listModel);
+            private final JTextField searchField = new JTextField(15);
+            private final JButton semanticSearchButton;
 
-        public void refreshNotes() {
-            refreshNotes(null);
-        }
-
-        public void refreshNotes(List<Note> notes) {
-            var selectedBefore = noteJList.getSelectedValue();
-            listModel.clear();
-            var term = searchField.getText().toLowerCase();
-            ((notes != null) ? notes : core.note.findNotes(n -> !n.tags.contains("config") && (term.isEmpty() || n.getTitle().toLowerCase().contains(term) || n.getText().toLowerCase().contains(term) || n.tags.stream().anyMatch(t -> t.toLowerCase().contains(term)))))
-                    .stream().sorted((n1, n2) -> n2.updatedAt.compareTo(n1.updatedAt)).forEach(listModel::addElement);
-            if (selectedBefore != null && listModel.contains(selectedBefore))
-                noteJList.setSelectedValue(selectedBefore, true);
-        }
-
-        private void performSemanticSearch() {
-            if (!core.lm.isReady()) {
-                JOptionPane.showMessageDialog(this, "LLM Service not ready.", "LLM Error", JOptionPane.ERROR_MESSAGE);
-                return;
+            public NavPanel(Core core, Consumer<Note> onShowNote, Consumer<Note> onShowChat, Runnable onSettings, Runnable onNewNote) {
+                this.core = core;
+                setLayout(new BorderLayout(5, 5));
+                setBorder(new EmptyBorder(5, 5, 5, 5));
+                noteJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+                noteJList.addListSelectionListener((ListSelectionEvent e) -> {
+                    if (!e.getValueIsAdjusting()) {
+                        var sel = noteJList.getSelectedValue();
+                        if (sel != null) (sel.tags.contains("chat") ? onShowChat : onShowNote).accept(sel);
+                        else onShowNote.accept(null);
+                    }
+                });
+                add(new JScrollPane(noteJList), BorderLayout.CENTER);
+                var searchPanel = new JPanel(new BorderLayout(5, 0));
+                searchPanel.add(new JLabel("Search:"), BorderLayout.WEST);
+                searchPanel.add(searchField, BorderLayout.CENTER);
+                searchField.getDocument().addDocumentListener(new FieldUpdateListener(e -> refreshNotes()));
+                semanticSearchButton = new JButton("AI");
+                semanticSearchButton.setToolTipText("Semantic Search (AI)");
+                semanticSearchButton.addActionListener(e -> performSemanticSearch());
+                var combinedSearchPanel = new JPanel(new BorderLayout());
+                combinedSearchPanel.add(searchPanel, BorderLayout.CENTER);
+                combinedSearchPanel.add(semanticSearchButton, BorderLayout.EAST);
+                var topControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
+                var newNoteBtn = new JButton("+Note");
+                newNoteBtn.setToolTipText("Create New Note");
+                newNoteBtn.addActionListener(e -> onNewNote.run());
+                topControls.add(newNoteBtn);
+                var settingsBtn = new JButton("Prefs");
+                settingsBtn.setToolTipText("Open Settings");
+                settingsBtn.addActionListener(e -> onSettings.run());
+                topControls.add(settingsBtn);
+                var northPanel = new JPanel(new BorderLayout(0, 5));
+                northPanel.add(topControls, BorderLayout.NORTH);
+                northPanel.add(combinedSearchPanel, BorderLayout.CENTER);
+                add(northPanel, BorderLayout.NORTH);
+                refreshNotes();
+                updateLLMButtonStates();
             }
-            var query = JOptionPane.showInputDialog(this, "Semantic search query:");
-            if (query == null || query.trim().isEmpty()) return;
-            core.lm.generateEmbedding(query).ifPresentOrElse(qEmb -> {
-                var notesWithEmb = core.note.getAllNotes().stream().filter(n -> n.getEmbeddingV1() != null && !n.tags.contains("config")).collect(Collectors.toList());
-                if (notesWithEmb.isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "No notes with embeddings.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
+
+            public void updateLLMButtonStates() {
+                semanticSearchButton.setEnabled(core.lm.isReady());
+            }
+
+            public void refreshNotes() {
+                refreshNotes(null);
+            }
+
+            public void refreshNotes(List<Note> notes) {
+                var selectedBefore = noteJList.getSelectedValue();
+                listModel.clear();
+                var term = searchField.getText().toLowerCase();
+                ((notes != null) ? notes : core.notes.getAll(n -> !n.tags.contains("config") && (term.isEmpty() || n.getTitle().toLowerCase().contains(term) || n.getText().toLowerCase().contains(term) || n.tags.stream().anyMatch(t -> t.toLowerCase().contains(term)))))
+                        .stream().sorted((n1, n2) -> n2.updatedAt.compareTo(n1.updatedAt)).forEach(listModel::addElement);
+                if (selectedBefore != null && listModel.contains(selectedBefore))
+                    noteJList.setSelectedValue(selectedBefore, true);
+            }
+
+            private void performSemanticSearch() {
+                if (!core.lm.isReady()) {
+                    JOptionPane.showMessageDialog(this, "LLM Service not ready.", "LLM Error", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
-                var scored = notesWithEmb.stream().map(n -> Map.entry(n, LMService.cosineSimilarity(qEmb, n.getEmbeddingV1()))).filter(entry -> entry.getValue() > 0.1).sorted((e1, e2) -> Double.compare(e2.getValue(), e1.getValue())).map(Map.Entry::getKey).collect(Collectors.toList());
-                if (scored.isEmpty())
-                    JOptionPane.showMessageDialog(this, "No relevant notes found.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
-                else refreshNotes(scored);
-            }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding for query.", "LLM Error", JOptionPane.ERROR_MESSAGE));
-        }
-    }
-
-    private record FieldUpdateListener(Consumer<DocumentEvent> consumer) implements DocumentListener {
-        @Override
-        public void insertUpdate(DocumentEvent e) {
-            consumer.accept(e);
-        }
-
-        @Override
-        public void removeUpdate(DocumentEvent e) {
-            consumer.accept(e);
-        }
-
-        @Override
-        public void changedUpdate(DocumentEvent e) {
-            consumer.accept(e);
-        }
-    }
-
-    public static class NoteEditorPanel extends JPanel {
-        private final Core core;
-        private final Runnable onSaveCb;
-        private final JTextField titleF = new JTextField(40);
-        private final JTextArea contentA = new JTextArea(15, 40);
-        private final JTextField tagsF = new JTextField(40);
-        private final JLabel embStatusL = new JLabel("Embedding: Unknown");
-        private final JButton saveButton, publishButton, deleteButton;
-        private Note currentNote;
-
-        public NoteEditorPanel(Core core, Note note, Runnable onSaveCb) {
-            super(new BorderLayout(5, 5));
-            setBorder(new EmptyBorder(10, 10, 10, 10));
-            this.core = core;
-            this.currentNote = note;
-            this.onSaveCb = onSaveCb;
-            var formP = new JPanel(new GridBagLayout());
-            var gbc = new GridBagConstraints();
-            gbc.insets = new Insets(2, 2, 2, 2);
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.anchor = GridBagConstraints.WEST;
-            var y = 0;
-            gbc.gridx = 0;
-            gbc.gridy = y;
-            formP.add(new JLabel("Title:"), gbc);
-            gbc.gridx = 1;
-            gbc.gridy = y++;
-            gbc.weightx = 1.0;
-            formP.add(titleF, gbc);
-            gbc.gridx = 0;
-            gbc.gridy = y;
-            formP.add(new JLabel("Tags:"), gbc);
-            gbc.gridx = 1;
-            gbc.gridy = y++;
-            formP.add(tagsF, gbc);
-            tagsF.setToolTipText("Comma-separated");
-            gbc.gridx = 0;
-            gbc.gridy = y;
-            gbc.anchor = GridBagConstraints.NORTHWEST;
-            formP.add(new JLabel("Content:"), gbc);
-            gbc.gridx = 0;
-            gbc.gridy = ++y;
-            gbc.gridwidth = 2;
-            gbc.weighty = 1.0;
-            gbc.fill = GridBagConstraints.BOTH;
-            contentA.setLineWrap(true);
-            contentA.setWrapStyleWord(true);
-            formP.add(new JScrollPane(contentA), gbc);
-            gbc.gridy = ++y;
-            gbc.weighty = 0.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            formP.add(embStatusL, gbc);
-            add(formP, BorderLayout.CENTER);
-            var bottomButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            saveButton = new JButton("Save");
-            saveButton.addActionListener(e -> saveNote(false));
-            bottomButtonPanel.add(saveButton);
-            publishButton = new JButton("Save & Publish (Nostr)");
-            publishButton.addActionListener(e -> saveNote(true));
-            bottomButtonPanel.add(publishButton);
-            deleteButton = new JButton("Delete");
-            deleteButton.addActionListener(e -> deleteCurrentNote());
-            bottomButtonPanel.add(deleteButton);
-            add(bottomButtonPanel, BorderLayout.SOUTH);
-
-            if (this.currentNote == null) {
-                titleF.setText("");
-                contentA.setText("Select a note or create a new one.");
-                titleF.setEnabled(false);
-                contentA.setEnabled(false);
-                tagsF.setEnabled(false);
-                embStatusL.setText("No note loaded.");
-                saveButton.setEnabled(false);
-                publishButton.setEnabled(false);
-                deleteButton.setEnabled(false);
-            } else populateFields();
-            updateNostrButtonStates();
-        }
-
-        private void populateFields() {
-            if (currentNote == null) return;
-            titleF.setText(currentNote.getTitle());
-            contentA.setText(currentNote.getText());
-            tagsF.setText(String.join(", ", currentNote.tags));
-            updateEmbeddingStatus();
-            titleF.setEnabled(true);
-            contentA.setEnabled(true);
-            tagsF.setEnabled(true);
-            saveButton.setEnabled(true);
-            deleteButton.setEnabled(core.note.getNote(currentNote.id).isPresent());
-            updateNostrButtonStates();
-        }
-
-        private void updateEmbeddingStatus() {
-            embStatusL.setText("Embedding: " + (currentNote != null && currentNote.getEmbeddingV1() != null ? "Generated (" + currentNote.getEmbeddingV1().length + " dims)" : "Not Generated"));
-        }
-
-        public void updateLLMButtonStates() {
-        }
-
-        private void updateNostrButtonStates() {
-            publishButton.setEnabled(core.net.isEnabled() && core.net.getPrivateKeyBech32() != null && !core.net.getPrivateKeyBech32().isEmpty() && currentNote != null);
-        }
-
-        public Note getCurrentNote() {
-            return currentNote;
-        }
-
-        public void updateNoteFromFields() {
-            if (currentNote == null) currentNote = new Note();
-            currentNote.setTitle(titleF.getText());
-            currentNote.setText(contentA.getText());
-            currentNote.tags.clear();
-            Stream.of(tagsF.getText().split(",")).map(String::trim).filter(s -> !s.isEmpty()).forEach(currentNote.tags::add);
-        }
-
-        private void saveNote(boolean andPublish) {
-            updateNoteFromFields();
-            currentNote = core.note.saveNote(currentNote);
-            if (andPublish) core.net.publishNote(currentNote);
-            if (onSaveCb != null) onSaveCb.run();
-            updateNostrButtonStates();
-            deleteButton.setEnabled(true);
-        }
-
-        private void deleteCurrentNote() {
-            if (currentNote == null || !core.note.getNote(currentNote.id).isPresent()) {
-                JOptionPane.showMessageDialog(this, "Note not saved yet or already deleted.", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            if (JOptionPane.showConfirmDialog(this, "Delete note '" + currentNote.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                core.note.deleteNote(currentNote.id);
-                currentNote = null;
-                if (onSaveCb != null) onSaveCb.run();
-                JOptionPane.showMessageDialog(this, "Note deleted.", "Deleted", JOptionPane.INFORMATION_MESSAGE);
-                titleF.setText("");
-                contentA.setText("Select a note or create a new one.");
-                titleF.setEnabled(false);
-                contentA.setEnabled(false);
-                tagsF.setEnabled(false);
-                embStatusL.setText("No note loaded.");
-                saveButton.setEnabled(false);
-                publishButton.setEnabled(false);
-                deleteButton.setEnabled(false);
+                var query = JOptionPane.showInputDialog(this, "Semantic search query:");
+                if (query == null || query.trim().isEmpty()) return;
+                core.lm.generateEmbedding(query).ifPresentOrElse(qEmb -> {
+                    var notesWithEmb = core.notes.getAllNotes().stream().filter(n -> n.getEmbeddingV1() != null && !n.tags.contains("config")).toList();
+                    if (notesWithEmb.isEmpty()) {
+                        JOptionPane.showMessageDialog(this, "No notes with embeddings.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
+                        return;
+                    }
+                    var scored = notesWithEmb.stream().map(n -> Map.entry(n, LM.cosineSimilarity(qEmb, n.getEmbeddingV1()))).filter(entry -> entry.getValue() > 0.1).sorted((e1, e2) -> Double.compare(e2.getValue(), e1.getValue())).map(Map.Entry::getKey).collect(Collectors.toList());
+                    if (scored.isEmpty())
+                        JOptionPane.showMessageDialog(this, "No relevant notes found.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
+                    else refreshNotes(scored);
+                }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding for query.", "LLM Error", JOptionPane.ERROR_MESSAGE));
             }
         }
-    }
 
-    public static class InspectorPanel extends JPanel {
-        private final Core core;
-        private final JTextArea llmAnalysisArea;
-        private final List<JButton> llmButtons = new ArrayList<>();
-        private final JLabel noteInfoLabel;
-        private Note contextNote;
+        public static class NoteEditorPanel extends JPanel {
+            private final Core core;
+            private final Runnable onSaveCb;
+            private final JTextField titleF = new JTextField(40);
+            private final JTextArea contentA = new JTextArea(15, 40);
+            private final JTextField tagsF = new JTextField(40);
+            private final JLabel embStatusL = new JLabel("Embedding: Unknown");
+            private final JButton saveButton, publishButton, deleteButton;
+            private Note currentNote;
 
-        public InspectorPanel(Core core) {
-            super(new BorderLayout(5, 5));
-            this.core = core;
-            setBorder(BorderFactory.createTitledBorder("Inspector"));
-            setPreferredSize(new Dimension(250, 0));
-            var contentPanel = new JPanel();
-            contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-            noteInfoLabel = new JLabel("No note selected.");
-            noteInfoLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
-            contentPanel.add(noteInfoLabel);
-            var llmToolbar = new JToolBar();
-            llmToolbar.setFloatable(false);
-            llmToolbar.setLayout(new FlowLayout(FlowLayout.LEFT));
-            Stream.of("Embed:EMBED", "Summarize:SUMMARIZE", "Ask:ASK", "Decompose:DECOMPOSE").forEach(s -> {
-                var p = s.split(":");
-                var b = new JButton(p[0]);
-                b.setActionCommand(p[1]);
-                b.addActionListener(this::handleLLMAction);
-                llmButtons.add(b);
-                llmToolbar.add(b);
-            });
-            contentPanel.add(llmToolbar);
-            llmAnalysisArea = new JTextArea(8, 20);
-            llmAnalysisArea.setEditable(false);
-            llmAnalysisArea.setLineWrap(true);
-            llmAnalysisArea.setWrapStyleWord(true);
-            llmAnalysisArea.setFont(llmAnalysisArea.getFont().deriveFont(Font.ITALIC));
-            llmAnalysisArea.setBackground(getBackground().darker());
-            contentPanel.add(new JScrollPane(llmAnalysisArea));
-            add(contentPanel, BorderLayout.NORTH);
-            updateLLMButtonStates();
-        }
-
-        public void setContextNote(Note note) {
-            this.contextNote = note;
-            if (note != null) {
-                noteInfoLabel.setText("<html><b>" + note.getTitle() + "</b><br>Tags: " + String.join(", ", note.tags) + "<br>Updated: " + DateTimeFormatter.ISO_INSTANT.format(note.updatedAt.atZone(ZoneId.systemDefault())).substring(0, 19) + "</html>");
-                displayLLMAnalysis();
-            } else {
-                noteInfoLabel.setText("No note selected.");
-                llmAnalysisArea.setText("");
-            }
-            updateLLMButtonStates();
-        }
-
-        public void updateLLMButtonStates() {
-            var llmReady = core.lm.isReady();
-            llmButtons.forEach(b -> b.setEnabled(llmReady && contextNote != null));
-        }
-
-        private void displayLLMAnalysis() {
-            if (contextNote == null) {
-                llmAnalysisArea.setText("");
-                return;
-            }
-            var sb = new StringBuilder();
-            Optional.ofNullable(contextNote.metadata.get("llm:summary")).ifPresent(s -> sb.append("Summary:\n").append(s).append("\n\n"));
-            Optional.ofNullable(contextNote.metadata.get("llm:decomposition")).ifPresent(d -> {
-                if (d instanceof List) {
-                    sb.append("Task Decomposition:\n");
-                    ((List<?>) d).forEach(i -> sb.append("- ").append(i).append("\n"));
-                    sb.append("\n");
-                }
-            });
-            llmAnalysisArea.setText(sb.toString().trim());
-            llmAnalysisArea.setCaretPosition(0);
-        }
-
-        private void handleLLMAction(ActionEvent e) {
-            if (!core.lm.isReady() || contextNote == null) {
-                JOptionPane.showMessageDialog(this, "LLM Service not ready or no note selected.", "LLM Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            var cmd = e.getActionCommand();
-            var textContent = contextNote.getText();
-            var titleContent = contextNote.getTitle();
-            switch (cmd) {
-                case "EMBED" -> core.lm.generateEmbedding(contextNote.getContentForEmbedding()).ifPresentOrElse(emb -> {
-                    contextNote.setEmbeddingV1(emb);
-                    core.note.saveNote(contextNote);
-                    displayLLMAnalysis();
-                    JOptionPane.showMessageDialog(this, "Embedding generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding.", "LLM Error", JOptionPane.ERROR_MESSAGE));
-                case "SUMMARIZE" -> core.lm.summarize(textContent).ifPresent(s -> {
-                    contextNote.metadata.put("llm:summary", s);
-                    core.note.saveNote(contextNote);
-                    displayLLMAnalysis();
-                    JOptionPane.showMessageDialog(this, "Summary generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                });
-                case "ASK" -> {
-                    var q = JOptionPane.showInputDialog(this, "Ask about note content:");
-                    if (q != null && !q.trim().isEmpty())
-                        core.lm.askAboutText(textContent, q).ifPresent(a -> JOptionPane.showMessageDialog(this, a, "Answer", JOptionPane.INFORMATION_MESSAGE));
-                }
-                case "DECOMPOSE" ->
-                        core.lm.decomposeTask(titleContent.isEmpty() ? textContent : titleContent).ifPresent(d -> {
-                            contextNote.metadata.put("llm:decomposition", d);
-                            core.note.saveNote(contextNote);
-                            displayLLMAnalysis();
-                            JOptionPane.showMessageDialog(this, "Task decomposed and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                        });
-            }
-        }
-    }
-
-    public static class ChatPanel extends JPanel {
-        private final Core core;
-        private final Note note;
-        private final String partnerNpub;
-        private final JTextArea chatArea = new JTextArea(20, 50);
-        private final JTextField messageInput = new JTextField(40);
-        private final DateTimeFormatter chatTSFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
-
-        public ChatPanel(Core core, Note note, String partnerNpub) {
-            super(new BorderLayout(5, 5));
-            setBorder(new EmptyBorder(10, 10, 10, 10));
-            this.core = core;
-            this.note = note;
-            this.partnerNpub = partnerNpub;
-            chatArea.setEditable(false);
-            chatArea.setLineWrap(true);
-            chatArea.setWrapStyleWord(true);
-            add(new JScrollPane(chatArea), BorderLayout.CENTER);
-            var inputP = new JPanel(new BorderLayout(5, 0));
-            inputP.add(messageInput, BorderLayout.CENTER);
-            var sendB = new JButton("Send");
-            sendB.addActionListener(e -> sendMessage());
-            inputP.add(sendB, BorderLayout.EAST);
-            add(inputP, BorderLayout.SOUTH);
-            messageInput.addActionListener(e -> sendMessage());
-            loadMessages();
-            core.on(note.id, this::appendMessageFromListener);
-            addComponentListener(new ComponentAdapter() {
-                @Override
-                public void componentHidden(ComponentEvent e) {
-                    core.off(note.id);
-                }
-            });
-        }
-
-        @SuppressWarnings("unchecked")
-        private void loadMessages() {
-            chatArea.setText("");
-            var fresh = core.note.getNote(note.id).orElse(note);
-            ((List<Map<String, String>>) fresh.content.getOrDefault("messages", new ArrayList<>())).forEach(this::formatAndAppendMsg);
-            scrollToBottom();
-        }
-
-        private void formatAndAppendMsg(Map<String, String> m) {
-            var senderNpub = m.get("sender");
-            var t = m.get("text");
-            var ts = Instant.parse(m.get("timestamp"));
-            var dn = senderNpub.equals(core.net.getPublicKeyBech32()) ? "Me" : senderNpub.substring(0, Math.min(senderNpub.length(), 8));
-            chatArea.append(String.format("[%s] %s: %s\n", chatTSFormatter.format(ts), dn, t));
-        }
-
-        private void sendMessage() {
-            var txt = messageInput.getText().trim();
-            if (txt.isEmpty()) return;
-            if (!core.net.isEnabled() || core.net.getPrivateKeyBech32() == null || core.net.getPrivateKeyBech32().isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Nostr not enabled/configured.", "Nostr Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            core.net.sendDirectMessage(partnerNpub, txt);
-            var entry = Map.of("sender", core.net.getPublicKeyBech32(), "timestamp", Instant.now().toString(), "text", txt);
-            var cur = core.note.getNote(note.id).orElse(note);
-            @SuppressWarnings("unchecked") var msgs = (List<Map<String, String>>) cur.content.computeIfAbsent("messages", k -> new ArrayList<>());
-            msgs.add(entry);
-            core.note.saveNote(cur);
-            formatAndAppendMsg(entry);
-            messageInput.setText("");
-            scrollToBottom();
-        }
-
-        private void appendMessageFromListener(String rawMsg) {
-            SwingUtilities.invokeLater(this::loadMessages);
-        }
-
-        private void scrollToBottom() {
-            chatArea.setCaretPosition(chatArea.getDocument().getLength());
-        }
-    }
-
-    public static class SettingsPanel extends JPanel {
-        private static final Logger logger = LoggerFactory.getLogger(SettingsPanel.class);
-        private final Core core;
-
-        public SettingsPanel(Core core, Consumer<String> themeUpdater, Runnable llmInitCb) {
-            super(new BorderLayout(10, 10));
-            setBorder(new EmptyBorder(10, 10, 10, 10));
-            this.core = core;
-            var tabbedPane = new JTabbedPane();
-            groupFieldsByAnnotation(core.cfg.net).forEach((group, fields) -> tabbedPane.addTab("Nostr: " + group, buildConfigSubPanelFor(core.cfg.net, fields, "Nostr " + group)));
-            groupFieldsByAnnotation(core.cfg.ui).forEach((group, fields) -> tabbedPane.addTab("UI: " + group, buildConfigSubPanelFor(core.cfg.ui, fields, "UI " + group)));
-            groupFieldsByAnnotation(core.cfg.lm).forEach((group, fields) -> tabbedPane.addTab("LLM: " + group, buildConfigSubPanelFor(core.cfg.lm, fields, "LLM " + group)));
-            add(tabbedPane, BorderLayout.CENTER);
-            var saveButton = new JButton("Save All Settings");
-            saveButton.addActionListener(e -> {
-                core.cfg.saveAllConfigs();
-                core.net.setEnabled(false); // Force re-evaluation of keys on next enable attempt
-                core.lm.init(); // Re-initialize LLM with potentially new settings
-                JOptionPane.showMessageDialog(this, "All settings saved. Services re-initialized.", "Settings Saved", JOptionPane.INFORMATION_MESSAGE);
-                if (themeUpdater != null) themeUpdater.accept(core.cfg.ui.theme);
-                if (llmInitCb != null) llmInitCb.run();
-            });
-            var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            bottomPanel.add(saveButton);
-            add(bottomPanel, BorderLayout.SOUTH);
-        }
-
-        private Map<String, List<Field>> groupFieldsByAnnotation(Object configObject) {
-            return Stream.of(configObject.getClass().getDeclaredFields()).filter(f -> f.isAnnotationPresent(ConfigField.class)).collect(Collectors.groupingBy(f -> f.getAnnotation(ConfigField.class).group()));
-        }
-
-        private JComponent buildConfigSubPanelFor(Object configObject, List<Field> fields, String title) {
-            var panel = new JPanel(new GridBagLayout());
-            panel.setName(title + " Settings Panel");
-            var gbc = new GridBagConstraints();
-            gbc.insets = new Insets(4, 4, 4, 4);
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.anchor = GridBagConstraints.WEST;
-            var y = 0;
-            final var pubKeyLabelHolder = new JLabel[1];
-            for (var field : fields) {
-                var cf = field.getAnnotation(ConfigField.class);
+            public NoteEditorPanel(Core core, Note note, Runnable onSaveCb) {
+                super(new BorderLayout(5, 5));
+                setBorder(new EmptyBorder(10, 10, 10, 10));
+                this.core = core;
+                this.currentNote = note;
+                this.onSaveCb = onSaveCb;
+                var formP = new JPanel(new GridBagLayout());
+                var gbc = new GridBagConstraints();
+                gbc.insets = new Insets(2, 2, 2, 2);
+                gbc.fill = GridBagConstraints.HORIZONTAL;
+                gbc.anchor = GridBagConstraints.WEST;
+                var y = 0;
                 gbc.gridx = 0;
                 gbc.gridy = y;
-                panel.add(new JLabel(cf.label()), gbc);
-                var comp = createEditorComponent(field, configObject, cf);
-                if (!cf.tooltip().isEmpty()) comp.setToolTipText(cf.tooltip());
+                formP.add(new JLabel("Title:"), gbc);
                 gbc.gridx = 1;
                 gbc.gridy = y++;
                 gbc.weightx = 1.0;
-                panel.add(comp, gbc);
-                gbc.weightx = 0.0;
-                if (field.getName().equals("privateKeyBech32") && configObject instanceof ConfigService.NostrSettings nostrSettings) {
-                    pubKeyLabelHolder[0] = new JLabel("Public Key (npub): " + nostrSettings.publicKeyBech32);
+                formP.add(titleF, gbc);
+                gbc.gridx = 0;
+                gbc.gridy = y;
+                formP.add(new JLabel("Tags:"), gbc);
+                gbc.gridx = 1;
+                gbc.gridy = y++;
+                formP.add(tagsF, gbc);
+                tagsF.setToolTipText("Comma-separated");
+                gbc.gridx = 0;
+                gbc.gridy = y;
+                gbc.anchor = GridBagConstraints.NORTHWEST;
+                formP.add(new JLabel("Content:"), gbc);
+                gbc.gridx = 0;
+                gbc.gridy = ++y;
+                gbc.gridwidth = 2;
+                gbc.weighty = 1.0;
+                gbc.fill = GridBagConstraints.BOTH;
+                contentA.setLineWrap(true);
+                contentA.setWrapStyleWord(true);
+                formP.add(new JScrollPane(contentA), gbc);
+                gbc.gridy = ++y;
+                gbc.weighty = 0.0;
+                gbc.fill = GridBagConstraints.HORIZONTAL;
+                formP.add(embStatusL, gbc);
+                add(formP, BorderLayout.CENTER);
+                var bottomButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+                saveButton = new JButton("Save");
+                saveButton.addActionListener(e -> saveNote(false));
+                bottomButtonPanel.add(saveButton);
+                publishButton = new JButton("Save & Publish (Nostr)");
+                publishButton.addActionListener(e -> saveNote(true));
+                bottomButtonPanel.add(publishButton);
+                deleteButton = new JButton("Delete");
+                deleteButton.addActionListener(e -> deleteCurrentNote());
+                bottomButtonPanel.add(deleteButton);
+                add(bottomButtonPanel, BorderLayout.SOUTH);
+
+                if (this.currentNote == null) {
+                    titleF.setText("");
+                    contentA.setText("Select a note or create a new one.");
+                    titleF.setEnabled(false);
+                    contentA.setEnabled(false);
+                    tagsF.setEnabled(false);
+                    embStatusL.setText("No note loaded.");
+                    saveButton.setEnabled(false);
+                    publishButton.setEnabled(false);
+                    deleteButton.setEnabled(false);
+                } else populateFields();
+                updateNostrButtonStates();
+            }
+
+            private void populateFields() {
+                if (currentNote == null) return;
+                titleF.setText(currentNote.getTitle());
+                contentA.setText(currentNote.getText());
+                tagsF.setText(String.join(", ", currentNote.tags));
+                updateEmbeddingStatus();
+                titleF.setEnabled(true);
+                contentA.setEnabled(true);
+                tagsF.setEnabled(true);
+                saveButton.setEnabled(true);
+                deleteButton.setEnabled(core.notes.get(currentNote.id).isPresent());
+                updateNostrButtonStates();
+            }
+
+            private void updateEmbeddingStatus() {
+                embStatusL.setText("Embedding: " + (currentNote != null && currentNote.getEmbeddingV1() != null ? "Generated (" + currentNote.getEmbeddingV1().length + " dims)" : "Not Generated"));
+            }
+
+            public void updateLLMButtonStates() {
+            }
+
+            private void updateNostrButtonStates() {
+                publishButton.setEnabled(core.net.isEnabled() && core.net.getPrivateKeyBech32() != null && !core.net.getPrivateKeyBech32().isEmpty() && currentNote != null);
+            }
+
+            public Note getCurrentNote() {
+                return currentNote;
+            }
+
+            public void updateNoteFromFields() {
+                if (currentNote == null) currentNote = new Note();
+                currentNote.setTitle(titleF.getText());
+                currentNote.setText(contentA.getText());
+                currentNote.tags.clear();
+                Stream.of(tagsF.getText().split(",")).map(String::trim).filter(s -> !s.isEmpty()).forEach(currentNote.tags::add);
+            }
+
+            private void saveNote(boolean andPublish) {
+                updateNoteFromFields();
+                currentNote = core.notes.save(currentNote);
+                if (andPublish) core.net.publishNote(currentNote);
+                if (onSaveCb != null) onSaveCb.run();
+                updateNostrButtonStates();
+                deleteButton.setEnabled(true);
+            }
+
+            private void deleteCurrentNote() {
+                if (currentNote == null || core.notes.get(currentNote.id).isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "Note not saved yet or already deleted.", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                if (JOptionPane.showConfirmDialog(this, "Delete note '" + currentNote.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
+                    core.notes.delete(currentNote.id);
+                    currentNote = null;
+                    if (onSaveCb != null) onSaveCb.run();
+                    JOptionPane.showMessageDialog(this, "Note deleted.", "Deleted", JOptionPane.INFORMATION_MESSAGE);
+                    titleF.setText("");
+                    contentA.setText("Select a note or create a new one.");
+                    titleF.setEnabled(false);
+                    contentA.setEnabled(false);
+                    tagsF.setEnabled(false);
+                    embStatusL.setText("No note loaded.");
+                    saveButton.setEnabled(false);
+                    publishButton.setEnabled(false);
+                    deleteButton.setEnabled(false);
+                }
+            }
+        }
+
+        public static class InspectorPanel extends JPanel {
+            private final Core core;
+            private final JTextArea llmAnalysisArea;
+            private final List<JButton> llmButtons = new ArrayList<>();
+            private final JLabel noteInfoLabel;
+            private Note contextNote;
+
+            public InspectorPanel(Core core) {
+                super(new BorderLayout(5, 5));
+                this.core = core;
+                setBorder(BorderFactory.createTitledBorder("Inspector"));
+                setPreferredSize(new Dimension(250, 0));
+                var contentPanel = new JPanel();
+                contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+                noteInfoLabel = new JLabel("No note selected.");
+                noteInfoLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
+                contentPanel.add(noteInfoLabel);
+                var llmToolbar = new JToolBar();
+                llmToolbar.setFloatable(false);
+                llmToolbar.setLayout(new FlowLayout(FlowLayout.LEFT));
+                Stream.of("Embed:EMBED", "Summarize:SUMMARIZE", "Ask:ASK", "Decompose:DECOMPOSE").forEach(s -> {
+                    var p = s.split(":");
+                    var b = new JButton(p[0]);
+                    b.setActionCommand(p[1]);
+                    b.addActionListener(this::handleLLMAction);
+                    llmButtons.add(b);
+                    llmToolbar.add(b);
+                });
+                contentPanel.add(llmToolbar);
+                llmAnalysisArea = new JTextArea(8, 20);
+                llmAnalysisArea.setEditable(false);
+                llmAnalysisArea.setLineWrap(true);
+                llmAnalysisArea.setWrapStyleWord(true);
+                llmAnalysisArea.setFont(llmAnalysisArea.getFont().deriveFont(Font.ITALIC));
+                llmAnalysisArea.setBackground(getBackground().darker());
+                contentPanel.add(new JScrollPane(llmAnalysisArea));
+                add(contentPanel, BorderLayout.NORTH);
+                updateLLMButtonStates();
+            }
+
+            public void setContextNote(Note note) {
+                this.contextNote = note;
+                if (note != null) {
+                    noteInfoLabel.setText("<html><b>" + note.getTitle() + "</b><br>Tags: " + String.join(", ", note.tags) + "<br>Updated: " + DateTimeFormatter.ISO_INSTANT.format(note.updatedAt.atZone(ZoneId.systemDefault())).substring(0, 19) + "</html>");
+                    displayLLMAnalysis();
+                } else {
+                    noteInfoLabel.setText("No note selected.");
+                    llmAnalysisArea.setText("");
+                }
+                updateLLMButtonStates();
+            }
+
+            public void updateLLMButtonStates() {
+                var llmReady = core.lm.isReady();
+                llmButtons.forEach(b -> b.setEnabled(llmReady && contextNote != null));
+            }
+
+            private void displayLLMAnalysis() {
+                if (contextNote == null) {
+                    llmAnalysisArea.setText("");
+                    return;
+                }
+                var sb = new StringBuilder();
+                Optional.ofNullable(contextNote.metadata.get("llm:summary")).ifPresent(s -> sb.append("Summary:\n").append(s).append("\n\n"));
+                Optional.ofNullable(contextNote.metadata.get("llm:decomposition")).ifPresent(d -> {
+                    if (d instanceof List) {
+                        sb.append("Task Decomposition:\n");
+                        ((List<?>) d).forEach(i -> sb.append("- ").append(i).append("\n"));
+                        sb.append("\n");
+                    }
+                });
+                llmAnalysisArea.setText(sb.toString().trim());
+                llmAnalysisArea.setCaretPosition(0);
+            }
+
+            private void handleLLMAction(ActionEvent e) {
+                if (!core.lm.isReady() || contextNote == null) {
+                    JOptionPane.showMessageDialog(this, "LLM Service not ready or no note selected.", "LLM Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                var cmd = e.getActionCommand();
+                var textContent = contextNote.getText();
+                var titleContent = contextNote.getTitle();
+                switch (cmd) {
+                    case "EMBED" ->
+                            core.lm.generateEmbedding(contextNote.getContentForEmbedding()).ifPresentOrElse(emb -> {
+                                contextNote.setEmbeddingV1(emb);
+                                core.notes.save(contextNote);
+                                displayLLMAnalysis();
+                                JOptionPane.showMessageDialog(this, "Embedding generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
+                            }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding.", "LLM Error", JOptionPane.ERROR_MESSAGE));
+                    case "SUMMARIZE" -> core.lm.summarize(textContent).ifPresent(s -> {
+                        contextNote.metadata.put("llm:summary", s);
+                        core.notes.save(contextNote);
+                        displayLLMAnalysis();
+                        JOptionPane.showMessageDialog(this, "Summary generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
+                    });
+                    case "ASK" -> {
+                        var q = JOptionPane.showInputDialog(this, "Ask about note content:");
+                        if (q != null && !q.trim().isEmpty())
+                            core.lm.askAboutText(textContent, q).ifPresent(a -> JOptionPane.showMessageDialog(this, a, "Answer", JOptionPane.INFORMATION_MESSAGE));
+                    }
+                    case "DECOMPOSE" ->
+                            core.lm.decomposeTask(titleContent.isEmpty() ? textContent : titleContent).ifPresent(d -> {
+                                contextNote.metadata.put("llm:decomposition", d);
+                                core.notes.save(contextNote);
+                                displayLLMAnalysis();
+                                JOptionPane.showMessageDialog(this, "Task decomposed and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
+                            });
+                }
+            }
+        }
+
+        public static class ChatPanel extends JPanel {
+            private final Core core;
+            private final Note note;
+            private final String partnerNpub;
+            private final JTextArea chatArea = new JTextArea(20, 50);
+            private final JTextField messageInput = new JTextField(40);
+            private final DateTimeFormatter chatTSFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+
+            public ChatPanel(Core core, Note note, String partnerNpub) {
+                super(new BorderLayout(5, 5));
+                setBorder(new EmptyBorder(10, 10, 10, 10));
+                this.core = core;
+                this.note = note;
+                this.partnerNpub = partnerNpub;
+                chatArea.setEditable(false);
+                chatArea.setLineWrap(true);
+                chatArea.setWrapStyleWord(true);
+                add(new JScrollPane(chatArea), BorderLayout.CENTER);
+                var inputP = new JPanel(new BorderLayout(5, 0));
+                inputP.add(messageInput, BorderLayout.CENTER);
+                var sendB = new JButton("Send");
+                sendB.addActionListener(e -> sendMessage());
+                inputP.add(sendB, BorderLayout.EAST);
+                add(inputP, BorderLayout.SOUTH);
+                messageInput.addActionListener(e -> sendMessage());
+                loadMessages();
+                core.on(note.id, this::appendMessageFromListener);
+                addComponentListener(new ComponentAdapter() {
+                    @Override
+                    public void componentHidden(ComponentEvent e) {
+                        core.off(note.id);
+                    }
+                });
+            }
+
+            @SuppressWarnings("unchecked")
+            private void loadMessages() {
+                chatArea.setText("");
+                var fresh = core.notes.get(note.id).orElse(note);
+                ((List<Map<String, String>>) fresh.content.getOrDefault("messages", new ArrayList<>())).forEach(this::formatAndAppendMsg);
+                scrollToBottom();
+            }
+
+            private void formatAndAppendMsg(Map<String, String> m) {
+                var senderNpub = m.get("sender");
+                var t = m.get("text");
+                var ts = Instant.parse(m.get("timestamp"));
+                var dn = senderNpub.equals(core.net.getPublicKeyBech32()) ? "Me" : senderNpub.substring(0, Math.min(senderNpub.length(), 8));
+                chatArea.append(String.format("[%s] %s: %s\n", chatTSFormatter.format(ts), dn, t));
+            }
+
+            private void sendMessage() {
+                var txt = messageInput.getText().trim();
+                if (txt.isEmpty()) return;
+                if (!core.net.isEnabled() || core.net.getPrivateKeyBech32() == null || core.net.getPrivateKeyBech32().isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "Nostr not enabled/configured.", "Nostr Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                core.net.sendDirectMessage(partnerNpub, txt);
+                var entry = Map.of("sender", core.net.getPublicKeyBech32(), "timestamp", Instant.now().toString(), "text", txt);
+                var cur = core.notes.get(note.id).orElse(note);
+                @SuppressWarnings("unchecked") var msgs = (List<Map<String, String>>) cur.content.computeIfAbsent("messages", k -> new ArrayList<>());
+                msgs.add(entry);
+                core.notes.save(cur);
+                formatAndAppendMsg(entry);
+                messageInput.setText("");
+                scrollToBottom();
+            }
+
+            private void appendMessageFromListener(String rawMsg) {
+                SwingUtilities.invokeLater(this::loadMessages);
+            }
+
+            private void scrollToBottom() {
+                chatArea.setCaretPosition(chatArea.getDocument().getLength());
+            }
+        }
+
+        public static class SettingsPanel extends JPanel {
+            private static final Logger logger = LoggerFactory.getLogger(SettingsPanel.class);
+            private final Core core;
+
+            public SettingsPanel(Core core, Consumer<String> themeUpdater, Runnable llmInitCb) {
+                super(new BorderLayout(10, 10));
+                setBorder(new EmptyBorder(10, 10, 10, 10));
+                this.core = core;
+                var tabbedPane = new JTabbedPane();
+                groupFieldsByAnnotation(core.cfg.net).forEach((group, fields) -> tabbedPane.addTab("Nostr: " + group, buildConfigSubPanelFor(core.cfg.net, fields, "Nostr " + group)));
+                groupFieldsByAnnotation(core.cfg.ui).forEach((group, fields) -> tabbedPane.addTab("UI: " + group, buildConfigSubPanelFor(core.cfg.ui, fields, "UI " + group)));
+                groupFieldsByAnnotation(core.cfg.lm).forEach((group, fields) -> tabbedPane.addTab("LLM: " + group, buildConfigSubPanelFor(core.cfg.lm, fields, "LLM " + group)));
+                add(tabbedPane, BorderLayout.CENTER);
+                var saveButton = new JButton("Save All Settings");
+                saveButton.addActionListener(e -> {
+                    core.cfg.saveAllConfigs();
+                    core.net.setEnabled(false); // Force re-evaluation of keys on next enable attempt
+                    core.lm.init(); // Re-initialize LLM with potentially new settings
+                    JOptionPane.showMessageDialog(this, "All settings saved. Services re-initialized.", "Settings Saved", JOptionPane.INFORMATION_MESSAGE);
+                    if (themeUpdater != null) themeUpdater.accept(core.cfg.ui.theme);
+                    if (llmInitCb != null) llmInitCb.run();
+                });
+                var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+                bottomPanel.add(saveButton);
+                add(bottomPanel, BorderLayout.SOUTH);
+            }
+
+            private Map<String, List<java.lang.reflect.Field>> groupFieldsByAnnotation(Object configObject) {
+                return Stream.of(configObject.getClass().getDeclaredFields()).filter(f -> f.isAnnotationPresent(Field.class)).collect(Collectors.groupingBy(f -> f.getAnnotation(Field.class).group()));
+            }
+
+            private JComponent buildConfigSubPanelFor(Object configObject, List<java.lang.reflect.Field> fields, String title) {
+                var panel = new JPanel(new GridBagLayout());
+                panel.setName(title + " Settings Panel");
+                var gbc = new GridBagConstraints();
+                gbc.insets = new Insets(4, 4, 4, 4);
+                gbc.fill = GridBagConstraints.HORIZONTAL;
+                gbc.anchor = GridBagConstraints.WEST;
+                var y = 0;
+                final var pubKeyLabelHolder = new JLabel[1];
+                for (var field : fields) {
+                    var cf = field.getAnnotation(Field.class);
+                    gbc.gridx = 0;
+                    gbc.gridy = y;
+                    panel.add(new JLabel(cf.label()), gbc);
+                    var comp = createEditorComponent(field, configObject, cf);
+                    if (!cf.tooltip().isEmpty()) comp.setToolTipText(cf.tooltip());
                     gbc.gridx = 1;
                     gbc.gridy = y++;
-                    panel.add(pubKeyLabelHolder[0], gbc);
-                    DocumentListener dl = new FieldUpdateListener(de -> {
-                        try {
-                            var pkNsec = (comp instanceof JPasswordField pf) ? new String(pf.getPassword()) : ((JTextField) comp).getText();
-                            if (pkNsec != null && !pkNsec.trim().isEmpty()) {
-                                var privKeyRaw = Bech32.nip19Decode(pkNsec);
-                                var pubKeyXOnlyRaw = CustomCryptoUtils.getPublicKeyXOnly(privKeyRaw);
-                                nostrSettings.publicKeyBech32 = Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
-                            } else nostrSettings.publicKeyBech32 = "Enter nsec to derive";
-                        } catch (Exception ex) {
-                            nostrSettings.publicKeyBech32 = "Invalid nsec";
-                        }
-                        pubKeyLabelHolder[0].setText("Public Key (npub): " + nostrSettings.publicKeyBech32);
-                    });
-                    if (comp instanceof JPasswordField pf) pf.getDocument().addDocumentListener(dl);
-                    else if (comp instanceof JTextField tf) tf.getDocument().addDocumentListener(dl);
-                    var genKeysBtn = new JButton("Generate New Keys");
-                    genKeysBtn.addActionListener(evt -> {
-                        if (JOptionPane.showConfirmDialog(panel, "Generate new Nostr keys & overwrite? Backup existing!", "Confirm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                            var keysInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
-                            if (comp instanceof JPasswordField pf) pf.setText(nostrSettings.privateKeyBech32);
-                            else if (comp instanceof JTextField tf) tf.setText(nostrSettings.privateKeyBech32);
+                    gbc.weightx = 1.0;
+                    panel.add(comp, gbc);
+                    gbc.weightx = 0.0;
+                    if (field.getName().equals("privateKeyBech32") && configObject instanceof Config.NostrSettings nostrSettings) {
+                        pubKeyLabelHolder[0] = new JLabel("Public Key (npub): " + nostrSettings.publicKeyBech32);
+                        gbc.gridx = 1;
+                        gbc.gridy = y++;
+                        panel.add(pubKeyLabelHolder[0], gbc);
+                        DocumentListener dl = new FieldUpdateListener(de -> {
+                            try {
+                                var pkNsec = (comp instanceof JPasswordField pf) ? new String(pf.getPassword()) : ((JTextField) comp).getText();
+                                if (pkNsec != null && !pkNsec.trim().isEmpty()) {
+                                    var privKeyRaw = Crypto.Bech32.nip19Decode(pkNsec);
+                                    var pubKeyXOnlyRaw = Crypto.getPublicKeyXOnly(privKeyRaw);
+                                    nostrSettings.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
+                                } else nostrSettings.publicKeyBech32 = "Enter nsec to derive";
+                            } catch (Exception ex) {
+                                nostrSettings.publicKeyBech32 = "Invalid nsec";
+                            }
                             pubKeyLabelHolder[0].setText("Public Key (npub): " + nostrSettings.publicKeyBech32);
-                            var kda = new JTextArea(keysInfo, 5, 50);
-                            kda.setEditable(false);
-                            JOptionPane.showMessageDialog(panel, new JScrollPane(kda), "New Keys (Backup!)", JOptionPane.INFORMATION_MESSAGE);
-                        }
-                    });
-                    gbc.gridx = 1;
-                    gbc.gridy = y++;
-                    gbc.anchor = GridBagConstraints.EAST;
-                    panel.add(genKeysBtn, gbc);
-                    gbc.anchor = GridBagConstraints.WEST;
+                        });
+                        if (comp instanceof JPasswordField pf) pf.getDocument().addDocumentListener(dl);
+                        else if (comp instanceof JTextField tf) tf.getDocument().addDocumentListener(dl);
+                        var genKeysBtn = new JButton("Generate New Keys");
+                        genKeysBtn.addActionListener(evt -> {
+                            if (JOptionPane.showConfirmDialog(panel, "Generate new Nostr keys & overwrite? Backup existing!", "Confirm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
+                                var keysInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
+                                if (comp instanceof JPasswordField pf) pf.setText(nostrSettings.privateKeyBech32);
+                                else if (comp instanceof JTextField tf) tf.setText(nostrSettings.privateKeyBech32);
+                                pubKeyLabelHolder[0].setText("Public Key (npub): " + nostrSettings.publicKeyBech32);
+                                var kda = new JTextArea(keysInfo, 5, 50);
+                                kda.setEditable(false);
+                                JOptionPane.showMessageDialog(panel, new JScrollPane(kda), "New Keys (Backup!)", JOptionPane.INFORMATION_MESSAGE);
+                            }
+                        });
+                        gbc.gridx = 1;
+                        gbc.gridy = y++;
+                        gbc.anchor = GridBagConstraints.EAST;
+                        panel.add(genKeysBtn, gbc);
+                        gbc.anchor = GridBagConstraints.WEST;
+                    }
+                }
+                gbc.gridy = y;
+                gbc.weighty = 1.0;
+                panel.add(new JPanel(), gbc);
+                return new JScrollPane(panel);
+            }
+
+            @SuppressWarnings("unchecked")
+            private JComponent createEditorComponent(java.lang.reflect.Field field, Object configObj, Field cf) {
+                try {
+                    field.setAccessible(true);
+                    var val = field.get(configObj);
+                    switch (cf.type()) {
+                        case TEXT_AREA:
+                            var ta = new JTextArea(3, 30);
+                            if (val instanceof List) ta.setText(String.join("\n", (List<String>) val));
+                            else if (val != null) ta.setText(val.toString());
+                            ta.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
+                                try {
+                                    field.set(configObj, new ArrayList<>(List.of(ta.getText().split("\\n"))));
+                                } catch (IllegalAccessException ex) {
+                                    logger.error("Error setting TEXT_AREA field {}", field.getName(), ex);
+                                }
+                            }));
+                            return new JScrollPane(ta);
+                        case COMBO_BOX:
+                            var cb = new JComboBox<>(cf.choices());
+                            if (val != null) cb.setSelectedItem(val.toString());
+                            cb.addActionListener(e -> {
+                                try {
+                                    field.set(configObj, cb.getSelectedItem());
+                                } catch (IllegalAccessException ex) {
+                                    logger.error("Error setting COMBO_BOX field {}", field.getName(), ex);
+                                }
+                            });
+                            return cb;
+                        case CHECK_BOX:
+                            var chkbx = new JCheckBox();
+                            if (val instanceof Boolean) chkbx.setSelected((Boolean) val);
+                            chkbx.addActionListener(e -> {
+                                try {
+                                    field.set(configObj, chkbx.isSelected());
+                                } catch (IllegalAccessException ex) {
+                                    logger.error("Error setting CHECK_BOX field {}", field.getName(), ex);
+                                }
+                            });
+                            return chkbx;
+                        case PASSWORD_FIELD:
+                            var pf = new JPasswordField(30);
+                            if (val != null) pf.setText(val.toString());
+                            pf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
+                                try {
+                                    field.set(configObj, new String(pf.getPassword()));
+                                } catch (IllegalAccessException ex) {
+                                    logger.error("Error setting PASSWORD_FIELD field {}", field.getName(), ex);
+                                }
+                            }));
+                            return pf;
+                        case TEXT_FIELD:
+                        default:
+                            var tf = new JTextField(30);
+                            if (val != null) tf.setText(val.toString());
+                            tf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
+                                try {
+                                    field.set(configObj, tf.getText());
+                                } catch (IllegalAccessException ex) {
+                                    logger.error("Error setting TEXT_FIELD field {}", field.getName(), ex);
+                                }
+                            }));
+                            return tf;
+                    }
+                } catch (IllegalAccessException e) {
+                    return new JLabel("Error: " + e.getMessage());
                 }
             }
-            gbc.gridy = y;
-            gbc.weighty = 1.0;
-            panel.add(new JPanel(), gbc);
-            return new JScrollPane(panel);
         }
 
-        @SuppressWarnings("unchecked")
-        private JComponent createEditorComponent(Field field, Object configObj, ConfigField cf) {
-            try {
-                field.setAccessible(true);
-                var val = field.get(configObj);
-                switch (cf.type()) {
-                    case TEXT_AREA:
-                        var ta = new JTextArea(3, 30);
-                        if (val instanceof List) ta.setText(String.join("\n", (List<String>) val));
-                        else if (val != null) ta.setText(val.toString());
-                        ta.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                            try {
-                                field.set(configObj, new ArrayList<>(List.of(ta.getText().split("\\n"))));
-                            } catch (IllegalAccessException ex) {
-                                logger.error("Error setting TEXT_AREA field {}", field.getName(), ex);
-                            }
-                        }));
-                        return new JScrollPane(ta);
-                    case COMBO_BOX:
-                        var cb = new JComboBox<String>(cf.choices());
-                        if (val != null) cb.setSelectedItem(val.toString());
-                        cb.addActionListener(e -> {
-                            try {
-                                field.set(configObj, cb.getSelectedItem());
-                            } catch (IllegalAccessException ex) {
-                                logger.error("Error setting COMBO_BOX field {}", field.getName(), ex);
-                            }
-                        });
-                        return cb;
-                    case CHECK_BOX:
-                        var chkbx = new JCheckBox();
-                        if (val instanceof Boolean) chkbx.setSelected((Boolean) val);
-                        chkbx.addActionListener(e -> {
-                            try {
-                                field.set(configObj, chkbx.isSelected());
-                            } catch (IllegalAccessException ex) {
-                                logger.error("Error setting CHECK_BOX field {}", field.getName(), ex);
-                            }
-                        });
-                        return chkbx;
-                    case PASSWORD_FIELD:
-                        var pf = new JPasswordField(30);
-                        if (val != null) pf.setText(val.toString());
-                        pf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                            try {
-                                field.set(configObj, new String(pf.getPassword()));
-                            } catch (IllegalAccessException ex) {
-                                logger.error("Error setting PASSWORD_FIELD field {}", field.getName(), ex);
-                            }
-                        }));
-                        return pf;
-                    case TEXT_FIELD:
-                    default:
-                        var tf = new JTextField(30);
-                        if (val != null) tf.setText(val.toString());
-                        tf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                            try {
-                                field.set(configObj, tf.getText());
-                            } catch (IllegalAccessException ex) {
-                                logger.error("Error setting TEXT_FIELD field {}", field.getName(), ex);
-                            }
-                        }));
-                        return tf;
-                }
-            } catch (IllegalAccessException e) {
-                return new JLabel("Error: " + e.getMessage());
+        public static class StatusPanel extends JPanel {
+            private final JLabel label;
+            private final Core core;
+
+            public StatusPanel(Core core) {
+                super(new FlowLayout(FlowLayout.LEFT));
+                this.core = core;
+                setBorder(new EmptyBorder(2, 5, 2, 5));
+                label = new JLabel("Initializing...");
+                add(label);
+                updateStatus("Application ready.");
+            }
+
+            public void updateStatus(String message) {
+                SwingUtilities.invokeLater(() -> label.setText(String.format("Status: %s | Nostr: %s | Sync: %s | LLM: %s", message, core.net.isEnabled() ? "ON" : "OFF", core.sync.isRunning() ? "RUN" : "STOP", core.lm.isReady() ? "READY" : "NOT READY")));
+            }
+        }
+
+        private record FieldUpdateListener(Consumer<DocumentEvent> consumer) implements DocumentListener {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                consumer.accept(e);
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                consumer.accept(e);
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                consumer.accept(e);
             }
         }
     }
 
-    public static class StatusPanel extends JPanel {
-        private final JLabel label;
-        private final Core core;
-
-        public StatusPanel(Core core) {
-            super(new FlowLayout(FlowLayout.LEFT));
-            this.core = core;
-            setBorder(new EmptyBorder(2, 5, 2, 5));
-            label = new JLabel("Initializing...");
-            add(label);
-            updateStatus("Application ready.");
-        }
-
-        public void updateStatus(String message) {
-            SwingUtilities.invokeLater(() -> label.setText(String.format("Status: %s | Nostr: %s | Sync: %s | LLM: %s", message, core.net.isEnabled() ? "ON" : "OFF", core.sync.isRunning() ? "RUN" : "STOP", core.lm.isReady() ? "READY" : "NOT READY")));
-        }
-    }
 }
