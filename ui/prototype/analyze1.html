@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Notes</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --text-color: #212529;
+            --primary-color: #007bff;
+            --secondary-color: #6c757d;
+            --border-color: #dee2e6;
+            --hover-bg: #e9ecef;
+            --card-bg: #ffffff;
+            --danger-color: #dc3545;
+            --success-color: #28a745;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            font-family: var(--font-family);
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #app {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        #sidebar {
+            width: 250px;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--card-bg);
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        #sidebar h2 { margin-top: 0; font-size: 1.2rem; color: var(--primary-color); }
+        #note-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
+        #note-list li {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #note-list li:hover, #note-list li.active { background-color: var(--hover-bg); }
+        #add-note-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: background-color 0.2s ease;
+        }
+        #add-note-btn:hover { background-color: #0056b3; }
+        #ollama-status {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: var(--secondary-color);
+            padding: 5px 0;
+            border-top: 1px solid var(--border-color);
+        }
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        #note-editor {
+            display: flex;
+            flex-direction: column;
+            height: 65%; /* Adjust as needed */
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background-color: var(--card-bg);
+            padding: 15px;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+        #note-editor.hidden { display: none; }
+        #note-title {
+            font-size: 1.4rem;
+            font-weight: bold;
+            border: none;
+            border-bottom: 1px solid var(--border-color);
+            padding: 5px 0 10px 0;
+            margin-bottom: 10px;
+            outline: none;
+        }
+        #note-content {
+            flex-grow: 1;
+            font-family: inherit;
+            font-size: 1rem;
+            border: none;
+            resize: none;
+            outline: none;
+            padding: 5px 0;
+            line-height: 1.6;
+            overflow-y: auto;
+        }
+        #note-semantic {
+            margin-top: 15px;
+            border-top: 1px dashed var(--border-color);
+            padding-top: 10px;
+            max-height: 100px; /* Limit height */
+            overflow-y: auto;
+            font-size: 0.85rem;
+            color: var(--secondary-color);
+        }
+        #note-semantic h3 { margin: 0 0 5px 0; font-size: 0.9rem; color: var(--primary-color); }
+        #semantic-output {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+            font-family: monospace;
+            font-size: 0.8rem;
+            background-color: #f1f3f5;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .editor-buttons { margin-top: 10px; display: flex; gap: 10px; }
+        .editor-buttons button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        #save-note-btn { background-color: var(--success-color); color: white; border-color: var(--success-color); }
+        #save-note-btn:hover { background-color: #218838; border-color: #1e7e34; }
+        #analyze-note-btn { background-color: var(--secondary-color); color: white; border-color: var(--secondary-color); }
+        #analyze-note-btn:hover { background-color: #5a6268; border-color: #545b62; }
+        #delete-note-btn { background-color: var(--danger-color); color: white; border-color: var(--danger-color); margin-left: auto; }
+        #delete-note-btn:hover { background-color: #c82333; border-color: #bd2130; }
+
+        #action-dock {
+            height: 35%; /* Adjust as needed */
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background-color: var(--card-bg);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        #action-dock h3 { margin: 0 0 10px 0; font-size: 1.1rem; color: var(--primary-color); border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+        #action-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+        .action-item {
+            background-color: var(--hover-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+        .action-item span { flex-grow: 1; line-height: 1.4; }
+        .action-dismiss-btn {
+            background: none;
+            border: none;
+            color: var(--danger-color);
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        .action-dismiss-btn:hover { color: #a0232f; }
+        .loading-indicator {
+            display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor;
+            border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite;
+            vertical-align: middle; margin-left: 5px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div id="sidebar">
+        <h2>Semantic Notes</h2>
+        <ul id="note-list"></ul>
+        <button id="add-note-btn">Add Note</button>
+        <div id="ollama-status">Ollama: Initializing...</div>
+    </div>
+    <div id="main-content">
+        <div id="note-editor" class="hidden">
+            <input type="text" id="note-title" placeholder="Note Title">
+            <textarea id="note-content" placeholder="Start writing your note..."></textarea>
+            <div id="note-semantic">
+                <h3>Semantic Analysis <span id="semantic-loading" class="loading-indicator" style="display: none;"></span></h3>
+                <pre id="semantic-output">Analysis will appear here after running 'Analyze'.</pre>
+            </div>
+            <div class="editor-buttons">
+                <button id="save-note-btn">Save</button>
+                <button id="analyze-note-btn">Analyze</button>
+                <button id="delete-note-btn">Delete</button>
+            </div>
+        </div>
+        <div id="action-dock">
+            <h3>Action Dock <span id="action-loading" class="loading-indicator" style="display: none;"></span></h3>
+            <ul id="action-list"></ul>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // LangChainJS imports via CDN
+    const { Ollama } = await import("https://esm.sh/@langchain/community/llms/ollama");
+    const { StringOutputParser } = await import("https://esm.sh/@langchain/core/output_parsers");
+    const { PromptTemplate } = await import("https://esm.sh/@langchain/core/prompts");
+
+    // --- Configuration ---
+    const OLLAMA_BASE_URL = "http://localhost:11434";
+    const OLLAMA_MODEL = "llama3"; // Change to your preferred model
+    const DEBOUNCE_MS = 1000; // Auto-save/analyze debounce delay
+    const LOCAL_STORAGE_KEY_NOTES = 'semanticNotesApp_notes';
+    const LOCAL_STORAGE_KEY_ACTIONS = 'semanticNotesApp_actions';
+
+    // --- Helper Functions ---
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => document.querySelectorAll(selector);
+    const generateUUID = () => crypto.randomUUID();
+    const debounce = (func, wait) => {
+        let timeout;
+        return (...args) => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    };
+
+    // --- Application Class ---
+    class SemanticNotesApp {
+        notes = [];
+        actionQueue = [];
+        currentNoteId = null;
+        llm = null;
+        isAnalyzing = false;
+        isGeneratingActions = false;
+        analysisChain = null;
+        actionChain = null;
+
+        constructor() {
+            this.initLLM();
+            this.loadData();
+            this.renderNoteList();
+            this.renderActionDock();
+            this.attachEventListeners();
+        }
+
+        initLLM() {
+            try {
+                this.llm = new Ollama({ baseUrl: OLLAMA_BASE_URL, model: OLLAMA_MODEL });
+                this.updateOllamaStatus('Checking connection...', true);
+
+                // Test connection & setup chains
+                this.llm.invoke("Respond with only 'OK'").then(res => {
+                    if (res.trim() === 'OK') {
+                        this.updateOllamaStatus(`Connected (${OLLAMA_MODEL})`, false, true);
+                        this.setupLLMChains();
+                    } else throw new Error("Unexpected response");
+                }).catch(err => {
+                    console.error("Ollama connection failed:", err);
+                    this.updateOllamaStatus('Connection Failed!', false, false, true);
+                    alert(`Failed to connect to Ollama at ${OLLAMA_BASE_URL} with model ${OLLAMA_MODEL}. Please ensure Ollama is running and the model is available.`);
+                });
+
+            } catch (err) {
+                console.error("Failed to initialize Ollama:", err);
+                this.updateOllamaStatus('Initialization Error!', false, false, true);
+            }
+        }
+
+        setupLLMChains() {
+            const analysisPrompt = PromptTemplate.fromTemplate(
+                `Analyze the following note for its semantic meaning. Provide a concise summary, infer the primary purpose (e.g., brainstorming, reminder, learning, planning, reflection), and list 3-5 relevant semantic tags.
+
+Note Title: {title}
+Note Content:
+{content}
+
+Output your analysis strictly as a JSON object with keys "summary", "purpose", and "tags" (an array of strings). Do not include any explanations outside the JSON structure.
+JSON Output:`
+            );
+            this.analysisChain = analysisPrompt.pipe(this.llm).pipe(new StringOutputParser());
+
+            const actionPrompt = PromptTemplate.fromTemplate(
+                `Given the following note and its analysis, suggest ONE insightful question or actionable suggestion to help the user clarify or expand on the note's context or purpose.
+Focus on uncovering implicit assumptions, exploring related concepts, or prompting for next steps. Phrase it directly to the user.
+
+Note Title: {title}
+Note Content:
+{content}
+Analysis:
+{analysis}
+
+Existing Actions (for context, avoid duplicates):
+{existing_actions}
+
+Your Suggestion/Question:`
+            );
+            this.actionChain = actionPrompt.pipe(this.llm).pipe(new StringOutputParser());
+        }
+
+
+        updateOllamaStatus(text, loading = false, success = false, error = false) {
+            const statusEl = $('#ollama-status');
+            statusEl.textContent = `Ollama: ${text}`;
+            statusEl.style.color = error ? 'var(--danger-color)' : success ? 'var(--success-color)' : 'var(--secondary-color)';
+            if (loading) statusEl.innerHTML += ' <span class="loading-indicator"></span>';
+        }
+
+        loadData() {
+            this.notes = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY_NOTES) || '[]');
+            this.actionQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY_ACTIONS) || '[]');
+        }
+
+        saveData() {
+            localStorage.setItem(LOCAL_STORAGE_KEY_NOTES, JSON.stringify(this.notes));
+            localStorage.setItem(LOCAL_STORAGE_KEY_ACTIONS, JSON.stringify(this.actionQueue));
+        }
+
+        renderNoteList() {
+            const listEl = $('#note-list');
+            listEl.innerHTML = '';
+            this.notes
+                .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)) // Show most recent first
+                .forEach(note => {
+                    const li = document.createElement('li');
+                    li.textContent = note.title || 'Untitled Note';
+                    li.dataset.id = note.id;
+                    if (note.id === this.currentNoteId) li.classList.add('active');
+                    listEl.appendChild(li);
+                });
+        }
+
+        renderEditor(note) {
+            const editorEl = $('#note-editor');
+            if (!note) {
+                editorEl.classList.add('hidden');
+                this.currentNoteId = null;
+                return;
+            }
+            editorEl.classList.remove('hidden');
+            $('#note-title').value = note.title || '';
+            $('#note-content').value = note.content || '';
+            this.renderSemantic(note.semantic);
+            this.updateEditorButtons();
+            // Highlight active note in list
+            $$('#note-list li').forEach(li => li.classList.toggle('active', li.dataset.id === note.id));
+        }
+
+        renderSemantic(semanticData) {
+            const outputEl = $('#semantic-output');
+            if (semanticData && Object.keys(semanticData).length > 0) {
+                // Basic formatting for readability
+                let formatted = `Summary: ${semanticData.summary || 'N/A'}\n`;
+                formatted += `Purpose: ${semanticData.purpose || 'N/A'}\n`;
+                formatted += `Tags: ${(semanticData.tags || []).join(', ') || 'N/A'}`;
+                outputEl.textContent = formatted;
+            } else {
+                outputEl.textContent = "Analysis will appear here after running 'Analyze'.";
+            }
+            $('#semantic-loading').style.display = this.isAnalyzing ? 'inline-block' : 'none';
+        }
+
+        renderActionDock() {
+            const listEl = $('#action-list');
+            listEl.innerHTML = '';
+            $('#action-loading').style.display = this.isGeneratingActions ? 'inline-block' : 'none';
+
+            this.actionQueue.forEach(action => {
+                const li = document.createElement('li');
+                li.classList.add('action-item');
+                li.dataset.id = action.id;
+
+                const noteTitle = this.notes.find(n => n.id === action.noteId)?.title || 'Unknown Note';
+
+                li.innerHTML = `
+                        <span><strong>[${noteTitle.substring(0, 15)}${noteTitle.length > 15 ? '...' : ''}]</strong> ${action.text}</span>
+                        <button class="action-dismiss-btn" title="Dismiss Action">×</button>
+                    `;
+                listEl.appendChild(li);
+            });
+        }
+
+        addNote() {
+            const now = Date.now();
+            const newNote = {
+                id: generateUUID(),
+                title: 'Untitled Note',
+                content: '',
+                semantic: {},
+                createdAt: now,
+                updatedAt: now,
+            };
+            this.notes.push(newNote);
+            this.currentNoteId = newNote.id;
+            this.saveData();
+            this.renderNoteList();
+            this.renderEditor(newNote);
+            $('#note-title').focus();
+            $('#note-title').select();
+        }
+
+        selectNote(noteId) {
+            if (this.currentNoteId === noteId) return;
+            // Auto-save previous note implicitly before switching
+            this.saveCurrentNote(); // Save changes if any
+            this.currentNoteId = noteId;
+            const note = this.notes.find(n => n.id === noteId);
+            this.renderEditor(note);
+            this.renderNoteList(); // Re-render list to update active state
+        }
+
+        updateCurrentNoteData() {
+            const note = this.notes.find(n => n.id === this.currentNoteId);
+            if (!note) return false;
+
+            const newTitle = $('#note-title').value.trim();
+            const newContent = $('#note-content').value;
+            const changed = note.title !== newTitle || note.content !== newContent;
+
+            if (changed) {
+                note.title = newTitle || 'Untitled Note'; // Ensure title isn't empty
+                note.content = newContent;
+                note.updatedAt = Date.now();
+            }
+            return changed;
+        }
+
+        saveCurrentNote() {
+            if (!this.currentNoteId) return;
+            const changed = this.updateCurrentNoteData();
+            if (changed) {
+                this.saveData();
+                this.renderNoteList(); // Update title in list if changed
+                console.log(`Note ${this.currentNoteId} saved.`);
+            }
+        }
+
+        deleteCurrentNote() {
+            if (!this.currentNoteId || !confirm('Are you sure you want to delete this note?')) return;
+
+            const noteIdToDelete = this.currentNoteId;
+            this.notes = this.notes.filter(n => n.id !== noteIdToDelete);
+            // Also remove related actions
+            this.actionQueue = this.actionQueue.filter(a => a.noteId !== noteIdToDelete);
+
+            this.currentNoteId = null;
+            this.saveData();
+            this.renderNoteList();
+            this.renderEditor(null);
+            this.renderActionDock();
+        }
+
+        async analyzeCurrentNote() {
+            if (!this.currentNoteId || this.isAnalyzing || !this.llm || !this.analysisChain) return;
+            this.saveCurrentNote(); // Ensure latest content is saved before analysis
+
+            const note = this.notes.find(n => n.id === this.currentNoteId);
+            if (!note || (!note.content && !note.title)) {
+                alert("Cannot analyze an empty note.");
+                return;
+            }
+
+            this.isAnalyzing = true;
+            this.renderSemantic(note.semantic); // Show loading indicator
+
+            try {
+                const result = await this.analysisChain.invoke({
+                    title: note.title,
+                    content: note.content
+                });
+
+                console.log("LLM Analysis Raw:", result);
+                // Attempt to parse JSON, allowing for potential markdown backticks
+                const jsonResult = result.trim().replace(/^```json\s*|```$/g, '');
+                const parsed = JSON.parse(jsonResult);
+
+                if (parsed && typeof parsed === 'object' && ('summary' in parsed || 'purpose' in parsed || 'tags' in parsed)) {
+                    note.semantic = {
+                        summary: parsed.summary || note.semantic.summary || '',
+                        purpose: parsed.purpose || note.semantic.purpose || '',
+                        tags: Array.isArray(parsed.tags) ? parsed.tags : (note.semantic.tags || [])
+                    };
+                    note.updatedAt = Date.now(); // Mark as updated due to new analysis
+                    this.saveData();
+                    this.renderSemantic(note.semantic); // Update display with results
+                    this.generateActionForNote(note); // Trigger action generation
+                } else {
+                    throw new Error("Parsed JSON lacks expected keys (summary, purpose, tags).");
+                }
+
+            } catch (error) {
+                console.error("Error analyzing note:", error);
+                alert(`Analysis failed: ${error.message}. Check console and Ollama status.`);
+                this.renderSemantic(note.semantic); // Render previous state if failed
+            } finally {
+                this.isAnalyzing = false;
+                $('#semantic-loading').style.display = 'none'; // Ensure loading is hidden
+                this.updateEditorButtons(); // Update button states
+            }
+        }
+
+        async generateActionForNote(note) {
+            if (this.isGeneratingActions || !this.llm || !this.actionChain) return;
+
+            // Basic check to prevent excessive actions for the same note
+            const existingActionsForNote = this.actionQueue.filter(a => a.noteId === note.id).length;
+            if (existingActionsForNote >= 3) { // Limit actions per note
+                console.log(`Skipping action generation for ${note.id}, limit reached.`);
+                return;
+            }
+
+            this.isGeneratingActions = true;
+            this.renderActionDock(); // Show loading indicator
+
+            try {
+                const analysisString = JSON.stringify(note.semantic || {}, null, 2);
+                const existingActionTexts = this.actionQueue
+                    .filter(a => a.noteId === note.id)
+                    .map(a => `- ${a.text}`)
+                    .join('\n') || 'None';
+
+                const suggestion = await this.actionChain.invoke({
+                    title: note.title,
+                    content: note.content,
+                    analysis: analysisString,
+                    existing_actions: existingActionTexts
+                });
+
+                console.log("LLM Action Suggestion:", suggestion);
+                if (suggestion && suggestion.trim().length > 5) { // Basic sanity check
+                    this.addAction({
+                        id: generateUUID(),
+                        noteId: note.id,
+                        text: suggestion.trim(),
+                        createdAt: Date.now()
+                    });
+                } else {
+                    console.log("LLM did not provide a valid action suggestion.");
+                }
+
+            } catch (error) {
+                console.error("Error generating action:", error);
+                // Don't alert the user for this, it's less critical
+            } finally {
+                this.isGeneratingActions = false;
+                this.renderActionDock(); // Hide loading indicator and render new action if any
+            }
+        }
+
+        addAction(actionData) {
+            // Avoid adding exact duplicate text for the same note
+            const exists = this.actionQueue.some(a => a.noteId === actionData.noteId && a.text === actionData.text);
+            if (!exists) {
+                this.actionQueue.push(actionData);
+                this.saveData();
+                this.renderActionDock();
+            } else {
+                console.log("Duplicate action suggestion prevented.");
+            }
+        }
+
+
+        dismissAction(actionId) {
+            this.actionQueue = this.actionQueue.filter(a => a.id !== actionId);
+            this.saveData();
+            this.renderActionDock();
+        }
+
+        updateEditorButtons() {
+            const analyzeBtn = $('#analyze-note-btn');
+            if (analyzeBtn) {
+                analyzeBtn.disabled = this.isAnalyzing || !this.llm;
+                analyzeBtn.textContent = this.isAnalyzing ? 'Analyzing...' : 'Analyze';
+            }
+        }
+
+        // --- Event Handlers ---
+        attachEventListeners() {
+            $('#add-note-btn').addEventListener('click', () => this.addNote());
+
+            $('#note-list').addEventListener('click', (e) => {
+                if (e.target.tagName === 'LI') {
+                    this.selectNote(e.target.dataset.id);
+                }
+            });
+
+            // Debounced auto-save for title and content
+            const debouncedSave = debounce(() => this.saveCurrentNote(), DEBOUNCE_MS);
+            $('#note-title').addEventListener('input', debouncedSave);
+            $('#note-content').addEventListener('input', debouncedSave);
+
+            // Explicit Save Button
+            $('#save-note-btn').addEventListener('click', () => this.saveCurrentNote());
+
+            // Analyze Button
+            $('#analyze-note-btn').addEventListener('click', () => this.analyzeCurrentNote());
+
+            // Delete Button
+            $('#delete-note-btn').addEventListener('click', () => this.deleteCurrentNote());
+
+            // Action Dock Dismiss Button
+            $('#action-list').addEventListener('click', (e) => {
+                const button = e.target.closest('.action-dismiss-btn');
+                if (button) {
+                    const actionId = button.closest('.action-item').dataset.id;
+                    this.dismissAction(actionId);
+                }
+                // If clicking on the action text itself, select the corresponding note
+                const actionItem = e.target.closest('.action-item');
+                if (actionItem && !button) {
+                    const noteId = this.actionQueue.find(a => a.id === actionItem.dataset.id)?.noteId;
+                    if (noteId && noteId !== this.currentNoteId) {
+                        this.selectNote(noteId);
+                    }
+                }
+            });
+
+            // Save on unload / page close
+            window.addEventListener('beforeunload', () => this.saveCurrentNote());
+        }
+    }
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        window.app = new SemanticNotesApp();
+    });
+
+</script>
+</body>
+</html>
