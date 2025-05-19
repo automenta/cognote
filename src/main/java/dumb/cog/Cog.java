@@ -653,8 +653,8 @@ public class Cog {
         var answerFuture = new CompletableFuture<Answer>();
         var queryID = query.id();
         Consumer<Event> listener = e -> {
-            if (e instanceof Answer.AnswerEvent resultEvent && resultEvent.result().queryId().equals(queryID)) {
-                answerFuture.complete(resultEvent.result());
+            if (e instanceof Answer.AnswerEvent(Answer result) && result.queryId().equals(queryID)) {
+                answerFuture.complete(result);
             }
         };
         @SuppressWarnings("unchecked")

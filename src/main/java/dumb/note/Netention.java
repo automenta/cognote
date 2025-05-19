@@ -12,19 +12,12 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
-import org.bouncycastle.asn1.x9.X9ECParameters;
-import org.bouncycastle.crypto.ec.CustomNamedCurves;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.math.ec.ECCurve;
-import org.bouncycastle.math.ec.ECPoint;
+import dumb.note.theme.DarkMetalLookAndFeel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.IvParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
@@ -33,13 +26,11 @@ import javax.swing.event.ListSelectionEvent;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -47,36 +38,48 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.*;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static java.util.Arrays.copyOfRange;
 import static java.util.Optional.empty;
 
 
 public class Netention {
 
     static {
-        Security.addProvider(new BouncyCastleProvider());
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
         System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "yyyy-MM-dd HH:mm:ss:SSS Z");
     }
 
+
+
     public static void main(String[] args) {
         var core = new Core();
-        SwingUtilities.invokeLater(() -> new UI(core));
+        SwingUtilities.invokeLater(() -> {
+            try {
+                UIManager.setLookAndFeel( new DarkMetalLookAndFeel() );
+            } catch( Exception ex ) {
+                System.err.println( "Failed to initialize LaF" );
+            }
+            new UI(core);
+        });
     }
 
     public enum FieldType {TEXT_FIELD, TEXT_AREA, COMBO_BOX, CHECK_BOX, PASSWORD_FIELD}
@@ -93,303 +96,6 @@ public class Netention {
         String[] choices() default {};
 
         String group() default "General";
-    }
-
-    public static class Crypto {
-        private static final String PROVIDER_BC = BouncyCastleProvider.PROVIDER_NAME;
-        private static final X9ECParameters SECP256K1_PARAMS = CustomNamedCurves.getByName("secp256k1");
-        private static final ECCurve CURVE = SECP256K1_PARAMS.getCurve();
-        private static final ECPoint G = SECP256K1_PARAMS.getG();
-        private static final SecureRandom secureRandom = new SecureRandom();
-
-        public static byte[] hexToBytes(String s) {
-            if (s == null) return null;
-            var len = s.length();
-            var data = new byte[len / 2];
-            for (var i = 0; i < len; i += 2)
-                data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i + 1), 16));
-            return data;
-        }
-
-        public static String bytesToHex(byte[] bytes) {
-            if (bytes == null) return null;
-            var sb = new StringBuilder(bytes.length * 2);
-            for (var b : bytes)
-                sb.append(String.format("%02x", b));
-            return sb.toString();
-        }
-
-        public static byte[] generatePrivateKey() {
-            var privKey = new byte[32];
-            secureRandom.nextBytes(privKey);
-            var d = new BigInteger(1, privKey);
-            if (d.signum() == 0 || d.compareTo(SECP256K1_PARAMS.getN()) >= 0) return generatePrivateKey();
-            return privKey;
-        }
-
-        public static byte[] ensureCoordBytesAre32(byte[] coordBytes) {
-            if (coordBytes.length == 32) return coordBytes;
-            var out = new byte[32];
-            if (coordBytes.length > 32) System.arraycopy(coordBytes, coordBytes.length - 32, out, 0, 32);
-            else System.arraycopy(coordBytes, 0, out, 32 - coordBytes.length, coordBytes.length);
-            return out;
-        }
-
-        public static byte[] bigIntegerTo32BytesPadded(BigInteger bi) {
-            var bytes = bi.toByteArray();
-            var l = bytes.length;
-            if (l == 32) return bytes;
-            var res = new byte[32];
-            if (l > 32) System.arraycopy(bytes, l - 32, res, 0, 32);
-            else System.arraycopy(bytes, 0, res, 32 - l, l);
-            return res;
-        }
-
-        public static byte[] getPublicKeyXOnly(byte[] privateKeyBytes) {
-            var p = G.multiply(new BigInteger(1, privateKeyBytes));
-            if (p.isInfinity()) throw new IllegalArgumentException("Private key results in point at infinity");
-            return ensureCoordBytesAre32(p.normalize().getAffineXCoord().getEncoded());
-        }
-
-        public static byte[] getPublicKeyCompressed(byte[] privateKeyBytes) {
-            var p = G.multiply(new BigInteger(1, privateKeyBytes));
-            if (p.isInfinity())
-                throw new IllegalArgumentException("Private key results in point at infinity for compressed pubkey");
-            return p.getEncoded(true);
-        }
-
-        public static byte[] getSharedSecret(byte[] myPrivateKeyBytes, byte[] theirPublicKeyCompressedBytes) {
-            var theirPublicKey = CURVE.decodePoint(theirPublicKeyCompressedBytes);
-            if (theirPublicKey.isInfinity())
-                throw new IllegalArgumentException("Their public key is point at infinity");
-            var sharedPoint = theirPublicKey.multiply(new BigInteger(1, myPrivateKeyBytes));
-            if (sharedPoint.isInfinity()) throw new IllegalArgumentException("Shared secret point is at infinity");
-            return bigIntegerTo32BytesPadded(sharedPoint.normalize().getAffineXCoord().toBigInteger());
-        }
-
-        public static String nip04Encrypt(String plaintext, byte[] sharedSecret32Bytes, byte[] theirPublicKeyXOnlyBytes) throws GeneralSecurityException {
-            var iv = new byte[16];
-            secureRandom.nextBytes(iv);
-            var cipher = Cipher.getInstance("AES/CBC/PKCS5Padding", PROVIDER_BC);
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(sharedSecret32Bytes, "AES"), new IvParameterSpec(iv));
-            var ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(ciphertext) + "?iv=" + Base64.getEncoder().encodeToString(iv);
-        }
-
-        public static String nip04Decrypt(String nip04Payload, byte[] sharedSecret32Bytes) throws GeneralSecurityException {
-            var parts = nip04Payload.split("\\?iv=");
-            if (parts.length != 2) throw new IllegalArgumentException("Invalid NIP-04 payload format");
-            var ciphertext = Base64.getDecoder().decode(parts[0]);
-            var iv = Base64.getDecoder().decode(parts[1]);
-            var cipher = Cipher.getInstance("AES/CBC/PKCS5Padding", PROVIDER_BC);
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(sharedSecret32Bytes, "AES"), new IvParameterSpec(iv));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
-        }
-
-        public static byte[] generateAuxRand() {
-            var r = new byte[32];
-            secureRandom.nextBytes(r);
-            return r;
-        }
-
-        public static class Schnorr {
-            private static final BigInteger
-                    EC_P = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16),
-                    EC_N = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
-            private static final X9ECParameters SECP256K1_PARAMS = CustomNamedCurves.getByName("secp256k1");
-            private static final ECPoint EC_G = SECP256K1_PARAMS.getG();
-
-            private static byte[] getEncodedPoint(ECPoint p) {
-                return p.getEncoded(true);
-            }
-
-            private static byte[] sha256(byte[]... inputs) throws NoSuchAlgorithmException {
-                var digest = MessageDigest.getInstance("SHA-256");
-                for (var input : inputs) digest.update(input);
-                return digest.digest();
-            }
-
-            private static BigInteger liftX(BigInteger x) {
-                var ySq = x.pow(3).add(BigInteger.valueOf(7)).mod(EC_P);
-                var y = ySq.modPow(EC_P.add(BigInteger.ONE).divide(BigInteger.valueOf(4)), EC_P);
-                if (!y.modPow(BigInteger.TWO, EC_P).equals(ySq)) return null;
-                return y;
-            }
-
-            public static ECPoint liftXToPoint(byte[] xCoordBytes) {
-                var x = new BigInteger(1, xCoordBytes);
-                var y = liftX(x);
-                return y == null ? null : SECP256K1_PARAMS.getCurve().createPoint(x, y);
-            }
-
-            private static boolean hasEvenY(ECPoint p) {
-                return p.getAffineYCoord().toBigInteger().mod(BigInteger.TWO).equals(BigInteger.ZERO);
-            }
-
-            private static byte[] taggedHash(String tag, byte[] a, byte[] b, byte[] c) throws NoSuchAlgorithmException {
-                var abc = new byte[a.length + b.length + c.length];
-                System.arraycopy(a, 0, abc, 0, a.length);
-                System.arraycopy(b, 0, abc, a.length, b.length);
-                System.arraycopy(c, 0, abc, a.length + b.length, c.length);
-                return taggedHash(tag, abc);
-            }
-
-            private static byte[] taggedHash(String tag, byte[] msg) throws NoSuchAlgorithmException {
-                var tagHash = sha256(tag.getBytes(StandardCharsets.UTF_8));
-                return sha256(tagHash, tagHash, msg);
-            }
-
-            public static byte[] sign(byte[] msgHash, byte[] seckey, byte[] auxRand) throws NoSuchAlgorithmException {
-                var d0 = new BigInteger(1, seckey);
-                if (!(BigInteger.ONE.compareTo(d0) <= 0 && d0.compareTo(EC_N.subtract(BigInteger.ONE)) <= 0))
-                    throw new IllegalArgumentException("Secret key is out of range.");
-                var P_point = EC_G.multiply(d0);
-                if (P_point.isInfinity()) throw new IllegalStateException("Public key point is infinity in sign");
-                var P_normalized = P_point.normalize();
-                var d = hasEvenY(P_normalized) ? d0 : EC_N.subtract(d0);
-                var k0 = new BigInteger(1, taggedHash("BIP0340/aux", auxRand)).mod(EC_N);
-                if (k0.equals(BigInteger.ZERO)) throw new RuntimeException("Auxiliary random data produced k=0.");
-                var R_point = EC_G.multiply(k0);
-                if (R_point.isInfinity()) throw new RuntimeException("Auxiliary random data produced R=infinity.");
-                var R_normalized = R_point.normalize();
-                var k = hasEvenY(R_normalized) ? k0 : EC_N.subtract(k0);
-                var rX = ensureCoordBytesAre32(R_normalized.getAffineXCoord().getEncoded());
-                var pX = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
-                var sBytes = bigIntegerTo32BytesPadded(k.add(new BigInteger(1, taggedHash("BIP0340/challenge", rX, pX, msgHash)).mod(EC_N).multiply(d)).mod(EC_N));
-                var sig = new byte[64];
-                System.arraycopy(rX, 0, sig, 0, 32);
-                System.arraycopy(sBytes, 0, sig, 32, 32);
-                return sig;
-            }
-
-            public static boolean verify(byte[] msgHash, byte[] pubkeyXOnly, byte[] sig) throws NoSuchAlgorithmException {
-                if (pubkeyXOnly.length != 32 || sig.length != 64) return false;
-                var P = liftXToPoint(pubkeyXOnly);
-                if (P == null) return false;
-                var P_normalized = P.normalize();
-                var r = new BigInteger(1, copyOfRange(sig, 0, 32));
-                var s = new BigInteger(1, copyOfRange(sig, 32, 64));
-                if (r.compareTo(EC_P) >= 0 || s.compareTo(EC_N) >= 0) return false;
-                var pXBytes = ensureCoordBytesAre32(P_normalized.getAffineXCoord().getEncoded());
-                var rXBytes = bigIntegerTo32BytesPadded(r);
-                var e = new BigInteger(1, taggedHash("BIP0340/challenge", rXBytes, pXBytes, msgHash)).mod(EC_N);
-                var R_calc = EC_G.multiply(s).add(P_normalized.multiply(EC_N.subtract(e)));
-                var R_calc_normalized = R_calc.normalize();
-                if (R_calc_normalized.isInfinity()) return false;
-                return hasEvenY(R_calc_normalized) && R_calc_normalized.getAffineXCoord().toBigInteger().equals(r);
-            }
-        }
-
-        public static class Bech32 {
-            private static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-            private static final int[] GENERATOR = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
-
-            private static int polymod(byte[] values) {
-                var chk = 1;
-                for (var v : values) {
-                    var top = chk >> 25;
-                    chk = (chk & 0x1ffffff) << 5 ^ v;
-                    for (var i = 0; i < 5; ++i) if ((top >> i & 1) == 1) chk ^= GENERATOR[i];
-                }
-                return chk;
-            }
-
-            private static byte[] expandHrp(String hrp) {
-                var l = hrp.length();
-                var ret = new byte[l * 2 + 1];
-                for (var i = 0; i < l; ++i) {
-                    ret[i] = (byte) (hrp.charAt(i) >> 5);
-                    ret[i + l + 1] = (byte) (hrp.charAt(i) & 0x1f);
-                }
-                ret[l] = 0;
-                return ret;
-            }
-
-            private static boolean verifyChecksum(String hrp, byte[] data) {
-                var exp = expandHrp(hrp);
-                var el = exp.length;
-                var dl = data.length;
-                var values = new byte[el + dl];
-                System.arraycopy(exp, 0, values, 0, el);
-                System.arraycopy(data, 0, values, el, dl);
-                return polymod(values) == 1;
-            }
-
-            private static byte[] createChecksum(String hrp, byte[] data) {
-                var exp = expandHrp(hrp);
-                var el = exp.length;
-                var dl = data.length;
-                var values = new byte[el + dl + 6];
-                System.arraycopy(exp, 0, values, 0, el);
-                System.arraycopy(data, 0, values, el, dl);
-                var mod = polymod(values) ^ 1;
-                var ret = new byte[6];
-                for (var i = 0; i < 6; ++i) ret[i] = (byte) (mod >> 5 * (5 - i) & 0x1f);
-                return ret;
-            }
-
-            public static String encode(String hrp, byte[] data) {
-                var checksum = createChecksum(hrp, data);
-                var combined = new byte[data.length + checksum.length];
-                System.arraycopy(data, 0, combined, 0, data.length);
-                System.arraycopy(checksum, 0, combined, data.length, checksum.length);
-                var sb = new StringBuilder(hrp).append('1');
-                for (var b : combined) sb.append(CHARSET.charAt(b));
-                return sb.toString();
-            }
-
-            public static Bech32Data decode(String bech) throws Exception {
-                if (!bech.equals(bech.toLowerCase(Locale.ROOT)) && !bech.equals(bech.toUpperCase(Locale.ROOT)))
-                    throw new Exception("Mixed case in Bech32 string");
-                bech = bech.toLowerCase(Locale.ROOT);
-                var pos = bech.lastIndexOf('1');
-                var l = bech.length();
-                if (pos < 1 || pos + 7 > l || l > 90)
-                    throw new Exception("Invalid Bech32 string structure or length");
-                var hrp = bech.substring(0, pos);
-                var data = new byte[l - 1 - pos];
-                for (int i = 0, j = pos + 1; j < l; ++i, ++j) {
-                    var v = CHARSET.indexOf(bech.charAt(j));
-                    if (v == -1) throw new Exception("Invalid character in Bech32 string data part");
-                    data[i] = (byte) v;
-                }
-                if (!verifyChecksum(hrp, data)) throw new Exception("Bech32 checksum verification failed");
-                return new Bech32Data(hrp, copyOfRange(data, 0, data.length - 6));
-            }
-
-            private static byte[] convertBits(byte[] data, int fromBits, int toBits, boolean pad) throws Exception {
-                var acc = 0;
-                var bits = 0;
-                var ret = new ByteArrayOutputStream();
-                var maxv = (1 << toBits) - 1;
-                for (var value : data) {
-                    var v = value & 0xff;
-                    if (v >> fromBits != 0) throw new Exception("Invalid data range for bit conversion");
-                    acc = acc << fromBits | v;
-                    bits += fromBits;
-                    while (bits >= toBits) {
-                        bits -= toBits;
-                        ret.write(acc >> bits & maxv);
-                    }
-                }
-                if (pad) {
-                    if (bits > 0) ret.write(acc << toBits - bits & maxv);
-                } else if (bits >= fromBits || (acc << toBits - bits & maxv) != 0)
-                    throw new Exception("Invalid padding in bit conversion");
-                return ret.toByteArray();
-            }
-
-            public static byte[] nip19Decode(String nip19String) throws Exception {
-                return convertBits(decode(nip19String).data, 5, 8, false);
-            }
-
-            public static String nip19Encode(String hrp, byte[] data32Bytes) throws Exception {
-                return encode(hrp, convertBits(data32Bytes, 8, 5, true));
-            }
-
-            public record Bech32Data(String hrp, byte[] data) {
-            }
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -472,7 +178,6 @@ public class Netention {
         public final Notes notes;
         public final Config cfg;
         public final Nostr net;
-        public final Sync sync;
         public final LM lm;
         private final Map<String, Consumer<String>> events = new ConcurrentHashMap<>();
         private final List<Consumer<CoreEvent>> coreEventListeners = new CopyOnWriteArrayList<>();
@@ -489,10 +194,8 @@ public class Netention {
             this.cfg = new Config(notes);
             this.lm = new LM(cfg);
             this.net = new Nostr(cfg, this::handleIncomingNostrEvent, () -> cfg.net.publicKeyBech32);
-            this.sync = new Sync(net);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                logger.info("Netention shutting down...");
-                sync.stop();
+                logger.info("Netention stop...");
                 if (net.isEnabled()) net.setEnabled(false);
             }));
             logger.info("NetentionCore initialized.");
@@ -576,7 +279,7 @@ public class Netention {
         private void handleIncomingPrivateMessage(Nostr.NostrEvent event) {
             try {
                 var senderPubKeyXOnlyBytes = Crypto.hexToBytes(event.pubkey);
-                var decryptedContent = Crypto.nip04Decrypt(event.content, net.getSharedSecretWithRetry(Crypto.Bech32.nip19Decode(net.getPrivateKeyBech32()), senderPubKeyXOnlyBytes));
+                var decryptedContent = Crypto.nip04Decrypt(event.content, Crypto.getSharedSecretWithRetry(Crypto.Bech32.nip19Decode(net.getPrivateKeyBech32()), senderPubKeyXOnlyBytes));
                 logger.info("Decrypted DM from {}: {}", event.pubkey.substring(0, 8), decryptedContent.substring(0, Math.min(decryptedContent.length(), 50)) + (decryptedContent.length() > 50 ? "..." : ""));
                 var partnerNpub = Crypto.Bech32.nip19Encode("npub", senderPubKeyXOnlyBytes);
                 var chatId = "chat_" + partnerNpub;
@@ -913,65 +616,6 @@ public class Netention {
         }
     }
 
-    public static class Sync {
-        private static final Logger logger = LoggerFactory.getLogger(Sync.class);
-        private final Nostr net;
-        private ScheduledExecutorService sched;
-        private ScheduledFuture<?> syncTaskFut;
-        private volatile boolean running = false;
-
-        public Sync(Nostr n) {
-            this.net = n;
-        }
-
-        public synchronized void start() {
-            if (running) {
-                logger.info("Sync service already running.");
-                return;
-            }
-            sched = Executors.newSingleThreadScheduledExecutor(r -> {
-                var t = new Thread(r, "NetentionSyncThread");
-                t.setDaemon(true);
-                return t;
-            });
-            syncTaskFut = sched.scheduleAtFixedRate(() -> {
-                try {
-                    if (net.isEnabled()) {
-                        logger.debug("Periodic sync: processing Nostr queue.");
-                        net.processQueue();
-                    } else logger.debug("Periodic sync: Nostr disabled.");
-                } catch (Exception e) {
-                    logger.error("Error during periodic sync", e);
-                }
-            }, 0, 30, TimeUnit.SECONDS);
-            running = true;
-            logger.info("Sync service started.");
-        }
-
-        public synchronized void stop() {
-            if (!running) {
-                logger.info("Sync service not running/stopped.");
-                return;
-            }
-            running = false;
-            if (syncTaskFut != null) syncTaskFut.cancel(false);
-            if (sched != null) {
-                sched.shutdown();
-                try {
-                    if (!sched.awaitTermination(5, TimeUnit.SECONDS)) sched.shutdownNow();
-                } catch (InterruptedException e) {
-                    sched.shutdownNow();
-                    Thread.currentThread().interrupt();
-                }
-            }
-            logger.info("Sync service stopped.");
-        }
-
-        public boolean isRunning() {
-            return running;
-        }
-    }
-
     public static class Nostr {
         private static final Logger logger = LoggerFactory.getLogger(Nostr.class);
         private final Config.NostrSettings cfg;
@@ -1070,7 +714,8 @@ public class Netention {
         private void handleRelayMessage(String relayUri, String message) {
             logger.trace("Relay {} RX: {}", relayUri, message);
             try {
-                var l = NostrUtil.fromJson(message, new TypeReference<List<Object>>() { });
+                var l = NostrUtil.fromJson(message, new TypeReference<List<Object>>() {
+                });
                 var type = (String) l.get(0);
                 var n = l.size();
 
@@ -1156,33 +801,13 @@ public class Netention {
             logger.info("Published Note (Kind 1): {}", e.id.substring(0, 8));
         }
 
-        public byte[] getSharedSecretWithRetry(byte[] myPrivKeyBytes, byte[] theirXOnlyPubKeyBytes) throws GeneralSecurityException {
-            var theirCompressed02 = new byte[33];
-            theirCompressed02[0] = 0x02;
-            System.arraycopy(theirXOnlyPubKeyBytes, 0, theirCompressed02, 1, 32);
-            try {
-                Crypto.CURVE.decodePoint(theirCompressed02);
-                return Crypto.getSharedSecret(myPrivKeyBytes, theirCompressed02);
-            } catch (Exception e) {
-                var theirCompressed03 = new byte[33];
-                theirCompressed03[0] = 0x03;
-                System.arraycopy(theirXOnlyPubKeyBytes, 0, theirCompressed03, 1, 32);
-                try {
-                    Crypto.CURVE.decodePoint(theirCompressed03);
-                    return Crypto.getSharedSecret(myPrivKeyBytes, theirCompressed03);
-                } catch (Exception e2) {
-                    throw new GeneralSecurityException("Could not derive shared secret: Invalid recipient public key (x-only). " + e.getMessage() + " | " + e2.getMessage());
-                }
-            }
-        }
-
         private void sendDirectMessageInternal(String recipientNpub, String message) throws Exception {
             var e = new NostrEvent();
             e.pubkey = this.publicKeyXOnlyHex;
             e.created_at = Instant.now().getEpochSecond();
             e.kind = 4;
             var recipientXOnlyBytes = Crypto.Bech32.nip19Decode(recipientNpub);
-            var sharedSecret = getSharedSecretWithRetry(this.privateKeyRaw, recipientXOnlyBytes);
+            var sharedSecret = Crypto.getSharedSecretWithRetry(this.privateKeyRaw, recipientXOnlyBytes);
             e.content = Crypto.nip04Encrypt(message, sharedSecret, recipientXOnlyBytes);
             e.tags.add(List.of("p", Crypto.bytesToHex(recipientXOnlyBytes)));
             e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
@@ -1452,7 +1077,6 @@ public class Netention {
                 trayIcon.displayMessage("Netention", "Running in background.", TrayIcon.MessageType.INFO);
             } else {
                 logger.info("Exiting application via window close.");
-                core.sync.stop();
                 if (core.net.isEnabled()) core.net.setEnabled(false);
                 System.exit(0);
             }
@@ -1644,19 +1268,6 @@ public class Netention {
                 }
             }));
             mb.add(nostrM);
-            var syncM = new JMenu("Sync");
-            var toggleSync = new JCheckBoxMenuItem("Enable Sync Service");
-            toggleSync.setSelected(core.sync.isRunning());
-            if (core.sync.isRunning()) core.sync.start();
-            else core.sync.stop();
-            toggleSync.addActionListener(e -> {
-                var en = toggleSync.isSelected();
-                if (en) core.sync.start();
-                else core.sync.stop();
-                statusPanel.updateStatus("Sync Service " + (en ? "Started" : "Stopped"));
-            });
-            syncM.add(toggleSync);
-            mb.add(syncM);
             var llmM = new JMenu("LLM");
             llmM.add(new JMenuItem(new AbstractAction("Initialize LLM Service") {
                 @Override
@@ -2459,7 +2070,7 @@ public class Netention {
             }
 
             public void updateStatus(String message) {
-                SwingUtilities.invokeLater(() -> label.setText(String.format("Status: %s | Nostr: %s | Sync: %s | LLM: %s", message, core.net.isEnabled() ? "ON" : "OFF", core.sync.isRunning() ? "RUN" : "STOP", core.lm.isReady() ? "READY" : "NOT READY")));
+                SwingUtilities.invokeLater(() -> label.setText(String.format("Status: %s | Nostr: %s | LLM: %s", message, core.net.isEnabled() ? "ON" : "OFF", core.lm.isReady() ? "READY" : "NOT READY")));
             }
         }
 
