@@ -69,15 +69,9 @@ public class Netention {
     }
 
 
-
     public static void main(String[] args) {
         var core = new Core();
         SwingUtilities.invokeLater(() -> {
-            try {
-                UIManager.setLookAndFeel( new DarkMetalLookAndFeel() );
-            } catch( Exception ex ) {
-                System.err.println( "Failed to initialize LaF" );
-            }
             new UI(core);
         });
     }
@@ -1008,6 +1002,15 @@ public class Netention {
 
     public static class UI extends JFrame {
         private static final Logger logger = LoggerFactory.getLogger(UI.class);
+
+        static {
+            try {
+                UIManager.setLookAndFeel(new DarkMetalLookAndFeel());
+            } catch (Exception ex) {
+                System.err.println("Failed to initialize LaF");
+            }
+        }
+
         private final Core core;
         private final JSplitPane contentInspectorSplit;
         private final NavPanel navPanel;
