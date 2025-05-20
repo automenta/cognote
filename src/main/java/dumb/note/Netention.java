@@ -2,63 +2,35 @@ package dumb.note;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
-import dumb.note.theme.DarkMetalLookAndFeel;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.event.ListSelectionEvent;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.image.BufferedImage;
+import javax.swing.text.BadLocationException;
 import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.GeneralSecurityException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.List;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.BiConsumer;
+import java.util.concurrent.*;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static java.util.Optional.empty;
-
+import static java.util.Optional.ofNullable;
 
 public class Netention {
 
@@ -66,17 +38,37 @@ public class Netention {
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
         System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "yyyy-MM-dd HH:mm:ss:SSS Z");
-    }
 
+        try {
+            UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
+        } catch (Exception ex) {
+            System.err.println("Failed to initialize LaF: " + ex.getMessage());
+        }
+    }
 
     public static void main(String[] args) {
         var core = new Core();
-        SwingUtilities.invokeLater(() -> {
-            new UI(core);
-        });
+        SwingUtilities.invokeLater(() -> new UI(core));
     }
 
     public enum FieldType {TEXT_FIELD, TEXT_AREA, COMBO_BOX, CHECK_BOX, PASSWORD_FIELD}
+
+    public enum ContentType {
+        TEXT_PLAIN("text/plain"), TEXT_HTML("text/html");
+        private final String value;
+
+        ContentType(String value) {
+            this.value = value;
+        }
+
+        public static ContentType fromString(String text) {
+            return Stream.of(values()).filter(ct -> ct.value.equalsIgnoreCase(text)).findFirst().orElse(TEXT_PLAIN);
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.FIELD)
@@ -92,40 +84,57 @@ public class Netention {
         String group() default "General";
     }
 
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Note {
-        public final List<String> tags = new ArrayList<>();
-        public final Map<String, Object> content = new HashMap<>();
-        public final Map<String, Object> metadata = new HashMap<>();
+        public final List<String> tags = new CopyOnWriteArrayList<>();
+        public final Map<String, Object> content = new ConcurrentHashMap<>();
+        public final Map<String, Object> meta = new ConcurrentHashMap<>();
+        public final List<Link> links = new CopyOnWriteArrayList<>();
         public String id = UUID.randomUUID().toString();
         public int version = 1;
         public Instant createdAt, updatedAt;
-        public List<Link> links = new ArrayList<>();
         public float[] embeddingV1;
 
         public Note() {
             createdAt = updatedAt = Instant.now();
+            content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
         }
 
         public Note(String t, String txt) {
             this();
-            this.content.putAll(Map.of("title", t, "text", txt));
+            this.content.putAll(Map.of(
+                    ContentKey.TITLE.getKey(), t,
+                    ContentKey.TEXT.getKey(), txt,
+                    ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()
+            ));
         }
 
         public String getTitle() {
-            return (String) content.getOrDefault("title", "Untitled");
+            return (String) content.getOrDefault(ContentKey.TITLE.getKey(), "Untitled");
         }
 
         public void setTitle(String t) {
-            content.put("title", t);
+            content.put(ContentKey.TITLE.getKey(), t);
         }
 
         public String getText() {
-            return (String) content.getOrDefault("text", "");
+            return (String) content.getOrDefault(ContentKey.TEXT.getKey(), "");
         }
 
         public void setText(String t) {
-            content.put("text", t);
+            content.put(ContentKey.TEXT.getKey(), t);
+            if (!ContentType.TEXT_HTML.getValue().equals(content.get(ContentKey.CONTENT_TYPE.getKey()))) {
+                content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
+            }
+        }
+
+        public ContentType getContentTypeEnum() {
+            return ContentType.fromString((String) content.getOrDefault(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()));
+        }
+
+        public String getContentType() {
+            return getContentTypeEnum().getValue();
         }
 
         public float[] getEmbeddingV1() {
@@ -136,8 +145,24 @@ public class Netention {
             this.embeddingV1 = e;
         }
 
+        public void setHtmlText(String html) {
+            content.put(ContentKey.TEXT.getKey(), html);
+            content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_HTML.getValue());
+        }
+
         public String getContentForEmbedding() {
-            return getTitle() + "\n" + getText();
+            var textContent = getText();
+            if (ContentType.TEXT_HTML.equals(getContentTypeEnum())) {
+                try {
+                    var pane = new JTextPane();
+                    pane.setContentType(ContentType.TEXT_HTML.getValue());
+                    pane.setText(textContent);
+                    textContent = pane.getDocument().getText(0, pane.getDocument().getLength());
+                } catch (BadLocationException e) {
+                    Core.logger.warn("Failed to strip HTML for embedding note {}: {}", id, e.getMessage());
+                }
+            }
+            return getTitle() + "\n" + textContent;
         }
 
         @Override
@@ -154,12 +179,64 @@ public class Netention {
         public int hashCode() {
             return Objects.hash(id);
         }
+
+        public enum ContentKey {
+            TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES,
+            PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN,
+            RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
+
+            public String getKey() {
+                return name().toLowerCase();
+            }
+        }
+
+        public enum Metadata {
+            PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
+            NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
+            PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition");
+            public final String key;
+
+            Metadata() {
+                this.key = name().toLowerCase();
+            }
+
+            Metadata(String key) {
+                this.key = key;
+            }
+
+        }
+
+        public enum SystemTag {
+            SYSTEM_EVENT("#system_event"), SYSTEM_PROCESS_HANDLER("#system_process_handler"),
+            SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
+            NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
+            CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
+            NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile");
+            public final String value;
+
+            SystemTag(String value) {
+                this.value = value;
+            }
+
+        }
+
+        public enum NoteProperty {
+            ID, TITLE, TEXT, CONTENT_TYPE, TAGS, LINKS, METADATA, CONTENT, CREATED_AT, UPDATED_AT;
+
+            public String getKey() {
+                return name().toLowerCase();
+            }
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Link {
-        public final String targetNoteId, relationType;
         public final Map<String, Object> properties = new HashMap<>();
+        public String targetNoteId;
+        public String relationType;
+
+        public Link() {
+        }
 
         public Link(String t, String r) {
             this.targetNoteId = t;
@@ -167,14 +244,369 @@ public class Netention {
         }
     }
 
+    public static class Planner {
+        private static final Logger logger = LoggerFactory.getLogger(Planner.class);
+        private static final int DEFAULT_MAX_RETRIES = 2;
+        private final Core core;
+        private final Map<String, PlanExecution> activePlans = new ConcurrentHashMap<>();
+        private final ObjectMapper objectMapper = Core.createObjectMapper();
+
+        public Planner(Core core) {
+            this.core = core;
+        }
+
+        @SuppressWarnings("unchecked")
+        public void executePlan(Note goal, Map<String, Object> initialContext) {
+            if (goal == null) {
+                logger.warn("Goal note is null, cannot execute plan.");
+                return;
+            }
+
+            var exe = activePlans.compute(goal.id, (k, existingExec) ->
+                    (existingExec != null && PlanState.RUNNING.equals(existingExec.currentStatus)) ?
+                            existingExec : new PlanExecution(goal.id, initialContext)
+            );
+            if (exe.context.isEmpty() && !initialContext.isEmpty()) exe.context.putAll(initialContext);
+
+
+            if (!PlanState.RUNNING.equals(exe.currentStatus) || exe.steps.isEmpty()) {
+                exe.currentStatus = PlanState.PARSING;
+                goal.meta.putAll(Map.of(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name(),
+                        Note.Metadata.PLAN_START_TIME.key, Instant.now().toString()));
+                core.saveNote(goal);
+
+                var planStepsData = goal.content.get(Note.ContentKey.PLAN_STEPS.getKey());
+                if (planStepsData instanceof List<?> rawStepsList && exe.steps.isEmpty()) {
+                    try {
+                        for (var i = 0; i < rawStepsList.size(); i++) {
+                            if (rawStepsList.get(i) instanceof Map rawStepObj) {
+                                var step = objectMapper.convertValue(rawStepObj, PlanStep.class);
+                                if (step.id == null || step.id.isEmpty() || step.id.matches("step\\d+_id_placeholder")) {
+                                    step.id = "step_" + i + "_" + UUID.randomUUID().toString().substring(0, 4);
+                                }
+                                exe.steps.add(step);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.error("Failed to parse plan steps for note {}", goal.id, e);
+                        exe.currentStatus = PlanState.FAILED_PARSING;
+                        goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                        core.saveNote(goal);
+                        activePlans.remove(goal.id);
+                        return;
+                    }
+                }
+
+                if (exe.steps.isEmpty() && goal.tags.contains(Note.SystemTag.GOAL_WITH_PLAN.value)) {
+                    try {
+                        var initialSteps = (List<PlanStep>) core.executeTool(Core.Tool.SUGGEST_PLAN_STEPS,
+                                Map.of(ToolParam.GOAL_TEXT.getKey(), goal.getText().isEmpty() ? goal.getTitle() : goal.getText()));
+                        if (initialSteps != null && !initialSteps.isEmpty()) exe.steps.addAll(initialSteps);
+                        else addDefaultInitialStep(exe, goal);
+                    } catch (Exception e) {
+                        logger.warn("Failed to get initial plan steps from LM for {}: {}", goal.id, e.getMessage());
+                        addDefaultInitialStep(exe, goal);
+                    }
+                } else if (exe.steps.isEmpty()) {
+                    logger.warn("Plan {} has no steps defined and is not a typical user goal for LM suggestion.", goal.id);
+                    exe.currentStatus = PlanState.FAILED_NO_STEPS;
+                    goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                    core.saveNote(goal);
+                    activePlans.remove(goal.id);
+                    return;
+                }
+
+                goal.content.put(Note.ContentKey.PLAN_STEPS.getKey(), exe.steps.stream().map(s -> objectMapper.convertValue(s, Map.class)).collect(Collectors.toList()));
+                exe.currentStatus = PlanState.RUNNING;
+                goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                core.saveNote(goal);
+            }
+            core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exe);
+            tick();
+        }
+
+        public void executePlan(Note goalNote) {
+            executePlan(goalNote, new HashMap<>());
+        }
+
+        private void addDefaultInitialStep(PlanExecution execution, Note goalNote) {
+            var initialStep = new PlanStep();
+            initialStep.description = "Initial analysis of goal: " + goalNote.getTitle();
+            initialStep.toolName = Core.Tool.LOG_MESSAGE.name();
+            initialStep.toolParams = Map.of(ToolParam.MESSAGE.getKey(), "Starting plan for: " + goalNote.getTitle());
+            execution.steps.add(initialStep);
+        }
+
+        public synchronized void tick() {
+            activePlans.values().stream()
+                    .filter(exec -> PlanState.RUNNING.equals(exec.currentStatus) || exec.steps.stream().anyMatch(s -> PlanStepState.PENDING_RETRY.equals(s.status)))
+                    .forEach(this::processExecution);
+        }
+
+        private void processExecution(PlanExecution exec) {
+            findNextRunnableStep(exec).ifPresentOrElse(currentStep -> {
+                if (PlanStepState.PENDING.equals(currentStep.status) || PlanStepState.PENDING_RETRY.equals(currentStep.status)) {
+                    currentStep.status = PlanStepState.RUNNING;
+                    currentStep.startTime = Instant.now();
+                    core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
+                    executeStep(exec, currentStep);
+                }
+            }, () -> updateOverallPlanStatus(exec));
+        }
+
+        private void updateOverallPlanStatus(PlanExecution exec) {
+            var allCompleted = exec.steps.stream().allMatch(s -> PlanStepState.COMPLETED.equals(s.status));
+            var anyFailedNoAlternativesOrRetries = exec.steps.stream().anyMatch(s -> PlanStepState.FAILED.equals(s.status) && s.retryCount >= s.maxRetries && (s.alternatives.isEmpty() || s.currentAlternativeIndex >= s.alternatives.size() - 1));
+            var anyRunningOrWaiting = exec.steps.stream().anyMatch(s -> Set.of(PlanStepState.RUNNING, PlanStepState.WAITING_FOR_USER, PlanStepState.PENDING_RETRY).contains(s.status));
+
+            if (allCompleted && !anyRunningOrWaiting) exec.currentStatus = PlanState.COMPLETED;
+            else if (anyFailedNoAlternativesOrRetries && !anyRunningOrWaiting) exec.currentStatus = PlanState.FAILED;
+            else if (!anyRunningOrWaiting && exec.steps.stream().noneMatch(s -> PlanStepState.PENDING.equals(s.status) || PlanStepState.PENDING_RETRY.equals(s.status))) {
+                exec.currentStatus = PlanState.STUCK;
+            }
+
+            if (!PlanState.RUNNING.equals(exec.currentStatus) && exec.steps.stream().noneMatch(s -> PlanStepState.PENDING_RETRY.equals(s.status))) {
+                core.notes.get(exec.planNoteId).ifPresent(n -> {
+                    n.meta.put(Note.Metadata.PLAN_STATUS.key, exec.currentStatus.name());
+                    if (Set.of(PlanState.COMPLETED, PlanState.FAILED, PlanState.STUCK).contains(exec.currentStatus)) {
+                        n.meta.put(Note.Metadata.PLAN_END_TIME.key, Instant.now().toString());
+                    }
+                    core.saveNote(n);
+                });
+                if (Set.of(PlanState.COMPLETED, PlanState.FAILED, PlanState.STUCK).contains(exec.currentStatus)) {
+                    activePlans.remove(exec.planNoteId);
+                }
+                core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
+            }
+        }
+
+        private Optional<PlanStep> findNextRunnableStep(PlanExecution exec) {
+            return exec.steps.stream()
+                    .filter(step -> PlanStepState.PENDING.equals(step.status) || PlanStepState.PENDING_RETRY.equals(step.status))
+                    .filter(step -> step.dependsOnStepIds.isEmpty() || step.dependsOnStepIds.stream().allMatch(depId ->
+                            exec.getStepById(depId).map(depStep -> PlanStepState.COMPLETED.equals(depStep.status)).orElseGet(() -> {
+                                logger.warn("Dependency step {} not found for step {}", depId, step.id);
+                                return false;
+                            })
+                    ))
+                    .findFirst();
+        }
+
+        private Object traversePath(Object current, String[] parts, int startIndex, PlanStep currentStepContext) {
+            var c = current;
+            for (var i = startIndex; i < parts.length; i++) {
+                if (c == null) return null;
+                var part = parts[i];
+                int I = i;
+                switch (c) {
+                    case PlanStep ps when "result".equals(part) && I == startIndex && ps == currentStepContext ->  // Handle $stepId.result
+                            c = ps.result;
+                    case Map map -> c = map.get(part);
+                    case JsonNode jn -> c = jn.has(part) ? jn.get(part) : null;
+                    default -> {
+                        return null;
+                    }
+                }
+            }
+            return c;
+        }
+
+        public Object resolveContextValue(String path, PlanExecution planExec) {
+            if (path == null || !path.startsWith("$")) return path;
+            var key = path.substring(1);
+            var parts = key.split("\\.");
+            Object currentValue;
+
+            if ("trigger".equals(parts[0])) {
+                currentValue = traversePath(planExec.context.get(parts[0]), parts, 1, null);
+            } else {
+                var stepOpt = planExec.getStepById(parts[0]);
+                if (stepOpt.isPresent()) {
+                    currentValue = traversePath(stepOpt.get(), parts, 1, stepOpt.get());
+                } else {
+                    currentValue = planExec.context.get(key);
+                }
+            }
+
+            if (currentValue instanceof JsonNode jn && jn.isValueNode()) {
+                if (jn.isTextual()) return jn.asText();
+                if (jn.isNumber()) return jn.numberValue();
+                if (jn.isBoolean()) return jn.asBoolean();
+                return jn.toString();
+            }
+            return (currentValue != null) ? currentValue : path;
+        }
+
+        private void executeStep(PlanExecution planExec, PlanStep step) {
+            new Thread(() -> {
+                var currentToolNameStr = step.toolName;
+                var currentToolParams = step.toolParams;
+
+                if (step.currentAlternativeIndex >= 0 && step.currentAlternativeIndex < step.alternatives.size()) {
+                    var alt = step.alternatives.get(step.currentAlternativeIndex);
+                    currentToolNameStr = alt.toolName();
+                    currentToolParams = alt.toolParams();
+                    logger.info("Executing alternative {} for step: {}", step.currentAlternativeIndex, step.description);
+                } else {
+                    logger.info("Executing primary for step: {}", step.description);
+                }
+
+                try {
+                    Map<String, Object> resolvedParams = new HashMap<>();
+                    if (currentToolParams != null) {
+                        for (var entry : currentToolParams.entrySet()) {
+                            var value = entry.getValue();
+                            resolvedParams.put(entry.getKey(), (value instanceof String valStr && valStr.startsWith("$")) ? resolveContextValue(valStr, planExec) : value);
+                        }
+                    }
+                    var currentTool = Core.Tool.fromString(currentToolNameStr);
+                    if (Core.Tool.USER_INTERACTION.equals(currentTool)) {
+                        var callbackKey = planExec.planNoteId + "_" + step.id;
+                        planExec.waitingCallbacks.put(callbackKey, step);
+                        step.status = PlanStepState.WAITING_FOR_USER;
+                        core.fireCoreEvent(Core.CoreEventType.USER_INTERACTION_REQUESTED, Map.of(
+                                ToolParam.PROMPT.getKey(), resolvedParams.getOrDefault(ToolParam.PROMPT.getKey(), "Provide input:"),
+                                ToolParam.CALLBACK_KEY.getKey(), callbackKey, ToolParam.PLAN_NOTE_ID.getKey(), planExec.planNoteId
+                        ));
+                        core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
+                        return;
+                    }
+
+                    var result = core.executeTool(currentTool, resolvedParams);
+                    step.result = result;
+                    if (step.id != null && result != null) planExec.context.put(step.id + ".result", result);
+                    step.status = PlanStepState.COMPLETED;
+                    logger.info("Step {} (Tool: {}) completed successfully.", step.description, currentToolNameStr);
+                } catch (Exception e) {
+                    logger.error("Step {} (Tool: {}) failed: {}", step.description, currentToolNameStr, e.getMessage(), e);
+                    if (step.currentAlternativeIndex < step.alternatives.size() - 1) {
+                        step.currentAlternativeIndex++;
+                        step.status = PlanStepState.PENDING_RETRY;
+                        logger.info("Will try next alternative for step {}", step.description);
+                    } else if (step.retryCount < step.maxRetries) {
+                        step.retryCount++;
+                        step.currentAlternativeIndex = -1; // Reset for primary tool retry
+                        step.status = PlanStepState.PENDING_RETRY;
+                        logger.info("Will retry (attempt {}) step {}", step.retryCount, step.description);
+                    } else {
+                        step.status = PlanStepState.FAILED;
+                        step.result = e.getMessage();
+                    }
+                } finally {
+                    if (Set.of(PlanStepState.COMPLETED, PlanStepState.FAILED).contains(step.status))
+                        step.endTime = Instant.now();
+                    core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
+                    SwingUtilities.invokeLater(this::tick);
+                }
+            }).start();
+        }
+
+        public void postUserInteractionResult(String callbackKey, Object result) {
+            activePlans.values().stream()
+                    .filter(exec -> exec.waitingCallbacks.containsKey(callbackKey))
+                    .findFirst().ifPresent(exec -> {
+                        var step = exec.waitingCallbacks.remove(callbackKey);
+                        if (step != null) {
+                            step.result = result;
+                            step.status = (result == null || (result instanceof String s && s.isEmpty())) ? PlanStepState.FAILED : PlanStepState.COMPLETED;
+                            logger.info("User interaction for step {} {}.", step.description, step.status == PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
+                            if (step.id != null && result != null) exec.context.put(step.id + ".result", result);
+                            step.endTime = Instant.now();
+                            core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
+                            SwingUtilities.invokeLater(this::tick);
+                        }
+                    });
+        }
+
+        public Optional<PlanExecution> getPlanExecution(String planNoteId) {
+            return ofNullable(activePlans.get(planNoteId));
+        }
+
+        public Map<String, PlanExecution> getActivePlans() {
+            return Collections.unmodifiableMap(activePlans);
+        }
+
+        public enum PlanStepKey {
+            ID, DESCRIPTION, TOOL_NAME, TOOL_PARAMS, DEPENDS_ON_STEP_IDS, STATUS, RESULT, OUTPUT_NOTE_ID, START_TIME, END_TIME, ALTERNATIVES, RETRY_COUNT, MAX_RETRIES, CURRENT_ALTERNATIVE_INDEX;
+
+            public String getKey() {
+                return name().toLowerCase();
+            }
+        }
+
+        public enum PlanState {PENDING, RUNNING, COMPLETED, FAILED, STUCK, PARSING, FAILED_PARSING, FAILED_NO_STEPS}
+
+        public enum PlanStepState {PENDING, RUNNING, COMPLETED, FAILED, WAITING_FOR_USER, PENDING_RETRY}
+
+        public enum ToolParam {
+            MESSAGE, NOTE_ID, PROPERTY_PATH, FAIL_IF_NOT_FOUND, DEFAULT_VALUE, JSON_STRING, ID, TITLE, TEXT, AS_HTML, TAGS, CONTENT, METADATA, CONTENT_UPDATE,
+            NOSTR_PUB_KEY_HEX, PROFILE_DATA, CONDITION, TRUE_STEPS, FALSE_STEPS, EVENT_PAYLOAD_MAP, PARTNER_PUB_KEY_HEX, SENDER_PUB_KEY_HEX,
+            MESSAGE_CONTENT, TIMESTAMP_EPOCH_SECONDS, EVENT_TYPE, EVENT_DATA, GOAL_TEXT, PAYLOAD, DELAY_SECONDS, TAG, LIST, LOOP_VAR, LOOP_STEPS,
+            QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID;
+
+            public String getKey() {
+                return name().toLowerCase();
+            }
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class PlanStep {
+            public final List<String> dependsOnStepIds = new ArrayList<>();
+            public final List<AlternativeExecution> alternatives = new ArrayList<>();
+            public final int maxRetries = DEFAULT_MAX_RETRIES;
+            public String id = UUID.randomUUID().toString();
+            public String description;
+            public String toolName;
+            public Map<String, Object> toolParams = new HashMap<>();
+            public PlanStepState status = PlanStepState.PENDING;
+            public Object result;
+            public String outputNoteId;
+            public Instant startTime, endTime;
+            public int retryCount = 0;
+            public int currentAlternativeIndex = -1;
+        }
+
+        public static class PlanExecution {
+            public final String planNoteId;
+            public final List<PlanStep> steps = new CopyOnWriteArrayList<>();
+            public final Map<String, Object> context = new ConcurrentHashMap<>();
+            public final Map<String, PlanStep> waitingCallbacks = new ConcurrentHashMap<>();
+            public PlanState currentStatus = PlanState.PENDING;
+
+            public PlanExecution(String planNoteId) {
+                this.planNoteId = planNoteId;
+            }
+
+            public PlanExecution(String planNoteId, Map<String, Object> initialContext) {
+                this.planNoteId = planNoteId;
+                this.context.putAll(initialContext);
+            }
+
+            public Optional<PlanStep> getStepById(String id) {
+                return steps.stream().filter(s -> s.id.equals(id)).findFirst();
+            }
+        }
+
+        public record AlternativeExecution(String toolName, Map<String, Object> toolParams, double confidenceScore,
+                                           String rationale) {
+        }
+    }
+
     public static class Core {
-        private static final Logger logger = LoggerFactory.getLogger(Core.class);
+        public static final Logger logger = LoggerFactory.getLogger(Core.class);
         public final Notes notes;
         public final Config cfg;
         public final Nostr net;
         public final LM lm;
-        private final Map<String, Consumer<String>> events = new ConcurrentHashMap<>();
+        public final Planner planner;
+        public final Map<Tool, BiFunction<Core, Map<String, Object>, Object>> tools = new ConcurrentHashMap<>();
+        public final ObjectMapper json = createObjectMapper();
         private final List<Consumer<CoreEvent>> coreEventListeners = new CopyOnWriteArrayList<>();
+        final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            var t = new Thread(r, "NetentionCoreScheduler");
+            t.setDaemon(true);
+            return t;
+        });
 
         public Core() {
             var dDir = Paths.get(System.getProperty("user.home"), ".netention", "data");
@@ -184,15 +616,70 @@ public class Netention {
                 logger.error("Failed to create data dir {}", dDir, e);
                 throw new RuntimeException("Init failed: data dir error.", e);
             }
+
             this.notes = new Notes(dDir);
-            this.cfg = new Config(notes);
+            this.cfg = new Config(notes, this);
+            this.planner = new Planner(this);
+            Tools.registerAllTools(tools);
+            bootstrapSystemNotes();
+
+            Stream.of("nostr", "ui", "llm").forEach(typeKey -> {
+                var noteId = Config.CONFIG_NOTE_PREFIX + typeKey;
+                if (notes.get(noteId).isEmpty()) {
+                    logger.info("Config note {} not found after bootstrap. Creating with defaults.", noteId);
+                    var configInstance = switch (typeKey) {
+                        case "nostr" -> cfg.net;
+                        case "ui" -> cfg.ui;
+                        case "llm" -> cfg.lm;
+                        default -> null;
+                    };
+                    cfg.saveConfigObjectToNote(configInstance, typeKey);
+                }
+            });
+
+            fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.LOAD_ALL_CONFIGS_REQUESTED.name(),
+                    Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
+                    Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
+            ));
             this.lm = new LM(cfg);
-            this.net = new Nostr(cfg, this::handleIncomingNostrEvent, () -> cfg.net.publicKeyBech32);
+            this.net = new Nostr(cfg, this, this::handleRawNostrEvent, () -> cfg.net.publicKeyBech32);
+            scheduler.schedule(() -> fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(),
+                    Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
+                    Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
+            )), 30, TimeUnit.SECONDS);
+
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 logger.info("Netention stop...");
+                scheduler.shutdownNow();
                 if (net.isEnabled()) net.setEnabled(false);
+                logger.info("Netention shutdown complete.");
             }));
             logger.info("NetentionCore initialized.");
+        }
+
+        public static ObjectMapper createObjectMapper() {
+            return new ObjectMapper().registerModule(new JavaTimeModule())
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+                    .configure(SerializationFeature.INDENT_OUTPUT, true)
+                    .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        }
+
+        static Object getNoteSpecificProperty(Note n, String propertyNameStr) {
+            var propertyName = Note.NoteProperty.valueOf(propertyNameStr.toUpperCase());
+            return switch (propertyName) {
+                case ID -> n.id;
+                case TITLE -> n.getTitle();
+                case TEXT -> n.getText();
+                case CONTENT_TYPE -> n.getContentType();
+                case TAGS -> new ArrayList<>(n.tags);
+                case LINKS -> new ArrayList<>(n.links);
+                case METADATA -> new HashMap<>(n.meta);
+                case CONTENT -> new HashMap<>(n.content);
+                case CREATED_AT -> n.createdAt;
+                case UPDATED_AT -> n.updatedAt;
+            };
         }
 
         public void addCoreEventListener(Consumer<CoreEvent> listener) {
@@ -203,99 +690,335 @@ public class Netention {
             coreEventListeners.remove(listener);
         }
 
-        private void fireCoreEvent(CoreEventType type, Object data) {
+        public void fireCoreEvent(CoreEventType type, Object data) {
             var event = new CoreEvent(type, data);
-            coreEventListeners.forEach(l -> SwingUtilities.invokeLater(() -> l.accept(event)));
+            if (type == CoreEventType.SYSTEM_EVENT_REQUESTED && data instanceof Map<?, ?> eventDetailsMap) {
+                @SuppressWarnings("unchecked") var details = (Map<String, Object>) eventDetailsMap;
+                var systemEventNote = new Note();
+                systemEventNote.tags.add(Note.SystemTag.SYSTEM_EVENT.value);
+                var eventTypeVal = details.get(Planner.ToolParam.EVENT_TYPE.getKey());
+                systemEventNote.content.put(Note.ContentKey.EVENT_TYPE.getKey(), Objects.requireNonNullElse(eventTypeVal, SystemEventType.UNKNOWN_EVENT_TYPE.name()).toString());
+                if (eventTypeVal == null)
+                    logger.error("SYSTEM_EVENT_REQUESTED fired with null eventType in data: {}", data);
+                systemEventNote.content.put(Note.ContentKey.PAYLOAD.getKey(), Objects.requireNonNullElse(details.get(Planner.ToolParam.PAYLOAD.getKey()), Collections.emptyMap()));
+                systemEventNote.content.put(Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name());
+                saveNote(systemEventNote);
+            } else {
+                coreEventListeners.forEach(l -> SwingUtilities.invokeLater(() -> l.accept(event)));
+            }
         }
 
         public Note saveNote(Note note) {
             if (note == null) return null;
             var savedNote = notes.save(note);
             fireCoreEvent(savedNote.version == 1 ? CoreEventType.NOTE_ADDED : CoreEventType.NOTE_UPDATED, savedNote);
+            checkForSystemTriggers(savedNote);
             return savedNote;
         }
 
         public boolean deleteNote(String noteId) {
             if (notes.delete(noteId)) {
-                fireCoreEvent(CoreEventType.NOTE_DELETED, noteId);
+                fireCoreEvent(Core.CoreEventType.NOTE_DELETED, noteId);
                 return true;
             }
             return false;
         }
 
-        public void on(String cId, Consumer<String> l) {
-            events.put(cId, l);
-        }
-
-        public void off(String cId) {
-            events.remove(cId);
+        private void handleRawNostrEvent(Nostr.NostrEvent event) {
+            logger.debug("Queueing Nostr event as System Event Note: kind={}, id={}", event.kind, event.id);
+            try {
+                var eventType = switch (event.kind) {
+                    case 0 -> SystemEventType.NOSTR_KIND0_RECEIVED;
+                    case 1 -> SystemEventType.NOSTR_KIND1_RECEIVED;
+                    case 4 -> SystemEventType.NOSTR_KIND4_RECEIVED;
+                    default -> SystemEventType.NOSTR_KIND_UNKNOWN_RECEIVED;
+                };
+                fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                        Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name(),
+                        Planner.ToolParam.PAYLOAD.getKey(), json.convertValue(event, Map.class),
+                        Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name(),
+                        "originalKind", event.kind
+                ));
+            } catch (Exception e) {
+                logger.error("Failed to process raw NostrEvent for system event note: {}", e.getMessage(), e);
+            }
         }
 
         @SuppressWarnings("unchecked")
-        private void handleIncomingNostrEvent(Nostr.NostrEvent event) {
-            logger.debug("Handling Nostr event: kind={},id={}", event.kind, event.id);
-            switch (event.kind) {
-                case 4 -> handleIncomingPrivateMessage(event);
-                case 1 -> handleIncomingPublicMessage(event);
-            }
-        }
+        private void checkForSystemTriggers(Note triggeredNote) {
+            if (!triggeredNote.tags.contains(Note.SystemTag.SYSTEM_EVENT.value)) return;
+            var handlers = notes.getAll(n -> n.tags.contains(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value));
+            for (var handlerNote : handlers) {
+                var handlerContent = handlerNote.content;
+                var expectedEventType = (String) handlerContent.get("triggerEventType");
+                var expectedStatus = (String) handlerContent.get("triggerStatus");
+                var eventNoteContent = triggeredNote.content;
+                var eventTypeMatches = expectedEventType != null && expectedEventType.equals(eventNoteContent.get(Note.ContentKey.EVENT_TYPE.getKey()));
+                var statusMatches = expectedStatus == null || expectedStatus.equals(eventNoteContent.get(Note.ContentKey.STATUS.getKey()));
 
-        private void handleIncomingPublicMessage(Nostr.NostrEvent event) {
-            logger.info("CORE: Processing incoming public message (Kind 1) from pubkey {}, event ID: {}", event.pubkey.substring(0, 8), event.id.substring(0, 8));
-            try {
-                var noteId = "nostr_event_" + event.id;
-                if (notes.get(noteId).isEmpty()) {
-                    var noteTitle = "Nostr: " + event.content.substring(0, Math.min(event.content.length(), 30)) + (event.content.length() > 30 ? "..." : "");
-                    var pubN = new Note(noteTitle, event.content);
-                    pubN.id = noteId;
-                    pubN.tags.add("nostr_feed");
-                    try {
-                        pubN.metadata.putAll(Map.of(
-                                "nostrEventId", event.id,
-                                "nostrPubKey", Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(event.pubkey)),
-                                "nostrRawEvent", Nostr.NostrUtil.toJson(event)
-                        ));
-                    } catch (Exception e) {
-                        logger.warn("Could not set all metadata for public Nostr note {}: {}", noteId, e.getMessage());
+                if (eventTypeMatches && statusMatches) {
+                    logger.info("System trigger matched for handler {} by event note {}", handlerNote.id, triggeredNote.id);
+                    var existingExecution = planner.getPlanExecution(handlerNote.id).orElse(null);
+                    if (existingExecution != null && Planner.PlanState.RUNNING.equals(existingExecution.currentStatus)) {
+                        logger.warn("Handler plan {} is already running. Skipping new trigger by {}.", handlerNote.id, triggeredNote.id);
+                        continue;
                     }
-                    pubN.createdAt = Instant.ofEpochSecond(event.created_at);
-                    var savedPubN = notes.save(pubN);
-                    fireCoreEvent(CoreEventType.NOTE_ADDED, savedPubN);
-                    logger.info("CORE: Saved public Nostr event {} as Note ID {}", event.id.substring(0, 8), savedPubN.id);
-                } else {
-                    logger.debug("Skipping already processed public Nostr event ID {}", event.id.substring(0, 8));
+                    Map<String, Object> planContext = new HashMap<>();
+                    planContext.put("trigger", Map.of("sourceEventNoteId", triggeredNote.id, "eventContent", new HashMap<>(triggeredNote.content)));
+                    planner.executePlan(handlerNote, planContext);
                 }
-            } catch (Exception e) {
-                logger.error("Critical error in handleIncomingPublicMessage for event {}: {}", event.id, e.getMessage(), e);
             }
         }
 
-        private void handleIncomingPrivateMessage(Nostr.NostrEvent event) {
+        private void bootstrapSystemNotes() {
+            logger.info("Bootstrapping system notes...");
+            PlanDefBuilder.create("system_listener_nostr_kind0_handler")
+                    .title("System Listener: Nostr Kind 0 (Profile) Handler")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.NOSTR_KIND0_RECEIVED, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s0a_get_self_info", Tool.GET_SELF_NOSTR_INFO, Map.of())
+                    .step("s1_parse_profile", Tool.PARSE_JSON, Map.of(Planner.ToolParam.JSON_STRING, "$s0_get_payload.result.content"), "s0_get_payload")
+                    .step("s2_if_self_profile", Tool.IF_ELSE, Map.of(
+                            Planner.ToolParam.CONDITION, "$s0_get_payload.result.pubkey == $s0a_get_self_info.result.pubKeyHex",
+                            Planner.ToolParam.TRUE_STEPS, List.of(
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$s0a_get_self_info.result.myProfileNoteId", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(Note.ContentKey.PROFILE_NAME.getKey(), "$s1_parse_profile.result.name", Note.ContentKey.PROFILE_ABOUT.getKey(), "$s1_parse_profile.result.about", Note.ContentKey.PROFILE_PICTURE_URL.getKey(), "$s1_parse_profile.result.picture", "metadataUpdate", Map.of(Note.Metadata.PROFILE_LAST_UPDATED_AT.key, "NOW")))),
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Updated own Nostr profile from Kind 0 event."))
+                            ),
+                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_OR_UPDATE_CONTACT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.PROFILE_DATA.getKey(), "$s1_parse_profile.result")))
+                    ), "s0_get_payload", "s0a_get_self_info", "s1_parse_profile")
+                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_self_profile")
+                    .bootstrap(this);
+
+            PlanDefBuilder.create("system_listener_nostr_kind1_handler")
+                    .title("System Listener: Nostr Kind 1 Handler")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.NOSTR_KIND1_RECEIVED, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s1_check_exists", Tool.GET_NOTE_PROPERTY, "Check if Nostr event note already exists", Map.of(Planner.ToolParam.NOTE_ID, "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.PROPERTY_PATH, Note.NoteProperty.ID.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false), "s0_get_payload")
+                    .step("s2_if_else", Tool.IF_ELSE, "Process if new, else log", Map.of(
+                            Planner.ToolParam.CONDITION, "$s1_check_exists.result == null",
+                            Planner.ToolParam.TRUE_STEPS, List.of(
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.ID.getKey(), "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.TITLE.getKey(), "Nostr: $s0_get_payload.result.content_substring_30", Planner.ToolParam.TEXT.getKey(), "$s0_get_payload.result.content", Planner.ToolParam.TAGS.getKey(), List.of(Note.SystemTag.NOSTR_FEED.value), Planner.ToolParam.METADATA.getKey(), Map.of(Note.Metadata.NOSTR_EVENT_ID.key, "$s0_get_payload.result.id", Note.Metadata.NOSTR_PUB_KEY_HEX.key, "$s0_get_payload.result.pubkey", Note.Metadata.NOSTR_PUB_KEY.key, "$s0_get_payload.result.pubkey_npub", Note.Metadata.NOSTR_RAW_EVENT.key, "$s0_get_payload.result", Note.Metadata.CREATED_AT_FROM_EVENT.key, "$s0_get_payload.result.created_at"))),
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_OR_UPDATE_CONTACT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))
+                            ),
+                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Skipping duplicate Nostr Kind 1 event: $s0_get_payload.result.id")))
+                    ), "s0_get_payload", "s1_check_exists")
+                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_else")
+                    .bootstrap(this);
+
+            PlanDefBuilder.create("system_listener_nostr_kind4_handler")
+                    .title("System Listener: Nostr Kind 4 (DM) Handler")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.NOSTR_KIND4_RECEIVED, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(Planner.ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload")
+                    .step("s2_update_contact", Tool.CREATE_OR_UPDATE_CONTACT_NOTE, "Update contact for sender", Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX, "$s0_get_payload.result.pubkey"), "s0_get_payload")
+                    .step("s3_if_lm_result", Tool.IF_ELSE, "Handle if LM result or regular DM", Map.of(
+                            Planner.ToolParam.CONDITION, "$s1_decrypt_dm.result.isLmResult == true",
+                            Planner.ToolParam.TRUE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.DISTRIBUTED_LM_RESULT.name(), Planner.ToolParam.EVENT_DATA.getKey(), "$s1_decrypt_dm.result.lmResultPayload"))),
+                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText", Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at")))
+                    ), "s1_decrypt_dm", "s2_update_contact")
+                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s3_if_lm_result")
+                    .bootstrap(this);
+
+            for (var type : new String[]{"nostr", "ui", "llm"}) {
+                var eventType = SystemEventType.valueOf("SAVE_" + type.toUpperCase() + "_CONFIG_REQUESTED");
+                PlanDefBuilder.create("system_listener_save_" + type + "_config_handler")
+                        .title("System Listener: Save " + type.toUpperCase() + " Config")
+                        .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                        .trigger(eventType, Planner.PlanState.PENDING)
+                        .step("s1_get_state", Tool.GET_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type))
+                        .step("s2_save_to_note", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.CONTENT_UPDATE, "$s1_get_state.result"), "s1_get_state")
+                        .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_save_to_note")
+                        .bootstrap(this);
+            }
+
+            var loadAllConfigsBuilder = PlanDefBuilder.create("system_listener_load_all_configs_handler")
+                    .title("System Listener: Load All Configurations")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.LOAD_ALL_CONFIGS_REQUESTED, Planner.PlanState.PENDING);
+            List<String> lastApplyStepIds = new ArrayList<>();
+            for (var type : List.of("nostr", "ui", "llm")) {
+                var getId = "s_load_" + type + "_get_content";
+                var applyId = "s_load_" + type + "_apply";
+                loadAllConfigsBuilder.step(getId, Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.PROPERTY_PATH, Note.NoteProperty.CONTENT.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false));
+                loadAllConfigsBuilder.step(applyId, Tool.APPLY_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type, Planner.ToolParam.STATE_MAP, "$" + getId + ".result"), getId);
+                lastApplyStepIds.add(applyId);
+            }
+            loadAllConfigsBuilder.step("s_load_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), lastApplyStepIds.toArray(String[]::new))
+                    .bootstrap(this);
+
+
+            PlanDefBuilder.create("system_listener_persistent_query_handler")
+                    .title("System Listener: Persistent Query Handler")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.EVALUATE_PERSISTENT_QUERIES, Planner.PlanState.PENDING)
+                    .step("s1_log_start", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Evaluating persistent queries..."))
+                    .step("s2_find_queries", Tool.FIND_NOTES_BY_TAG, Map.of(Planner.ToolParam.TAG, Note.SystemTag.PERSISTENT_QUERY.value))
+                    .step("s3_foreach_query", Tool.FOR_EACH, Map.of(
+                            Planner.ToolParam.LIST, "$s2_find_queries.result", Planner.ToolParam.LOOP_VAR, "queryNote",
+                            Planner.ToolParam.LOOP_STEPS, List.of(
+                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_1_get_content", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.GET_NOTE_PROPERTY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.PROPERTY_PATH.getKey(), Note.NoteProperty.CONTENT.getKey())),
+                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_2_exec_query", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.EXECUTE_SEMANTIC_QUERY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), "$s3_1_get_content.result"),
+                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_3_update_note", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(Note.ContentKey.RESULTS.getKey(), "$s3_2_exec_query.result", Note.ContentKey.LAST_RUN.getKey(), "NOW")))
+                            )
+                    ), "s2_find_queries")
+                    .step("s4_reschedule", Tool.SCHEDULE_SYSTEM_EVENT, Map.of(Planner.ToolParam.EVENT_TYPE, SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(), Planner.ToolParam.DELAY_SECONDS, 3600L), "s3_foreach_query")
+                    .step("s5_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s4_reschedule")
+                    .bootstrap(this);
+
+            PlanDefBuilder.create("system_listener_stalled_plan_handler")
+                    .title("System Listener: Stalled Plan Handler")
+                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.STALLED_PLAN_DETECTED, Planner.PlanState.PENDING)
+                    .step("s1_get_plan_id", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload.planNoteId"))
+                    .step("s2_log_stalled", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Stalled plan detected: $s1_get_plan_id.result. Consider user notification or automated actions."), "s1_get_plan_id")
+                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_log_stalled")
+                    .bootstrap(this);
+        }
+
+        public Object executeTool(Tool tool, Map<String, Object> params) {
+            if (tool == null || !tools.containsKey(tool)) throw new IllegalArgumentException("Tool not found: " + tool);
+            logger.info("Executing tool: {} with params: {}", tool.name(), params);
             try {
-                var senderPubKeyXOnlyBytes = Crypto.hexToBytes(event.pubkey);
-                var decryptedContent = Crypto.nip04Decrypt(event.content, Crypto.getSharedSecretWithRetry(Crypto.Bech32.nip19Decode(net.getPrivateKeyBech32()), senderPubKeyXOnlyBytes));
-                logger.info("Decrypted DM from {}: {}", event.pubkey.substring(0, 8), decryptedContent.substring(0, Math.min(decryptedContent.length(), 50)) + (decryptedContent.length() > 50 ? "..." : ""));
-                var partnerNpub = Crypto.Bech32.nip19Encode("npub", senderPubKeyXOnlyBytes);
-                var chatId = "chat_" + partnerNpub;
-                var chatNote = notes.get(chatId).orElseGet(() -> {
-                    var nCN = new Note("Chat with " + partnerNpub.substring(0, 10) + "...", "");
-                    nCN.id = chatId;
-                    nCN.tags.addAll(List.of("chat", "nostr"));
-                    nCN.metadata.put("nostrPubKey", partnerNpub);
-                    nCN.content.put("messages", new ArrayList<Map<String, String>>());
-                    logger.info("Created new chat note for {}", partnerNpub);
-                    return nCN;
-                });
-                ((List<Map<String, String>>) chatNote.content.get("messages")).add(Map.of("sender", partnerNpub, "timestamp", Instant.ofEpochSecond(event.created_at).toString(), "text", decryptedContent));
-                var savedChatNote = notes.save(chatNote);
-                fireCoreEvent(savedChatNote.version == 1 ? CoreEventType.NOTE_ADDED : CoreEventType.NOTE_UPDATED, savedChatNote);
-                Optional.ofNullable(events.get(chatId)).ifPresent(l -> SwingUtilities.invokeLater(() -> l.accept(partnerNpub.substring(0, 8) + ": " + decryptedContent)));
+                return tools.get(tool).apply(this, params);
             } catch (Exception e) {
-                logger.error("Error processing NIP04Event {}: {}", event.id, e.getMessage(), e);
+                logger.error("Error executing tool {}: {}", tool.name(), e.getMessage(), e);
+                throw e;
             }
         }
 
-        public enum CoreEventType {NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED}
+        public List<Note> findRelatedNotes(Note sourceNote, int maxResults, double minSimilarity) {
+            if (sourceNote == null || sourceNote.getEmbeddingV1() == null || !lm.isReady())
+                return Collections.emptyList();
+            var sourceEmbedding = sourceNote.getEmbeddingV1();
+            return notes.getAllNotes().stream()
+                    .filter(n -> {
+                        if (n.id.equals(sourceNote.id) || n.getEmbeddingV1() == null || n.getEmbeddingV1().length != sourceEmbedding.length)
+                            return false;
+                        return !n.tags.contains(Note.SystemTag.CONFIG.value);
+                    })
+                    .map(candidateNote -> new AbstractMap.SimpleEntry<>(candidateNote, LM.cosineSimilarity(sourceEmbedding, candidateNote.getEmbeddingV1())))
+                    .filter(entry -> entry.getValue() > minSimilarity)
+                    .sorted(Map.Entry.<Note, Double>comparingByValue().reversed())
+                    .limit(maxResults)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+        }
+
+        public enum CoreEventType {
+            NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED, PLAN_UPDATED, USER_INTERACTION_REQUESTED, DISTRIBUTED_LM_RESULT,
+            CONFIG_CHANGED, STATUS_MESSAGE, CHAT_MESSAGE_ADDED, ACTIONABLE_ITEM_ADDED, ACTIONABLE_ITEM_REMOVED, SYSTEM_EVENT_REQUESTED
+        }
+
+        public enum SystemEventType {
+            NOSTR_KIND0_RECEIVED, NOSTR_KIND1_RECEIVED, NOSTR_KIND4_RECEIVED, NOSTR_KIND_UNKNOWN_RECEIVED,
+            SAVE_NOSTR_CONFIG_REQUESTED, SAVE_UI_CONFIG_REQUESTED, SAVE_LLM_CONFIG_REQUESTED,
+            LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE
+        }
+
+        public enum Tool {
+            LOG_MESSAGE, USER_INTERACTION, GET_NOTE_PROPERTY, PARSE_JSON, CREATE_NOTE, MODIFY_NOTE_CONTENT, DELETE_NOTE,
+            CREATE_OR_UPDATE_CONTACT_NOTE, IF_ELSE, DECRYPT_NOSTR_DM, UPDATE_CHAT_NOTE, FIRE_CORE_EVENT,
+            SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY,
+            CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS,
+            GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO,
+            DECOMPOSE_GOAL(true), PLAN(true), GET_PLAN_DEPENDENCIES(true), ASSERT_KIF(true), QUERY(true), RETRACT(true),
+            API(true), ECHO(true), FILE_OPERATIONS(true), GENERATE_TASK_LOGIC(true), INSPECT(true), EVAL_EXPR(true),
+            GENERATE(true), REFLECT(true), REASON(true), DEFINE_CONCEPT(true), EXEC(true), GRAPH_SEARCH(true),
+            CODE_WRITING(true), CODE_EXECUTION(true), FIND_ASSERTIONS(true), IDENTIFY_CONCEPTS(true), SUMMARIZE(true), ENHANCE(true);
+            private final boolean placeholder;
+
+            Tool() {
+                this(false);
+            }
+
+            Tool(boolean placeholder) {
+                this.placeholder = placeholder;
+            }
+
+            public static Tool fromString(String text) {
+                return Stream.of(values()).filter(t -> t.name().equalsIgnoreCase(text)).findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("No enum constant Core.Tool." + text));
+            }
+
+            public boolean isPlaceholder() {
+                return placeholder;
+            }
+        }
+
+        private static class PlanDefBuilder {
+            private final String noteId;
+            private final List<String> tags = new ArrayList<>();
+            private final Map<String, Object> contentProperties = new HashMap<>();
+            private final List<Map<String, Object>> steps = new ArrayList<>();
+            private String title;
+
+            private PlanDefBuilder(String noteId) {
+                this.noteId = noteId;
+            }
+
+            public static PlanDefBuilder create(String noteId) {
+                return new PlanDefBuilder(noteId);
+            }
+
+            public PlanDefBuilder title(String title) {
+                this.title = title;
+                return this;
+            }
+
+            public PlanDefBuilder tags(String... tags) {
+                this.tags.addAll(List.of(tags));
+                return this;
+            }
+
+            public PlanDefBuilder trigger(SystemEventType eventType, Planner.PlanState status) {
+                this.contentProperties.put("triggerEventType", eventType.name());
+                this.contentProperties.put("triggerStatus", status.name());
+                return this;
+            }
+
+            public PlanDefBuilder step(String id, Tool tool, Map<Planner.ToolParam, Object> params, String... dependsOn) {
+                Map<String, Object> stepMap = new HashMap<>();
+                stepMap.put(Planner.PlanStepKey.ID.getKey(), id);
+                stepMap.put(Planner.PlanStepKey.TOOL_NAME.getKey(), tool.name());
+                stepMap.put(Planner.PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream()
+                        .collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
+                if (dependsOn.length > 0)
+                    stepMap.put(Planner.PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
+                this.steps.add(stepMap);
+                return this;
+            }
+
+            public PlanDefBuilder step(String id, Tool tool, String description, Map<Planner.ToolParam, Object> params, String... dependsOn) {
+                Map<String, Object> stepMap = new HashMap<>();
+                stepMap.put(Planner.PlanStepKey.ID.getKey(), id);
+                stepMap.put(Planner.PlanStepKey.DESCRIPTION.getKey(), description);
+                stepMap.put(Planner.PlanStepKey.TOOL_NAME.getKey(), tool.name());
+                stepMap.put(Planner.PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream()
+                        .collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
+                if (dependsOn.length > 0)
+                    stepMap.put(Planner.PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
+                this.steps.add(stepMap);
+                return this;
+            }
+
+            public void bootstrap(Core core) {
+                if (core.notes.get(noteId).isPresent()) {
+                    logger.debug("System plan {} already exists, skipping bootstrap.", noteId);
+                    return;
+                }
+                var handlerNote = new Note();
+                handlerNote.id = noteId;
+                handlerNote.setTitle(title);
+                handlerNote.tags.addAll(tags);
+                handlerNote.content.putAll(contentProperties);
+                handlerNote.content.put(Note.ContentKey.PLAN_STEPS.getKey(), steps);
+                core.notes.save(handlerNote, true);
+                logger.info("Bootstrapped system note: {}", noteId);
+            }
+        }
 
         public record CoreEvent(CoreEventType type, Object data) {
         }
@@ -304,14 +1027,10 @@ public class Netention {
     public static class Notes {
         private static final Logger logger = LoggerFactory.getLogger(Notes.class);
         private final Path dir;
-        private final ObjectMapper json;
+        private final ObjectMapper json = Core.createObjectMapper();
         private final Map<String, Note> cache = new ConcurrentHashMap<>();
 
         public Notes(Path dir) {
-            this.json = new ObjectMapper()
-                    .registerModule(new JavaTimeModule())
-                    .configure(SerializationFeature.INDENT_OUTPUT, true)
-                    .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
             this.dir = dir;
             load();
         }
@@ -322,25 +1041,50 @@ public class Netention {
                 return;
             }
             try (var ps = Files.walk(dir)) {
-                ps.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".json")).forEach(this::load);
+                ps.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".json")).forEach(this::loadFromFile);
                 logger.info("Loaded {} notes.", cache.size());
             } catch (IOException e) {
                 logger.error("Error walking data dir {}: {}", dir, e.getMessage(), e);
             }
         }
 
-        private void load(Path fp) {
+        private void loadFromFile(Path fp) {
             try {
                 var n = json.readValue(fp.toFile(), Note.class);
+                n.content.computeIfAbsent(Note.ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
                 cache.put(n.id, n);
-                logger.debug("Loaded note {} from {}", n.id, fp);
             } catch (IOException e) {
                 logger.error("Failed to load note from {}: {}", fp, e.getMessage(), e);
             }
         }
 
+        public Note save(Note n, boolean internalOperation) {
+            n.updatedAt = Instant.now();
+            var isNew = !cache.containsKey(n.id) || cache.get(n.id).version == 0;
+            if (isNew) {
+                n.createdAt = Objects.requireNonNullElse(n.createdAt, Instant.now());
+                n.version = 1;
+            } else {
+                n.version = cache.get(n.id).version + 1;
+            }
+            n.content.computeIfAbsent(Note.ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
+            cache.put(n.id, n);
+            try {
+                json.writeValue(dir.resolve(n.id + ".json").toFile(), n);
+                if (!internalOperation)
+                    logger.info("💾 Saved note {}(v{}). New:{}", n.id, n.version, isNew && n.version == 1);
+            } catch (IOException e) {
+                logger.error("Failed to save note {}: {}", n.id, e.getMessage(), e);
+            }
+            return n;
+        }
+
+        public Note save(Note n) {
+            return save(n, false);
+        }
+
         public Optional<Note> get(String id) {
-            return Optional.ofNullable(cache.get(id));
+            return ofNullable(cache.get(id));
         }
 
         public List<Note> getAllNotes() {
@@ -351,25 +1095,6 @@ public class Netention {
             return cache.values().stream().filter(f).collect(Collectors.toList());
         }
 
-        public Note save(Note n) {
-            n.updatedAt = Instant.now();
-            var isNew = !cache.containsKey(n.id) || cache.get(n.id).version == 0;
-            if (isNew) {
-                n.createdAt = n.createdAt == null ? Instant.now() : n.createdAt;
-                n.version = 1;
-            } else {
-                n.version = cache.get(n.id).version + 1;
-            }
-            cache.put(n.id, n);
-            try {
-                json.writeValue(dir.resolve(n.id + ".json").toFile(), n);
-                logger.info("Saved note {}(v{}). New:{}", n.id, n.version, isNew && n.version == 1);
-            } catch (IOException e) {
-                logger.error("Failed to save note {}: {}", n.id, e.getMessage(), e);
-            }
-            return n;
-        }
-
         public boolean delete(String id) {
             if (!cache.containsKey(id)) {
                 logger.warn("Attempted delete non-existent note {}", id);
@@ -378,7 +1103,7 @@ public class Netention {
             cache.remove(id);
             try {
                 Files.deleteIfExists(dir.resolve(id + ".json"));
-                logger.info("Deleted note {}", id);
+                logger.info("🗑️ Deleted note {}", id);
                 return true;
             } catch (IOException e) {
                 logger.error("Failed to delete note file for {}: {}", id, e.getMessage(), e);
@@ -388,86 +1113,42 @@ public class Netention {
     }
 
     public static class Config {
+        public static final String CONFIG_NOTE_PREFIX = "netention_config_";
         private static final Logger logger = LoggerFactory.getLogger(Config.class);
-        private static final String CONFIG_NOTE_PREFIX = "netention_config_";
         public final NostrSettings net = new NostrSettings();
         public final UISettings ui = new UISettings();
         public final LMSettings lm = new LMSettings();
-        public final Notes notes;
+        private final Notes notes;
+        private final Core coreRef;
 
-        public Config(Notes notes) {
+        public Config(Notes notes, Core core) {
             this.notes = notes;
-            loadAllConfigs();
+            this.coreRef = core;
+            logger.info("Config object initialized. Plan-driven loading will occur via Core.");
         }
 
-        public void loadAllConfigs() {
-            load(net, "nostr");
-            load(ui, "ui");
-            load(lm, "llm");
-            logger.info("All configurations loaded/initialized using annotation-driven objects.");
-        }
-
-        public void saveAllConfigs() {
-            save(net, "nostr");
-            save(ui, "ui");
-            save(lm, "llm");
-            logger.info("All configurations persisted using annotation-driven objects.");
-        }
-
-        @SuppressWarnings("unchecked")
-        private void load(Object configInstance, String typeKey) {
-            var noteId = CONFIG_NOTE_PREFIX + typeKey;
-            notes.get(noteId).ifPresentOrElse(n -> {
-                logger.debug("{} config loaded from note {}", typeKey, noteId);
-                var savedValues = n.content;
-                for (var field : configInstance.getClass().getDeclaredFields()) {
-                    if (field.isAnnotationPresent(Field.class)) {
-                        try {
-                            field.setAccessible(true);
-                            if (savedValues.containsKey(field.getName())) {
-                                var savedValue = savedValues.get(field.getName());
-                                var t = field.getType();
-                                switch (savedValue) {
-                                    case List list when t.isAssignableFrom(List.class) ->
-                                            field.set(configInstance, new ArrayList<>(list));
-                                    case Boolean b when t == Boolean.class || t == boolean.class ->
-                                            field.set(configInstance, savedValue);
-                                    case String s when t.isEnum() ->
-                                            field.set(configInstance, Enum.valueOf((Class<Enum>) t, s));
-                                    case null, default -> field.set(configInstance, t.cast(savedValue));
-                                }
-                            }
-                        } catch (IllegalAccessException | ClassCastException e) {
-                            logger.error("Error loading config field {} for {}: {}", field.getName(), typeKey, e.getMessage());
-                        }
-                    }
-                }
-            }, () -> {
-                logger.info("{} config note {} not found, using defaults and saving.", typeKey, noteId);
-                save(configInstance, typeKey);
-            });
-        }
-
-        public void save(Object configInstance, String typeKey) {
+        public void saveConfigObjectToNote(Object configInstance, String typeKey) {
             var noteId = CONFIG_NOTE_PREFIX + typeKey;
             var cfgNote = notes.get(noteId).orElse(new Note());
             cfgNote.id = noteId;
+            cfgNote.setTitle("Config: " + typeKey);
+            cfgNote.tags.clear();
+            cfgNote.tags.addAll(List.of(Note.SystemTag.CONFIG.value, typeKey + "_config", Note.SystemTag.SYSTEM_NOTE.value));
             cfgNote.content.clear();
-            for (var field : configInstance.getClass().getDeclaredFields()) {
-                if (field.isAnnotationPresent(Field.class)) {
-                    try {
-                        field.setAccessible(true);
-                        cfgNote.content.put(field.getName(), field.get(configInstance));
-                    } catch (IllegalAccessException e) {
-                        logger.error("Error saving config field {} for {}: {}", field.getName(), typeKey, e.getMessage());
-                    }
-                }
+            cfgNote.content.putAll(coreRef.json.convertValue(configInstance, new TypeReference<Map<String, Object>>() {
+            }));
+            notes.save(cfgNote, true);
+            logger.info("Directly saved {} config to note {} (e.g. initial bootstrap)", typeKey, noteId);
+        }
+
+        public void saveAllConfigs() {
+            if (coreRef == null) {
+                logger.error("Core reference not available in Config.");
+                return;
             }
-            var tags = cfgNote.tags;
-            if (!tags.contains(typeKey + "_config")) tags.add(typeKey + "_config");
-            if (!tags.contains("config")) tags.add("config");
-            notes.save(cfgNote);
-            logger.info("Saved {} config to note {}", typeKey, noteId);
+            Stream.of(Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED, Core.SystemEventType.SAVE_UI_CONFIG_REQUESTED, Core.SystemEventType.SAVE_LLM_CONFIG_REQUESTED)
+                    .forEach(eventType -> coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name())));
+            logger.info("Fired events to save all configurations via plans.");
         }
 
         public String generateNewNostrKeysAndUpdateConfig() {
@@ -476,7 +1157,25 @@ public class Netention {
                 var pubKeyXOnlyRaw = Crypto.getPublicKeyXOnly(privKeyRaw);
                 net.privateKeyBech32 = Crypto.Bech32.nip19Encode("nsec", privKeyRaw);
                 net.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
-                save(net, "nostr");
+                var pubKeyHex = Crypto.bytesToHex(pubKeyXOnlyRaw);
+
+                var profileNote = (net.myProfileNoteId != null && !net.myProfileNoteId.isEmpty()) ? notes.get(net.myProfileNoteId).orElse(null) : null;
+                if (profileNote == null) {
+                    profileNote = new Note("My Nostr Profile", "Edit your profile details here.");
+                    profileNote.id = "my_profile_" + pubKeyHex;
+                    net.myProfileNoteId = profileNote.id;
+                }
+                profileNote.tags.clear();
+                profileNote.tags.addAll(Arrays.asList(Note.SystemTag.CONTACT.value, Note.SystemTag.NOSTR_CONTACT.value, Note.SystemTag.MY_PROFILE.value));
+                profileNote.meta.putAll(Map.of(Note.Metadata.NOSTR_PUB_KEY.key, net.publicKeyBech32, Note.Metadata.NOSTR_PUB_KEY_HEX.key, pubKeyHex));
+                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_NAME.getKey(), "Anonymous");
+                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_ABOUT.getKey(), "");
+                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_PICTURE_URL.getKey(), "");
+                notes.save(profileNote);
+
+                if (coreRef != null)
+                    coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED.name()));
+                else saveConfigObjectToNote(net, "nostr");
                 return "nsec: " + net.privateKeyBech32 + "\nnpub: " + net.publicKeyBech32;
             } catch (Exception e) {
                 logger.error("Failed to generate Nostr keys", e);
@@ -485,16 +1184,15 @@ public class Netention {
         }
 
         public static class NostrSettings {
-            @Field(label = "Relays (one per line)", type = FieldType.TEXT_AREA, group = "Connection")
-            public final List<String> relays = new ArrayList<>(List.of("wss://relay.damus.io", "wss://nos.lol"));
             @Field(label = "Private Key (nsec)", tooltip = "Nostr secret key (nsec...)", type = FieldType.PASSWORD_FIELD, group = "Identity")
             public String privateKeyBech32 = "";
             public String publicKeyBech32 = "";
+            public String myProfileNoteId = "";
         }
 
         public static class UISettings {
-            @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Default", "Dark"}, group = "Appearance")
-            public final String theme = "Default";
+            @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Nimbus (Dark)", "System"}, group = "Appearance")
+            public final String theme = "Nimbus (Dark)";
             @Field(label = "Minimize to System Tray", tooltip = "If enabled, closing the window minimizes to tray instead of exiting.", group = "Behavior")
             public final boolean minimizeToTray = true;
         }
@@ -508,1590 +1206,6 @@ public class Netention {
             public final String ollamaChatModelName = "llama3";
             @Field(label = "Embedding Model", group = "Ollama")
             public final String ollamaEmbeddingModelName = "nomic-embed-text";
-        }
-    }
-
-    public static class LM {
-        private static final Logger logger = LoggerFactory.getLogger(LM.class);
-        private final Config.LMSettings cfg;
-        private EmbeddingModel embedding;
-        private ChatLanguageModel chat;
-        private volatile boolean isInitialized = false, isReady = false;
-
-        public LM(Config cs) {
-            this.cfg = cs.lm;
-        }
-
-        public static double cosineSimilarity(float[] vA, float[] vB) {
-            if (vA == null || vB == null || vA.length == 0 || vA.length != vB.length) return 0.0;
-            double d = 0.0, nA = 0.0, nB = 0.0;
-            for (var i = 0; i < vA.length; i++) {
-                d += vA[i] * vB[i];
-                nA += vA[i] * vA[i];
-                nB += vB[i] * vB[i];
-            }
-            return nA == 0 || nB == 0 ? 0.0 : d / (Math.sqrt(nA) * Math.sqrt(nB));
-        }
-
-        public synchronized void init() {
-            if (isInitialized && isReady) {
-                logger.debug("LLMService already initialized/ready.");
-                return;
-            }
-            isInitialized = false;
-            isReady = false;
-            var prov = cfg.provider;
-            logger.info("Initializing LLMService with provider: {}", prov);
-            try {
-                switch (prov.toUpperCase()) {
-                    case "OLLAMA":
-                        embedding = OllamaEmbeddingModel.builder().baseUrl(cfg.ollamaBaseUrl).modelName(cfg.ollamaEmbeddingModelName).timeout(Duration.ofSeconds(60)).build();
-                        chat = OllamaChatModel.builder().baseUrl(cfg.ollamaBaseUrl).modelName(cfg.ollamaChatModelName).timeout(Duration.ofSeconds(120)).build();
-                        break;
-                    case "NONE":
-                    default:
-                        logger.info("LLM provider NONE/unsupported. LLM features disabled.");
-                        isInitialized = true;
-                        isReady = false;
-                        return;
-                }
-                isReady = true;
-                logger.info("LLMService initialized successfully for provider: {}", prov);
-            } catch (Exception e) {
-                logger.error("Failed to initialize LLM provider {}: {}. LLM features disabled.", prov, e.getMessage(), e);
-                embedding = null;
-                chat = null;
-                isReady = false;
-            }
-            isInitialized = true;
-        }
-
-        public boolean isReady() {
-            if (!isInitialized) init();
-            return isReady;
-        }
-
-        public Optional<float[]> generateEmbedding(String t) {
-            if (!isReady()) {
-                logger.warn("LLM not ready, cannot gen embedding.");
-                return empty();
-            }
-            try {
-                return Optional.of(embedding.embed(t).content().vector());
-            } catch (Exception e) {
-                logger.error("Error gen embedding: {}", e.getMessage(), e);
-                return empty();
-            }
-        }
-
-        public Optional<String> chat(String p) {
-            if (!isReady()) {
-                logger.warn("LLM not ready, cannot chat.");
-                return empty();
-            }
-            try {
-                return Optional.of(chat.chat(p));
-            } catch (Exception e) {
-                logger.error("Error during chat: {}", e.getMessage(), e);
-                return empty();
-            }
-        }
-
-        public Optional<String> summarize(String t) {
-            return t == null || t.trim().isEmpty() ? Optional.of("") : chat("Summarize concisely:\n\n" + t);
-        }
-
-        public Optional<String> askAboutText(String t, String q) {
-            return t == null || t.trim().isEmpty() || q == null || q.trim().isEmpty() ? empty() : chat("Context:\n\"\"\"\n" + t + "\n\"\"\"\n\nQuestion: " + q + "\nAnswer:");
-        }
-
-        public Optional<List<String>> decomposeTask(String task) {
-            return task == null || task.trim().isEmpty() ? empty() : chat("Decompose into sub-tasks (prefix each with '- '):\n" + task).map(r -> Stream.of(r.split("\\n")).map(String::trim).filter(s -> s.startsWith("- ")).map(s -> s.substring(2).trim()).filter(s -> !s.isEmpty()).collect(Collectors.toList()));
-        }
-    }
-
-    public static class Nostr {
-        private static final Logger logger = LoggerFactory.getLogger(Nostr.class);
-        private final Config.NostrSettings cfg;
-        private final List<RelayConnection> relays = new CopyOnWriteArrayList<>();
-        private final ConcurrentLinkedQueue<NostrAction> queue = new ConcurrentLinkedQueue<>();
-        private final Consumer<NostrEvent> events;
-        private final HttpClient http;
-        private byte[] privateKeyRaw;
-        private String publicKeyXOnlyHex;
-        private volatile boolean enabled = false;
-
-        public Nostr(Config cs, Consumer<NostrEvent> eh, java.util.function.Supplier<String> selfNpubSupplier) {
-            this.cfg = cs.net;
-            this.events = eh;
-            this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-            loadIdentity();
-        }
-
-        private void loadIdentity() {
-            byte[] publicKeyXOnlyRaw;
-            if (cfg.privateKeyBech32 == null || cfg.privateKeyBech32.isEmpty()) {
-                logger.warn("Nostr private key (nsec) not configured.");
-                this.privateKeyRaw = null;
-                this.publicKeyXOnlyHex = null;
-                cfg.publicKeyBech32 = "";
-                return;
-            }
-            try {
-                this.privateKeyRaw = Crypto.Bech32.nip19Decode(cfg.privateKeyBech32);
-                publicKeyXOnlyRaw = Crypto.getPublicKeyXOnly(this.privateKeyRaw);
-                this.publicKeyXOnlyHex = Crypto.bytesToHex(publicKeyXOnlyRaw);
-                cfg.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", publicKeyXOnlyRaw);
-                logger.info("Nostr identity loaded for pubkey: {}", cfg.publicKeyBech32);
-            } catch (Exception e) {
-                logger.error("Failed to load Nostr identity from nsec: {}. Nostr unavailable.", e.getMessage(), e);
-                this.privateKeyRaw = null;
-                this.publicKeyXOnlyHex = null;
-                cfg.publicKeyBech32 = "";
-            }
-        }
-
-        public String getPrivateKeyBech32() {
-            return cfg.privateKeyBech32;
-        }
-
-        public String getPublicKeyBech32() {
-            return cfg.publicKeyBech32;
-        }
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public synchronized void setEnabled(boolean shouldEnable) {
-            if (shouldEnable == this.enabled) return;
-            if (shouldEnable) {
-                loadIdentity();
-                if (privateKeyRaw == null || publicKeyXOnlyHex == null) {
-                    logger.error("Cannot enable Nostr: identity not loaded/invalid.");
-                    this.enabled = false;
-                    return;
-                }
-                connectToRelays();
-                processQueue();
-            } else {
-                disconnectFromRelays();
-            }
-            this.enabled = shouldEnable;
-            logger.info("Nostr service {}", this.enabled ? "enabled" : "disabled");
-        }
-
-        private void connectToRelays() {
-            disconnectFromRelays();
-            if (cfg.relays.isEmpty()) {
-                logger.warn("No Nostr relays configured.");
-                return;
-            }
-            var selfXOnlyHex = this.publicKeyXOnlyHex;
-            for (var relayUrl : cfg.relays) {
-                try {
-                    var conn = new RelayConnection(URI.create(relayUrl), http, this::handleRelayMessage, selfXOnlyHex);
-                    conn.connect();
-                    relays.add(conn);
-                } catch (Exception e) {
-                    logger.error("Failed to initiate connection to relay {}: {}", relayUrl, e.getMessage());
-                }
-            }
-        }
-
-        private void disconnectFromRelays() {
-            relays.forEach(RelayConnection::close);
-            relays.clear();
-            logger.info("All relay connections closed.");
-        }
-
-        private void handleRelayMessage(String relayUri, String message) {
-            logger.trace("Relay {} RX: {}", relayUri, message);
-            try {
-                var l = NostrUtil.fromJson(message, new TypeReference<List<Object>>() {
-                });
-                var type = (String) l.get(0);
-                var n = l.size();
-
-                if (n >= 3 && "EVENT".equals(type)) {
-                    var subId = (String) l.get(1);
-                    @SuppressWarnings("unchecked") var eventMap = (Map<String, Object>) l.get(2);
-                    try {
-                        var ne = mapToNostrEvent(eventMap);
-                        logger.debug("Relay {}: RX EVENT for sub_id '{}'. Kind: {}, ID: {}, Pubkey: {}",
-                                relayUri, subId, ne.kind, ne.id.substring(0, 8), ne.pubkey.substring(0, 8));
-                        if (events != null) events.accept(ne);
-                    } catch (Exception mapEx) {
-                        logger.error("Relay {}: Failed to map/process Nostr EVENT for sub_id '{}': {}. Raw: {}",
-                                relayUri, subId, mapEx.getMessage(), eventMap, mapEx);
-                    }
-                } else if (n >= 2 && "NOTICE".equals(type)) {
-                    logger.warn("Relay {}: RX NOTICE: {}", relayUri, l.get(1));
-                } else if (n >= 2 && "EOSE".equals(type)) {
-                    var subId = (String) l.get(1);
-                    logger.info("Relay {}: RX EOSE for sub_id '{}'", relayUri, subId);
-                } else if ("OK".equals(type)) { // NIP-20
-                    var eventId = n > 1 ? (String) l.get(1) : "N/A";
-                    var success = n > 2 ? (Boolean) l.get(2) : false;
-                    var okMessage = n > 3 ? (String) l.get(3) : "";
-                    logger.info("Relay {}: RX OK for event_id '{}'. Success: {}. Message: '{}'", relayUri, eventId.substring(0, Math.min(eventId.length(), 8)), success, okMessage);
-                } else {
-                    logger.debug("Relay {}: RX unhandled/unknown message. Type: '{}', Full: {}", relayUri, type, message.substring(0, Math.min(message.length(), 100)));
-                }
-            } catch (Exception e) {
-                logger.error("Error processing message from relay {}: {}", relayUri, message, e);
-            }
-        }
-
-
-        private NostrEvent mapToNostrEvent(Map<String, Object> m) {
-            var e = new NostrEvent();
-            e.id = (String) m.get("id");
-            e.pubkey = (String) m.get("pubkey");
-            e.created_at = ((Number) m.get("created_at")).longValue();
-            e.kind = ((Number) m.get("kind")).intValue();
-            e.content = (String) m.get("content");
-            e.sig = (String) m.get("sig");
-            if (m.get("tags") instanceof List) ((List<?>) m.get("tags")).forEach(tagObj -> {
-                if (tagObj instanceof List<?> tl) e.tags.add(tl.stream().map(Object::toString).toList());
-            });
-            return e;
-        }
-
-        public void queueAction(NostrAction a) {
-            queue.add(a);
-            if (enabled) processQueue();
-        }
-
-        public void processQueue() {
-            if (!enabled || privateKeyRaw == null) return;
-            NostrAction action;
-            while ((action = queue.poll()) != null) {
-                try {
-                    switch (action.t) {
-                        case PUBLISH_NOTE:
-                            publishNoteInternal((Note) action.p);
-                            break;
-                        case SEND_DM:
-                            @SuppressWarnings("unchecked") var dmParams = (Map<String, String>) action.p;
-                            sendDirectMessageInternal(dmParams.get("recipientNpub"), dmParams.get("message"));
-                            break;
-                    }
-                } catch (Exception e) {
-                    logger.error("Error processing Nostr action {} from queue: {}", action.t, e.getMessage(), e);
-                }
-            }
-        }
-
-        private void publishNoteInternal(Note note) throws GeneralSecurityException, JsonProcessingException {
-            var e = new NostrEvent();
-            e.pubkey = this.publicKeyXOnlyHex;
-            e.created_at = Instant.now().getEpochSecond();
-            e.kind = 1;
-            e.content = note.getTitle() + "\n\n" + note.getText();
-            note.tags.stream().filter(t -> !t.equals("nostr_feed")).forEach(t -> e.tags.add(List.of("t", t))); // Don't publish internal tags
-            e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
-            broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
-            logger.info("Published Note (Kind 1): {}", e.id.substring(0, 8));
-        }
-
-        private void sendDirectMessageInternal(String recipientNpub, String message) throws Exception {
-            var e = new NostrEvent();
-            e.pubkey = this.publicKeyXOnlyHex;
-            e.created_at = Instant.now().getEpochSecond();
-            e.kind = 4;
-            var recipientXOnlyBytes = Crypto.Bech32.nip19Decode(recipientNpub);
-            var sharedSecret = Crypto.getSharedSecretWithRetry(this.privateKeyRaw, recipientXOnlyBytes);
-            e.content = Crypto.nip04Encrypt(message, sharedSecret, recipientXOnlyBytes);
-            e.tags.add(List.of("p", Crypto.bytesToHex(recipientXOnlyBytes)));
-            e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
-            broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
-            logger.info("Sent DM (Kind 4) to {}: {}", recipientNpub.substring(0, 8), e.id.substring(0, 8));
-        }
-
-        private void broadcastToRelays(String jsonMessage) {
-            logger.debug("Broadcasting to relays: {}", jsonMessage.substring(0, Math.min(jsonMessage.length(), 100)));
-            relays.forEach(rc -> rc.send(jsonMessage));
-        }
-
-        public void publishNote(Note n) {
-            queueAction(new NostrAction(NostrActionType.PUBLISH_NOTE, n));
-        }
-
-        public void sendDirectMessage(String recipientNpub, String message) {
-            queueAction(new NostrAction(NostrActionType.SEND_DM, Map.of("recipientNpub", recipientNpub, "message", message)));
-        }
-
-        public void sendFriendRequest(String recipientNpub) {
-            sendDirectMessage(recipientNpub, "Hello! I'd like to connect on Netention.");
-        }
-
-        private enum NostrActionType {PUBLISH_NOTE, SEND_DM}
-
-        private static class RelayConnection implements WebSocket.Listener {
-            private final URI uri;
-            private final HttpClient http;
-            private final StringBuilder messageBuffer = new StringBuilder();
-            private final BiConsumer<String, String> onMessageCallback;
-            private final String selfPublicKeyXOnlyHexForReq;
-            private final ConcurrentLinkedQueue<String> pendingMessages = new ConcurrentLinkedQueue<>();
-            private WebSocket socket;
-            private volatile boolean connected = false;
-
-            public RelayConnection(URI uri, HttpClient client, BiConsumer<String, String> onMessage, String selfPubKeyXOnlyHex) {
-                this.uri = uri;
-                this.http = client;
-                this.onMessageCallback = onMessage;
-                this.selfPublicKeyXOnlyHexForReq = selfPubKeyXOnlyHex;
-            }
-
-            public void connect() {
-                if (connected && socket != null && !socket.isOutputClosed()) {
-                    logger.info("Relay {}: Already connected and socket is open.", uri);
-                    return;
-                }
-                logger.info("Relay {}: Initiating connection.", uri);
-                http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10)).buildAsync(uri, this)
-                        .thenAccept(ws -> {
-                            logger.info("Relay {}: WebSocket object assigned. Connection handshake will proceed.", uri);
-                            this.socket = ws;
-                        })
-                        .exceptionally(ex -> {
-                            logger.error("Relay {}: Connection attempt failed: {}", uri, ex.getMessage());
-                            this.connected = false;
-                            return null;
-                        });
-            }
-
-            @Override
-            public void onOpen(WebSocket ws) {
-                logger.info("Relay {}: Connection opened.", uri);
-                this.connected = true;
-                this.socket = ws;
-                ws.request(1);
-                processPendingMessages();
-
-                try {
-                    var generalSubId = "publicfeed-" + UUID.randomUUID().toString().substring(0, 8);
-                    var generalFeedFilter = Map.of("kinds", List.of(1), "limit", 50);
-                    var publicFeedReq = NostrUtil.toJson(List.of("REQ", generalSubId, generalFeedFilter));
-                    send(publicFeedReq);
-                    logger.info("Relay {}: Sent REQ for Kind 1 (Public Feed). Details: {}", uri, publicFeedReq.substring(0, Math.min(publicFeedReq.length(), 150)));
-
-                    if (selfPublicKeyXOnlyHexForReq != null && !selfPublicKeyXOnlyHexForReq.isEmpty()) {
-                        var dmSubId = "mydms-" + UUID.randomUUID().toString().substring(0, 8);
-                        var dmFilter = Map.of("kinds", List.of(4), "#p", List.of(selfPublicKeyXOnlyHexForReq));
-                        var dmReq = NostrUtil.toJson(List.of("REQ", dmSubId, dmFilter));
-                        send(dmReq);
-                        logger.info("Relay {}: Sent REQ for Kind 4 (DMs). Details: {}", uri, dmReq.substring(0, Math.min(dmReq.length(), 150)));
-                    } else {
-                        logger.warn("Relay {}: Self public key hex not available. DM subscription skipped.", uri);
-                    }
-                } catch (Exception e) {
-                    logger.error("Relay {}: Error sending initial REQs: {}", uri, e.getMessage());
-                }
-            }
-
-            @Override
-            public CompletionStage<?> onText(WebSocket ws, CharSequence data, boolean last) {
-                messageBuffer.append(data);
-                ws.request(1);
-                if (last) {
-                    if (onMessageCallback != null) try {
-                        onMessageCallback.accept(uri.toString(), messageBuffer.toString());
-                    } catch (Exception e) {
-                        logger.error("Error in onMessageCallback for relay {}: {}", uri, e.getMessage(), e);
-                    }
-                    messageBuffer.setLength(0);
-                }
-                return null;
-            }
-
-            @Override
-            public CompletionStage<?> onClose(WebSocket ws, int statusCode, String reason) {
-                logger.info("Relay {}: Connection closed. Status: {}, Reason: {}", uri, statusCode, reason);
-                this.connected = false;
-                return null;
-            }
-
-            @Override
-            public void onError(WebSocket ws, Throwable error) {
-                logger.error("Relay {}: WebSocket error: {}", uri, error.getMessage(), error);
-                this.connected = false;
-                if (socket != null && !socket.isOutputClosed()) {
-                    socket.abort(); // Force close on error
-                }
-            }
-
-            private void processPendingMessages() {
-                String message;
-                while (connected && socket != null && !socket.isOutputClosed() && (message = pendingMessages.poll()) != null) {
-                    logger.trace("Relay {} TX (from queue): {}", uri, message.substring(0, Math.min(message.length(), 100)));
-                    socket.sendText(message, true);
-                }
-            }
-
-            public void send(String message) {
-                pendingMessages.offer(message);
-                if (connected && socket != null && !socket.isOutputClosed()) {
-                    processPendingMessages();
-                } else {
-                    logger.warn("Relay {}: Message queued as not connected or socket output closed. URI: {}, Message: {}",
-                            this, uri, message.substring(0, Math.min(message.length(), 100)));
-                }
-            }
-
-            public void close() {
-                if (socket != null) {
-                    if (!socket.isOutputClosed()) {
-                        socket.sendClose(WebSocket.NORMAL_CLOSURE, "Client closing").join();
-                    }
-                }
-                connected = false;
-                logger.info("Relay {}: Connection explicitly closed by client.", uri);
-            }
-
-            public boolean isConnected() {
-                return connected;
-            }
-        }
-
-        record NostrAction(NostrActionType t, Object p) {
-        }
-
-        static class NostrUtil {
-            private static final ObjectMapper json = new ObjectMapper()
-                    .setSerializationInclusion(JsonInclude.Include.NON_NULL)
-                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-
-            public static String toJson(Object object) throws JsonProcessingException {
-                return json.writeValueAsString(object);
-            }
-
-            public static <T> T fromJson(String json, TypeReference<T> typeReference) throws JsonProcessingException {
-                return NostrUtil.json.readValue(json, typeReference);
-            }
-
-        }
-
-        public static class NostrEvent {
-            public final List<List<String>> tags = new ArrayList<>();
-            public String id, pubkey;
-            public long created_at;
-            public int kind;
-            public String content, sig;
-
-            public String getSerializedForSigning() throws JsonProcessingException {
-                return NostrUtil.json.writeValueAsString(List.of(0, this.pubkey, this.created_at, this.kind, this.tags, this.content));
-            }
-
-            public void calculateId() throws NoSuchAlgorithmException, JsonProcessingException {
-                this.id = Crypto.bytesToHex(MessageDigest.getInstance("SHA-256").digest(getSerializedForSigning().getBytes(StandardCharsets.UTF_8)));
-            }
-
-            public void sign(byte[] privateKey32Bytes, byte[] auxRand32Bytes) throws GeneralSecurityException, JsonProcessingException {
-                if (this.id == null) calculateId();
-                this.sig = Crypto.bytesToHex(Crypto.Schnorr.sign(Crypto.hexToBytes(this.id), privateKey32Bytes, auxRand32Bytes));
-            }
-
-            public boolean verifySignature() throws GeneralSecurityException {
-                return this.id != null && this.pubkey != null && this.sig != null && Crypto.Schnorr.verify(Crypto.hexToBytes(this.id), Crypto.hexToBytes(this.pubkey), Crypto.hexToBytes(this.sig));
-            }
-        }
-    }
-
-    public static class UI extends JFrame {
-        private static final Logger logger = LoggerFactory.getLogger(UI.class);
-
-        static {
-            try {
-                UIManager.setLookAndFeel(new DarkMetalLookAndFeel());
-            } catch (Exception ex) {
-                System.err.println("Failed to initialize LaF");
-            }
-        }
-
-        private final Core core;
-        private final JSplitPane contentInspectorSplit;
-        private final NavPanel navPanel;
-        private final JPanel contentPanelHost;
-        private final InspectorPanel inspectorPanel;
-        private final StatusPanel statusPanel;
-        private TrayIcon trayIcon;
-        private SystemTray tray;
-
-        public UI(Core core) {
-            this.core = core;
-            setTitle("Netention");
-            setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-            setSize(1024, 768);
-            setLocationRelativeTo(null);
-
-            if (core.cfg.net.privateKeyBech32 != null && !core.cfg.net.privateKeyBech32.isEmpty()) {
-                logger.info("Nostr keys found, attempting to enable Nostr by default.");
-                core.net.setEnabled(true);
-                if (!core.net.isEnabled()) {
-                    logger.warn("Failed to enable Nostr by default despite keys being present. Check logs or key format.");
-                }
-            } else {
-                logger.info("Nostr private key not configured. Nostr will not be enabled by default. Please set it in File -> Settings.");
-            }
-
-            addWindowListener(new WindowAdapter() {
-                @Override
-                public void windowClosing(WindowEvent e) {
-                    handleWindowClose();
-                }
-
-                @Override
-                public void windowIconified(WindowEvent e) {
-                    if (core.cfg.ui.minimizeToTray && tray != null) {
-                        setVisible(false);
-                        logger.debug("Window iconified, hiding to tray.");
-                    }
-                }
-            });
-            inspectorPanel = new InspectorPanel(core);
-            setJMenuBar(createMenuBar());
-            navPanel = new NavPanel(core, this::display, this::displayChatInEditor, this::displaySettingsInEditor, this::createNewNote);
-            contentPanelHost = new JPanel(new BorderLayout());
-            contentInspectorSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, contentPanelHost, inspectorPanel);
-            contentInspectorSplit.setResizeWeight(0.8);
-            contentInspectorSplit.setOneTouchExpandable(true);
-            var mainSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navPanel, contentInspectorSplit);
-            mainSplitPane.setDividerLocation(250);
-            mainSplitPane.setOneTouchExpandable(true);
-            add(mainSplitPane, BorderLayout.CENTER);
-            statusPanel = new StatusPanel(core);
-            add(statusPanel, BorderLayout.SOUTH);
-            initSystemTray();
-            updateTheme(core.cfg.ui.theme);
-            setVisible(true);
-            displayNoteInEditor(null);
-            inspectorPanel.setVisible(false);
-            contentInspectorSplit.setDividerLocation(1.0);
-            logger.info("NetentionUI initialized.");
-        }
-
-        private void handleWindowClose() {
-            if (core.cfg.ui.minimizeToTray && tray != null && trayIcon != null) {
-                setVisible(false);
-                logger.info("Window hidden to system tray.");
-                trayIcon.displayMessage("Netention", "Running in background.", TrayIcon.MessageType.INFO);
-            } else {
-                logger.info("Exiting application via window close.");
-                if (core.net.isEnabled()) core.net.setEnabled(false);
-                System.exit(0);
-            }
-        }
-
-        private void initSystemTray() {
-            if (!SystemTray.isSupported()) {
-                logger.warn("SystemTray is not supported.");
-                return;
-            }
-            tray = SystemTray.getSystemTray();
-            var image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-            var g2d = image.createGraphics();
-            g2d.setColor(Color.BLUE);
-            g2d.fillRect(0, 0, 16, 16);
-            g2d.setColor(Color.WHITE);
-            g2d.drawString("N", 4, 12);
-            g2d.dispose();
-            trayIcon = new TrayIcon(image, "Netention", initMenu());
-            trayIcon.setImageAutoSize(true);
-            trayIcon.addActionListener(e -> restoreWindow());
-            try {
-                tray.add(trayIcon);
-                logger.info("System tray icon added.");
-            } catch (AWTException e) {
-                logger.error("Failed to add system tray icon: {}", e.getMessage(), e);
-                trayIcon = null;
-                tray = null;
-            }
-        }
-
-        private @NotNull PopupMenu initMenu() {
-            var trayMenu = new PopupMenu();
-            var openItem = new MenuItem("Open Netention");
-            openItem.addActionListener(e -> restoreWindow());
-            trayMenu.add(openItem);
-            var quickAddItem = new MenuItem("Quick Add Note");
-            quickAddItem.addActionListener(e -> quickAddNoteFromTray());
-            trayMenu.add(quickAddItem);
-            trayMenu.addSeparator();
-            var exitItem = new MenuItem("Exit");
-            exitItem.addActionListener(e -> {
-                tray.remove(trayIcon);
-                System.exit(0);
-            });
-            trayMenu.add(exitItem);
-            return trayMenu;
-        }
-
-        private void restoreWindow() {
-            setVisible(true);
-            setState(JFrame.NORMAL);
-            toFront();
-            logger.debug("Window restored.");
-        }
-
-        private void quickAddNoteFromTray() {
-            restoreWindow();
-            createNewNote();
-        }
-
-        private void setContentPanel(JComponent panel, Note contextNote) {
-            contentPanelHost.removeAll();
-            if (panel != null) contentPanelHost.add(panel, BorderLayout.CENTER);
-            contentPanelHost.revalidate();
-            contentPanelHost.repaint();
-            inspectorPanel.setContextNote(contextNote);
-            var showInspector = contextNote != null;
-            if (inspectorPanel.isVisible() != showInspector) {
-                inspectorPanel.setVisible(showInspector);
-                contentInspectorSplit.setDividerLocation(showInspector ? 0.8 : 1.0);
-            }
-            logger.debug("Content panel set to: {}, context note: {}", panel != null ? panel.getClass().getSimpleName() : "empty", contextNote != null ? contextNote.id : "none");
-        }
-
-        public void display(@Nullable Note note) {
-            if (note == null) displayNoteInEditor(null);
-            else if (note.tags.contains("chat")) displayChatInEditor(note);
-            else displayNoteInEditor(note);
-        }
-
-        private void displayNoteInEditor(@Nullable Note note) {
-            setContentPanel(new NoteEditorPanel(core, note, () -> {
-                var editorPanel = (NoteEditorPanel) contentPanelHost.getComponent(0);
-                var currentNoteInEditor = editorPanel.getCurrentNote();
-                statusPanel.updateStatus(currentNoteInEditor == null || currentNoteInEditor.id == null ? "Note created" : "Note saved: " + currentNoteInEditor.getTitle());
-                inspectorPanel.setContextNote(currentNoteInEditor);
-            }), note);
-        }
-
-        public void createNewNote() {
-            displayNoteInEditor(new Note("Untitled", ""));
-        }
-
-        public void displayChatInEditor(Note chatNote) {
-            if (!chatNote.tags.contains("chat")) {
-                logger.warn("Attempted to open non-chat note {} in chat view.", chatNote.id);
-                display(chatNote);
-                return;
-            }
-            var partnerNpub = (String) chatNote.metadata.get("nostrPubKey");
-            if (partnerNpub == null) {
-                JOptionPane.showMessageDialog(this, "Chat partner PK (npub) not found.", "Chat Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            setContentPanel(new ChatPanel(core, chatNote, partnerNpub), chatNote);
-        }
-
-        public void displaySettingsInEditor() {
-            setContentPanel(new SettingsPanel(core, this::updateThemeAndRestartMessage, () -> {
-                statusPanel.updateStatus("LLM status updated.");
-                navPanel.updateLLMButtonStates();
-                var cc = contentPanelHost.getComponentCount() > 0 ? contentPanelHost.getComponent(0) : null;
-                if (cc instanceof NoteEditorPanel nep) nep.updateLLMButtonStates();
-                if (cc instanceof JScrollPane && ((JScrollPane) cc).getViewport().getView() instanceof InspectorPanel ip)
-                    ip.updateLLMButtonStates();
-                else if (cc instanceof InspectorPanel ip) ip.updateLLMButtonStates();
-            }), null);
-        }
-
-        private void updateThemeAndRestartMessage(String themeName) {
-            updateTheme(themeName);
-            JOptionPane.showMessageDialog(this, "Theme changed. Some L&F changes may require restart.", "Theme Changed", JOptionPane.INFORMATION_MESSAGE);
-        }
-
-        private void updateTheme(String themeName) {
-            try {
-                if ("Dark".equalsIgnoreCase(themeName))
-                    UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
-                else UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-                SwingUtilities.updateComponentTreeUI(this);
-                logger.info("Theme updated to: {}", themeName);
-            } catch (Exception e) {
-                logger.warn("Failed to set theme '{}': {}", themeName, e.getMessage());
-            }
-        }
-
-        private JMenuBar createMenuBar() {
-            var mb = new JMenuBar();
-            var fileM = new JMenu("File");
-            fileM.add(new JMenuItem(new AbstractAction("New Note") {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    createNewNote();
-                }
-            }));
-            fileM.add(new JMenuItem(new AbstractAction("Settings") {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    displaySettingsInEditor();
-                }
-            }));
-            fileM.addSeparator();
-            fileM.add(new JMenuItem(new AbstractAction("Exit") {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    handleWindowClose();
-                }
-            }));
-            mb.add(fileM);
-            var viewM = getMenu();
-            mb.add(viewM);
-            var nostrM = new JMenu("Nostr");
-            var toggleNostr = getItem();
-            nostrM.add(toggleNostr);
-            nostrM.add(new JMenuItem(new AbstractAction("Add Nostr Friend") {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    var pkNpub = JOptionPane.showInputDialog(UI.this, "Friend's Nostr public key (npub):");
-                    if (pkNpub != null && !pkNpub.trim().isEmpty()) {
-                        try {
-                            Crypto.Bech32.nip19Decode(pkNpub.trim());
-                            core.net.sendFriendRequest(pkNpub.trim());
-                            var cId = "chat_" + pkNpub.trim();
-                            if (core.notes.get(cId).isEmpty()) {
-                                var fn = new Note("Chat with " + pkNpub.trim().substring(0, 10) + "...", "");
-                                fn.id = cId;
-                                fn.tags.addAll(List.of("friend_profile", "chat", "nostr"));
-                                fn.metadata.put("nostrPubKey", pkNpub.trim());
-                                fn.content.put("messages", new ArrayList<Map<String, String>>());
-                                core.saveNote(fn);
-                                JOptionPane.showMessageDialog(UI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... added & intro DM sent.", "Friend Added", JOptionPane.INFORMATION_MESSAGE);
-                            } else
-                                JOptionPane.showMessageDialog(UI.this, "Friend " + pkNpub.trim().substring(0, 10) + "... already exists.", "Friend Exists", JOptionPane.INFORMATION_MESSAGE);
-                        } catch (Exception ex) {
-                            JOptionPane.showMessageDialog(UI.this, "Invalid Nostr public key (npub): " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                        }
-                    }
-                }
-            }));
-            mb.add(nostrM);
-            var llmM = new JMenu("LLM");
-            llmM.add(new JMenuItem(new AbstractAction("Initialize LLM Service") {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    core.lm.init();
-                    var msg = "LLM Service " + (core.lm.isReady() ? "initialized." : "failed to initialize. Check settings/logs.");
-                    JOptionPane.showMessageDialog(UI.this, msg, "LLM Status", core.lm.isReady() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
-                    statusPanel.updateStatus("LLM status updated.");
-                    navPanel.updateLLMButtonStates();
-                    var c = contentPanelHost.getComponentCount() > 0 ? contentPanelHost.getComponent(0) : null;
-                    if (c instanceof NoteEditorPanel nep) nep.updateLLMButtonStates();
-                    if (c instanceof JScrollPane && ((JScrollPane) c).getViewport().getView() instanceof InspectorPanel ip)
-                        ip.updateLLMButtonStates();
-                    else if (c instanceof InspectorPanel ip) ip.updateLLMButtonStates();
-                }
-            }));
-            mb.add(llmM);
-            return mb;
-        }
-
-        private @NotNull JCheckBoxMenuItem getItem() {
-            var toggleNostr = new JCheckBoxMenuItem("Enable Nostr");
-            toggleNostr.setSelected(core.net.isEnabled());
-            toggleNostr.addActionListener(e -> {
-                var userWantsToEnable = toggleNostr.isSelected();
-                String operationStatusMessage;
-
-                if (userWantsToEnable) {
-                    var keysConfigured = core.cfg.net.privateKeyBech32 != null && !core.cfg.net.privateKeyBech32.isEmpty();
-                    if (!keysConfigured) {
-                        JOptionPane.showMessageDialog(UI.this,
-                                "Nostr private key (nsec) is not configured.\nPlease go to File > Settings > Nostr: Identity to set it up or generate new keys.",
-                                "Nostr Configuration Needed",
-                                JOptionPane.WARNING_MESSAGE);
-                        operationStatusMessage = "Nostr setup required.";
-                    } else {
-                        core.net.setEnabled(true);
-                        if (core.net.isEnabled()) {
-                            JOptionPane.showMessageDialog(UI.this, "Nostr successfully enabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
-                            operationStatusMessage = "Nostr enabled.";
-                        } else {
-                            JOptionPane.showMessageDialog(UI.this,
-                                    "Failed to enable Nostr. Please check your Nostr key in Settings or view logs for details.",
-                                    "Nostr Error",
-                                    JOptionPane.ERROR_MESSAGE);
-                            operationStatusMessage = "Nostr enabling failed.";
-                        }
-                    }
-                } else {
-                    core.net.setEnabled(false);
-                    JOptionPane.showMessageDialog(UI.this, "Nostr disabled.", "Nostr Status", JOptionPane.INFORMATION_MESSAGE);
-                    operationStatusMessage = "Nostr disabled by user.";
-                }
-                statusPanel.updateStatus(operationStatusMessage);
-                toggleNostr.setSelected(core.net.isEnabled());
-            });
-            return toggleNostr;
-        }
-
-        private @NotNull JMenu getMenu() {
-            var viewM = new JMenu("View");
-            var toggleInspectorItem = new JCheckBoxMenuItem("Toggle Inspector Panel");
-            toggleInspectorItem.setSelected(inspectorPanel.isVisible());
-            toggleInspectorItem.addActionListener(e -> {
-                var show = toggleInspectorItem.isSelected();
-                inspectorPanel.setVisible(show);
-                contentInspectorSplit.setDividerLocation(show ? 0.8 : 1.0);
-                contentInspectorSplit.revalidate();
-            });
-            viewM.add(toggleInspectorItem);
-            return viewM;
-        }
-
-        public static class NavPanel extends JPanel {
-            private final Core core;
-            private final DefaultListModel<Note> listModel = new DefaultListModel<>();
-            private final JList<Note> noteJList = new JList<>(listModel);
-            private final JTextField searchField = new JTextField(15);
-            private final JButton semanticSearchButton;
-            private final JComboBox<String> viewSelector;
-
-            public NavPanel(Core core, Consumer<Note> onShowNote, Consumer<Note> onShowChat, Runnable onSettings, Runnable onNewNote) {
-                this.core = core;
-                setLayout(new BorderLayout(5, 5));
-                setBorder(new EmptyBorder(5, 5, 5, 5));
-
-                core.addCoreEventListener(event -> {
-                    if (event.type() == Core.CoreEventType.NOTE_ADDED ||
-                            event.type() == Core.CoreEventType.NOTE_UPDATED ||
-                            event.type() == Core.CoreEventType.NOTE_DELETED) {
-                        SwingUtilities.invokeLater(this::refreshNotes);
-                    }
-                });
-
-                noteJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-                noteJList.addListSelectionListener((ListSelectionEvent e) -> {
-                    if (!e.getValueIsAdjusting()) {
-                        var sel = noteJList.getSelectedValue();
-                        if (sel != null) (sel.tags.contains("chat") ? onShowChat : onShowNote).accept(sel);
-                        else onShowNote.accept(null);
-                    }
-                });
-                add(new JScrollPane(noteJList), BorderLayout.CENTER);
-
-                var topControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
-                var newNoteBtn = new JButton("+Note");
-                newNoteBtn.setToolTipText("Create New Note");
-                newNoteBtn.addActionListener(e -> onNewNote.run());
-                topControls.add(newNoteBtn);
-
-                var settingsBtn = new JButton("Prefs");
-                settingsBtn.setToolTipText("Open Settings");
-                settingsBtn.addActionListener(e -> onSettings.run());
-                topControls.add(settingsBtn);
-
-                viewSelector = new JComboBox<>(new String[]{"My Notes", "Public"});
-                viewSelector.addActionListener(e -> {
-                    refreshNotes();
-                    updateLLMButtonStates();
-                });
-
-
-                var searchPanel = new JPanel(new BorderLayout(5, 0));
-                searchPanel.add(new JLabel("Search:"), BorderLayout.WEST);
-                searchPanel.add(searchField, BorderLayout.CENTER);
-                searchField.getDocument().addDocumentListener(new FieldUpdateListener(e -> refreshNotes()));
-
-                semanticSearchButton = new JButton("AI");
-                semanticSearchButton.setToolTipText("Semantic Search (AI)");
-                semanticSearchButton.addActionListener(e -> performSemanticSearch());
-
-                var combinedSearchPanel = new JPanel(new BorderLayout());
-                combinedSearchPanel.add(searchPanel, BorderLayout.CENTER);
-                combinedSearchPanel.add(semanticSearchButton, BorderLayout.EAST);
-
-                var topBox = Box.createVerticalBox();
-                topControls.setAlignmentX(Component.LEFT_ALIGNMENT);
-                topBox.add(topControls);
-
-                viewSelector.setAlignmentX(Component.LEFT_ALIGNMENT);
-                viewSelector.setMaximumSize(new Dimension(Integer.MAX_VALUE, viewSelector.getPreferredSize().height));
-                topBox.add(viewSelector);
-
-                combinedSearchPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-                topBox.add(combinedSearchPanel);
-
-                add(topBox, BorderLayout.NORTH);
-
-                refreshNotes();
-                updateLLMButtonStates();
-            }
-
-            public void updateLLMButtonStates() {
-                var selectedView = (String) viewSelector.getSelectedItem();
-                semanticSearchButton.setEnabled(core.lm.isReady() && "My Notes".equals(selectedView));
-            }
-
-            public void refreshNotes() {
-                refreshNotes(null);
-            }
-
-            public void refreshNotes(List<Note> notesToDisplay) {
-                var selectedBefore = noteJList.getSelectedValue();
-                listModel.clear();
-                var term = searchField.getText().toLowerCase();
-                var selectedView = (String) viewSelector.getSelectedItem();
-
-                Predicate<Note> viewFilter;
-                if ("Public".equals(selectedView)) {
-                    viewFilter = n -> n.tags.contains("nostr_feed");
-                } else { // "My Notes" or default
-                    viewFilter = n -> !n.tags.contains("config") && !n.tags.contains("nostr_feed");
-                }
-
-                Predicate<Note> textFilter = n -> term.isEmpty() ||
-                        n.getTitle().toLowerCase().contains(term) ||
-                        n.getText().toLowerCase().contains(term) ||
-                        n.tags.stream().anyMatch(t -> t.toLowerCase().contains(term));
-
-                (notesToDisplay != null ? notesToDisplay : core.notes.getAll(viewFilter.and(textFilter)))
-                        .stream()
-                        .sorted((n1, n2) -> n2.updatedAt.compareTo(n1.updatedAt))
-                        .forEach(listModel::addElement);
-
-                if (selectedBefore != null && listModel.contains(selectedBefore)) {
-                    noteJList.setSelectedValue(selectedBefore, true);
-                } else if (!listModel.isEmpty()) {
-                    // Optionally select first item if nothing was selected or previous selection is gone
-                    // noteJList.setSelectedIndex(0); 
-                }
-                // updateLLMButtonStates(); // Already called by viewSelector listener or externally if needed
-            }
-
-            private void performSemanticSearch() {
-                if (!core.lm.isReady()) {
-                    JOptionPane.showMessageDialog(this, "LLM Service not ready.", "LLM Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                var selectedView = (String) viewSelector.getSelectedItem();
-                if (!"My Notes".equals(selectedView)) {
-                    JOptionPane.showMessageDialog(this, "Semantic search is only available for 'My Notes'.", "Info", JOptionPane.INFORMATION_MESSAGE);
-                    return;
-                }
-
-                var query = JOptionPane.showInputDialog(this, "Semantic search query:");
-                if (query == null || query.trim().isEmpty()) return;
-
-                core.lm.generateEmbedding(query).ifPresentOrElse(qEmb -> {
-                    var notesWithEmb = core.notes.getAllNotes().stream()
-                            .filter(n -> !n.tags.contains("config") && !n.tags.contains("nostr_feed")) // Ensure only "My Notes"
-                            .filter(n -> n.getEmbeddingV1() != null)
-                            .toList();
-                    if (notesWithEmb.isEmpty()) {
-                        JOptionPane.showMessageDialog(this, "No notes with embeddings in 'My Notes'.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
-                        return;
-                    }
-                    var scored = notesWithEmb.stream()
-                            .map(n -> Map.entry(n, LM.cosineSimilarity(qEmb, n.getEmbeddingV1())))
-                            .filter(entry -> entry.getValue() > 0.1)
-                            .sorted((e1, e2) -> Double.compare(e2.getValue(), e1.getValue()))
-                            .map(Map.Entry::getKey)
-                            .collect(Collectors.toList());
-                    if (scored.isEmpty())
-                        JOptionPane.showMessageDialog(this, "No relevant notes found.", "Semantic Search", JOptionPane.INFORMATION_MESSAGE);
-                    else refreshNotes(scored);
-                }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding for query.", "LLM Error", JOptionPane.ERROR_MESSAGE));
-            }
-        }
-
-        public static class NoteEditorPanel extends JPanel {
-            private final Core core;
-            private final Runnable onSaveCb;
-            private final JTextField titleF = new JTextField(40);
-            private final JTextArea contentA = new JTextArea(15, 40);
-            private final JTextField tagsF = new JTextField(40);
-            private final JLabel embStatusL = new JLabel("Embedding: Unknown");
-            private final JButton saveButton, publishButton, deleteButton;
-            private Note currentNote;
-
-            public NoteEditorPanel(Core core, Note note, Runnable onSaveCb) {
-                super(new BorderLayout(5, 5));
-                setBorder(new EmptyBorder(10, 10, 10, 10));
-                this.core = core;
-                this.currentNote = note;
-                this.onSaveCb = onSaveCb;
-                var formP = new JPanel(new GridBagLayout());
-                var gbc = new GridBagConstraints();
-                gbc.insets = new Insets(2, 2, 2, 2);
-                gbc.fill = GridBagConstraints.HORIZONTAL;
-                gbc.anchor = GridBagConstraints.WEST;
-                var y = 0;
-                gbc.gridx = 0;
-                gbc.gridy = y;
-                formP.add(new JLabel("Title:"), gbc);
-                gbc.gridx = 1;
-                gbc.gridy = y++;
-                gbc.weightx = 1.0;
-                formP.add(titleF, gbc);
-                gbc.gridx = 0;
-                gbc.gridy = y;
-                formP.add(new JLabel("Tags:"), gbc);
-                gbc.gridx = 1;
-                gbc.gridy = y++;
-                formP.add(tagsF, gbc);
-                tagsF.setToolTipText("Comma-separated");
-                gbc.gridx = 0;
-                gbc.gridy = y;
-                gbc.anchor = GridBagConstraints.NORTHWEST;
-                formP.add(new JLabel("Content:"), gbc);
-                gbc.gridx = 0;
-                gbc.gridy = ++y;
-                gbc.gridwidth = 2;
-                gbc.weighty = 1.0;
-                gbc.fill = GridBagConstraints.BOTH;
-                contentA.setLineWrap(true);
-                contentA.setWrapStyleWord(true);
-                formP.add(new JScrollPane(contentA), gbc);
-                gbc.gridy = ++y;
-                gbc.weighty = 0.0;
-                gbc.fill = GridBagConstraints.HORIZONTAL;
-                formP.add(embStatusL, gbc);
-                add(formP, BorderLayout.CENTER);
-                var bottomButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-                saveButton = new JButton("Save");
-                saveButton.addActionListener(e -> saveNote(false));
-                bottomButtonPanel.add(saveButton);
-                publishButton = new JButton("Save & Publish (Nostr)");
-                publishButton.addActionListener(e -> saveNote(true));
-                bottomButtonPanel.add(publishButton);
-                deleteButton = new JButton("Delete");
-                deleteButton.addActionListener(e -> deleteCurrentNote());
-                bottomButtonPanel.add(deleteButton);
-                add(bottomButtonPanel, BorderLayout.SOUTH);
-                populateFields();
-            }
-
-            private void populateFields() {
-                if (currentNote == null) {
-                    titleF.setText("");
-                    contentA.setText("Select a note or create a new one.");
-                    tagsF.setText("");
-                    titleF.setEnabled(false);
-                    contentA.setEnabled(false);
-                    tagsF.setEnabled(false);
-                    embStatusL.setText("No note loaded.");
-                    saveButton.setEnabled(false);
-                    publishButton.setEnabled(false);
-                    deleteButton.setEnabled(false);
-                    updateNostrButtonStates();
-                    return;
-                }
-
-                titleF.setText(currentNote.getTitle());
-                contentA.setText(currentNote.getText());
-                tagsF.setText(String.join(", ", currentNote.tags));
-                updateEmbeddingStatus();
-
-                var isPublicFeedItem = currentNote.tags.contains("nostr_feed");
-                var isReadOnly = isPublicFeedItem;
-
-                titleF.setEnabled(true); // Field itself is enabled
-                contentA.setEnabled(true);
-                tagsF.setEnabled(true);
-
-                titleF.setEditable(!isReadOnly);
-                contentA.setEditable(!isReadOnly);
-                tagsF.setEditable(!isReadOnly);
-
-                saveButton.setEnabled(!isReadOnly);
-                deleteButton.setEnabled(!isReadOnly && currentNote.id != null && core.notes.get(currentNote.id).isPresent());
-                updateNostrButtonStates();
-            }
-
-
-            private void updateEmbeddingStatus() {
-                embStatusL.setText("Embedding: " + (currentNote != null && currentNote.getEmbeddingV1() != null ? "Generated (" + currentNote.getEmbeddingV1().length + " dims)" : "Not Generated"));
-            }
-
-            public void updateLLMButtonStates() {
-                // This panel doesn't have direct LLM buttons, InspectorPanel does.
-            }
-
-            private void updateNostrButtonStates() {
-                var isPublicFeedItem = currentNote != null && currentNote.tags.contains("nostr_feed");
-                publishButton.setEnabled(!isPublicFeedItem && core.net.isEnabled() && core.net.getPrivateKeyBech32() != null && !core.net.getPrivateKeyBech32().isEmpty() && currentNote != null);
-            }
-
-            public Note getCurrentNote() {
-                return currentNote;
-            }
-
-            public void updateNoteFromFields() {
-                if (currentNote == null) currentNote = new Note();
-                currentNote.setTitle(titleF.getText());
-                currentNote.setText(contentA.getText());
-                currentNote.tags.clear();
-                Stream.of(tagsF.getText().split(",")).map(String::trim).filter(s -> !s.isEmpty()).forEach(currentNote.tags::add);
-            }
-
-            private void saveNote(boolean andPublish) {
-                if (currentNote != null && currentNote.tags.contains("nostr_feed")) {
-                    JOptionPane.showMessageDialog(this, "Cannot save public feed items.", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                updateNoteFromFields();
-                var saved = core.saveNote(this.currentNote);
-                if (saved != null) {
-                    this.currentNote = saved;
-                    if (andPublish) core.net.publishNote(this.currentNote);
-                    if (onSaveCb != null) onSaveCb.run();
-                    populateFields();
-                } else {
-                    JOptionPane.showMessageDialog(this, "Failed to save note.", "Error", JOptionPane.ERROR_MESSAGE);
-                }
-            }
-
-            private void deleteCurrentNote() {
-                if (currentNote == null || core.notes.get(currentNote.id).isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "Note not saved yet or already deleted.", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                if (currentNote.tags.contains("nostr_feed")) {
-                    JOptionPane.showMessageDialog(this, "Cannot delete public feed items.", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                if (JOptionPane.showConfirmDialog(this, "Delete note '" + currentNote.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                    var deletedTitle = currentNote.getTitle();
-                    if (core.deleteNote(currentNote.id)) {
-                        currentNote = null;
-                        if (onSaveCb != null) onSaveCb.run(); // This will refresh UI
-                        JOptionPane.showMessageDialog(this, "Note '" + deletedTitle + "' deleted.", "Deleted", JOptionPane.INFORMATION_MESSAGE);
-                        populateFields(); // Update editor to reflect no note or next note
-                    } else {
-                        JOptionPane.showMessageDialog(this, "Failed to delete note.", "Error", JOptionPane.ERROR_MESSAGE);
-                    }
-                }
-            }
-        }
-
-        public static class InspectorPanel extends JPanel {
-            private final Core core;
-            private final JTextArea llmAnalysisArea;
-            private final List<JButton> llmButtons = new ArrayList<>();
-            private final JLabel noteInfoLabel;
-            private Note contextNote;
-
-            public InspectorPanel(Core core) {
-                super(new BorderLayout(5, 5));
-                this.core = core;
-                setBorder(BorderFactory.createTitledBorder("Inspector"));
-                setPreferredSize(new Dimension(250, 0));
-                var contentPanel = new JPanel();
-                contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-                noteInfoLabel = new JLabel("No note selected.");
-                noteInfoLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
-                contentPanel.add(noteInfoLabel);
-                var llmToolbar = new JToolBar();
-                llmToolbar.setFloatable(false);
-                llmToolbar.setLayout(new FlowLayout(FlowLayout.LEFT));
-                Stream.of("Embed:EMBED", "Summarize:SUMMARIZE", "Ask:ASK", "Decompose:DECOMPOSE").forEach(s -> {
-                    var p = s.split(":");
-                    var b = new JButton(p[0]);
-                    b.setActionCommand(p[1]);
-                    b.addActionListener(this::handleLLMAction);
-                    llmButtons.add(b);
-                    llmToolbar.add(b);
-                });
-                contentPanel.add(llmToolbar);
-                llmAnalysisArea = new JTextArea(8, 20);
-                llmAnalysisArea.setEditable(false);
-                llmAnalysisArea.setLineWrap(true);
-                llmAnalysisArea.setWrapStyleWord(true);
-                llmAnalysisArea.setFont(llmAnalysisArea.getFont().deriveFont(Font.ITALIC));
-                llmAnalysisArea.setBackground(getBackground().darker());
-                contentPanel.add(new JScrollPane(llmAnalysisArea));
-                add(contentPanel, BorderLayout.NORTH);
-                updateLLMButtonStates();
-            }
-
-            public void setContextNote(Note note) {
-                this.contextNote = note;
-                if (note != null) {
-                    var title = note.getTitle();
-                    if (title.length() > 50) title = title.substring(0, 47) + "...";
-                    var tags = String.join(", ", note.tags);
-                    if (tags.length() > 50) tags = tags.substring(0, 47) + "...";
-
-                    var pubKeyInfo = "";
-                    if (note.tags.contains("nostr_feed") && note.metadata.containsKey("nostrPubKey")) {
-                        var npub = (String) note.metadata.get("nostrPubKey");
-                        pubKeyInfo = "<br>From: " + npub.substring(0, Math.min(npub.length(), 12)) + "...";
-                    }
-
-                    noteInfoLabel.setText("<html><b>" + title + "</b><br>Tags: " + tags +
-                            "<br>Updated: " + DateTimeFormatter.ISO_INSTANT.format(note.updatedAt.atZone(ZoneId.systemDefault())).substring(0, 19) +
-                            pubKeyInfo + "</html>");
-                    displayLLMAnalysis();
-                } else {
-                    noteInfoLabel.setText("No note selected.");
-                    llmAnalysisArea.setText("");
-                }
-                updateLLMButtonStates();
-            }
-
-            public void updateLLMButtonStates() {
-                var llmReady = core.lm.isReady();
-                var isPublicFeedItem = contextNote != null && contextNote.tags.contains("nostr_feed");
-                var allowLLM = llmReady && contextNote != null && !isPublicFeedItem;
-                llmButtons.forEach(b -> b.setEnabled(allowLLM));
-            }
-
-            private void displayLLMAnalysis() {
-                if (contextNote == null) {
-                    llmAnalysisArea.setText("");
-                    return;
-                }
-                var sb = new StringBuilder();
-                Optional.ofNullable(contextNote.metadata.get("llm:summary")).ifPresent(s -> sb.append("Summary:\n").append(s).append("\n\n"));
-                Optional.ofNullable(contextNote.metadata.get("llm:decomposition")).ifPresent(d -> {
-                    if (d instanceof List) {
-                        sb.append("Task Decomposition:\n");
-                        ((List<?>) d).forEach(i -> sb.append("- ").append(i).append("\n"));
-                        sb.append("\n");
-                    }
-                });
-                llmAnalysisArea.setText(sb.toString().trim());
-                llmAnalysisArea.setCaretPosition(0);
-            }
-
-            private void handleLLMAction(ActionEvent e) {
-                if (contextNote != null && contextNote.tags.contains("nostr_feed")) {
-                    JOptionPane.showMessageDialog(this, "LLM actions are not available for public feed items.", "LLM Info", JOptionPane.INFORMATION_MESSAGE);
-                    return;
-                }
-                if (!core.lm.isReady() || contextNote == null) {
-                    JOptionPane.showMessageDialog(this, "LLM Service not ready or no note selected.", "LLM Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-
-                var cmd = e.getActionCommand();
-                var textContent = contextNote.getText();
-                var titleContent = contextNote.getTitle();
-                switch (cmd) {
-                    case "EMBED" ->
-                            core.lm.generateEmbedding(contextNote.getContentForEmbedding()).ifPresentOrElse(emb -> {
-                                contextNote.setEmbeddingV1(emb);
-                                core.saveNote(contextNote);
-                                displayLLMAnalysis(); // Refresh inspector
-                                JOptionPane.showMessageDialog(this, "Embedding generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                            }, () -> JOptionPane.showMessageDialog(this, "Failed to generate embedding.", "LLM Error", JOptionPane.ERROR_MESSAGE));
-                    case "SUMMARIZE" -> core.lm.summarize(textContent).ifPresent(s -> {
-                        contextNote.metadata.put("llm:summary", s);
-                        core.saveNote(contextNote);
-                        displayLLMAnalysis();
-                        JOptionPane.showMessageDialog(this, "Summary generated and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                    });
-                    case "ASK" -> {
-                        var q = JOptionPane.showInputDialog(this, "Ask about note content:");
-                        if (q != null && !q.trim().isEmpty())
-                            core.lm.askAboutText(textContent, q).ifPresent(a -> JOptionPane.showMessageDialog(this, a, "Answer", JOptionPane.INFORMATION_MESSAGE));
-                    }
-                    case "DECOMPOSE" ->
-                            core.lm.decomposeTask(titleContent.isEmpty() ? textContent : titleContent).ifPresent(d -> {
-                                contextNote.metadata.put("llm:decomposition", d);
-                                core.saveNote(contextNote);
-                                displayLLMAnalysis();
-                                JOptionPane.showMessageDialog(this, "Task decomposed and saved.", "LLM", JOptionPane.INFORMATION_MESSAGE);
-                            });
-                }
-            }
-        }
-
-        public static class ChatPanel extends JPanel {
-            private final Core core;
-            private final Note note;
-            private final String partnerNpub;
-            private final JTextArea chatArea = new JTextArea(20, 50);
-            private final JTextField messageInput = new JTextField(40);
-            private final DateTimeFormatter chatTSFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
-
-            public ChatPanel(Core core, Note note, String partnerNpub) {
-                super(new BorderLayout(5, 5));
-                setBorder(new EmptyBorder(10, 10, 10, 10));
-                this.core = core;
-                this.note = note;
-                this.partnerNpub = partnerNpub;
-                chatArea.setEditable(false);
-                chatArea.setLineWrap(true);
-                chatArea.setWrapStyleWord(true);
-                add(new JScrollPane(chatArea), BorderLayout.CENTER);
-                var inputP = new JPanel(new BorderLayout(5, 0));
-                inputP.add(messageInput, BorderLayout.CENTER);
-                var sendB = new JButton("Send");
-                sendB.addActionListener(e -> sendMessage());
-                inputP.add(sendB, BorderLayout.EAST);
-                add(inputP, BorderLayout.SOUTH);
-                messageInput.addActionListener(e -> sendMessage());
-                loadMessages();
-                core.on(note.id, this::appendMessageFromListener);
-                addComponentListener(new ComponentAdapter() {
-                    @Override
-                    public void componentHidden(ComponentEvent e) {
-                        core.off(note.id);
-                    }
-                });
-            }
-
-            @SuppressWarnings("unchecked")
-            private void loadMessages() {
-                chatArea.setText("");
-                core.notes.get(this.note.id).ifPresent(freshNote -> ((List<Map<String, String>>) freshNote.content.getOrDefault("messages", new ArrayList<>()))
-                        .forEach(this::formatAndAppendMsg));
-                scrollToBottom();
-            }
-
-            private void formatAndAppendMsg(Map<String, String> m) {
-                var senderNpub = m.get("sender");
-                var t = m.get("text");
-                var ts = Instant.parse(m.get("timestamp"));
-                var dn = senderNpub.equals(core.net.getPublicKeyBech32()) ? "Me" : senderNpub.substring(0, Math.min(senderNpub.length(), 8));
-                chatArea.append(String.format("[%s] %s: %s\n", chatTSFormatter.format(ts), dn, t));
-            }
-
-            private void sendMessage() {
-                var txt = messageInput.getText().trim();
-                if (txt.isEmpty()) return;
-                if (!core.net.isEnabled() || core.net.getPrivateKeyBech32() == null || core.net.getPrivateKeyBech32().isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "Nostr not enabled/configured.", "Nostr Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                core.net.sendDirectMessage(partnerNpub, txt);
-                core.notes.get(this.note.id).ifPresent(currentChatNote -> {
-                    var entry = Map.of("sender", core.net.getPublicKeyBech32(), "timestamp", Instant.now().toString(), "text", txt);
-                    @SuppressWarnings("unchecked") var msgs = (List<Map<String, String>>) currentChatNote.content.computeIfAbsent("messages", k -> new ArrayList<>());
-                    msgs.add(entry);
-                    core.saveNote(currentChatNote);
-                    messageInput.setText("");
-                    // loadMessages(); // Message will appear when Nostr event for self is processed or if local echo is desired
-                });
-            }
-
-            private void appendMessageFromListener(String rawMsg) {
-                SwingUtilities.invokeLater(this::loadMessages);
-            }
-
-            private void scrollToBottom() {
-                chatArea.setCaretPosition(chatArea.getDocument().getLength());
-            }
-        }
-
-        public static class SettingsPanel extends JPanel {
-            private static final Logger logger = LoggerFactory.getLogger(SettingsPanel.class);
-            private final Core core;
-
-            public SettingsPanel(Core core, Consumer<String> themeUpdater, Runnable llmInitCb) {
-                super(new BorderLayout(10, 10));
-                setBorder(new EmptyBorder(10, 10, 10, 10));
-                this.core = core;
-                var tabbedPane = new JTabbedPane();
-                groupFieldsByAnnotation(core.cfg.net).forEach((group, fields) -> tabbedPane.addTab("Nostr: " + group, buildConfigSubPanelFor(core.cfg.net, fields, "Nostr " + group)));
-                groupFieldsByAnnotation(core.cfg.ui).forEach((group, fields) -> tabbedPane.addTab("UI: " + group, buildConfigSubPanelFor(core.cfg.ui, fields, "UI " + group)));
-                groupFieldsByAnnotation(core.cfg.lm).forEach((group, fields) -> tabbedPane.addTab("LLM: " + group, buildConfigSubPanelFor(core.cfg.lm, fields, "LLM " + group)));
-                add(tabbedPane, BorderLayout.CENTER);
-                var bottomPanel = getPanel(core, themeUpdater, llmInitCb);
-                add(bottomPanel, BorderLayout.SOUTH);
-            }
-
-            private @NotNull JPanel getPanel(Core core, Consumer<String> themeUpdater, Runnable llmInitCb) {
-                var saveButton = new JButton("Save All Settings");
-                saveButton.addActionListener(e -> {
-                    core.cfg.saveAllConfigs();
-                    // Re-initialize services that depend on config
-                    if (core.net.isEnabled()) { // If it was enabled, disable and re-enable to pick up changes
-                        core.net.setEnabled(false);
-                        core.net.setEnabled(true);
-                    } else { // If it was disabled, loadIdentity might be needed if keys changed
-                        core.net.setEnabled(false); // Effectively re-runs loadIdentity if keys changed
-                    }
-                    core.lm.init(); // Re-init LLM
-                    JOptionPane.showMessageDialog(this, "All settings saved. Services re-initialized.", "Settings Saved", JOptionPane.INFORMATION_MESSAGE);
-                    if (themeUpdater != null) themeUpdater.accept(core.cfg.ui.theme);
-                    if (llmInitCb != null) llmInitCb.run();
-                });
-                var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-                bottomPanel.add(saveButton);
-                return bottomPanel;
-            }
-
-            private Map<String, List<java.lang.reflect.Field>> groupFieldsByAnnotation(Object configObject) {
-                return Stream.of(configObject.getClass().getDeclaredFields()).filter(f -> f.isAnnotationPresent(Field.class)).collect(Collectors.groupingBy(f -> f.getAnnotation(Field.class).group()));
-            }
-
-            private JComponent buildConfigSubPanelFor(Object configObject, List<java.lang.reflect.Field> fields, String title) {
-                var panel = new JPanel(new GridBagLayout());
-                panel.setName(title + " Settings Panel");
-                var gbc = new GridBagConstraints();
-                gbc.insets = new Insets(4, 4, 4, 4);
-                gbc.fill = GridBagConstraints.HORIZONTAL;
-                gbc.anchor = GridBagConstraints.WEST;
-                var y = 0;
-                final var pubKeyLabelHolder = new JLabel[1];
-                for (var field : fields) {
-                    var cf = field.getAnnotation(Field.class);
-                    gbc.gridx = 0;
-                    gbc.gridy = y;
-                    panel.add(new JLabel(cf.label()), gbc);
-                    var comp = createEditorComponent(field, configObject, cf);
-                    if (!cf.tooltip().isEmpty()) comp.setToolTipText(cf.tooltip());
-                    gbc.gridx = 1;
-                    gbc.gridy = y++;
-                    gbc.weightx = 1.0;
-                    panel.add(comp, gbc);
-                    gbc.weightx = 0.0;
-                    if (field.getName().equals("privateKeyBech32") && configObject instanceof Config.NostrSettings nostrSettings) {
-                        pubKeyLabelHolder[0] = new JLabel("Public Key (npub): " + nostrSettings.publicKeyBech32);
-                        gbc.gridx = 1;
-                        gbc.gridy = y++;
-                        panel.add(pubKeyLabelHolder[0], gbc);
-                        DocumentListener dl = new FieldUpdateListener(de -> {
-                            try {
-                                var pkNsec = comp instanceof JPasswordField pf ? new String(pf.getPassword()) : ((JTextField) comp).getText();
-                                if (pkNsec != null && !pkNsec.trim().isEmpty()) {
-                                    var privKeyRaw = Crypto.Bech32.nip19Decode(pkNsec);
-                                    var pubKeyXOnlyRaw = Crypto.getPublicKeyXOnly(privKeyRaw);
-                                    nostrSettings.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
-                                } else nostrSettings.publicKeyBech32 = "Enter nsec to derive";
-                            } catch (Exception ex) {
-                                nostrSettings.publicKeyBech32 = "Invalid nsec";
-                            }
-                            pubKeyLabelHolder[0].setText("Public Key (npub): " + nostrSettings.publicKeyBech32);
-                        });
-                        if (comp instanceof JPasswordField pf) pf.getDocument().addDocumentListener(dl);
-                        else if (comp instanceof JTextField tf) tf.getDocument().addDocumentListener(dl);
-                        var genKeysBtn = new JButton("Generate New Keys");
-                        genKeysBtn.addActionListener(evt -> {
-                            if (JOptionPane.showConfirmDialog(panel, "Generate new Nostr keys & overwrite? Backup existing!", "Confirm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
-                                var keysInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
-                                if (comp instanceof JPasswordField pf) pf.setText(nostrSettings.privateKeyBech32);
-                                else if (comp instanceof JTextField tf) tf.setText(nostrSettings.privateKeyBech32);
-                                pubKeyLabelHolder[0].setText("Public Key (npub): " + nostrSettings.publicKeyBech32);
-                                var kda = new JTextArea(keysInfo, 5, 50);
-                                kda.setEditable(false);
-                                JOptionPane.showMessageDialog(panel, new JScrollPane(kda), "New Keys (Backup!)", JOptionPane.INFORMATION_MESSAGE);
-                            }
-                        });
-                        gbc.gridx = 1;
-                        gbc.gridy = y++;
-                        gbc.anchor = GridBagConstraints.EAST;
-                        panel.add(genKeysBtn, gbc);
-                        gbc.anchor = GridBagConstraints.WEST;
-                    }
-                }
-                gbc.gridy = y;
-                gbc.weighty = 1.0;
-                panel.add(new JPanel(), gbc);
-                return new JScrollPane(panel);
-            }
-
-            @SuppressWarnings("unchecked")
-            private JComponent createEditorComponent(java.lang.reflect.Field field, Object configObj, Field cf) {
-                try {
-                    field.setAccessible(true);
-                    var val = field.get(configObj);
-                    switch (cf.type()) {
-                        case TEXT_AREA:
-                            var ta = new JTextArea(3, 30);
-                            if (val instanceof List) ta.setText(String.join("\n", (List<String>) val));
-                            else if (val != null) ta.setText(val.toString());
-                            ta.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                                try {
-                                    field.set(configObj, new ArrayList<>(List.of(ta.getText().split("\\n"))));
-                                } catch (IllegalAccessException ex) {
-                                    logger.error("Error setting TEXT_AREA field {}", field.getName(), ex);
-                                }
-                            }));
-                            return new JScrollPane(ta);
-                        case COMBO_BOX:
-                            var cb = new JComboBox<>(cf.choices());
-                            if (val != null) cb.setSelectedItem(val.toString());
-                            cb.addActionListener(e -> {
-                                try {
-                                    field.set(configObj, cb.getSelectedItem());
-                                } catch (IllegalAccessException ex) {
-                                    logger.error("Error setting COMBO_BOX field {}", field.getName(), ex);
-                                }
-                            });
-                            return cb;
-                        case CHECK_BOX:
-                            var chkbx = new JCheckBox();
-                            if (val instanceof Boolean) chkbx.setSelected((Boolean) val);
-                            chkbx.addActionListener(e -> {
-                                try {
-                                    field.set(configObj, chkbx.isSelected());
-                                } catch (IllegalAccessException ex) {
-                                    logger.error("Error setting CHECK_BOX field {}", field.getName(), ex);
-                                }
-                            });
-                            return chkbx;
-                        case PASSWORD_FIELD:
-                            var pf = new JPasswordField(30);
-                            if (val != null) pf.setText(val.toString());
-                            pf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                                try {
-                                    field.set(configObj, new String(pf.getPassword()));
-                                } catch (IllegalAccessException ex) {
-                                    logger.error("Error setting PASSWORD_FIELD field {}", field.getName(), ex);
-                                }
-                            }));
-                            return pf;
-                        case TEXT_FIELD:
-                        default:
-                            var tf = new JTextField(30);
-                            if (val != null) tf.setText(val.toString());
-                            tf.getDocument().addDocumentListener(new FieldUpdateListener(e -> {
-                                try {
-                                    field.set(configObj, tf.getText());
-                                } catch (IllegalAccessException ex) {
-                                    logger.error("Error setting TEXT_FIELD field {}", field.getName(), ex);
-                                }
-                            }));
-                            return tf;
-                    }
-                } catch (IllegalAccessException e) {
-                    return new JLabel("Error: " + e.getMessage());
-                }
-            }
-        }
-
-        public static class StatusPanel extends JPanel {
-            private final JLabel label;
-            private final Core core;
-
-            public StatusPanel(Core core) {
-                super(new FlowLayout(FlowLayout.LEFT));
-                this.core = core;
-                setBorder(new EmptyBorder(2, 5, 2, 5));
-                label = new JLabel("Initializing...");
-                add(label);
-                updateStatus("Application ready.");
-            }
-
-            public void updateStatus(String message) {
-                SwingUtilities.invokeLater(() -> label.setText(String.format("Status: %s | Nostr: %s | LLM: %s", message, core.net.isEnabled() ? "ON" : "OFF", core.lm.isReady() ? "READY" : "NOT READY")));
-            }
-        }
-
-        private record FieldUpdateListener(Consumer<DocumentEvent> consumer) implements DocumentListener {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                consumer.accept(e);
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                consumer.accept(e);
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                consumer.accept(e);
-            }
         }
     }
 

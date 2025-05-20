@@ -1,11 +1,16 @@
 package dumb.note.theme;
 
 import javax.swing.*;
-import javax.swing.border.*;
-import javax.swing.plaf.*;
-import javax.swing.plaf.metal.*;
+import javax.swing.border.Border;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
+import javax.swing.plaf.ColorUIResource;
+import javax.swing.plaf.FontUIResource;
+import javax.swing.plaf.InsetsUIResource;
+import javax.swing.plaf.metal.DefaultMetalTheme;
+import javax.swing.plaf.metal.MetalButtonUI;
+import javax.swing.plaf.metal.MetalLookAndFeel;
 import java.awt.*;
-import java.util.Random;
 
 /**
  * HackerDarkMetalLookAndFeel - A refined Metal Look and Feel with a cyberpunk-inspired
@@ -60,7 +65,7 @@ public class DarkMetalLookAndFeel extends MetalLookAndFeel {
     /**
      * Custom Metal theme with enhanced aesthetics
      */
-    private class HackerDarkTheme extends DefaultMetalTheme {
+    private static class HackerDarkTheme extends DefaultMetalTheme {
 
         @Override
         public String getName() {

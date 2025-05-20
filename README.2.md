@@ -10,49 +10,50 @@ Netention is a system for organizing, prioritizing, and evolving thoughts ("Note
 - Shared Notes: Create, prioritize, and manage data collaboratively as `Note`s.
 - Privacy by Default: All `Note`s are private unless explicitly shared.
 - Tolerates vagueness and incomplete information 
-
-- Persistent Queries: `Note`s can act as ongoing search interests.
+- Agents: `Note`s represent the control surface for swarms of **agents** that use the reasoning engine and tools to pursue goals, react to, or anticipate changes.
+- Persistent Queries: `Note`s represent ongoing search interests.
 - Semantic Matching: `Note`s capture meaning and intent.
 - Notifications: The app receives matches to shared `Note`s as replies.
 - Real vs. Imaginary: Matches factual descriptions of real things to hypothetical (acceptable) descriptions of imaginary
   things - effecting the realization of imagination.
 
-  - **Tools:** External capabilities that the system can invoke based on its reasoning:
-          Language Model interaction (LangChain/LangChainJS/LangChain4J/etc...)
-              - supporting, at least: Ollama (localhost:11434) and Gemini
-          GetNoteText
-          ModifyNoteText
-          Graph search, traversal, etc..
-          Web Search
-          Code writing
-          Code execution
-          FindAssertions
-          LogMessage
-          IdentifyConcepts
-          GenerateQuestions
-          DecomposeGoal
-          Summarize
-          Enhance
-          AssertKIF
-          Query
-          Retract
-          Api
-          Echo        
-          FileOperations
-          UserInteraction
-          GenerateTaskLogic
-          Inspect 
-          EvalExpr
-          IfElse
-          Generate
-          Reflect
-          Schedule
-          Plan
-          Reason
-          DefineConcept
-          Exec
+- **Tools:** External capabilities that the system can invoke based on its reasoning:
+```
+  Language Model interaction (LangChain/LangChainJS/LangChain4J/etc...)
+      - supporting, at least: Ollama (localhost:11434) and Gemini
+  GetNoteText
+  ModifyNoteText
+  Graph search, traversal, etc..
+  Web Search
+  Code writing
+  Code execution
+  FindAssertions
+  LogMessage
+  IdentifyConcepts
+  GenerateQuestions
+  DecomposeGoal
+  Summarize
+  Enhance
+  AssertKIF
+  Query
+  Retract
+  Api
+  Echo        
+  FileOperations
+  UserInteraction
+  GenerateTaskLogic
+  Inspect 
+  EvalExpr
+  IfElse
+  Generate
+  Reflect
+  Schedule
+  Plan
+  Reason
+  DefineConcept
+  Exec
+```
 
-- **Agents:** Notes can become "active" and act as agents, using the reasoning engine and tools to pursue goals or react to changes.
 - **Real-time Communication:** A WebSocket server enables clients (UIs, other systems) to interact with the system in real-time, sending commands and receiving updates.
 - **Semantic Matching:** Notes and queries can be matched based on their meaning using various strategies:
     - comparisons of semantic metadata (facts satisfying conditions)

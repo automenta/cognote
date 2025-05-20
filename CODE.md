@@ -1,4 +1,4 @@
-__**## Code Guidelines / Conventions
+## Code Guidelines / Conventions
 
 - Complete, fully functional
 - Professional-grade, not explanatory/educational
@@ -13,4 +13,4 @@ __**## Code Guidelines / Conventions
 - Modular (logically organized, supporting abstraction)
 - Remove all comments, relying only on self-documenting code
     - Clear naming and structure
-- Use the latest version of the language, APIs, and dependencies__**
+- Use the latest version of the language, APIs, and dependencies
