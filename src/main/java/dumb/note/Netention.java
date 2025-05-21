@@ -46,11 +46,6 @@ public class Netention {
         }
     }
 
-    public static void main(String[] args) {
-        var core = new Core();
-        SwingUtilities.invokeLater(() -> new UI(core));
-    }
-
     public enum FieldType {TEXT_FIELD, TEXT_AREA, COMBO_BOX, CHECK_BOX, PASSWORD_FIELD}
 
     public enum ContentType {
