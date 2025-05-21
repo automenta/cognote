@@ -1192,7 +1192,7 @@ public class Netention {
 
         public static class UISettings {
             @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Nimbus (Dark)", "System"}, group = "Appearance")
-            public final String theme = "Nimbus (Dark)";
+            public String theme = "Nimbus (Dark)";
             @Field(label = "Minimize to System Tray", tooltip = "If enabled, closing the window minimizes to tray instead of exiting.", group = "Behavior")
             public final boolean minimizeToTray = true;
         }

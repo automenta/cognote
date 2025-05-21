@@ -291,6 +291,17 @@ public class Nostr {
         queueAction(new NostrAction(NostrActionType.PUBLISH_PROFILE, profileNote));
     }
 
+    public void requestSync() {
+        //TODO
+    }
+
+    public int getConnectedRelayCount() {
+        return (int) relays.stream().filter(r -> r.connected).count();
+    }
+    public int getConfiguredRelayCount() {
+        return relays.size();
+    }
+
     private enum NostrActionType {PUBLISH_NOTE, SEND_DM, PUBLISH_PROFILE}
 
     private record NostrAction(NostrActionType t, Object p) {
