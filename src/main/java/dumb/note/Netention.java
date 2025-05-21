@@ -435,6 +435,8 @@ public class Netention {
         private void executeStep(PlanExecution planExec, PlanStep step) {
             new Thread(() -> {
                 var currentToolNameStr = step.toolName;
+                if (currentToolNameStr==null)
+                    return; //??
                 var currentToolParams = step.toolParams;
 
                 if (step.currentAlternativeIndex >= 0 && step.currentAlternativeIndex < step.alternatives.size()) {
