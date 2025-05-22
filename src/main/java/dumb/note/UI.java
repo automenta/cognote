@@ -119,7 +119,7 @@ public class UI {
         }
 
         protected void setEditorComponent(JComponent panel) {
-            JPanel targetHost = getEditorHostPanel();
+            var targetHost = getEditorHostPanel();
             targetHost.removeAll();
             if (panel != null) targetHost.add(panel, BorderLayout.CENTER);
             targetHost.revalidate();
@@ -128,9 +128,9 @@ public class UI {
         }
 
         protected Optional<Netention.Note> getCurrentEditedNote() {
-            JPanel editorHost = getEditorHostPanel();
+            var editorHost = getEditorHostPanel();
             if (editorHost.getComponentCount() > 0) {
-                Component comp = editorHost.getComponent(0);
+                var comp = editorHost.getComponent(0);
                 if (comp instanceof NoteEditorPanel nep) return Optional.ofNullable(nep.getCurrentNote());
                 if (comp instanceof ConfigNoteEditorPanel cnep) return Optional.ofNullable(cnep.getConfigNote());
                 if (comp instanceof ChatPanel cp) return Optional.ofNullable(cp.getChatNote());
@@ -162,7 +162,7 @@ public class UI {
             System.exit(0);
         }
 
-        protected boolean canSwitchOrCloseContent(boolean isSwitchingToNewUnsaved, @Nullable JInternalFrame frameToClose) {
+        protected boolean canSwitchOrCloseContent(boolean ignoredIsSwitchingToNewUnsaved, @Nullable JInternalFrame frameToClose) {
             var editorHost = getEditorHostPanel();
             var currentEditorComp = (frameToClose == null && editorHost.getComponentCount() > 0) ? editorHost.getComponent(0) : null;
 
@@ -239,9 +239,9 @@ public class UI {
         protected void displayNoteInEditor(@Nullable Netention.Note note) {
             var nep = new NoteEditorPanel(core, note,
                     () -> {
-                        JPanel host = getEditorHostPanel();
+                        var host = getEditorHostPanel();
                         if (host.getComponentCount() > 0 && host.getComponent(0) instanceof NoteEditorPanel currentNep) {
-                            Netention.Note savedNote = currentNep.getCurrentNote();
+                            var savedNote = currentNep.getCurrentNote();
                             updateStatus(savedNote == null || savedNote.id == null ? "📝 Note created" : "💾 Note saved: " + savedNote.getTitle());
                         }
                     },
@@ -319,7 +319,7 @@ public class UI {
 
         private void updateAppTitleWithActiveFrame(@Nullable BaseInternalFrame activeFrame) {
             if (activeFrame != null && activeFrame.getAssociatedNote() != null) {
-                String noteTitle = activeFrame.getAssociatedNote().getTitle();
+                var noteTitle = activeFrame.getAssociatedNote().getTitle();
                 if (noteTitle == null || noteTitle.isEmpty()) noteTitle = "Untitled";
                 setTitle(baseTitle + " - [" + noteTitle + (activeFrame.isPanelDirty() ? " *" : "") + "]");
             } else {
@@ -351,17 +351,17 @@ public class UI {
         }
 
         private void populateActionHandlers() {
-            actionHandlers.put(UIAction.NEW_NOTE, e -> createNewNote());
-            actionHandlers.put(UIAction.NEW_FROM_TEMPLATE, e -> {
+            actionHandlers.put(UIAction.NEW_NOTE, _ -> createNewNote());
+            actionHandlers.put(UIAction.NEW_FROM_TEMPLATE, _ -> {
                 var templates = core.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.TEMPLATE.value));
                 if (templates.isEmpty()) {
                     JOptionPane.showMessageDialog(this, "No templates found...", "🤷 No Templates", JOptionPane.INFORMATION_MESSAGE);
                     return;
                 }
-                var selectedTemplate = (Netention.Note) JOptionPane.showInputDialog(this, "Select a template:", "📄 New from Template", JOptionPane.PLAIN_MESSAGE, null, templates.toArray(), templates.isEmpty() ? null : templates.getFirst());
+                var selectedTemplate = (Netention.Note) JOptionPane.showInputDialog(this, "Select a template:", "📄 New from Template", JOptionPane.PLAIN_MESSAGE, null, templates.toArray(), templates.getFirst());
                 if (selectedTemplate != null) createNewNoteFromTemplate(selectedTemplate);
             });
-            actionHandlers.put(UIAction.EXIT, e -> handleWindowClose());
+            actionHandlers.put(UIAction.EXIT, _ -> handleWindowClose());
             actionHandlers.put(UIAction.TOGGLE_INSPECTOR, e -> {
                 var show = ((JCheckBoxMenuItem) e.getSource()).isSelected();
                 inspectorPanel.setVisible(show);
@@ -375,16 +375,13 @@ public class UI {
                 mainSplitPane.revalidate();
             });
 
-            actionHandlers.put(UIAction.SAVE_NOTE, e -> getActiveInternalFrame().ifPresent(f -> f.savePanel(false)));
-            actionHandlers.put(UIAction.PUBLISH_NOTE, e -> getActiveInternalFrame().ifPresent(f -> {
-                if (f instanceof NoteInternalFrame) f.savePanel(true);
-                else f.savePanel(false);
-            }));
-            actionHandlers.put(UIAction.SET_GOAL, e -> getActiveInternalFrame().ifPresent(f -> {
+            actionHandlers.put(UIAction.SAVE_NOTE, _ -> getActiveInternalFrame().ifPresent(f -> f.savePanel(false)));
+            actionHandlers.put(UIAction.PUBLISH_NOTE, _ -> getActiveInternalFrame().ifPresent(f -> f.savePanel(f instanceof NoteInternalFrame)));
+            actionHandlers.put(UIAction.SET_GOAL, _ -> getActiveInternalFrame().ifPresent(f -> {
                 if (f.getMainPanel() instanceof NoteEditorPanel nep && nep.getCurrentNote() != null)
                     Stream.of(nep.toolBar.getComponents()).filter(c -> c instanceof JButton && "🎯".equals(((JButton) c).getText())).findFirst().map(JButton.class::cast).ifPresent(JButton::doClick);
             }));
-            actionHandlers.put(UIAction.DELETE_NOTE, e -> getActiveInternalFrame().ifPresent(frame -> {
+            actionHandlers.put(UIAction.DELETE_NOTE, _ -> getActiveInternalFrame().ifPresent(frame -> {
                 var noteToDelete = frame.getAssociatedNote();
                 if (noteToDelete != null && JOptionPane.showConfirmDialog(this, "🗑️ Delete note '" + noteToDelete.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                     core.deleteNote(noteToDelete.id);
@@ -394,11 +391,11 @@ public class UI {
                 }
             }));
 
-            actionHandlers.put(UIAction.MY_PROFILE, e -> ofNullable(core.cfg.net.myProfileNoteId).filter(id -> !id.isEmpty()).flatMap(core.notes::get)
+            actionHandlers.put(UIAction.MY_PROFILE, _ -> ofNullable(core.cfg.net.myProfileNoteId).filter(id -> !id.isEmpty()).flatMap(core.notes::get)
                     .ifPresentOrElse(this::display,
                             () -> JOptionPane.showMessageDialog(this, "My Profile note ID not configured or note not found.", "👤 Profile Error", JOptionPane.ERROR_MESSAGE)));
 
-            actionHandlers.put(UIAction.PUBLISH_PROFILE, e ->
+            actionHandlers.put(UIAction.PUBLISH_PROFILE, _ ->
                     ofNullable(core.cfg.net.myProfileNoteId).filter(id -> !id.isEmpty()).flatMap(core.notes::get).ifPresentOrElse(profileNote -> {
                         core.net.publishProfile(profileNote);
                         JOptionPane.showMessageDialog(this, "Profile publish request sent.", "🚀 Nostr Profile", JOptionPane.INFORMATION_MESSAGE);
@@ -426,28 +423,28 @@ public class UI {
                 statusPanel.updateStatus(statusMsg);
                 core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "nostr_status_changed");
             });
-            actionHandlers.put(UIAction.ADD_NOSTR_FRIEND, e -> UIUtil.addNostrContactDialog(this, core, npub -> statusPanel.updateStatus("Friend " + npub.substring(0, 10) + "... added.")));
+            actionHandlers.put(UIAction.ADD_NOSTR_FRIEND, _ -> UIUtil.addNostrContactDialog(this, core, npub -> statusPanel.updateStatus("Friend " + npub.substring(0, 10) + "... added.")));
 
-            actionHandlers.put(UIAction.MANAGE_RELAYS, e -> navPanel.selectViewAndNote(NavPanel.View.SETTINGS, "config.nostr_relays"));
-            actionHandlers.put(UIAction.LLM_SETTINGS, e -> navPanel.selectViewAndNote(NavPanel.View.SETTINGS, "config.llm"));
+            actionHandlers.put(UIAction.MANAGE_RELAYS, _ -> navPanel.selectViewAndNote(NavPanel.View.SETTINGS, "config.nostr_relays"));
+            actionHandlers.put(UIAction.LLM_SETTINGS, _ -> navPanel.selectViewAndNote(NavPanel.View.SETTINGS, "config.llm"));
 
-            actionHandlers.put(UIAction.SYNC_ALL, e -> {
+            actionHandlers.put(UIAction.SYNC_ALL, _ -> {
                 core.fireCoreEvent(Netention.Core.CoreEventType.STATUS_MESSAGE, "🔄 Syncing all...");
                 if (core.net.isEnabled()) core.net.requestSync();
                 navPanel.refreshNotes();
                 JOptionPane.showMessageDialog(this, "Synchronization requested.", "🔄 Sync All", JOptionPane.INFORMATION_MESSAGE);
             });
-            actionHandlers.put(UIAction.ABOUT, e -> JOptionPane.showMessageDialog(this, "Netention ✨ (MDI App)\nVersion: (dev)\nYour awesome note-taking and Nostr app!", "ℹ️ About Netention", JOptionPane.INFORMATION_MESSAGE));
+            actionHandlers.put(UIAction.ABOUT, _ -> JOptionPane.showMessageDialog(this, "Netention ✨ (MDI App)\nVersion: (dev)\nYour awesome note-taking and Nostr app!", "ℹ️ About Netention", JOptionPane.INFORMATION_MESSAGE));
 
-            actionHandlers.put(UIAction.CASCADE_WINDOWS, e -> cascadeFrames());
-            actionHandlers.put(UIAction.TILE_WINDOWS_HORIZONTALLY, e -> tileFramesHorizontally());
-            actionHandlers.put(UIAction.TILE_WINDOWS_VERTICALLY, e -> tileFramesVertically());
-            actionHandlers.put(UIAction.CLOSE_ACTIVE_WINDOW, e -> getActiveInternalFrame().ifPresent(f -> {
+            actionHandlers.put(UIAction.CASCADE_WINDOWS, _ -> cascadeFrames());
+            actionHandlers.put(UIAction.TILE_WINDOWS_HORIZONTALLY, _ -> tileFramesHorizontally());
+            actionHandlers.put(UIAction.TILE_WINDOWS_VERTICALLY, _ -> tileFramesVertically());
+            actionHandlers.put(UIAction.CLOSE_ACTIVE_WINDOW, _ -> getActiveInternalFrame().ifPresent(f -> {
                 try {
                     f.setClosed(true);
                 } catch (Exception ex) { /* ignored */ }
             }));
-            actionHandlers.put(UIAction.CLOSE_ALL_WINDOWS, e -> Stream.of(desktopPane.getAllFrames()).forEach(f -> {
+            actionHandlers.put(UIAction.CLOSE_ALL_WINDOWS, _ -> Stream.of(desktopPane.getAllFrames()).forEach(f -> {
                 try {
                     f.setClosed(true);
                 } catch (Exception ex) { /* ignored */ }
@@ -489,7 +486,7 @@ public class UI {
                 case CHAT_MESSAGE_ADDED, NOTE_ADDED -> {
                     if (navPanel != null) navPanel.refreshNotes();
                     if (event.type() == Netention.Core.CoreEventType.CHAT_MESSAGE_ADDED && event.data() instanceof Map msgData) {
-                        String chatNoteId = (String) msgData.get("chatNoteId");
+                        var chatNoteId = (String) msgData.get("chatNoteId");
                         ofNullable(openFramesByNoteId.get(chatNoteId))
                                 .filter(ChatInternalFrame.class::isInstance).map(ChatInternalFrame.class::cast)
                                 .ifPresent(ChatInternalFrame::refreshMessages);
@@ -514,7 +511,7 @@ public class UI {
         @Override
         protected void handleWindowClose() {
             List<JInternalFrame> frames = new ArrayList<>(List.of(desktopPane.getAllFrames()));
-            for (JInternalFrame frame : frames) {
+            for (var frame : frames) {
                 if (frame instanceof BaseInternalFrame bif) {
                     if (!canSwitchOrCloseContent(false, bif)) {
                         return;
@@ -551,7 +548,7 @@ public class UI {
             g2d.dispose();
             trayIcon = new TrayIcon(image, "Netention ✨", createTrayPopupMenu());
             trayIcon.setImageAutoSize(true);
-            trayIcon.addActionListener(e -> restoreWindow());
+            trayIcon.addActionListener(_ -> restoreWindow());
             try {
                 tray.add(trayIcon);
             } catch (AWTException e) {
@@ -564,17 +561,17 @@ public class UI {
         private PopupMenu createTrayPopupMenu() {
             var trayMenu = new PopupMenu();
             Stream.of(new MenuItem("✨ Open Netention") {{
-                          addActionListener(e -> restoreWindow());
+                          addActionListener(_ -> restoreWindow());
                       }},
                     new MenuItem("➕ Quick Add Note") {{
-                        addActionListener(e -> {
+                        addActionListener(_ -> {
                             restoreWindow();
                             createNewNote();
                         });
                     }},
                     null,
                     new MenuItem("🚪 Exit") {{
-                        addActionListener(e -> {
+                        addActionListener(_ -> {
                             restoreWindow();
                             handleWindowClose();
                             if (isVisible() && core.cfg.ui.minimizeToTray) { /* still visible, probably minimized again */ } else if (!isVisible() && core.cfg.ui.minimizeToTray) { /* correctly minimized */ } else {
@@ -604,9 +601,9 @@ public class UI {
                 return;
             }
 
-            String noteId = noteToDisplay.id;
+            var noteId = noteToDisplay.id;
             if (noteId != null && openFramesByNoteId.containsKey(noteId)) {
-                BaseInternalFrame frame = openFramesByNoteId.get(noteId);
+                var frame = openFramesByNoteId.get(noteId);
                 try {
                     if (frame.isIcon()) frame.setIcon(false);
                     frame.setSelected(true);
@@ -620,7 +617,7 @@ public class UI {
             }
 
             if (noteId == null) {
-                for (BaseInternalFrame frame : openUnsavedFrames) {
+                for (var frame : openUnsavedFrames) {
                     if (frame.getAssociatedNote() == noteToDisplay) {
                         try {
                             if (frame.isIcon()) frame.setIcon(false);
@@ -648,7 +645,7 @@ public class UI {
 
         private <T extends BaseInternalFrame> void openWindowForNote(Netention.Note note, Class<T> frameClass, String titlePrefix) {
             try {
-                Constructor<T> constructor = frameClass.getDeclaredConstructor(App.class, Netention.Core.class, Netention.Note.class, String.class);
+                var constructor = frameClass.getDeclaredConstructor(App.class, Netention.Core.class, Netention.Note.class, String.class);
                 BaseInternalFrame frame = constructor.newInstance(this, core, note, titlePrefix);
                 desktopPane.add(frame);
                 frame.setVisible(true);
@@ -705,9 +702,9 @@ public class UI {
             mb.add(fileMenu);
 
             var editMenu = new JMenu("Edit ✏️");
-            editMenu.add(createMenuItem("✂️ Cut", UIAction.CUT, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::cut)));
-            editMenu.add(createMenuItem("📋 Copy", UIAction.COPY, KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::copy)));
-            editMenu.add(createMenuItem("📝 Paste", UIAction.PASTE, KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::paste)));
+            editMenu.add(createMenuItem("✂️ Cut", UIAction.CUT, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::cut)));
+            editMenu.add(createMenuItem("📋 Copy", UIAction.COPY, KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::copy)));
+            editMenu.add(createMenuItem("📝 Paste", UIAction.PASTE, KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::paste)));
             mb.add(editMenu);
 
             mb.add(createViewMenu());
@@ -770,7 +767,7 @@ public class UI {
             var themeGroup = new ButtonGroup();
             Stream.of("System Default", "Nimbus (Dark)").forEach(themeName -> {
                 var themeItem = new JRadioButtonMenuItem(themeName, themeName.equals(core.cfg.ui.theme));
-                themeItem.addActionListener(e -> {
+                themeItem.addActionListener(_ -> {
                     core.cfg.ui.theme = themeName;
                     updateThemeAndRestartMessage(themeName);
                     core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "ui_theme_updated");
@@ -791,20 +788,20 @@ public class UI {
         }
 
         private void cascadeFrames() {
-            JInternalFrame[] frames = desktopPane.getAllFrames();
+            var frames = desktopPane.getAllFrames();
             if (frames.length == 0) return;
             int x = 0, y = 0;
-            int frameOffset = Math.min(30, Math.min(desktopPane.getWidth(), desktopPane.getHeight()) / Math.max(1, frames.length * 2)); // Cascade offset
+            var frameOffset = Math.min(30, Math.min(desktopPane.getWidth(), desktopPane.getHeight()) / Math.max(1, frames.length * 2)); // Cascade offset
 
             Arrays.sort(frames, Comparator.comparingInt(f -> -desktopPane.getComponentZOrder(f))); // Frontmost first
 
-            for (JInternalFrame frame : frames) {
+            for (var frame : frames) {
                 if (!frame.isIcon()) {
                     try {
                         frame.setMaximum(false);
-                        Dimension prefSize = frame.getPreferredSize();
-                        int frameWidth = Math.min(prefSize.width, desktopPane.getWidth() - x);
-                        int frameHeight = Math.min(prefSize.height, desktopPane.getHeight() - y);
+                        var prefSize = frame.getPreferredSize();
+                        var frameWidth = Math.min(prefSize.width, desktopPane.getWidth() - x);
+                        var frameHeight = Math.min(prefSize.height, desktopPane.getHeight() - y);
                         if (frameWidth <= 0) frameWidth = desktopPane.getWidth() / 2; // Default if too small
                         if (frameHeight <= 0) frameHeight = desktopPane.getHeight() / 2;
 
@@ -821,16 +818,16 @@ public class UI {
         }
 
         private void tileFrames(boolean horizontal) {
-            JInternalFrame[] frames = Arrays.stream(desktopPane.getAllFrames())
+            var frames = Arrays.stream(desktopPane.getAllFrames())
                     .filter(f -> !f.isIcon()).toArray(JInternalFrame[]::new);
             if (frames.length == 0) return;
 
-            Dimension desktopSize = desktopPane.getSize();
-            int frameWidth = horizontal ? desktopSize.width / frames.length : desktopSize.width;
-            int frameHeight = horizontal ? desktopSize.height : desktopSize.height / frames.length;
+            var desktopSize = desktopPane.getSize();
+            var frameWidth = horizontal ? desktopSize.width / frames.length : desktopSize.width;
+            var frameHeight = horizontal ? desktopSize.height : desktopSize.height / frames.length;
             int x = 0, y = 0;
 
-            for (JInternalFrame frame : frames) {
+            for (var frame : frames) {
                 try {
                     frame.setMaximum(false);
                     frame.setBounds(x, y, frameWidth, frameHeight);
@@ -888,17 +885,17 @@ public class UI {
                 }
             });
             updateFrameTitle(); // Initial title set
-            Point nextLocation = getNextFrameLocation();
+            var nextLocation = getNextFrameLocation();
             setLocation(nextLocation.x, nextLocation.y);
         }
 
         private Point getNextFrameLocation() {
-            JInternalFrame[] frames = mdiApp.desktopPane.getAllFrames();
+            var frames = mdiApp.desktopPane.getAllFrames();
             if (frames.length <= 1) return new Point(5, 5); // First frame (or only this one being added)
-            Point lastLocation = frames[frames.length - (frames.length > 1 ? 2 : 1)].getLocation(); // Second to last, or last if only one other
-            int offset = 25;
-            int x = (lastLocation.x + offset);
-            int y = (lastLocation.y + offset);
+            var lastLocation = frames[frames.length - 2].getLocation(); // Second to last, or last if only one other
+            var offset = 25;
+            var x = (lastLocation.x + offset);
+            var y = (lastLocation.y + offset);
             if (x + getWidth() > mdiApp.desktopPane.getWidth()) x = 5;
             if (y + getHeight() > mdiApp.desktopPane.getHeight()) y = 5;
             return new Point(x, y);
@@ -926,7 +923,7 @@ public class UI {
         }
 
         public void updateFrameTitle() {
-            String title = (currentNote != null && currentNote.getTitle() != null && !currentNote.getTitle().isEmpty()) ? currentNote.getTitle() : "Untitled";
+            var title = (currentNote != null && currentNote.getTitle() != null && !currentNote.getTitle().isEmpty()) ? currentNote.getTitle() : "Untitled";
             setTitle(titlePrefix + title + (isPanelDirty() ? " *" : ""));
             if (isSelected()) mdiApp.updateAppTitleWithActiveFrame(this);
         }
@@ -1010,9 +1007,9 @@ public class UI {
 
         @Override
         protected JComponent createMainPanel() {
-            String partnerNpub = (String) currentNote.meta.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key);
+            var partnerNpub = (String) currentNote.meta.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key);
             if (partnerNpub == null) {
-                JLabel errorLabel = new JLabel("Chat partner PK (npub) not found.");
+                var errorLabel = new JLabel("Chat partner PK (npub) not found.");
                 errorLabel.setHorizontalAlignment(SwingConstants.CENTER);
                 return errorLabel;
             }
@@ -1087,7 +1084,7 @@ public class UI {
             this.editorPanelContainer = super.defaultEditorHostPanel;
 
             noteListPanel = new SimpleNoteListPanel(core, this::displayNote);
-            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, noteListPanel, editorPanelContainer);
+            var splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, noteListPanel, editorPanelContainer);
             splitPane.setDividerLocation(200);
 
             remove(super.defaultEditorHostPanel);
@@ -1099,19 +1096,19 @@ public class UI {
             displayNote(null);
         }
 
-        public static void main(String[] args) {
+        public static void main(String[] ignoredArgs) {
             SwingUtilities.invokeLater(() -> new SimpleNote(new Netention.Core()).setVisible(true));
         }
 
         private void populateActionHandlers() {
-            actionHandlers.put(UIAction.NEW_NOTE, e -> createNewNote());
-            actionHandlers.put(UIAction.EXIT, e -> handleWindowClose());
-            actionHandlers.put(UIAction.SAVE_NOTE, e -> {
+            actionHandlers.put(UIAction.NEW_NOTE, _ -> createNewNote());
+            actionHandlers.put(UIAction.EXIT, _ -> handleWindowClose());
+            actionHandlers.put(UIAction.SAVE_NOTE, _ -> {
                 if (editorPanelContainer.getComponentCount() > 0 && editorPanelContainer.getComponent(0) instanceof NoteEditorPanel nep) {
                     nep.saveNote(false);
                 }
             });
-            actionHandlers.put(UIAction.ABOUT, e ->
+            actionHandlers.put(UIAction.ABOUT, _ ->
                     JOptionPane.showMessageDialog(this, "SimpleNote ✨\nA basic notes editor.", "About SimpleNote", JOptionPane.INFORMATION_MESSAGE)
             );
         }
@@ -1162,9 +1159,9 @@ public class UI {
             mb.add(fileMenu);
 
             var editMenu = new JMenu("Edit");
-            editMenu.add(createMenuItem("Cut", UIAction.CUT, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::cut)));
-            editMenu.add(createMenuItem("Copy", UIAction.COPY, KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::copy)));
-            editMenu.add(createMenuItem("Paste", UIAction.PASTE, KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK), e -> getActiveTextComponent().ifPresent(JTextComponent::paste)));
+            editMenu.add(createMenuItem("Cut", UIAction.CUT, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::cut)));
+            editMenu.add(createMenuItem("Copy", UIAction.COPY, KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::copy)));
+            editMenu.add(createMenuItem("Paste", UIAction.PASTE, KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK), _ -> getActiveTextComponent().ifPresent(JTextComponent::paste)));
             mb.add(editMenu);
 
             var noteMenu = new JMenu("Note");
@@ -1180,16 +1177,15 @@ public class UI {
 
     public static class SimpleChat extends BaseAppFrame {
         private final BuddyListPanel buddyPanel;
-        private final JPanel contentPanelContainer;
         private JCheckBoxMenuItem nostrToggleMenuItem;
 
         public SimpleChat(Netention.Core core) {
             super(core, "SimpleChat ✨", 900, 700);
-            this.contentPanelContainer = super.defaultEditorHostPanel;
+            var contentPanelContainer = super.defaultEditorHostPanel;
 
             buddyPanel = new BuddyListPanel(core, this::displayContentForIdentifier, this::showMyProfileEditor);
 
-            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buddyPanel, contentPanelContainer);
+            var splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buddyPanel, contentPanelContainer);
             splitPane.setDividerLocation(250);
 
             remove(super.defaultEditorHostPanel);
@@ -1207,13 +1203,13 @@ public class UI {
             updateNostrToggleState();
         }
 
-        public static void main(String[] args) {
+        public static void main(String[] ignoredArgs) {
             SwingUtilities.invokeLater(() -> new SimpleChat(new Netention.Core()).setVisible(true));
         }
 
         private void populateActionHandlers() {
-            actionHandlers.put(UIAction.EXIT, e -> handleWindowClose());
-            actionHandlers.put(UIAction.TOGGLE_NOSTR, e -> {
+            actionHandlers.put(UIAction.EXIT, _ -> handleWindowClose());
+            actionHandlers.put(UIAction.TOGGLE_NOSTR, _ -> {
                 var wantsEnable = nostrToggleMenuItem.isSelected();
                 if (wantsEnable && (core.cfg.net.privateKeyBech32 == null || core.cfg.net.privateKeyBech32.isEmpty())) {
                     JOptionPane.showMessageDialog(this, "Nostr private key (nsec) not configured. Please configure it via Nostr -> Configure Identity.", "Nostr Configuration Needed", JOptionPane.WARNING_MESSAGE);
@@ -1224,11 +1220,11 @@ public class UI {
                 updateNostrToggleState();
                 core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "nostr_status_changed_simple_chat");
             });
-            actionHandlers.put(UIAction.SHOW_MY_NOSTR_PROFILE_EDITOR, e -> showMyProfileEditor());
-            actionHandlers.put(UIAction.ADD_NOSTR_FRIEND, e -> UIUtil.addNostrContactDialog(this, core, npub -> buddyPanel.refreshList()));
-            actionHandlers.put(UIAction.MANAGE_NOSTR_RELAYS_POPUP, e -> manageNostrRelays());
-            actionHandlers.put(UIAction.CONFIGURE_NOSTR_IDENTITY_POPUP, e -> configureNostrIdentity());
-            actionHandlers.put(UIAction.ABOUT, e ->
+            actionHandlers.put(UIAction.SHOW_MY_NOSTR_PROFILE_EDITOR, _ -> showMyProfileEditor());
+            actionHandlers.put(UIAction.ADD_NOSTR_FRIEND, _ -> UIUtil.addNostrContactDialog(this, core, _ -> buddyPanel.refreshList()));
+            actionHandlers.put(UIAction.MANAGE_NOSTR_RELAYS_POPUP, _ -> manageNostrRelays());
+            actionHandlers.put(UIAction.CONFIGURE_NOSTR_IDENTITY_POPUP, _ -> configureNostrIdentity());
+            actionHandlers.put(UIAction.ABOUT, _ ->
                     JOptionPane.showMessageDialog(this, "SimpleChat ✨\nA basic Nostr IM client.", "About SimpleChat", JOptionPane.INFORMATION_MESSAGE)
             );
         }
@@ -1295,7 +1291,7 @@ public class UI {
 
         private void showProfileForContact(Netention.Note contactNote) {
             var profileEditor = new NoteEditorPanel(core, contactNote, () -> {
-            }, null, dirty -> {
+            }, null, _ -> {
             });
             profileEditor.setReadOnlyMode(true);
             UIUtil.showPanelInDialog(this, "Profile: " + contactNote.getTitle(), profileEditor, new Dimension(400, 500), false);
@@ -1320,10 +1316,10 @@ public class UI {
                 }
             }
 
-            final String finalMyProfileNoteId = myProfileNoteId;
+            final var finalMyProfileNoteId = myProfileNoteId;
             core.notes.get(finalMyProfileNoteId).ifPresentOrElse(profileNote -> {
                 var dialogContentPanel = new JPanel(new BorderLayout());
-                NoteEditorPanel profileEditor = new NoteEditorPanel(core, profileNote, null, null, isDirty -> {
+                var profileEditor = new NoteEditorPanel(core, profileNote, null, null, _ -> {
                 });
                 profileEditor.onSaveCb = () -> {
                     updateStatus("Profile note saved.");
@@ -1331,7 +1327,7 @@ public class UI {
                 };
                 dialogContentPanel.add(profileEditor, BorderLayout.CENTER);
 
-                var publishButton = UIUtil.button("🚀 Publish Profile", null, e -> {
+                var publishButton = UIUtil.button("🚀 Publish Profile", null, _ -> {
                     profileEditor.saveNote(false);
                     core.net.publishProfile(profileEditor.currentNote);
                     updateStatus("Profile publish request sent.");
@@ -1343,7 +1339,7 @@ public class UI {
                 bottomPanel.add(publishButton);
                 dialogContentPanel.add(bottomPanel, BorderLayout.SOUTH);
 
-                UIUtil.showEditablePanelInDialog(this, "Edit My Nostr Profile", dialogContentPanel, new Dimension(500, 600), true, x -> profileEditor.isUserModified());
+                UIUtil.showEditablePanelInDialog(this, "Edit My Nostr Profile", dialogContentPanel, new Dimension(500, 600), true, _ -> profileEditor.isUserModified());
 
             }, () -> JOptionPane.showMessageDialog(this, "My Profile note not found (ID: " + core.cfg.net.myProfileNoteId + ").", "👤 Profile Error", JOptionPane.ERROR_MESSAGE));
         }
@@ -1368,10 +1364,10 @@ public class UI {
                             if ("config.nostr_identity".equals(configNoteId))
                                 buddyPanel.refreshList();
                         },
-                        isDirty -> {
+                        _ -> {
                         }
                 );
-                UIUtil.showEditablePanelInDialog(this, dialogTitle, configEditor, new Dimension(600, 400), true, x -> configEditor.isUserModified());
+                UIUtil.showEditablePanelInDialog(this, dialogTitle, configEditor, new Dimension(600, 400), true, _ -> configEditor.isUserModified());
             }, () -> JOptionPane.showMessageDialog(this, "Configuration note '" + configNoteId + "' not found.", "Config Error", JOptionPane.ERROR_MESSAGE));
         }
 
@@ -1421,11 +1417,11 @@ public class UI {
             add(new JScrollPane(noteJList), BorderLayout.CENTER);
 
             var topPanel = new JPanel(new BorderLayout(5, 5));
-            topPanel.add(UIUtil.button("➕", "New Note", e -> onNoteSelected.accept(new Netention.Note("Untitled", ""))), BorderLayout.WEST);
+            topPanel.add(UIUtil.button("➕", "New Note", _ -> onNoteSelected.accept(new Netention.Note("Untitled", ""))), BorderLayout.WEST);
 
             var searchBox = new JPanel(new BorderLayout(2, 0));
             searchBox.add(new JLabel("🔍"), BorderLayout.WEST);
-            searchField.getDocument().addDocumentListener(new FieldUpdateListener(e -> refreshNotes()));
+            searchField.getDocument().addDocumentListener(new FieldUpdateListener(_ -> refreshNotes()));
             searchBox.add(searchField, BorderLayout.CENTER);
             topPanel.add(searchBox, BorderLayout.CENTER);
             add(topPanel, BorderLayout.NORTH);
@@ -1496,7 +1492,7 @@ public class UI {
             var buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
             buttonPanel.add(UIUtil.button("👤", "My Profile", onShowMyProfile));
             buttonPanel.add(UIUtil.button("➕🫂", "Add Contact", () ->
-                    UIUtil.addNostrContactDialog(this, core, npub -> refreshList())
+                    UIUtil.addNostrContactDialog(this, core, _ -> refreshList())
             ));
             add(buttonPanel, BorderLayout.NORTH);
             refreshList();
@@ -1516,11 +1512,11 @@ public class UI {
                     .filter(contactNote -> {
                         var contactNpub = (String) contactNote.meta.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key);
                         if (contactNpub == null) return true;
-                        return !IntStream.range(0, listModel.getSize())
+                        return IntStream.range(0, listModel.getSize())
                                 .mapToObj(listModel::getElementAt)
                                 .filter(Netention.Note.class::isInstance)
                                 .map(Netention.Note.class::cast)
-                                .anyMatch(chatNote -> chatNote.tags.contains(Netention.Note.SystemTag.CHAT.value) &&
+                                .noneMatch(chatNote -> chatNote.tags.contains(Netention.Note.SystemTag.CHAT.value) &&
                                         contactNpub.equals(chatNote.meta.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key)));
                     })
                     .sorted(Comparator.comparing(Netention.Note::getTitle))
@@ -1577,7 +1573,7 @@ public class UI {
         private final JPanel tagFilterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
         private final Set<String> activeTagFilters = new HashSet<>();
 
-        public NavPanel(Netention.Core core, App uiRef, Consumer<Netention.Note> onShowNote, Consumer<Netention.Note> onShowChat, Consumer<Netention.Note> onShowConfigNote, Runnable onNewNote, Consumer<Netention.Note> onNewNoteFromTemplate) {
+        public NavPanel(Netention.Core core, App uiRef, Consumer<Netention.Note> ignoredOnShowNote, Consumer<Netention.Note> ignoredOnShowChat, Consumer<Netention.Note> ignoredOnShowConfigNote, Runnable onNewNote, Consumer<Netention.Note> onNewNoteFromTemplate) {
             this.core = core;
             this.uiRef = uiRef;
             setLayout(new BorderLayout(5, 5));
@@ -1607,20 +1603,20 @@ public class UI {
             });
             add(new JScrollPane(noteJList), BorderLayout.CENTER);
             var topControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
-            topControls.add(UIUtil.button("➕", "New Note", onNewNote::run));
-            topControls.add(UIUtil.button("📄", "New from Template", e -> {
+            topControls.add(UIUtil.button("➕", "New Note", onNewNote));
+            topControls.add(UIUtil.button("📄", "New from Template", _ -> {
                 var templates = core.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.TEMPLATE.value));
                 if (templates.isEmpty()) {
                     JOptionPane.showMessageDialog(this, "No templates found.", "🤷 No Templates", JOptionPane.INFORMATION_MESSAGE);
                     return;
                 }
-                var selectedTemplate = (Netention.Note) JOptionPane.showInputDialog(this, "Select a template:", "📄 New from Template", JOptionPane.PLAIN_MESSAGE, null, templates.toArray(), templates.isEmpty() ? null : templates.getFirst());
+                var selectedTemplate = (Netention.Note) JOptionPane.showInputDialog(this, "Select a template:", "📄 New from Template", JOptionPane.PLAIN_MESSAGE, null, templates.toArray(), templates.getFirst());
                 if (selectedTemplate != null)
                     onNewNoteFromTemplate.accept(selectedTemplate);
             }));
             viewSelector = new JComboBox<>(View.values());
             viewSelector.setSelectedItem(View.NOTES);
-            viewSelector.addActionListener(e -> {
+            viewSelector.addActionListener(_ -> {
                 refreshNotes();
                 updateServiceDependentButtonStates();
             });
@@ -1629,8 +1625,8 @@ public class UI {
             searchPanel.add(new JLabel("🔍"), BorderLayout.WEST);
             searchField.setToolTipText("Search notes by title, content, or tags");
             searchPanel.add(searchField, BorderLayout.CENTER);
-            searchField.getDocument().addDocumentListener(new FieldUpdateListener(e -> refreshNotes()));
-            semanticSearchButton = UIUtil.button("🧠", "AI Search", e -> performSemanticSearch());
+            searchField.getDocument().addDocumentListener(new FieldUpdateListener(_ -> refreshNotes()));
+            semanticSearchButton = UIUtil.button("🧠", "AI Search", _ -> performSemanticSearch());
             var combinedSearchPanel = new JPanel(new BorderLayout());
             combinedSearchPanel.add(searchPanel, BorderLayout.CENTER);
             combinedSearchPanel.add(semanticSearchButton, BorderLayout.EAST);
@@ -1702,14 +1698,14 @@ public class UI {
                 var processMenu = new JMenu("💡 Process with My LM");
                 processMenu.setEnabled(core.lm.isReady());
                 Stream.of("Summarize", "Decompose Task", "Identify Concepts").forEach(tool ->
-                        processMenu.add(UIUtil.menuItem(tool, ae -> processSharedNoteWithLM(note, tool)))
+                        processMenu.add(UIUtil.menuItem(tool, _ -> processSharedNoteWithLM(note, tool)))
                 );
                 contextMenu.add(processMenu);
             }
             if (note.tags.contains(Netention.Note.SystemTag.SYSTEM_EVENT.value)) {
                 var status = (String) note.content.getOrDefault(Netention.Note.ContentKey.STATUS.getKey(), "");
                 if (Set.of("PROCESSED", "FAILED_PROCESSING", Netention.Planner.PlanState.FAILED.name()).contains(status)) {
-                    contextMenu.add(UIUtil.menuItem("🗑️ Delete Processed/Failed Event", ae -> {
+                    contextMenu.add(UIUtil.menuItem("🗑️ Delete Processed/Failed Event", _ -> {
                         if (JOptionPane.showConfirmDialog(this, "Delete system event note '" + note.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                             core.deleteNote(note.id);
                         }
@@ -1717,7 +1713,7 @@ public class UI {
                 }
             }
             if (!note.tags.contains(Netention.Note.SystemTag.CONFIG.value)) {
-                contextMenu.add(UIUtil.menuItem("🗑️ Delete Note", ae -> {
+                contextMenu.add(UIUtil.menuItem("🗑️ Delete Note", _ -> {
                     if (JOptionPane.showConfirmDialog(this, "Delete note '" + note.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                         core.deleteNote(note.id);
                     }
@@ -1785,7 +1781,7 @@ public class UI {
             updateTagFilterPanel(filteredNotes);
 
             Netention.Note noteToReselect = null;
-            Optional<Netention.Note> currentEditorNoteOpt = uiRef.getActiveInternalFrame().map(BaseInternalFrame::getAssociatedNote);
+            var currentEditorNoteOpt = uiRef.getActiveInternalFrame().map(BaseInternalFrame::getAssociatedNote);
 
             if (currentEditorNoteOpt.isPresent() && currentEditorNoteOpt.get().id != null) {
                 final var editorNoteId = currentEditorNoteOpt.get().id;
@@ -1831,7 +1827,7 @@ public class UI {
                         var tagButton = new JToggleButton(entry.getKey() + " (" + entry.getValue() + ")");
                         tagButton.setMargin(new Insets(1, 3, 1, 3));
                         tagButton.setSelected(activeTagFilters.contains(entry.getKey()));
-                        tagButton.addActionListener(e -> {
+                        tagButton.addActionListener(_ -> {
                             if (tagButton.isSelected()) activeTagFilters.add(entry.getKey());
                             else activeTagFilters.remove(entry.getKey());
                             refreshNotes();
@@ -1945,7 +1941,7 @@ public class UI {
 
         private void setupDocumentListeners() {
             clearDocumentListeners();
-            var listener = new FieldUpdateListener(e -> {
+            var listener = new FieldUpdateListener(_ -> {
                 if (!userModified) {
                     userModified = true;
                     if (onDirtyStateChange != null) onDirtyStateChange.accept(true);
@@ -1965,11 +1961,11 @@ public class UI {
             for (var action : Arrays.asList(new StyledEditorKit.BoldAction(), new StyledEditorKit.ItalicAction(), new StyledEditorKit.UnderlineAction()))
                 toolBar.add(styleButton(action));
             toolBar.addSeparator();
-            toolBar.add(UIUtil.button("💾", "Save", "Save Note", e -> saveNote(false)));
-            toolBar.add(UIUtil.button("🚀", "Publish", "Save & Publish to Nostr", e -> saveNote(true)));
-            toolBar.add(UIUtil.button("🔄", "Refresh", "Refresh from Source (if changed externally)", e -> refreshFromSource()));
+            toolBar.add(UIUtil.button("💾", "Save", "Save Note", _ -> saveNote(false)));
+            toolBar.add(UIUtil.button("🚀", "Publish", "Save & Publish to Nostr", _ -> saveNote(true)));
+            toolBar.add(UIUtil.button("🔄", "Refresh", "Refresh from Source (if changed externally)", _ -> refreshFromSource()));
             toolBar.addSeparator();
-            toolBar.add(UIUtil.button("🎯", "Set Goal", "Make this note a Goal/Plan", e -> setGoal()));
+            toolBar.add(UIUtil.button("🎯", "Set Goal", "Make this note a Goal/Plan", _ -> setGoal()));
             toolBar.addSeparator();
             toolBar.add(getLlmMenu());
         }
@@ -1977,17 +1973,20 @@ public class UI {
         private @NotNull JButton styleButton(StyledEditorKit.StyledTextAction action) {
             var btn = new JButton(action);
             var name = action.toString();
-            if (action instanceof StyledEditorKit.BoldAction) {
-                name = "Bold";
-                btn.setText("B");
-            } else if (action instanceof StyledEditorKit.ItalicAction) {
-                name = "Italic";
-                btn.setText("I");
-            } else if (action instanceof StyledEditorKit.UnderlineAction) {
-                name = "Underline";
-                btn.setText("U");
-            } else {
-                btn.setText(name.substring(0, 1));
+            switch (action) {
+                case StyledEditorKit.BoldAction _ -> {
+                    name = "Bold";
+                    btn.setText("B");
+                }
+                case StyledEditorKit.ItalicAction _ -> {
+                    name = "Italic";
+                    btn.setText("I");
+                }
+                case StyledEditorKit.UnderlineAction _ -> {
+                    name = "Underline";
+                    btn.setText("U");
+                }
+                default -> btn.setText(name.substring(0, 1));
             }
             btn.setToolTipText(name);
             return btn;
@@ -2226,14 +2225,14 @@ public class UI {
 
         private void refreshFromSource() {
             if (currentNote == null || !externallyUpdated) return;
-            Optional<Netention.Note> latestNoteOpt = core.notes.get(currentNote.id);
+            var latestNoteOpt = core.notes.get(currentNote.id);
             if (latestNoteOpt.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Note no longer exists in store.", "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-            Netention.Note latestNote = latestNoteOpt.get();
+            var latestNote = latestNoteOpt.get();
             if (userModified) {
-                int choice = JOptionPane.showConfirmDialog(this, "You have unsaved local changes. Discard your changes and refresh from the latest version?", "Confirm Refresh", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                var choice = JOptionPane.showConfirmDialog(this, "You have unsaved local changes. Discard your changes and refresh from the latest version?", "Confirm Refresh", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (choice == JOptionPane.NO_OPTION) return;
             }
             populateFields(latestNote);
@@ -2273,9 +2272,9 @@ public class UI {
             add(new JScrollPane(chatArea), BorderLayout.CENTER);
             var inputP = new JPanel(new BorderLayout(5, 0));
             inputP.add(messageInput, BorderLayout.CENTER);
-            inputP.add(UIUtil.button("➡️", "Send", e -> sendMessage()), BorderLayout.EAST);
+            inputP.add(UIUtil.button("➡️", "Send", _ -> sendMessage()), BorderLayout.EAST);
             add(inputP, BorderLayout.SOUTH);
-            messageInput.addActionListener(e -> sendMessage());
+            messageInput.addActionListener(_ -> sendMessage());
             loadMessages();
             coreEventListener = this::handleChatPanelCoreEvent;
             core.addCoreEventListener(coreEventListener);
@@ -2329,7 +2328,7 @@ public class UI {
             core.net.sendDirectMessage(partnerNpub, txt);
             core.notes.get(this.note.id).ifPresent(currentChatNote -> {
                 var entry = Map.of("sender", core.net.getPublicKeyBech32(), "timestamp", Instant.now().toString(), "text", txt);
-                @SuppressWarnings("unchecked") var msgs = (List<Map<String, String>>) currentChatNote.content.computeIfAbsent(Netention.Note.ContentKey.MESSAGES.getKey(), k -> new ArrayList<Map<String, String>>());
+                @SuppressWarnings("unchecked") var msgs = (List<Map<String, String>>) currentChatNote.content.computeIfAbsent(Netention.Note.ContentKey.MESSAGES.getKey(), _ -> new ArrayList<Map<String, String>>());
                 msgs.add(entry);
                 core.saveNote(currentChatNote);
                 messageInput.setText("");
@@ -2349,7 +2348,7 @@ public class UI {
     public static class InspectorPanel extends JPanel {
         private final Netention.Core core;
         private final JTabbedPane tabbedPane;
-        private final JPanel planPanel, actionableItemsPanel;
+        private final JPanel planPanel;
         private final JTextArea llmAnalysisArea;
         private final JLabel noteInfoLabel;
         private final JButton copyPubKeyButton;
@@ -2374,7 +2373,7 @@ public class UI {
             var infoPanel = new JPanel(new BorderLayout());
             noteInfoLabel = new JLabel("No note selected.");
             noteInfoLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
-            copyPubKeyButton = UIUtil.button("📋", "Copy PubKey", e -> {
+            copyPubKeyButton = UIUtil.button("📋", "Copy PubKey", _ -> {
                 if (contextNote != null && contextNote.meta.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key) instanceof String npub) {
                     Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(npub), null);
                     uiRef.statusPanel.updateStatus("📋 Copied PubKey: " + npub.substring(0, Math.min(12, npub.length())) + "...");
@@ -2404,8 +2403,8 @@ public class UI {
             });
             linksPanel.add(new JScrollPane(linksJList), BorderLayout.CENTER);
             var linkButtonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            linkButtonsPanel.add(UIUtil.button("➕", "Add Link", e -> addLink()));
-            linkButtonsPanel.add(UIUtil.button("➖", "Remove Link", e -> removeLink()));
+            linkButtonsPanel.add(UIUtil.button("➕", "Add Link", _ -> addLink()));
+            linkButtonsPanel.add(UIUtil.button("➖", "Remove Link", _ -> removeLink()));
             linksPanel.add(linkButtonsPanel, BorderLayout.SOUTH);
             tabbedPane.addTab(Tab.LINKS.title, linksPanel);
             var relatedNotesPanel = new JPanel(new BorderLayout());
@@ -2425,7 +2424,7 @@ public class UI {
             planStepsTable.getColumnModel().getColumn(0).setPreferredWidth(150);
             planStepsTable.getColumnModel().getColumn(1).setPreferredWidth(50);
             planPanel.add(new JScrollPane(planStepsTable), BorderLayout.CENTER);
-            planPanel.add(UIUtil.button("▶️", "Execute/Update Plan", e -> {
+            planPanel.add(UIUtil.button("▶️", "Execute/Update Plan", _ -> {
                 if (contextNote != null) {
                     if (!contextNote.tags.contains(Netention.Note.SystemTag.GOAL_WITH_PLAN.value))
                         contextNote.tags.add(Netention.Note.SystemTag.GOAL_WITH_PLAN.value);
@@ -2449,7 +2448,7 @@ public class UI {
             });
             planDependenciesPanel.add(new JScrollPane(planDepsTree), BorderLayout.CENTER);
             tabbedPane.addTab(Tab.PLAN_DEPS.title, planDependenciesPanel);
-            actionableItemsPanel = new JPanel(new BorderLayout());
+            var actionableItemsPanel = new JPanel(new BorderLayout());
             actionableItemsJList = new JList<>(actionableItemsListModel);
             actionableItemsJList.setCellRenderer(new ActionableItemCellRenderer());
             actionableItemsJList.addMouseListener(new MouseAdapter() {
@@ -2741,7 +2740,7 @@ public class UI {
             this.onSaveCb = onSaveCb;
             this.onDirtyStateChange = onDirtyStateChangeCallback;
             var targetConfigObject = getTargetConfigObject(configNote.id);
-            boolean isKnownEditableType = targetConfigObject != null || "config.nostr_relays".equals(configNote.id);
+            var isKnownEditableType = targetConfigObject != null || "config.nostr_relays".equals(configNote.id);
             if ("config.nostr_relays".equals(configNote.id)) add(buildNostrRelaysPanel(), BorderLayout.CENTER);
             else if (targetConfigObject != null) {
                 var formPanel = new JPanel(new GridBagLayout());
@@ -2763,7 +2762,7 @@ public class UI {
                 add(new JScrollPane(formPanel), BorderLayout.CENTER);
             } else add(buildGenericConfigViewer(configNote), BorderLayout.CENTER);
             var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            if (isKnownEditableType) bottomPanel.add(UIUtil.button("💾", "Save Settings", e -> saveChanges()));
+            if (isKnownEditableType) bottomPanel.add(UIUtil.button("💾", "Save Settings", _ -> saveChanges()));
             add(bottomPanel, BorderLayout.SOUTH);
             if (targetConfigObject != null && !"config.nostr_relays".equals(configNote.id))
                 refreshFieldsFromConfig(); // Calls onDirtyStateChange(false) indirectly
@@ -2842,21 +2841,12 @@ public class UI {
             var panel = new JPanel(new BorderLayout(5, 5));
             var listModel = new DefaultListModel<Netention.Note>();
             core.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.NOSTR_RELAY.value)).forEach(listModel::addElement);
-            var relayList = new JList<>(listModel);
-            relayList.setCellRenderer(new DefaultListCellRenderer() {
-                @Override
-                public Component getListCellRendererComponent(JList<?> list, Object value, int i, boolean sel, boolean foc) {
-                    super.getListCellRendererComponent(list, value, i, sel, foc);
-                    if (value instanceof Netention.Note n)
-                        setText(n.content.getOrDefault(Netention.Note.ContentKey.RELAY_URL.getKey(), "N/A") + ((Boolean) n.content.getOrDefault(Netention.Note.ContentKey.RELAY_ENABLED.getKey(), true) ? "" : " (Disabled)"));
-                    return this;
-                }
-            });
+            var relayList = relayList(listModel);
             panel.add(new JScrollPane(relayList), BorderLayout.CENTER);
             var buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            buttonPanel.add(UIUtil.button("➕", "Add", e -> editRelayNote(null, listModel)));
-            buttonPanel.add(UIUtil.button("✏️", "Edit", e -> ofNullable(relayList.getSelectedValue()).ifPresent(val -> editRelayNote(val, listModel))));
-            buttonPanel.add(UIUtil.button("➖", "Remove", e -> ofNullable(relayList.getSelectedValue()).ifPresent(sel -> {
+            buttonPanel.add(UIUtil.button("➕", "Add", _ -> editRelayNote(null, listModel)));
+            buttonPanel.add(UIUtil.button("✏️", "Edit", _ -> ofNullable(relayList.getSelectedValue()).ifPresent(val -> editRelayNote(val, listModel))));
+            buttonPanel.add(UIUtil.button("➖", "Remove", _ -> ofNullable(relayList.getSelectedValue()).ifPresent(sel -> {
                 if (JOptionPane.showConfirmDialog(panel, "Delete relay " + sel.content.get(Netention.Note.ContentKey.RELAY_URL.getKey()) + "?", "Confirm Delete", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                     core.deleteNote(sel.id);
                     listModel.removeElement(sel);
@@ -2867,11 +2857,25 @@ public class UI {
             return panel;
         }
 
+        private @NotNull JList<Netention.Note> relayList(DefaultListModel<Netention.Note> listModel) {
+            var relayList = new JList<>(listModel);
+            relayList.setCellRenderer(new DefaultListCellRenderer() {
+                @Override
+                public Component getListCellRendererComponent(JList<?> list, Object value, int i, boolean sel, boolean foc) {
+                    super.getListCellRendererComponent(list, value, i, sel, foc);
+                    if (value instanceof Netention.Note n)
+                        setText(n.content.getOrDefault(Netention.Note.ContentKey.RELAY_URL.getKey(), "N/A") + ((Boolean) n.content.getOrDefault(Netention.Note.ContentKey.RELAY_ENABLED.getKey(), true) ? "" : " (Disabled)"));
+                    return this;
+                }
+            });
+            return relayList;
+        }
+
         private void editRelayNote(@Nullable Netention.Note relayNote, DefaultListModel<Netention.Note> listModel) {
             var editorDialog = new RelayEditDialog((Frame) SwingUtilities.getWindowAncestor(this), core, relayNote);
             editorDialog.setVisible(true);
             if (editorDialog.isSaved()) {
-                Netention.Note savedNote = editorDialog.getRelayNote();
+                var savedNote = editorDialog.getRelayNote();
                 if (relayNote == null) listModel.addElement(savedNote);
                 else listModel.setElementAt(savedNote, listModel.indexOf(relayNote));
                 core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "nostr_relays_updated");
@@ -2909,8 +2913,8 @@ public class UI {
                 gbc.gridy = 3;
                 formPanel.add(writeCheck, gbc);
                 var buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-                buttonPanel.add(UIUtil.button("💾 Save", null, e -> saveRelay()));
-                buttonPanel.add(UIUtil.button("❌ Cancel", null, e -> dispose()));
+                buttonPanel.add(UIUtil.button("💾 Save", null, _ -> saveRelay()));
+                buttonPanel.add(UIUtil.button("❌ Cancel", null, _ -> dispose()));
                 setLayout(new BorderLayout(10, 10));
                 add(formPanel, BorderLayout.CENTER);
                 add(buttonPanel, BorderLayout.SOUTH);
@@ -2941,23 +2945,16 @@ public class UI {
             }
         }
 
-        static class ConfigFieldEditorFactory {
-            private final Netention.Core core;
-            private final Runnable dirtyMarker;
-
-            public ConfigFieldEditorFactory(Netention.Core core, Runnable dirtyMarker) {
-                this.core = core;
-                this.dirtyMarker = dirtyMarker;
-            }
+        record ConfigFieldEditorFactory(Netention.Core core, Runnable dirtyMarker) {
 
             public JComponent createEditor(Field field, Object configObjInstance) {
-                Netention.Field cf = field.getAnnotation(Netention.Field.class);
+                var cf = field.getAnnotation(Netention.Field.class);
                 JComponent comp;
                 try {
                     field.setAccessible(true);
-                    Object currentValue = field.get(configObjInstance);
-                    DocumentListener dl = new FieldUpdateListener(e -> dirtyMarker.run());
-                    ActionListener al = e -> dirtyMarker.run();
+                    var currentValue = field.get(configObjInstance);
+                    DocumentListener dl = new FieldUpdateListener(_ -> dirtyMarker.run());
+                    ActionListener al = _ -> dirtyMarker.run();
                     if (field.getName().equals("privateKeyBech32") && configObjInstance instanceof Netention.Config.NostrSettings ns)
                         comp = createNostrIdentityEditor(ns, dl);
                     else comp = switch (cf.type()) {
@@ -2988,15 +2985,15 @@ public class UI {
                 var publicKeyLabel = new JLabel("Public Key (npub): " + ns.publicKeyBech32);
                 privateKeyField.getDocument().addDocumentListener(new FieldUpdateListener(de -> {
                     try {
-                        String pkNsec = new String(privateKeyField.getPassword());
-                        ns.publicKeyBech32 = pkNsec != null && !pkNsec.trim().isEmpty() ? Crypto.Bech32.nip19Encode("npub", Crypto.getPublicKeyXOnly(Crypto.Bech32.nip19Decode(pkNsec))) : "Enter nsec to derive";
+                        var pkNsec = new String(privateKeyField.getPassword());
+                        ns.publicKeyBech32 = !pkNsec.trim().isEmpty() ? Crypto.Bech32.nip19Encode("npub", Crypto.getPublicKeyXOnly(Crypto.Bech32.nip19Decode(pkNsec))) : "Enter nsec to derive";
                     } catch (Exception ex) {
                         ns.publicKeyBech32 = "Invalid nsec format";
                     }
                     publicKeyLabel.setText("Public Key (npub): " + ns.publicKeyBech32);
                     privateKeyDocListener.insertUpdate(de);
                 }));
-                var generateButton = UIUtil.button("🔑 Generate New", "Generate New Nostr Keys", evt -> {
+                var generateButton = UIUtil.button("🔑 Generate New", "Generate New Nostr Keys", _ -> {
                     if (JOptionPane.showConfirmDialog(panel, "Generate new Nostr keys & overwrite current ones? BACKUP EXISTING KEYS FIRST!", "Confirm Key Generation", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION) {
                         var keysInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
                         privateKeyField.setText(core.cfg.net.privateKeyBech32);
@@ -3116,7 +3113,6 @@ public class UI {
     public static class StatusPanel extends JPanel {
         private final JLabel label, nostrStatusLabel, llmStatusLabel, systemHealthLabel;
         private final Netention.Core core;
-        private final Timer healthMetricsTimer;
 
         public StatusPanel(Netention.Core core) {
             super(new FlowLayout(FlowLayout.LEFT));
@@ -3134,7 +3130,7 @@ public class UI {
                     updateStatus(msg);
                 }
             });
-            healthMetricsTimer = new Timer(15000, e -> updateSystemHealthMetrics());
+            var healthMetricsTimer = new Timer(15000, _ -> updateSystemHealthMetrics());
             healthMetricsTimer.setInitialDelay(1000);
             healthMetricsTimer.start();
         }
@@ -3158,9 +3154,9 @@ public class UI {
         public void updateStatus(String message) {
             SwingUtilities.invokeLater(() -> {
                 label.setText("ℹ️ " + message);
-                boolean nostrEnabled = core.net.isEnabled();
-                int connectedRelays = nostrEnabled ? core.net.getConnectedRelayCount() : 0;
-                int configuredRelays = nostrEnabled ? core.net.getConfiguredRelayCount() : 0;
+                var nostrEnabled = core.net.isEnabled();
+                var connectedRelays = nostrEnabled ? core.net.getConnectedRelayCount() : 0;
+                var configuredRelays = nostrEnabled ? core.net.getConfiguredRelayCount() : 0;
                 nostrStatusLabel.setText("💜 Nostr: " + (nostrEnabled ? connectedRelays + "/" + configuredRelays + " Relays" : "OFF"));
                 nostrStatusLabel.setForeground(nostrEnabled ? connectedRelays > 0 ? new Color(0, 153, 51) : Color.ORANGE.darker() : Color.RED);
                 llmStatusLabel.setText("💡 LLM: " + (core.lm.isReady() ? "READY" : "NOT READY"));
@@ -3188,7 +3184,7 @@ public class UI {
 
     private static class UIUtil {
         static JButton button(String emoji, String tooltip, Runnable listener) {
-            return button(emoji, "", tooltip, e -> listener.run());
+            return button(emoji, "", tooltip, _ -> listener.run());
         }
 
         static JButton button(String emoji, String tooltip, ActionListener listener) {
@@ -3235,8 +3231,8 @@ public class UI {
             return showEditablePanelInDialog(owner, title, panelContent, preferredSize, modal, null);
         }
 
-        static JDialog showEditablePanelInDialog(Frame owner, String baseTitle, JComponent panelContent, Dimension preferredSize, boolean modal, @Nullable Function<JComponent, Boolean> dirtyStateProvider) {
-            JDialog dialog = new JDialog(owner, baseTitle, modal);
+        static JDialog showEditablePanelInDialog(Frame owner, String baseTitle, JComponent panelContent, Dimension preferredSize, boolean modal, @Nullable Function<JComponent, Boolean> ignoredDirtyStateProvider) {
+            var dialog = new JDialog(owner, baseTitle, modal);
             dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
             dialog.setContentPane(panelContent);
             if (preferredSize != null) {
