@@ -104,23 +104,23 @@ public class Nostr {
 
     private void connectToRelays() {
         disconnectFromRelays();
-        var relayNotes = coreRef.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.NOSTR_RELAY.value));
+        var relayNotes = coreRef.notes.getAll(n -> n.tags.contains(Netention.SystemTag.NOSTR_RELAY.value));
         if (relayNotes.isEmpty()) {
             logger.warn("No Nostr relay notes found. Creating default relays.");
             Stream.of("wss://relay.damus.io", "wss://nos.lol").forEach(url -> {
                 var relayNote = new Netention.Note("Relay: " + url, "");
-                relayNote.tags.add(Netention.Note.SystemTag.NOSTR_RELAY.value);
-                relayNote.content.putAll(Map.of(Netention.Note.ContentKey.RELAY_URL.getKey(), url, Netention.Note.ContentKey.RELAY_ENABLED.getKey(), true, Netention.Note.ContentKey.RELAY_READ.getKey(), true, Netention.Note.ContentKey.RELAY_WRITE.getKey(), true));
+                relayNote.tags.add(Netention.SystemTag.NOSTR_RELAY.value);
+                relayNote.content.putAll(Map.of(Netention.ContentKey.RELAY_URL.getKey(), url, Netention.ContentKey.RELAY_ENABLED.getKey(), true, Netention.ContentKey.RELAY_READ.getKey(), true, Netention.ContentKey.RELAY_WRITE.getKey(), true));
                 coreRef.saveNote(relayNote);
             });
-            relayNotes = coreRef.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.NOSTR_RELAY.value));
+            relayNotes = coreRef.notes.getAll(n -> n.tags.contains(Netention.SystemTag.NOSTR_RELAY.value));
         }
         relayNotes.stream()
-                .filter(rn -> (Boolean) rn.content.getOrDefault(Netention.Note.ContentKey.RELAY_ENABLED.getKey(), true))
+                .filter(rn -> (Boolean) rn.content.getOrDefault(Netention.ContentKey.RELAY_ENABLED.getKey(), true))
                 .forEach(relayNote -> {
-                    var relayUrl = (String) relayNote.content.get(Netention.Note.ContentKey.RELAY_URL.getKey());
-                    boolean canRead = (Boolean) relayNote.content.getOrDefault(Netention.Note.ContentKey.RELAY_READ.getKey(), true);
-                    boolean canWrite = (Boolean) relayNote.content.getOrDefault(Netention.Note.ContentKey.RELAY_WRITE.getKey(), true);
+                    var relayUrl = (String) relayNote.content.get(Netention.ContentKey.RELAY_URL.getKey());
+                    boolean canRead = (Boolean) relayNote.content.getOrDefault(Netention.ContentKey.RELAY_READ.getKey(), true);
+                    boolean canWrite = (Boolean) relayNote.content.getOrDefault(Netention.ContentKey.RELAY_WRITE.getKey(), true);
                     if (relayUrl != null && !relayUrl.isEmpty()) {
                         try {
                             var conn = new RelayConnection(URI.create(relayUrl), http, this::handleRelayMessage, this.publicKeyXOnlyHex, canRead, canWrite);
@@ -227,8 +227,8 @@ public class Nostr {
         e.kind = 1;
         e.content = note.getTitle() + "\n\n" + note.getText();
         note.tags.stream().filter(t -> {
-                    if (Stream.of(Netention.Note.SystemTag.values()).noneMatch(st -> st.value.equals(t))) return true;
-                    return t.equals(Netention.Note.SystemTag.NOSTR_FEED.value);
+                    if (Stream.of(Netention.SystemTag.values()).noneMatch(st -> st.value.equals(t))) return true;
+                    return t.equals(Netention.SystemTag.NOSTR_FEED.value);
                 })
                 .forEach(t -> e.tags.add(List.of("t", t)));
         e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
@@ -250,7 +250,7 @@ public class Nostr {
     }
 
     private void publishProfileInternal(Netention.Note profileNote) throws GeneralSecurityException, JsonProcessingException {
-        if (!profileNote.tags.contains(Netention.Note.SystemTag.MY_PROFILE.value)) {
+        if (!profileNote.tags.contains(Netention.SystemTag.MY_PROFILE.value)) {
             logger.warn("Attempted to publish non-profile note {} as profile.", profileNote.id);
             return;
         }
@@ -259,14 +259,14 @@ public class Nostr {
         e.created_at = Instant.now().getEpochSecond();
         e.kind = 0;
         e.content = NostrUtil.toJson(Map.of(
-                "name", (String) profileNote.content.getOrDefault(Netention.Note.ContentKey.PROFILE_NAME.getKey(), ""),
-                "about", (String) profileNote.content.getOrDefault(Netention.Note.ContentKey.PROFILE_ABOUT.getKey(), ""),
-                "picture", (String) profileNote.content.getOrDefault(Netention.Note.ContentKey.PROFILE_PICTURE_URL.getKey(), "")
+                "name", (String) profileNote.content.getOrDefault(Netention.ContentKey.PROFILE_NAME.getKey(), ""),
+                "about", (String) profileNote.content.getOrDefault(Netention.ContentKey.PROFILE_ABOUT.getKey(), ""),
+                "picture", (String) profileNote.content.getOrDefault(Netention.ContentKey.PROFILE_PICTURE_URL.getKey(), "")
         ));
         e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
         broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
         logger.info("Published Profile (Kind 0): {}", e.id.substring(0, 8));
-        profileNote.meta.put(Netention.Note.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
+        profileNote.meta.put(Netention.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
         coreRef.saveNote(profileNote);
     }
 

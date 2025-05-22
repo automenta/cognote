@@ -149,26 +149,26 @@ public class Tools {
             newNote.content.putAll((Map<String, Object>) params.get(Netention.Planner.ToolParam.CONTENT.getKey()));
 
         Map<String, Object> metadata = params.get(Netention.Planner.ToolParam.METADATA.getKey()) instanceof Map ? new HashMap<>((Map<String, Object>) params.get(Netention.Planner.ToolParam.METADATA.getKey())) : new HashMap<>();
-        if (metadata.containsKey(Netention.Note.Metadata.CREATED_AT_FROM_EVENT.key)) {
-            var tsValue = metadata.remove(Netention.Note.Metadata.CREATED_AT_FROM_EVENT.key);
+        if (metadata.containsKey(Netention.Metadata.CREATED_AT_FROM_EVENT.key)) {
+            var tsValue = metadata.remove(Netention.Metadata.CREATED_AT_FROM_EVENT.key);
             var eventTime = (tsValue instanceof Number n) ? Instant.ofEpochSecond(n.longValue()) : ((tsValue instanceof Instant i) ? i : null);
             if (eventTime != null) {
                 newNote.createdAt = eventTime;
                 newNote.updatedAt = eventTime;
             }
         }
-        if (metadata.containsKey(Netention.Note.Metadata.NOSTR_RAW_EVENT.key)) {
-            var rawEventObj = metadata.remove(Netention.Note.Metadata.NOSTR_RAW_EVENT.key);
+        if (metadata.containsKey(Netention.Metadata.NOSTR_RAW_EVENT.key)) {
+            var rawEventObj = metadata.remove(Netention.Metadata.NOSTR_RAW_EVENT.key);
             try {
-                newNote.meta.put(Netention.Note.Metadata.NOSTR_RAW_EVENT.key, rawEventObj instanceof String s ? s : core.json.writeValueAsString(rawEventObj));
+                newNote.meta.put(Netention.Metadata.NOSTR_RAW_EVENT.key, rawEventObj instanceof String s ? s : core.json.writeValueAsString(rawEventObj));
             } catch (JsonProcessingException e) {
                 Netention.Core.logger.warn("Could not serialize nostrRawEvent for note metadata.");
             }
         }
-        if (metadata.containsKey(Netention.Note.Metadata.NOSTR_PUB_KEY.key)) {
-            if (metadata.get(Netention.Note.Metadata.NOSTR_PUB_KEY.key) instanceof String pubkeyHex) {
+        if (metadata.containsKey(Netention.Metadata.NOSTR_PUB_KEY.key)) {
+            if (metadata.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String pubkeyHex) {
                 try {
-                    newNote.meta.put(Netention.Note.Metadata.NOSTR_PUB_KEY.key, Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(pubkeyHex)));
+                    newNote.meta.put(Netention.Metadata.NOSTR_PUB_KEY.key, Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(pubkeyHex)));
                 } catch (Exception ex) {
                     Netention.Core.logger.warn("Failed to encode npub from hex in CreateNote metadata: {}", pubkeyHex);
                 }
@@ -189,13 +189,13 @@ public class Tools {
 
         return core.notes.get(noteId).map(note -> {
             Map<String, Object> updateCopy = new HashMap<>(contentUpdate); // Work on a copy
-            if ("NOW".equals(updateCopy.get(Netention.Note.ContentKey.LAST_RUN.getKey())))
-                updateCopy.put(Netention.Note.ContentKey.LAST_RUN.getKey(), Instant.now().toString());
+            if ("NOW".equals(updateCopy.get(Netention.ContentKey.LAST_RUN.getKey())))
+                updateCopy.put(Netention.ContentKey.LAST_RUN.getKey(), Instant.now().toString());
 
             if (updateCopy.get("metadataUpdate") instanceof Map metadataUpdatesRaw) {
                 Map<String, Object> metadataUpdates = new HashMap<>(metadataUpdatesRaw);
-                if ("NOW".equals(metadataUpdates.get(Netention.Note.Metadata.PROFILE_LAST_UPDATED_AT.key))) {
-                    metadataUpdates.put(Netention.Note.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
+                if ("NOW".equals(metadataUpdates.get(Netention.Metadata.PROFILE_LAST_UPDATED_AT.key))) {
+                    metadataUpdates.put(Netention.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
                 }
                 note.meta.putAll(metadataUpdates);
                 updateCopy.remove("metadataUpdate");
@@ -237,17 +237,17 @@ public class Tools {
             var contactNote = core.notes.get(contactNoteId).orElseGet(() -> {
                 var n = new Netention.Note("Contact: " + nostrPubKeyNpub.substring(0, Math.min(nostrPubKeyNpub.length(), 12)) + "...", "");
                 n.id = contactNoteId;
-                n.tags.addAll(Arrays.asList(Netention.Note.SystemTag.CONTACT.value, Netention.Note.SystemTag.NOSTR_CONTACT.value));
-                n.meta.putAll(Map.of(Netention.Note.Metadata.NOSTR_PUB_KEY.key, nostrPubKeyNpub, Netention.Note.Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex));
+                n.tags.addAll(Arrays.asList(Netention.SystemTag.CONTACT.value, Netention.SystemTag.NOSTR_CONTACT.value));
+                n.meta.putAll(Map.of(Netention.Metadata.NOSTR_PUB_KEY.key, nostrPubKeyNpub, Netention.Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex));
                 Netention.Core.logger.info("Created new contact note for {}", nostrPubKeyNpub);
                 return n;
             });
-            contactNote.meta.put(Netention.Note.Metadata.LAST_SEEN.key, Instant.now().toString());
+            contactNote.meta.put(Netention.Metadata.LAST_SEEN.key, Instant.now().toString());
             if (profileData != null) {
-                ofNullable(profileData.get("name")).ifPresent(name -> contactNote.content.put(Netention.Note.ContentKey.PROFILE_NAME.getKey(), name));
-                ofNullable(profileData.get("about")).ifPresent(about -> contactNote.content.put(Netention.Note.ContentKey.PROFILE_ABOUT.getKey(), about));
-                ofNullable(profileData.get("picture")).ifPresent(pic -> contactNote.content.put(Netention.Note.ContentKey.PROFILE_PICTURE_URL.getKey(), pic));
-                contactNote.meta.put(Netention.Note.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
+                ofNullable(profileData.get("name")).ifPresent(name -> contactNote.content.put(Netention.ContentKey.PROFILE_NAME.getKey(), name));
+                ofNullable(profileData.get("about")).ifPresent(about -> contactNote.content.put(Netention.ContentKey.PROFILE_ABOUT.getKey(), about));
+                ofNullable(profileData.get("picture")).ifPresent(pic -> contactNote.content.put(Netention.ContentKey.PROFILE_PICTURE_URL.getKey(), pic));
+                contactNote.meta.put(Netention.Metadata.PROFILE_LAST_UPDATED_AT.key, Instant.now().toString());
             }
             core.saveNote(contactNote);
             return contactNote.id;
@@ -300,13 +300,13 @@ public class Tools {
             var chatNote = core.notes.get(chatId).orElseGet(() -> {
                 var nCN = new Netention.Note("Chat with " + (selfNpub != null && selfNpub.equals(senderNpub) ? partnerNpub : senderNpub).substring(0, 10) + "...", "");
                 nCN.id = chatId;
-                nCN.tags.addAll(List.of(Netention.Note.SystemTag.CHAT.value, "nostr"));
-                nCN.meta.put(Netention.Note.Metadata.NOSTR_PUB_KEY.key, (selfNpub != null && selfNpub.equals(senderNpub) ? partnerNpub : senderNpub));
-                nCN.content.put(Netention.Note.ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+                nCN.tags.addAll(List.of(Netention.SystemTag.CHAT.value, "nostr"));
+                nCN.meta.put(Netention.Metadata.NOSTR_PUB_KEY.key, (selfNpub != null && selfNpub.equals(senderNpub) ? partnerNpub : senderNpub));
+                nCN.content.put(Netention.ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
                 Netention.Core.logger.info("Created new chat note for {}", partnerNpub);
                 return nCN;
             });
-            var messages = (List<Map<String, String>>) chatNote.content.computeIfAbsent(Netention.Note.ContentKey.MESSAGES.getKey(), k -> new ArrayList<>());
+            var messages = (List<Map<String, String>>) chatNote.content.computeIfAbsent(Netention.ContentKey.MESSAGES.getKey(), k -> new ArrayList<>());
             messages.add(Map.of("sender", senderNpub, "timestamp", Instant.ofEpochSecond(timestampEpoch).toString(), "text", messageContent));
             core.saveNote(chatNote);
             core.fireCoreEvent(Netention.Core.CoreEventType.CHAT_MESSAGE_ADDED, Map.of("chatNoteId", chatId, "message", messages.getLast()));
@@ -342,14 +342,14 @@ public class Tools {
         var noteId = (String) params.get(Netention.Planner.ToolParam.NOTE_ID.getKey());
         Map<String, Object> rootNode = new HashMap<>();
         core.notes.get(noteId).ifPresent(n -> {
-            rootNode.putAll(Map.of(Netention.Note.NoteProperty.ID.getKey(), n.id, Netention.Note.NoteProperty.TITLE.getKey(), n.getTitle(), Netention.Note.ContentKey.STATUS.getKey(), n.meta.get(Netention.Note.Metadata.PLAN_STATUS.key)));
+            rootNode.putAll(Map.of(Netention.NoteProperty.ID.getKey(), n.id, Netention.NoteProperty.TITLE.getKey(), n.getTitle(), Netention.ContentKey.STATUS.getKey(), n.meta.get(Netention.Metadata.PLAN_STATUS.key)));
             var children = n.links.stream()
                     .filter(l -> "plan_subgoal_of".equals(l.relationType) || "plan_depends_on".equals(l.relationType))
                     .flatMap(l -> core.notes.get(l.targetNoteId).stream())
-                    .map(childNote -> Map.of(Netention.Note.NoteProperty.ID.getKey(), childNote.id, Netention.Note.NoteProperty.TITLE.getKey(), childNote.getTitle(), Netention.Note.ContentKey.STATUS.getKey(), childNote.meta.get(Netention.Note.Metadata.PLAN_STATUS.key), "relation", childNote.links.stream().filter(cl -> cl.targetNoteId.equals(n.id)).findFirst().map(cl -> cl.relationType).orElse("unknown"))).collect(Collectors.toList());
+                    .map(childNote -> Map.of(Netention.NoteProperty.ID.getKey(), childNote.id, Netention.NoteProperty.TITLE.getKey(), childNote.getTitle(), Netention.ContentKey.STATUS.getKey(), childNote.meta.get(Netention.Metadata.PLAN_STATUS.key), "relation", childNote.links.stream().filter(cl -> cl.targetNoteId.equals(n.id)).findFirst().map(cl -> cl.relationType).orElse("unknown"))).collect(Collectors.toList());
             rootNode.put("children", children);
             var parents = core.notes.getAll(otherNote -> otherNote.links.stream().anyMatch(l -> l.targetNoteId.equals(noteId) && ("plan_subgoal_of".equals(l.relationType) || "plan_depends_on".equals(l.relationType))))
-                    .stream().flatMap(parentNote -> parentNote.links.stream().filter(l -> l.targetNoteId.equals(noteId) && ("plan_subgoal_of".equals(l.relationType) || "plan_depends_on".equals(l.relationType))).findFirst().stream().map(relevantLink -> Map.of(Netention.Note.NoteProperty.ID.getKey(), parentNote.id, Netention.Note.NoteProperty.TITLE.getKey(), parentNote.getTitle(), Netention.Note.ContentKey.STATUS.getKey(), parentNote.meta.get(Netention.Note.Metadata.PLAN_STATUS.key), "relation", relevantLink.relationType))).collect(Collectors.toList());
+                    .stream().flatMap(parentNote -> parentNote.links.stream().filter(l -> l.targetNoteId.equals(noteId) && ("plan_subgoal_of".equals(l.relationType) || "plan_depends_on".equals(l.relationType))).findFirst().stream().map(relevantLink -> Map.of(Netention.NoteProperty.ID.getKey(), parentNote.id, Netention.NoteProperty.TITLE.getKey(), parentNote.getTitle(), Netention.ContentKey.STATUS.getKey(), parentNote.meta.get(Netention.Metadata.PLAN_STATUS.key), "relation", relevantLink.relationType))).collect(Collectors.toList());
             rootNode.put("parents", parents);
         });
         return rootNode;
@@ -463,7 +463,7 @@ public class Tools {
         var tag = (String) params.get(Netention.Planner.ToolParam.TAG.getKey());
         if (tag == null) throw new IllegalArgumentException("tag parameter required.");
         return core.notes.getAll(n -> n.tags.contains(tag)).stream()
-                .map(n -> Map.of(Netention.Note.NoteProperty.ID.getKey(), n.id, Netention.Note.NoteProperty.TITLE.getKey(), n.getTitle()))
+                .map(n -> Map.of(Netention.NoteProperty.ID.getKey(), n.id, Netention.NoteProperty.TITLE.getKey(), n.getTitle()))
                 .collect(Collectors.toList());
     }
 
@@ -481,13 +481,13 @@ public class Tools {
                 .filter(n -> {
                     if (n.getEmbeddingV1() == null || n.getEmbeddingV1().length != queryEmb.get().length)
                         return false;
-                    return !n.tags.contains(Netention.Note.SystemTag.CONFIG.value);
+                    return !n.tags.contains(Netention.SystemTag.CONFIG.value);
                 })
                 .map(candidateNote -> new AbstractMap.SimpleEntry<>(candidateNote, LM.cosineSimilarity(queryEmb.get(), candidateNote.getEmbeddingV1())))
                 .filter(entry -> entry.getValue() > minSimilarity)
                 .sorted(Map.Entry.<Netention.Note, Double>comparingByValue().reversed())
                 .limit(maxResults)
-                .map(entry -> Map.of(Netention.Note.NoteProperty.ID.getKey(), entry.getKey().id, Netention.Note.NoteProperty.TITLE.getKey(), entry.getKey().getTitle(), "similarity", entry.getValue()))
+                .map(entry -> Map.of(Netention.NoteProperty.ID.getKey(), entry.getKey().id, Netention.NoteProperty.TITLE.getKey(), entry.getKey().getTitle(), "similarity", entry.getValue()))
                 .collect(Collectors.toList());
     }
 
@@ -571,7 +571,7 @@ public class Tools {
         core.scheduler.schedule(() -> core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                 Netention.Planner.ToolParam.EVENT_TYPE.getKey(), eventType,
                 Netention.Planner.ToolParam.PAYLOAD.getKey(), Objects.requireNonNullElse(payload, Collections.emptyMap()),
-                Netention.Note.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
+                Netention.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
         )), delaySeconds, TimeUnit.SECONDS);
         return "System event " + eventType + " scheduled in " + delaySeconds + "s.";
     }
@@ -579,7 +579,7 @@ public class Tools {
     @ToolAction(tool = Netention.Core.Tool.GET_SYSTEM_HEALTH_METRICS)
     public static Object getSystemHealthMetrics(Netention.Core core, Map<String, Object> params) {
         Map<String, Object> metrics = new HashMap<>();
-        metrics.put("pendingSystemEvents", core.notes.getAll(n -> n.tags.contains(Netention.Note.SystemTag.SYSTEM_EVENT.value) && Netention.Planner.PlanState.PENDING.name().equals(n.content.get(Netention.Note.ContentKey.STATUS.getKey()))).size());
+        metrics.put("pendingSystemEvents", core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.SYSTEM_EVENT.value) && Netention.Planner.PlanState.PENDING.name().equals(n.content.get(Netention.ContentKey.STATUS.getKey()))).size());
         metrics.put("activePlans", core.planner.getActivePlans().size());
         metrics.put("failedPlanStepsInActivePlans", core.planner.getActivePlans().values().stream().flatMap(exec -> exec.steps.stream()).filter(step -> Netention.Planner.PlanStepState.FAILED.equals(step.status)).count());
         metrics.put("nostrStatus", core.net.isEnabled() ? "ENABLED" : "DISABLED");
@@ -600,8 +600,8 @@ public class Tools {
                         stalledPlanNoteIds.add(planNoteId);
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                                 Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.STALLED_PLAN_DETECTED.name(),
-                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(Netention.Planner.ToolParam.PLAN_NOTE_ID.getKey(), planNoteId, Netention.Note.Metadata.PLAN_STATUS.key, exec.currentStatus.name()),
-                                Netention.Note.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
+                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(Netention.Planner.ToolParam.PLAN_NOTE_ID.getKey(), planNoteId, Netention.Metadata.PLAN_STATUS.key, exec.currentStatus.name()),
+                                Netention.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
                         ));
                     }
                 }

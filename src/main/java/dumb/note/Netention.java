@@ -65,6 +65,54 @@ public class Netention {
         }
     }
 
+    public enum SystemTag {
+        SYSTEM_EVENT("#system_event"), SYSTEM_PROCESS_HANDLER("#system_process_handler"),
+        SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
+        NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
+        CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
+        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile");
+        public final String value;
+
+        SystemTag(String value) {
+            this.value = value;
+        }
+
+    }
+
+    public enum NoteProperty {
+        ID, TITLE, TEXT, CONTENT_TYPE, TAGS, LINKS, METADATA, CONTENT, CREATED_AT, UPDATED_AT;
+
+        public String getKey() {
+            return name().toLowerCase();
+        }
+    }
+
+    public enum Metadata {
+        PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
+        NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
+        PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition");
+        public final String key;
+
+        Metadata() {
+            this.key = name().toLowerCase();
+        }
+
+        Metadata(String key) {
+            this.key = key;
+        }
+
+    }
+
+    public enum ContentKey {
+        TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES,
+        PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN,
+        RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
+
+        public String getKey() {
+            return name().toLowerCase();
+        }
+    }
+
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.FIELD)
     public @interface Field {
@@ -93,39 +141,39 @@ public class Netention {
 
         public Note() {
             createdAt = updatedAt = Instant.now();
-            content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
+            content.put(Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
         }
 
         public Note(String t, String txt) {
             this();
             this.content.putAll(Map.of(
-                    ContentKey.TITLE.getKey(), t,
-                    ContentKey.TEXT.getKey(), txt,
-                    ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()
+                    Netention.ContentKey.TITLE.getKey(), t,
+                    Netention.ContentKey.TEXT.getKey(), txt,
+                    Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()
             ));
         }
 
         public String getTitle() {
-            return (String) content.getOrDefault(ContentKey.TITLE.getKey(), "Untitled");
+            return (String) content.getOrDefault(Netention.ContentKey.TITLE.getKey(), "Untitled");
         }
 
         public void setTitle(String t) {
-            content.put(ContentKey.TITLE.getKey(), t);
+            content.put(Netention.ContentKey.TITLE.getKey(), t);
         }
 
         public String getText() {
-            return (String) content.getOrDefault(ContentKey.TEXT.getKey(), "");
+            return (String) content.getOrDefault(Netention.ContentKey.TEXT.getKey(), "");
         }
 
         public void setText(String t) {
-            content.put(ContentKey.TEXT.getKey(), t);
-            if (!ContentType.TEXT_HTML.getValue().equals(content.get(ContentKey.CONTENT_TYPE.getKey()))) {
-                content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
+            content.put(Netention.ContentKey.TEXT.getKey(), t);
+            if (!ContentType.TEXT_HTML.getValue().equals(content.get(Netention.ContentKey.CONTENT_TYPE.getKey()))) {
+                content.put(Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue());
             }
         }
 
         public ContentType getContentTypeEnum() {
-            return ContentType.fromString((String) content.getOrDefault(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()));
+            return ContentType.fromString((String) content.getOrDefault(Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()));
         }
 
         public String getContentType() {
@@ -141,8 +189,8 @@ public class Netention {
         }
 
         public void setHtmlText(String html) {
-            content.put(ContentKey.TEXT.getKey(), html);
-            content.put(ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_HTML.getValue());
+            content.put(Netention.ContentKey.TEXT.getKey(), html);
+            content.put(Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_HTML.getValue());
         }
 
         public String getContentForEmbedding() {
@@ -175,53 +223,6 @@ public class Netention {
             return Objects.hash(id);
         }
 
-        public enum ContentKey {
-            TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES,
-            PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN,
-            RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
-
-            public String getKey() {
-                return name().toLowerCase();
-            }
-        }
-
-        public enum Metadata {
-            PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
-            NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
-            PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition");
-            public final String key;
-
-            Metadata() {
-                this.key = name().toLowerCase();
-            }
-
-            Metadata(String key) {
-                this.key = key;
-            }
-
-        }
-
-        public enum SystemTag {
-            SYSTEM_EVENT("#system_event"), SYSTEM_PROCESS_HANDLER("#system_process_handler"),
-            SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
-            NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
-            CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
-            NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile");
-            public final String value;
-
-            SystemTag(String value) {
-                this.value = value;
-            }
-
-        }
-
-        public enum NoteProperty {
-            ID, TITLE, TEXT, CONTENT_TYPE, TAGS, LINKS, METADATA, CONTENT, CREATED_AT, UPDATED_AT;
-
-            public String getKey() {
-                return name().toLowerCase();
-            }
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -266,11 +267,11 @@ public class Netention {
 
             if (!PlanState.RUNNING.equals(exe.currentStatus) || exe.steps.isEmpty()) {
                 exe.currentStatus = PlanState.PARSING;
-                goal.meta.putAll(Map.of(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name(),
-                        Note.Metadata.PLAN_START_TIME.key, Instant.now().toString()));
+                goal.meta.putAll(Map.of(Metadata.PLAN_STATUS.key, exe.currentStatus.name(),
+                        Metadata.PLAN_START_TIME.key, Instant.now().toString()));
                 core.saveNote(goal);
 
-                var planStepsData = goal.content.get(Note.ContentKey.PLAN_STEPS.getKey());
+                var planStepsData = goal.content.get(ContentKey.PLAN_STEPS.getKey());
                 if (planStepsData instanceof List<?> rawStepsList && exe.steps.isEmpty()) {
                     try {
                         for (var i = 0; i < rawStepsList.size(); i++) {
@@ -285,14 +286,14 @@ public class Netention {
                     } catch (Exception e) {
                         logger.error("Failed to parse plan steps for note {}", goal.id, e);
                         exe.currentStatus = PlanState.FAILED_PARSING;
-                        goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                        goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                         core.saveNote(goal);
                         activePlans.remove(goal.id);
                         return;
                     }
                 }
 
-                if (exe.steps.isEmpty() && goal.tags.contains(Note.SystemTag.GOAL_WITH_PLAN.value)) {
+                if (exe.steps.isEmpty() && goal.tags.contains(SystemTag.GOAL_WITH_PLAN.value)) {
                     try {
                         var initialSteps = (List<PlanStep>) core.executeTool(Core.Tool.SUGGEST_PLAN_STEPS,
                                 Map.of(ToolParam.GOAL_TEXT.getKey(), goal.getText().isEmpty() ? goal.getTitle() : goal.getText()));
@@ -305,15 +306,15 @@ public class Netention {
                 } else if (exe.steps.isEmpty()) {
                     logger.warn("Plan {} has no steps defined and is not a typical user goal for LM suggestion.", goal.id);
                     exe.currentStatus = PlanState.FAILED_NO_STEPS;
-                    goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                    goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                     core.saveNote(goal);
                     activePlans.remove(goal.id);
                     return;
                 }
 
-                goal.content.put(Note.ContentKey.PLAN_STEPS.getKey(), exe.steps.stream().map(s -> objectMapper.convertValue(s, Map.class)).collect(Collectors.toList()));
+                goal.content.put(ContentKey.PLAN_STEPS.getKey(), exe.steps.stream().map(s -> objectMapper.convertValue(s, Map.class)).collect(Collectors.toList()));
                 exe.currentStatus = PlanState.RUNNING;
-                goal.meta.put(Note.Metadata.PLAN_STATUS.key, exe.currentStatus.name());
+                goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                 core.saveNote(goal);
             }
             core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exe);
@@ -362,9 +363,9 @@ public class Netention {
 
             if (!PlanState.RUNNING.equals(exec.currentStatus) && exec.steps.stream().noneMatch(s -> PlanStepState.PENDING_RETRY.equals(s.status))) {
                 core.notes.get(exec.planNoteId).ifPresent(n -> {
-                    n.meta.put(Note.Metadata.PLAN_STATUS.key, exec.currentStatus.name());
+                    n.meta.put(Metadata.PLAN_STATUS.key, exec.currentStatus.name());
                     if (Set.of(PlanState.COMPLETED, PlanState.FAILED, PlanState.STUCK).contains(exec.currentStatus)) {
-                        n.meta.put(Note.Metadata.PLAN_END_TIME.key, Instant.now().toString());
+                        n.meta.put(Metadata.PLAN_END_TIME.key, Instant.now().toString());
                     }
                     core.saveNote(n);
                 });
@@ -637,14 +638,14 @@ public class Netention {
             fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                     Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.LOAD_ALL_CONFIGS_REQUESTED.name(),
                     Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
-                    Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
+                    ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
             ));
             this.lm = new LM(cfg);
             this.net = new Nostr(cfg, this, this::handleRawNostrEvent, () -> cfg.net.publicKeyBech32);
             scheduler.schedule(() -> fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                     Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(),
                     Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
-                    Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
+                    ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
             )), 30, TimeUnit.SECONDS);
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -664,7 +665,7 @@ public class Netention {
         }
 
         static Object getNoteSpecificProperty(Note n, String propertyNameStr) {
-            var propertyName = Note.NoteProperty.valueOf(propertyNameStr.toUpperCase());
+            var propertyName = NoteProperty.valueOf(propertyNameStr.toUpperCase());
             return switch (propertyName) {
                 case ID -> n.id;
                 case TITLE -> n.getTitle();
@@ -692,13 +693,13 @@ public class Netention {
             if (type == CoreEventType.SYSTEM_EVENT_REQUESTED && data instanceof Map<?, ?> eventDetailsMap) {
                 @SuppressWarnings("unchecked") var details = (Map<String, Object>) eventDetailsMap;
                 var systemEventNote = new Note();
-                systemEventNote.tags.add(Note.SystemTag.SYSTEM_EVENT.value);
+                systemEventNote.tags.add(SystemTag.SYSTEM_EVENT.value);
                 var eventTypeVal = details.get(Planner.ToolParam.EVENT_TYPE.getKey());
-                systemEventNote.content.put(Note.ContentKey.EVENT_TYPE.getKey(), Objects.requireNonNullElse(eventTypeVal, SystemEventType.UNKNOWN_EVENT_TYPE.name()).toString());
+                systemEventNote.content.put(ContentKey.EVENT_TYPE.getKey(), Objects.requireNonNullElse(eventTypeVal, SystemEventType.UNKNOWN_EVENT_TYPE.name()).toString());
                 if (eventTypeVal == null)
                     logger.error("SYSTEM_EVENT_REQUESTED fired with null eventType in data: {}", data);
-                systemEventNote.content.put(Note.ContentKey.PAYLOAD.getKey(), Objects.requireNonNullElse(details.get(Planner.ToolParam.PAYLOAD.getKey()), Collections.emptyMap()));
-                systemEventNote.content.put(Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name());
+                systemEventNote.content.put(ContentKey.PAYLOAD.getKey(), Objects.requireNonNullElse(details.get(Planner.ToolParam.PAYLOAD.getKey()), Collections.emptyMap()));
+                systemEventNote.content.put(ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name());
                 saveNote(systemEventNote);
             } else {
                 coreEventListeners.forEach(l -> SwingUtilities.invokeLater(() -> l.accept(event)));
@@ -733,7 +734,7 @@ public class Netention {
                 fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                         Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name(),
                         Planner.ToolParam.PAYLOAD.getKey(), json.convertValue(event, Map.class),
-                        Note.ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name(),
+                        ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name(),
                         "originalKind", event.kind
                 ));
             } catch (Exception e) {
@@ -743,15 +744,15 @@ public class Netention {
 
         @SuppressWarnings("unchecked")
         private void checkForSystemTriggers(Note triggeredNote) {
-            if (!triggeredNote.tags.contains(Note.SystemTag.SYSTEM_EVENT.value)) return;
-            var handlers = notes.getAll(n -> n.tags.contains(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value));
+            if (!triggeredNote.tags.contains(SystemTag.SYSTEM_EVENT.value)) return;
+            var handlers = notes.getAll(n -> n.tags.contains(SystemTag.SYSTEM_PROCESS_HANDLER.value));
             for (var handlerNote : handlers) {
                 var handlerContent = handlerNote.content;
                 var expectedEventType = (String) handlerContent.get("triggerEventType");
                 var expectedStatus = (String) handlerContent.get("triggerStatus");
                 var eventNoteContent = triggeredNote.content;
-                var eventTypeMatches = expectedEventType != null && expectedEventType.equals(eventNoteContent.get(Note.ContentKey.EVENT_TYPE.getKey()));
-                var statusMatches = expectedStatus == null || expectedStatus.equals(eventNoteContent.get(Note.ContentKey.STATUS.getKey()));
+                var eventTypeMatches = expectedEventType != null && expectedEventType.equals(eventNoteContent.get(ContentKey.EVENT_TYPE.getKey()));
+                var statusMatches = expectedStatus == null || expectedStatus.equals(eventNoteContent.get(ContentKey.STATUS.getKey()));
 
                 if (eventTypeMatches && statusMatches) {
                     logger.info("System trigger matched for handler {} by event note {}", handlerNote.id, triggeredNote.id);
@@ -771,7 +772,7 @@ public class Netention {
             logger.info("Bootstrapping system notes...");
             PlanDefBuilder.create("system_listener_nostr_kind0_handler")
                     .title("System Listener: Nostr Kind 0 (Profile) Handler")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.NOSTR_KIND0_RECEIVED, Planner.PlanState.PENDING)
                     .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
                     .step("s0a_get_self_info", Tool.GET_SELF_NOSTR_INFO, Map.of())
@@ -779,34 +780,34 @@ public class Netention {
                     .step("s2_if_self_profile", Tool.IF_ELSE, Map.of(
                             Planner.ToolParam.CONDITION, "$s0_get_payload.result.pubkey == $s0a_get_self_info.result.pubKeyHex",
                             Planner.ToolParam.TRUE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$s0a_get_self_info.result.myProfileNoteId", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(Note.ContentKey.PROFILE_NAME.getKey(), "$s1_parse_profile.result.name", Note.ContentKey.PROFILE_ABOUT.getKey(), "$s1_parse_profile.result.about", Note.ContentKey.PROFILE_PICTURE_URL.getKey(), "$s1_parse_profile.result.picture", "metadataUpdate", Map.of(Note.Metadata.PROFILE_LAST_UPDATED_AT.key, "NOW")))),
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$s0a_get_self_info.result.myProfileNoteId", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.PROFILE_NAME.getKey(), "$s1_parse_profile.result.name", ContentKey.PROFILE_ABOUT.getKey(), "$s1_parse_profile.result.about", ContentKey.PROFILE_PICTURE_URL.getKey(), "$s1_parse_profile.result.picture", "metadataUpdate", Map.of(Metadata.PROFILE_LAST_UPDATED_AT.key, "NOW")))),
                                     Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Updated own Nostr profile from Kind 0 event."))
                             ),
                             Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_OR_UPDATE_CONTACT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.PROFILE_DATA.getKey(), "$s1_parse_profile.result")))
                     ), "s0_get_payload", "s0a_get_self_info", "s1_parse_profile")
-                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_self_profile")
+                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_self_profile")
                     .bootstrap(this);
 
             PlanDefBuilder.create("system_listener_nostr_kind1_handler")
                     .title("System Listener: Nostr Kind 1 Handler")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.NOSTR_KIND1_RECEIVED, Planner.PlanState.PENDING)
                     .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_check_exists", Tool.GET_NOTE_PROPERTY, "Check if Nostr event note already exists", Map.of(Planner.ToolParam.NOTE_ID, "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.PROPERTY_PATH, Note.NoteProperty.ID.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false), "s0_get_payload")
+                    .step("s1_check_exists", Tool.GET_NOTE_PROPERTY, "Check if Nostr event note already exists", Map.of(Planner.ToolParam.NOTE_ID, "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.PROPERTY_PATH, NoteProperty.ID.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false), "s0_get_payload")
                     .step("s2_if_else", Tool.IF_ELSE, "Process if new, else log", Map.of(
                             Planner.ToolParam.CONDITION, "$s1_check_exists.result == null",
                             Planner.ToolParam.TRUE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.ID.getKey(), "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.TITLE.getKey(), "Nostr: $s0_get_payload.result.content_substring_30", Planner.ToolParam.TEXT.getKey(), "$s0_get_payload.result.content", Planner.ToolParam.TAGS.getKey(), List.of(Note.SystemTag.NOSTR_FEED.value), Planner.ToolParam.METADATA.getKey(), Map.of(Note.Metadata.NOSTR_EVENT_ID.key, "$s0_get_payload.result.id", Note.Metadata.NOSTR_PUB_KEY_HEX.key, "$s0_get_payload.result.pubkey", Note.Metadata.NOSTR_PUB_KEY.key, "$s0_get_payload.result.pubkey_npub", Note.Metadata.NOSTR_RAW_EVENT.key, "$s0_get_payload.result", Note.Metadata.CREATED_AT_FROM_EVENT.key, "$s0_get_payload.result.created_at"))),
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.ID.getKey(), "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.TITLE.getKey(), "Nostr: $s0_get_payload.result.content_substring_30", Planner.ToolParam.TEXT.getKey(), "$s0_get_payload.result.content", Planner.ToolParam.TAGS.getKey(), List.of(SystemTag.NOSTR_FEED.value), Planner.ToolParam.METADATA.getKey(), Map.of(Metadata.NOSTR_EVENT_ID.key, "$s0_get_payload.result.id", Metadata.NOSTR_PUB_KEY_HEX.key, "$s0_get_payload.result.pubkey", Metadata.NOSTR_PUB_KEY.key, "$s0_get_payload.result.pubkey_npub", Metadata.NOSTR_RAW_EVENT.key, "$s0_get_payload.result", Metadata.CREATED_AT_FROM_EVENT.key, "$s0_get_payload.result.created_at"))),
                                     Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_OR_UPDATE_CONTACT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))
                             ),
                             Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Skipping duplicate Nostr Kind 1 event: $s0_get_payload.result.id")))
                     ), "s0_get_payload", "s1_check_exists")
-                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_else")
+                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_else")
                     .bootstrap(this);
 
             PlanDefBuilder.create("system_listener_nostr_kind4_handler")
                     .title("System Listener: Nostr Kind 4 (DM) Handler")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.NOSTR_KIND4_RECEIVED, Planner.PlanState.PENDING)
                     .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
                     .step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(Planner.ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload")
@@ -816,62 +817,62 @@ public class Netention {
                             Planner.ToolParam.TRUE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.DISTRIBUTED_LM_RESULT.name(), Planner.ToolParam.EVENT_DATA.getKey(), "$s1_decrypt_dm.result.lmResultPayload"))),
                             Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText", Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at")))
                     ), "s1_decrypt_dm", "s2_update_contact")
-                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s3_if_lm_result")
+                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_if_lm_result")
                     .bootstrap(this);
 
             for (var type : new String[]{"nostr", "ui", "llm"}) {
                 var eventType = SystemEventType.valueOf("SAVE_" + type.toUpperCase() + "_CONFIG_REQUESTED");
                 PlanDefBuilder.create("system_listener_save_" + type + "_config_handler")
                         .title("System Listener: Save " + type.toUpperCase() + " Config")
-                        .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                        .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                         .trigger(eventType, Planner.PlanState.PENDING)
                         .step("s1_get_state", Tool.GET_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type))
                         .step("s2_save_to_note", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.CONTENT_UPDATE, "$s1_get_state.result"), "s1_get_state")
-                        .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_save_to_note")
+                        .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_save_to_note")
                         .bootstrap(this);
             }
 
             var loadAllConfigsBuilder = PlanDefBuilder.create("system_listener_load_all_configs_handler")
                     .title("System Listener: Load All Configurations")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.LOAD_ALL_CONFIGS_REQUESTED, Planner.PlanState.PENDING);
             List<String> lastApplyStepIds = new ArrayList<>();
             for (var type : List.of("nostr", "ui", "llm")) {
                 var getId = "s_load_" + type + "_get_content";
                 var applyId = "s_load_" + type + "_apply";
-                loadAllConfigsBuilder.step(getId, Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.PROPERTY_PATH, Note.NoteProperty.CONTENT.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false));
+                loadAllConfigsBuilder.step(getId, Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.PROPERTY_PATH, NoteProperty.CONTENT.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false));
                 loadAllConfigsBuilder.step(applyId, Tool.APPLY_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type, Planner.ToolParam.STATE_MAP, "$" + getId + ".result"), getId);
                 lastApplyStepIds.add(applyId);
             }
-            loadAllConfigsBuilder.step("s_load_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), lastApplyStepIds.toArray(String[]::new))
+            loadAllConfigsBuilder.step("s_load_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), lastApplyStepIds.toArray(String[]::new))
                     .bootstrap(this);
 
 
             PlanDefBuilder.create("system_listener_persistent_query_handler")
                     .title("System Listener: Persistent Query Handler")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.EVALUATE_PERSISTENT_QUERIES, Planner.PlanState.PENDING)
                     .step("s1_log_start", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Evaluating persistent queries..."))
-                    .step("s2_find_queries", Tool.FIND_NOTES_BY_TAG, Map.of(Planner.ToolParam.TAG, Note.SystemTag.PERSISTENT_QUERY.value))
+                    .step("s2_find_queries", Tool.FIND_NOTES_BY_TAG, Map.of(Planner.ToolParam.TAG, SystemTag.PERSISTENT_QUERY.value))
                     .step("s3_foreach_query", Tool.FOR_EACH, Map.of(
                             Planner.ToolParam.LIST, "$s2_find_queries.result", Planner.ToolParam.LOOP_VAR, "queryNote",
                             Planner.ToolParam.LOOP_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_1_get_content", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.GET_NOTE_PROPERTY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.PROPERTY_PATH.getKey(), Note.NoteProperty.CONTENT.getKey())),
+                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_1_get_content", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.GET_NOTE_PROPERTY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.PROPERTY_PATH.getKey(), NoteProperty.CONTENT.getKey())),
                                     Map.of(Planner.PlanStepKey.ID.getKey(), "s3_2_exec_query", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.EXECUTE_SEMANTIC_QUERY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), "$s3_1_get_content.result"),
-                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_3_update_note", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(Note.ContentKey.RESULTS.getKey(), "$s3_2_exec_query.result", Note.ContentKey.LAST_RUN.getKey(), "NOW")))
+                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_3_update_note", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.RESULTS.getKey(), "$s3_2_exec_query.result", ContentKey.LAST_RUN.getKey(), "NOW")))
                             )
                     ), "s2_find_queries")
                     .step("s4_reschedule", Tool.SCHEDULE_SYSTEM_EVENT, Map.of(Planner.ToolParam.EVENT_TYPE, SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(), Planner.ToolParam.DELAY_SECONDS, 3600L), "s3_foreach_query")
-                    .step("s5_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s4_reschedule")
+                    .step("s5_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s4_reschedule")
                     .bootstrap(this);
 
             PlanDefBuilder.create("system_listener_stalled_plan_handler")
                     .title("System Listener: Stalled Plan Handler")
-                    .tags(Note.SystemTag.SYSTEM_PROCESS_HANDLER.value, Note.SystemTag.SYSTEM_NOTE.value)
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
                     .trigger(SystemEventType.STALLED_PLAN_DETECTED, Planner.PlanState.PENDING)
                     .step("s1_get_plan_id", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload.planNoteId"))
                     .step("s2_log_stalled", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Stalled plan detected: $s1_get_plan_id.result. Consider user notification or automated actions."), "s1_get_plan_id")
-                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(Note.ContentKey.STATUS.getKey(), "PROCESSED")), "s2_log_stalled")
+                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_log_stalled")
                     .bootstrap(this);
         }
 
@@ -894,7 +895,7 @@ public class Netention {
                     .filter(n -> {
                         if (n.id.equals(sourceNote.id) || n.getEmbeddingV1() == null || n.getEmbeddingV1().length != sourceEmbedding.length)
                             return false;
-                        return !n.tags.contains(Note.SystemTag.CONFIG.value);
+                        return !n.tags.contains(SystemTag.CONFIG.value);
                     })
                     .map(candidateNote -> new AbstractMap.SimpleEntry<>(candidateNote, LM.cosineSimilarity(sourceEmbedding, candidateNote.getEmbeddingV1())))
                     .filter(entry -> entry.getValue() > minSimilarity)
@@ -1011,7 +1012,7 @@ public class Netention {
                 handlerNote.setTitle(title);
                 handlerNote.tags.addAll(tags);
                 handlerNote.content.putAll(contentProperties);
-                handlerNote.content.put(Note.ContentKey.PLAN_STEPS.getKey(), steps);
+                handlerNote.content.put(ContentKey.PLAN_STEPS.getKey(), steps);
                 core.notes.save(handlerNote, true);
                 logger.info("Bootstrapped system note: {}", noteId);
             }
@@ -1048,7 +1049,7 @@ public class Netention {
         private void loadFromFile(Path fp) {
             try {
                 var n = json.readValue(fp.toFile(), Note.class);
-                n.content.computeIfAbsent(Note.ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
+                n.content.computeIfAbsent(ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
                 cache.put(n.id, n);
             } catch (IOException e) {
                 logger.error("Failed to load note from {}: {}", fp, e.getMessage(), e);
@@ -1064,7 +1065,7 @@ public class Netention {
             } else {
                 n.version = cache.get(n.id).version + 1;
             }
-            n.content.computeIfAbsent(Note.ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
+            n.content.computeIfAbsent(ContentKey.CONTENT_TYPE.getKey(), k -> ContentType.TEXT_PLAIN.getValue());
             cache.put(n.id, n);
             try {
                 json.writeValue(dir.resolve(n.id + ".json").toFile(), n);
@@ -1130,7 +1131,7 @@ public class Netention {
             cfgNote.id = noteId;
             cfgNote.setTitle("Config: " + typeKey);
             cfgNote.tags.clear();
-            cfgNote.tags.addAll(List.of(Note.SystemTag.CONFIG.value, typeKey + "_config", Note.SystemTag.SYSTEM_NOTE.value));
+            cfgNote.tags.addAll(List.of(SystemTag.CONFIG.value, typeKey + "_config", SystemTag.SYSTEM_NOTE.value));
             cfgNote.content.clear();
             cfgNote.content.putAll(coreRef.json.convertValue(configInstance, new TypeReference<Map<String, Object>>() {
             }));
@@ -1163,11 +1164,11 @@ public class Netention {
                     net.myProfileNoteId = profileNote.id;
                 }
                 profileNote.tags.clear();
-                profileNote.tags.addAll(Arrays.asList(Note.SystemTag.CONTACT.value, Note.SystemTag.NOSTR_CONTACT.value, Note.SystemTag.MY_PROFILE.value));
-                profileNote.meta.putAll(Map.of(Note.Metadata.NOSTR_PUB_KEY.key, net.publicKeyBech32, Note.Metadata.NOSTR_PUB_KEY_HEX.key, pubKeyHex));
-                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_NAME.getKey(), "Anonymous");
-                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_ABOUT.getKey(), "");
-                profileNote.content.putIfAbsent(Note.ContentKey.PROFILE_PICTURE_URL.getKey(), "");
+                profileNote.tags.addAll(Arrays.asList(SystemTag.CONTACT.value, SystemTag.NOSTR_CONTACT.value, SystemTag.MY_PROFILE.value));
+                profileNote.meta.putAll(Map.of(Metadata.NOSTR_PUB_KEY.key, net.publicKeyBech32, Metadata.NOSTR_PUB_KEY_HEX.key, pubKeyHex));
+                profileNote.content.putIfAbsent(ContentKey.PROFILE_NAME.getKey(), "Anonymous");
+                profileNote.content.putIfAbsent(ContentKey.PROFILE_ABOUT.getKey(), "");
+                profileNote.content.putIfAbsent(ContentKey.PROFILE_PICTURE_URL.getKey(), "");
                 notes.save(profileNote);
 
                 if (coreRef != null)
