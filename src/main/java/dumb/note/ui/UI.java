@@ -140,7 +140,7 @@ public class UI {
     }
 
     public record ActionableItem(String id, String planNoteId, String description, String type, Object rawData,
-                                 Runnable action) {
+                                 Runnable action, String sourceEventId) { // NEW: sourceEventId
     }
 
     abstract static class BaseAppFrame extends JFrame {
@@ -377,6 +377,7 @@ public class UI {
             var selectedValue = buddies.getSelectedValue();
             list.clear();
 
+            // Add chats first, sorted by last message time
             core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CHAT.value))
                     .stream()
                     .sorted(Comparator.comparing((Netention.Note n) -> n.updatedAt).reversed())
@@ -391,6 +392,7 @@ public class UI {
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
 
+            // Add contacts that don't have an associated chat yet
             core.notes.getAll(n -> n.tags.containsAll(List.of(Netention.SystemTag.CONTACT.value, Netention.SystemTag.NOSTR_CONTACT.value)))
                     .stream()
                     .filter(contactNote -> {
@@ -422,22 +424,40 @@ public class UI {
                     if (note.tags.contains(Netention.SystemTag.CHAT.value)) {
                         var partnerNpub = (String) note.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
                         var baseTitle = note.getTitle();
-                        if (partnerNpub != null && (baseTitle == null || baseTitle.startsWith("Chat with") || baseTitle.isEmpty())) {
-                            var contactName = core.notes.getAll(c -> c.tags.contains(Netention.SystemTag.CONTACT.value) && partnerNpub.equals(c.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
-                                    .stream().findFirst().map(Netention.Note::getTitle);
-                            text = "💬 " + contactName.orElseGet(() -> partnerNpub.substring(0, Math.min(10, partnerNpub.length())) + "...");
+                        String displayName;
+                        if (partnerNpub != null) {
+                            displayName = core.notes.getAll(c -> c.tags.contains(Netention.SystemTag.CONTACT.value) && partnerNpub.equals(c.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
+                                    .stream().findFirst().map(Netention.Note::getTitle)
+                                    .orElseGet(() -> partnerNpub.substring(0, Math.min(10, partnerNpub.length())) + "...");
                         } else {
-                            text = "💬 " + (baseTitle != null && !baseTitle.isEmpty() ? baseTitle : "Chat");
+                            displayName = (baseTitle != null && !baseTitle.isEmpty() ? baseTitle : "Unknown Chat");
+                        }
+                        int unreadCount = (Integer) note.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                        text = "💬 " + displayName + (unreadCount > 0 ? " (" + unreadCount + ")" : "");
+                        if (unreadCount > 0) {
+                            setFont(getFont().deriveFont(Font.BOLD));
+                            setForeground(Color.BLUE.darker());
+                        } else {
+                            setFont(getFont().deriveFont(Font.PLAIN));
+                            setForeground(UIManager.getColor("List.foreground"));
                         }
                     } else if (note.tags.contains(Netention.SystemTag.CONTACT.value)) {
                         text = "👤 " + note.getTitle();
+                        setFont(getFont().deriveFont(Font.PLAIN));
+                        setForeground(UIManager.getColor("List.foreground"));
                     } else {
                         text = note.getTitle();
+                        setFont(getFont().deriveFont(Font.PLAIN));
+                        setForeground(UIManager.getColor("List.foreground"));
                     }
                 } else if (value instanceof String strValue) {
                     text = "❔ " + strValue;
+                    setFont(getFont().deriveFont(Font.PLAIN));
+                    setForeground(UIManager.getColor("List.foreground"));
                 } else {
                     text = value != null ? value.toString() : "";
+                    setFont(getFont().deriveFont(Font.PLAIN));
+                    setForeground(UIManager.getColor("List.foreground"));
                 }
                 setText(text);
                 return this;
@@ -1101,7 +1121,7 @@ public class UI {
                 boolean effectivelyRO = isEffectivelyReadOnly();
 
                 titleF.setEditable(!effectivelyRO && !isMyProfileNote);
-                tagsF.setEditable(!effectivelyRO && !isMyProfileNote);
+                tagsF.setEditable(editable);
                 contentPane.setEditable(!effectivelyRO);
 
                 Stream.of(titleF, contentPane, tagsF).forEach(c -> c.setEnabled(true));
@@ -1340,20 +1360,33 @@ public class UI {
             chatArea.setText("");
             core.notes.get(this.note.id).ifPresent(freshNote -> {
                 var messages = (List<Map<String, String>>) freshNote.content.getOrDefault(Netention.ContentKey.MESSAGES.getKey(), Collections.emptyList());
-                messages.forEach(this::formatAndAppendMsg);
+                // Sort messages by timestamp before displaying
+                messages.stream()
+                        .sorted(Comparator.comparing(m -> Instant.parse(m.get("timestamp"))))
+                        .forEach(this::formatAndAppendMsg);
             });
             scrollToBottom();
         }
 
         private void formatAndAppendMsg(Map<String, String> m) {
-            var senderNpub = m.get("sender");
+            var senderNpubHex = m.get("sender");
             var text = m.get("text");
             var timestampStr = m.get("timestamp");
-            if (senderNpub == null || text == null || timestampStr == null) return;
+            if (senderNpubHex == null || text == null || timestampStr == null) return;
 
             try {
                 var timestamp = Instant.parse(timestampStr);
-                var displayName = senderNpub.equals(core.net.getPublicKeyBech32()) ? "Me" : senderNpub.substring(0, Math.min(senderNpub.length(), 8)) + "...";
+                String displayName;
+                if (senderNpubHex.equals(core.net.getPublicKeyXOnlyHex())) {
+                    displayName = "Me";
+                } else {
+                    // Try to find contact name
+                    displayName = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
+                                    senderNpubHex.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key)))
+                            .stream().findFirst()
+                            .map(Netention.Note::getTitle)
+                            .orElseGet(() -> senderNpubHex.substring(0, Math.min(senderNpubHex.length(), 8)) + "...");
+                }
                 chatArea.append(String.format("[%s] %s: %s\n", chatTSFormatter.format(timestamp), displayName, text));
             } catch (Exception e) {
                 logger.warn("Failed to parse chat message timestamp or format message: {}", m, e);
@@ -1363,13 +1396,13 @@ public class UI {
         private void sendMessage() {
             var textToSend = messageInput.getText().trim();
             if (textToSend.isEmpty()) return;
-            if (!core.net.isEnabled() || core.cfg.net.privateKeyBech32 == null || core.cfg.net.privateKeyBech32.isEmpty()) {
+            if (!core.net.isEnabled() || core.cfg.net.privateKeyBech32 == null || core.cfg.net.privateKeyBeach32.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Nostr not enabled/configured.", "Nostr Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             core.net.sendDirectMessage(partnerNpub, textToSend);
             core.notes.get(this.note.id).ifPresent(currentChatNote -> {
-                var messageEntry = Map.of("sender", core.net.getPublicKeyBech32(), "timestamp", Instant.now().toString(), "text", textToSend);
+                var messageEntry = Map.of("sender", core.net.getPublicKeyXOnlyHex(), "timestamp", Instant.now().toString(), "text", textToSend); // Use hex for sender
                 @SuppressWarnings("unchecked")
                 var messagesList = (List<Map<String, String>>) currentChatNote.content.computeIfAbsent(Netention.ContentKey.MESSAGES.getKey(), k -> new ArrayList<Map<String, String>>());
                 messagesList.add(messageEntry);
@@ -1743,7 +1776,22 @@ public class UI {
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
                 if (value instanceof ActionableItem item) {
-                    setText("<html><b>" + item.type().replace("_", " ") + ":</b> " + item.description() + "</html>");
+                    String icon = "";
+                    Color textColor = UIManager.getColor("List.foreground");
+                    Font font = getFont().deriveFont(Font.PLAIN);
+
+                    if (item.type().equals("FRIEND_REQUEST")) {
+                        icon = "🫂 ";
+                        textColor = Color.ORANGE.darker();
+                        font = getFont().deriveFont(Font.BOLD);
+                    } else if (item.type().equals("SYSTEM_NOTIFICATION")) {
+                        icon = "🔔 ";
+                        textColor = Color.GRAY.darker();
+                    }
+
+                    setText("<html>" + icon + "<b>" + item.type().replace("_", " ") + ":</b> " + item.description() + "</html>");
+                    setForeground(textColor);
+                    setFont(font);
                 }
                 return this;
             }
@@ -1962,10 +2010,6 @@ public class UI {
 
         @Override
         public Netention.Note getAssociatedNote() {
-            return configNote;
-        }
-
-        public Netention.Note getConfigNote() {
             return configNote;
         }
 
@@ -2365,4 +2409,118 @@ public class UI {
         }
     }
 
+    public static class UIUtil {
+        public static JButton button(String text, String tooltip, ActionListener listener) {
+            var b = new JButton(text);
+            b.setToolTipText(tooltip);
+            b.addActionListener(listener);
+            return b;
+        }
+
+        public static JButton button(String text, String tooltip, String actionCommand, ActionListener listener) {
+            var b = new JButton(text);
+            b.setToolTipText(tooltip);
+            b.setActionCommand(actionCommand);
+            b.addActionListener(listener);
+            return b;
+        }
+
+        public static JMenuItem menuItem(String text, String actionCommand, ActionListener listener) {
+            var item = new JMenuItem(text);
+            item.setActionCommand(actionCommand);
+            item.addActionListener(listener);
+            return item;
+        }
+
+        public static JMenuItem menuItem(String text, ActionListener listener) {
+            var item = new JMenuItem(text);
+            item.addActionListener(listener);
+            return item;
+        }
+
+        public static void addLabelAndComponent(JPanel panel, GridBagConstraints gbc, int row, String labelText, JComponent component) {
+            gbc.gridx = 0;
+            gbc.gridy = row;
+            gbc.gridwidth = 1;
+            gbc.weightx = 0.0;
+            panel.add(new JLabel(labelText), gbc);
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
+            panel.add(component, gbc);
+        }
+
+        public static void showPanelInDialog(Component parent, String title, JComponent panel, Dimension size, boolean modal) {
+            var dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), title, modal);
+            dialog.setContentPane(panel);
+            dialog.setPreferredSize(size);
+            dialog.pack();
+            dialog.setLocationRelativeTo(parent);
+            dialog.setVisible(true);
+        }
+
+        public static void showEditablePanelInDialog(Component parent, String title, JComponent panel, Dimension size, boolean modal, Predicate<JComponent> isDirtyCheck) {
+            var dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), title, modal);
+            dialog.setContentPane(panel);
+            dialog.setPreferredSize(size);
+            dialog.pack();
+            dialog.setLocationRelativeTo(parent);
+
+            dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+            dialog.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent e) {
+                    if (isDirtyCheck.test(panel)) {
+                        int result = JOptionPane.showConfirmDialog(dialog, "You have unsaved changes. Discard them?", "Unsaved Changes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                        if (result == JOptionPane.YES_OPTION) {
+                            dialog.dispose();
+                        }
+                    } else {
+                        dialog.dispose();
+                    }
+                }
+            });
+            dialog.setVisible(true);
+        }
+
+        public static void addNostrContactDialog(Component parent, Netention.Core core, Consumer<String> onContactAdded) {
+            var npubField = new JTextField(30);
+            var panel = new JPanel(new BorderLayout(5, 5));
+            panel.setBorder(new EmptyBorder(10, 10, 10, 10));
+            panel.add(new JLabel("Enter Nostr Public Key (npub):"), BorderLayout.NORTH);
+            panel.add(npubField, BorderLayout.CENTER);
+
+            int result = JOptionPane.showConfirmDialog(parent, panel, "Add Nostr Contact", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+            if (result == JOptionPane.OK_OPTION) {
+                var npub = npubField.getText().trim();
+                if (npub.isEmpty()) {
+                    JOptionPane.showMessageDialog(parent, "Npub cannot be empty.", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                if (!npub.startsWith("npub1")) {
+                    JOptionPane.showMessageDialog(parent, "Invalid npub format. Must start with 'npub1'.", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
+                try {
+                    var pubKeyHex = Crypto.bytesToHex(Crypto.Bech32.nip19Decode(npub));
+                    core.executeTool(Netention.Core.Tool.ADD_CONTACT, Map.of(Netention.Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), pubKeyHex));
+                    JOptionPane.showMessageDialog(parent, "Contact added/updated.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    onContactAdded.accept(npub);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(parent, "Failed to add contact: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    logger.error("Failed to add Nostr contact {}: {}", npub, e.getMessage(), e);
+                }
+            }
+        }
+
+        public static void showConfirmationDialog(Component parent, String title, String message, Runnable onConfirm, Runnable onCancel) {
+            int result = JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (result == JOptionPane.YES_OPTION) {
+                if (onConfirm != null) onConfirm.run();
+            } else {
+                if (onCancel != null) onCancel.run();
+            }
+        }
+    }
 }

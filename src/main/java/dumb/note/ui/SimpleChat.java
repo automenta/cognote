@@ -86,7 +86,21 @@ public class SimpleChat extends UI.BaseAppFrame {
             return;
         }
         switch (event.type()) {
-            case CHAT_MESSAGE_ADDED, NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED ->
+            case CHAT_MESSAGE_ADDED -> { // NEW: Handle CHAT_MESSAGE_ADDED to update unread count
+                if (event.data() instanceof Map<?,?> data && data.get("chatNoteId") instanceof String chatNoteId) {
+                    core.notes.get(chatNoteId).ifPresent(chatNote -> {
+                        // If the current chat is NOT this one, increment unread count
+                        if (!(getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
+                                currentChatPanel.getChatNote().id.equals(chatNoteId))) {
+                            int unreadCount = (Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                            chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, unreadCount + 1);
+                            core.saveNote(chatNote); // Save to persist unread count
+                        }
+                    });
+                }
+                SwingUtilities.invokeLater(buddyPanel::refreshList);
+            }
+            case NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED ->
                     SwingUtilities.invokeLater(buddyPanel::refreshList);
             case CONFIG_CHANGED -> {
                 updateStatusBasedOnNostrState(); // Also called by super.handleCoreEventBase via updateActionStates
@@ -131,6 +145,12 @@ public class SimpleChat extends UI.BaseAppFrame {
                 .ifPresentOrElse(chatNote -> {
                     if (chatNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String partnerNpub) {
                         setEditorComponent(new UI.ChatPanel(core, chatNote, partnerNpub, this::updateStatus));
+                        // Reset unread count when chat is opened
+                        if ((Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0) > 0) {
+                            chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                            core.saveNote(chatNote);
+                            buddyPanel.refreshList(); // Refresh buddy list to clear unread indicator
+                        }
                     } else {
                         setEditorComponent(new JLabel("Error: Chat partner not found in note metadata.", SwingConstants.CENTER));
                         updateStatus("Error: Chat partner not found for " + chatNote.getTitle());
@@ -258,7 +278,31 @@ public class SimpleChat extends UI.BaseAppFrame {
     }
 
     private void executeActionableItem(UI.ActionableItem item) {
-        item.action().run();
+        // Trigger a system event to handle the action via a plan
+        if (item.type().equals("FRIEND_REQUEST")) {
+            UIUtil.showConfirmationDialog(this, "Friend Request", "Accept friend request from " + item.description() + "?",
+                    () -> { // On Accept
+                        core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.ACCEPT_FRIEND_REQUEST.name(),
+                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
+                                        Netention.Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), item.data().get("senderNpub"),
+                                        Netention.Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
+                                )
+                        ));
+                        updateStatus("Friend request accepted.");
+                    },
+                    () -> { // On Reject
+                        core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.REJECT_FRIEND_REQUEST.name(),
+                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
+                                        Netention.Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
+                                )
+                        ));
+                        updateStatus("Friend request rejected.");
+                    });
+        } else {
+            item.action().run();
+        }
         // The action itself should trigger a CoreEventType.ACTIONABLE_ITEM_REMOVED event
         // if the item is no longer relevant, which will update the list.
         // No explicit removal here to avoid race conditions with Core events.

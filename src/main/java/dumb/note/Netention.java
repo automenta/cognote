@@ -22,6 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BiFunction;
@@ -70,7 +72,7 @@ public class Netention {
         SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
         NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
         CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
-        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile");
+        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile"), FRIEND_REQUEST("#friend_request"); // NEW: FRIEND_REQUEST
         public final String value;
 
         SystemTag(String value) {
@@ -90,7 +92,8 @@ public class Netention {
     public enum Metadata {
         PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
         NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
-        PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition");
+        PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition"),
+        UNREAD_MESSAGES_COUNT("unread_messages_count"); // NEW: UNREAD_MESSAGES_COUNT
         public final String key;
 
         Metadata() {
@@ -540,7 +543,8 @@ public class Netention {
             MESSAGE, NOTE_ID, PROPERTY_PATH, FAIL_IF_NOT_FOUND, DEFAULT_VALUE, JSON_STRING, ID, TITLE, TEXT, AS_HTML, TAGS, CONTENT, METADATA, CONTENT_UPDATE,
             NOSTR_PUB_KEY_HEX, PROFILE_DATA, CONDITION, TRUE_STEPS, FALSE_STEPS, EVENT_PAYLOAD_MAP, PARTNER_PUB_KEY_HEX, SENDER_PUB_KEY_HEX,
             MESSAGE_CONTENT, TIMESTAMP_EPOCH_SECONDS, EVENT_TYPE, EVENT_DATA, GOAL_TEXT, PAYLOAD, DELAY_SECONDS, TAG, LIST, LOOP_VAR, LOOP_STEPS,
-            QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID;
+            QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID,
+            FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID; // NEW: FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID
 
             public String getKey() {
                 return name().toLowerCase();
@@ -618,7 +622,7 @@ public class Netention {
             this.notes = new Notes(dDir);
             this.cfg = new Config(notes, this);
             this.planner = new Planner(this);
-            Tools.registerAllTools(tools);
+            Tools.registerAllTools(tools); // Register all tools here
             bootstrapSystemNotes();
 
             Stream.of("nostr", "ui", "llm").forEach(typeKey -> {
@@ -811,14 +815,81 @@ public class Netention {
                     .trigger(SystemEventType.NOSTR_KIND4_RECEIVED, Planner.PlanState.PENDING)
                     .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
                     .step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(Planner.ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload")
-                    .step("s2_update_contact", Tool.CREATE_OR_UPDATE_CONTACT_NOTE, "Update contact for sender", Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX, "$s0_get_payload.result.pubkey"), "s0_get_payload")
-                    .step("s3_if_lm_result", Tool.IF_ELSE, "Handle if LM result or regular DM", Map.of(
-                            Planner.ToolParam.CONDITION, "$s1_decrypt_dm.result.isLmResult == true",
-                            Planner.ToolParam.TRUE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.DISTRIBUTED_LM_RESULT.name(), Planner.ToolParam.EVENT_DATA.getKey(), "$s1_decrypt_dm.result.lmResultPayload"))),
-                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText", Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at")))
-                    ), "s1_decrypt_dm", "s2_update_contact")
-                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_if_lm_result")
+                    .step("s2_if_friend_request", Tool.IF_ELSE, "Check if friend request", Map.of( // NEW: Friend Request Check
+                            Planner.ToolParam.CONDITION, "$s1_decrypt_dm.result.isFriendRequest == true",
+                            Planner.ToolParam.TRUE_STEPS, List.of(
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(
+                                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.SYSTEM_EVENT_REQUESTED.name(),
+                                            Planner.ToolParam.PAYLOAD.getKey(), Map.of(
+                                                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.FRIEND_REQUEST_RECEIVED.name(),
+                                                    Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), "$s0_get_payload.result.pubkey_npub",
+                                                    "sourceEventId", "$s0_get_payload.result.id" // Pass original event ID
+                                            )
+                                    ))
+                            ),
+                            Planner.ToolParam.FALSE_STEPS, List.of(
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(
+                                            Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey",
+                                            Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey",
+                                            Planner.ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText",
+                                            Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at"
+                                    )),
+                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_OR_UPDATE_CONTACT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))
+                            )
+                    ), "s1_decrypt_dm")
+                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_friend_request")
                     .bootstrap(this);
+
+            // NEW: Handler for Friend Request Received
+            PlanDefBuilder.create("system_listener_friend_request_received_handler")
+                    .title("System Listener: Friend Request Received")
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.FRIEND_REQUEST_RECEIVED, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s1_create_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
+                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_ADDED.name(),
+                            Planner.ToolParam.EVENT_DATA.getKey(), Map.of(
+                                    "id", "friend_request_$s0_get_payload.result.friendRequestSenderNpub",
+                                    "type", "FRIEND_REQUEST",
+                                    "description", "Friend request from $s0_get_payload.result.friendRequestSenderNpub_npub",
+                                    "sourceEventId", "$s0_get_payload.result.sourceEventId",
+                                    "data", Map.of("senderNpub", "$s0_get_payload.result.friendRequestSenderNpub")
+                            )
+                    ), "s0_get_payload")
+                    .step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_create_actionable_item")
+                    .bootstrap(this);
+
+            // NEW: Handler for Accept Friend Request
+            PlanDefBuilder.create("system_listener_accept_friend_request_handler")
+                    .title("System Listener: Accept Friend Request")
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.ACCEPT_FRIEND_REQUEST, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s1_add_contact", Tool.ADD_CONTACT, Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX, "$s0_get_payload.result.senderNpub"), "s0_get_payload")
+                    .step("s2_send_confirmation_dm", Tool.SEND_DM, Map.of(
+                            Planner.ToolParam.RECIPIENT_NPUB.getKey(), "$s0_get_payload.result.senderNpub",
+                            Planner.ToolParam.MESSAGE.getKey(), "Friend request accepted! Let's chat."
+                    ), "s1_add_contact")
+                    .step("s3_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
+                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_REMOVED.name(),
+                            Planner.ToolParam.EVENT_DATA.getKey(), "$s0_get_payload.result.actionableItemId"
+                    ), "s2_send_confirmation_dm")
+                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_remove_actionable_item")
+                    .bootstrap(this);
+
+            // NEW: Handler for Reject Friend Request
+            PlanDefBuilder.create("system_listener_reject_friend_request_handler")
+                    .title("System Listener: Reject Friend Request")
+                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
+                    .trigger(SystemEventType.REJECT_FRIEND_REQUEST, Planner.PlanState.PENDING)
+                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
+                    .step("s1_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
+                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_REMOVED.name(),
+                            Planner.ToolParam.EVENT_DATA.getKey(), "$s0_get_payload.result.actionableItemId"
+                    ), "s0_get_payload")
+                    .step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_remove_actionable_item")
+                    .bootstrap(this);
+
 
             for (var type : new String[]{"nostr", "ui", "llm"}) {
                 var eventType = SystemEventType.valueOf("SAVE_" + type.toUpperCase() + "_CONFIG_REQUESTED");
@@ -913,7 +984,8 @@ public class Netention {
         public enum SystemEventType {
             NOSTR_KIND0_RECEIVED, NOSTR_KIND1_RECEIVED, NOSTR_KIND4_RECEIVED, NOSTR_KIND_UNKNOWN_RECEIVED,
             SAVE_NOSTR_CONFIG_REQUESTED, SAVE_UI_CONFIG_REQUESTED, SAVE_LLM_CONFIG_REQUESTED,
-            LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE
+            LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE,
+            FRIEND_REQUEST_RECEIVED, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST // NEW: Friend Request Events
         }
 
         public enum Tool {
@@ -922,6 +994,7 @@ public class Netention {
             SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY,
             CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS,
             GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO,
+            ADD_CONTACT, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, // NEW: IM Tools
             DECOMPOSE_GOAL(true), PLAN(true), GET_PLAN_DEPENDENCIES(true), ASSERT_KIF(true), QUERY(true), RETRACT(true),
             API(true), ECHO(true), FILE_OPERATIONS(true), GENERATE_TASK_LOGIC(true), INSPECT(true), EVAL_EXPR(true),
             GENERATE(true), REFLECT(true), REASON(true), DEFINE_CONCEPT(true), EXEC(true), GRAPH_SEARCH(true),
@@ -1019,6 +1092,592 @@ public class Netention {
         }
 
         public record CoreEvent(CoreEventType type, Object data) {
+        }
+
+        // NEW: Tools class to encapsulate tool implementations
+        private static class Tools {
+            private static final Logger logger = LoggerFactory.getLogger(Tools.class);
+
+            public static void registerAllTools(Map<Tool, BiFunction<Core, Map<String, Object>, Object>> tools) {
+                tools.put(Tool.LOG_MESSAGE, Tools::logMessage);
+                tools.put(Tool.GET_NOTE_PROPERTY, Tools::getNoteProperty);
+                tools.put(Tool.PARSE_JSON, Tools::parseJson);
+                tools.put(Tool.CREATE_NOTE, Tools::createNote);
+                tools.put(Tool.MODIFY_NOTE_CONTENT, Tools::modifyNoteContent);
+                tools.put(Tool.DELETE_NOTE, Tools::deleteNote);
+                tools.put(Tool.CREATE_OR_UPDATE_CONTACT_NOTE, Tools::createOrUpdateContactNote);
+                tools.put(Tool.IF_ELSE, Tools::ifElse);
+                tools.put(Tool.DECRYPT_NOSTR_DM, Tools::decryptNostrDm);
+                tools.put(Tool.UPDATE_CHAT_NOTE, Tools::updateChatNote);
+                tools.put(Tool.FIRE_CORE_EVENT, Tools::fireCoreEvent);
+                tools.put(Tool.SUGGEST_PLAN_STEPS, Tools::suggestPlanSteps);
+                tools.put(Tool.SCHEDULE_SYSTEM_EVENT, Tools::scheduleSystemEvent);
+                tools.put(Tool.FIND_NOTES_BY_TAG, Tools::findNotesByTag);
+                tools.put(Tool.FOR_EACH, Tools::forEach);
+                tools.put(Tool.EXECUTE_SEMANTIC_QUERY, Tools::executeSemanticQuery);
+                tools.put(Tool.GET_SYSTEM_HEALTH_METRICS, Tools::getSystemHealthMetrics);
+                tools.put(Tool.GET_CONFIG_STATE, Tools::getConfigState);
+                tools.put(Tool.APPLY_CONFIG_STATE, Tools::applyConfigState);
+                tools.put(Tool.GET_SELF_NOSTR_INFO, Tools::getSelfNostrInfo);
+                tools.put(Tool.ADD_CONTACT, Tools::addContact); // NEW
+                tools.put(Tool.ACCEPT_FRIEND_REQUEST, Tools::acceptFriendRequest); // NEW
+                tools.put(Tool.REJECT_FRIEND_REQUEST, Tools::rejectFriendRequest); // NEW
+                // Placeholder tools are not implemented here
+            }
+
+            private static Object logMessage(Core core, Map<String, Object> params) {
+                logger.info("TOOL_LOG: {}", params.get(Planner.ToolParam.MESSAGE.getKey()));
+                return null;
+            }
+
+            private static Object getNoteProperty(Core core, Map<String, Object> params) {
+                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
+                var propertyPath = (String) params.get(Planner.ToolParam.PROPERTY_PATH.getKey());
+                var failIfNotFound = (Boolean) params.getOrDefault(Planner.ToolParam.FAIL_IF_NOT_FOUND.getKey(), true);
+                var defaultValue = params.get(Planner.ToolParam.DEFAULT_VALUE.getKey());
+
+                return core.notes.get(noteId).map(n -> {
+                    try {
+                        var parts = propertyPath.split("\\.");
+                        Object current = n;
+                        for (var i = 0; i < parts.length; i++) {
+                            var part = parts[i];
+                            if (current == null) break;
+                            if (i == 0) { // Top-level properties like "id", "title", "content", "meta"
+                                current = switch (part) {
+                                    case "id" -> n.id;
+                                    case "title" -> n.getTitle();
+                                    case "text" -> n.getText();
+                                    case "tags" -> n.tags;
+                                    case "content" -> n.content;
+                                    case "meta" -> n.meta;
+                                    case "links" -> n.links;
+                                    case "createdAt" -> n.createdAt;
+                                    case "updatedAt" -> n.updatedAt;
+                                    default -> null;
+                                };
+                            } else if (current instanceof Map map) {
+                                current = map.get(part);
+                            } else if (current instanceof JsonNode jsonNode) {
+                                current = jsonNode.has(part) ? jsonNode.get(part) : null;
+                            } else {
+                                current = null; // Cannot traverse further
+                            }
+                        }
+                        if (current == null && failIfNotFound)
+                            throw new RuntimeException("Property path '" + propertyPath + "' not found for note " + noteId);
+                        if (current instanceof JsonNode jn && jn.isValueNode()) {
+                            if (jn.isTextual()) return jn.asText();
+                            if (jn.isNumber()) return jn.numberValue();
+                            if (jn.isBoolean()) return jn.asBoolean();
+                            return jn.toString();
+                        }
+                        return Objects.requireNonNullElse(current, defaultValue);
+                    } catch (Exception e) {
+                        logger.error("Error getting property {} from note {}: {}", propertyPath, noteId, e.getMessage());
+                        if (failIfNotFound) throw new RuntimeException("Failed to get property: " + e.getMessage(), e);
+                        return defaultValue;
+                    }
+                }).orElseGet(() -> {
+                    if (failIfNotFound)
+                        throw new RuntimeException("Note with ID " + noteId + " not found.");
+                    return defaultValue;
+                });
+            }
+
+            private static Object parseJson(Core core, Map<String, Object> params) {
+                var jsonString = (String) params.get(Planner.ToolParam.JSON_STRING.getKey());
+                try {
+                    return core.json.readTree(jsonString);
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException("Failed to parse JSON: " + e.getMessage(), e);
+                }
+            }
+
+            private static Object createNote(Core core, Map<String, Object> params) {
+                var note = new Note();
+                ofNullable((String) params.get(Planner.ToolParam.ID.getKey())).ifPresent(id -> note.id = id);
+                ofNullable((String) params.get(Planner.ToolParam.TITLE.getKey())).ifPresent(note::setTitle);
+                ofNullable((String) params.get(Planner.ToolParam.TEXT.getKey())).ifPresent(text -> {
+                    if (Boolean.TRUE.equals(params.get(Planner.ToolParam.AS_HTML.getKey()))) note.setHtmlText(text);
+                    else note.setText(text);
+                });
+                ofNullable((List<String>) params.get(Planner.ToolParam.TAGS.getKey())).ifPresent(tags -> note.tags.addAll(tags));
+                ofNullable((Map<String, Object>) params.get(Planner.ToolParam.CONTENT.getKey())).ifPresent(content -> note.content.putAll(content));
+                ofNullable((Map<String, Object>) params.get(Planner.ToolParam.METADATA.getKey())).ifPresent(meta -> note.meta.putAll(meta));
+                return core.saveNote(note);
+            }
+
+            private static Object modifyNoteContent(Core core, Map<String, Object> params) {
+                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
+                var contentUpdate = (Map<String, Object>) params.get(Planner.ToolParam.CONTENT_UPDATE.getKey());
+                return core.notes.get(noteId).map(n -> {
+                    contentUpdate.forEach((key, value) -> {
+                        if ("metadataUpdate".equals(key) && value instanceof Map<?, ?> metaUpdates) {
+                            metaUpdates.forEach((metaKey, metaValue) -> {
+                                if ("NOW".equals(metaValue)) n.meta.put((String) metaKey, Instant.now().toString());
+                                else n.meta.put((String) metaKey, metaValue);
+                            });
+                        } else if ("tagsAdd".equals(key) && value instanceof List<?> tagsToAdd) {
+                            tagsToAdd.forEach(tag -> n.tags.add(String.valueOf(tag)));
+                        } else if ("tagsRemove".equals(key) && value instanceof List<?> tagsToRemove) {
+                            tagsToRemove.forEach(tag -> n.tags.remove(String.valueOf(tag)));
+                        } else if ("title".equals(key)) {
+                            n.setTitle(String.valueOf(value));
+                        } else if ("text".equals(key)) {
+                            n.setText(String.valueOf(value));
+                        } else {
+                            n.content.put(key, value);
+                        }
+                    });
+                    return core.saveNote(n);
+                }).orElseThrow(() -> new RuntimeException("Note " + noteId + " not found for modification."));
+            }
+
+            private static Object deleteNote(Core core, Map<String, Object> params) {
+                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
+                return core.deleteNote(noteId);
+            }
+
+            private static Object createOrUpdateContactNote(Core core, Map<String, Object> params) {
+                var nostrPubKeyHex = (String) params.get(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+                var profileData = (Map<String, Object>) params.get(Planner.ToolParam.PROFILE_DATA.getKey());
+
+                if (nostrPubKeyHex == null || nostrPubKeyHex.isEmpty()) {
+                    throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for CREATE_OR_UPDATE_CONTACT_NOTE.");
+                }
+
+                var npub = "";
+                try {
+                    npub = Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(nostrPubKeyHex));
+                } catch (Exception e) {
+                    logger.warn("Could not encode npub for hex {}: {}", nostrPubKeyHex, e.getMessage());
+                    npub = "npub_error_" + nostrPubKeyHex.substring(0, 8);
+                }
+                final String finalNpub = npub;
+
+                var contactNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+
+                var contactNote = contactNoteOpt.orElseGet(() -> {
+                    var newNote = new Note();
+                    newNote.tags.add(SystemTag.CONTACT.value);
+                    newNote.tags.add(SystemTag.NOSTR_CONTACT.value);
+                    newNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
+                    newNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
+                    newNote.setTitle(profileData != null && profileData.containsKey("name") ? (String) profileData.get("name") : finalNpub.substring(0, 12) + "...");
+                    newNote.setText(profileData != null && profileData.containsKey("about") ? (String) profileData.get("about") : "");
+                    return newNote;
+                });
+
+                if (profileData != null) {
+                    ofNullable((String) profileData.get("name")).ifPresent(contactNote::setTitle);
+                    ofNullable((String) profileData.get("about")).ifPresent(contactNote::setText);
+                    ofNullable((String) profileData.get("picture")).ifPresent(pic -> contactNote.content.put(ContentKey.PROFILE_PICTURE_URL.getKey(), pic));
+                }
+                contactNote.meta.put(Metadata.LAST_SEEN.key, Instant.now().toString());
+
+                // Ensure a chat note exists for this contact
+                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+
+                if (chatNoteOpt.isEmpty()) {
+                    var chatNote = new Note("Chat with " + contactNote.getTitle(), "");
+                    chatNote.tags.add(SystemTag.CHAT.value);
+                    chatNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
+                    chatNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
+                    chatNote.content.put(ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+                    core.saveNote(chatNote);
+                    logger.info("Created new chat note for contact {}.", contactNote.getTitle());
+                }
+
+                return core.saveNote(contactNote);
+            }
+
+            private static Object ifElse(Core core, Map<String, Object> params) {
+                var condition = (Boolean) params.get(Planner.ToolParam.CONDITION.getKey());
+                var trueSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.TRUE_STEPS.getKey());
+                var falseSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.FALSE_STEPS.getKey());
+
+                List<Map<String, Object>> stepsToExecute = condition ? trueSteps : falseSteps;
+                if (stepsToExecute != null && !stepsToExecute.isEmpty()) {
+                    // This is a simplified execution. In a real planner, these would be added to the current plan's steps.
+                    // For now, we'll just log and return.
+                    logger.warn("IF_ELSE tool does not directly execute nested steps. This is a placeholder. Steps: {}", stepsToExecute);
+                }
+                return condition;
+            }
+
+            @SuppressWarnings("unchecked")
+            private static Object decryptNostrDm(Core core, Map<String, Object> params) {
+                var eventPayload = (Map<String, Object>) params.get(Planner.ToolParam.EVENT_PAYLOAD_MAP.getKey());
+                var content = (String) eventPayload.get("content");
+                var pubkey = (String) eventPayload.get("pubkey"); // Sender's pubkey
+                var tags = (List<List<String>>) eventPayload.get("tags");
+
+                String recipientPubKeyHex = null;
+                for (var tag : tags) {
+                    if ("p".equals(tag.get(0)) && tag.size() > 1) {
+                        recipientPubKeyHex = tag.get(1);
+                        break;
+                    }
+                }
+
+                if (recipientPubKeyHex == null) {
+                    throw new IllegalArgumentException("DM event missing 'p' tag for recipient.");
+                }
+
+                try {
+                    var selfNpubHex = core.net.getPublicKeyXOnlyHex();
+                    byte[] decryptedBytes;
+                    String partnerPubKeyHex;
+
+                    if (pubkey.equals(selfNpubHex)) { // This is a DM sent by me
+                        partnerPubKeyHex = recipientPubKeyHex;
+                    } else if (recipientPubKeyHex.equals(selfNpubHex)) { // This is a DM sent to me
+                        partnerPubKeyHex = pubkey;
+                    } else {
+                        throw new RuntimeException("DM is neither sent by nor to me. Pubkey: " + pubkey + ", Recipient: " + recipientPubKeyHex + ", Self: " + selfNpubHex);
+                    }
+
+                    decryptedBytes = Crypto.nip04Decrypt(content, Crypto.getSharedSecretWithRetry(core.net.privateKeyRaw, Crypto.hexToBytes(partnerPubKeyHex)));
+                    var decryptedText = new String(decryptedBytes, java.nio.charset.StandardCharsets.UTF_8);
+
+                    // Check for friend request message
+                    boolean isFriendRequest = decryptedText.equalsIgnoreCase("Hello! I'd like to connect on Netention.");
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("decryptedText", decryptedText);
+                    result.put("isLmResult", decryptedText.startsWith("{\"type\":\"netention_lm_result\""));
+                    result.put("isFriendRequest", isFriendRequest); // NEW: Add friend request flag
+                    if (result.get("isLmResult") instanceof Boolean && (Boolean) result.get("isLmResult")) {
+                        try {
+                            result.put("lmResultPayload", core.json.readValue(decryptedText, new TypeReference<Map<String, Object>>() {
+                            }));
+                        } catch (JsonProcessingException e) {
+                            logger.warn("Failed to parse LM result payload: {}", e.getMessage());
+                        }
+                    }
+                    return result;
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to decrypt Nostr DM: " + e.getMessage(), e);
+                }
+            }
+
+            @SuppressWarnings("unchecked")
+            private static Object updateChatNote(Core core, Map<String, Object> params) {
+                var partnerPubKeyHex = (String) params.get(Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey());
+                var senderPubKeyHex = (String) params.get(Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey());
+                var messageContent = (String) params.get(Planner.ToolParam.MESSAGE_CONTENT.getKey());
+                var timestampEpochSeconds = (Long) params.get(Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey());
+
+                var selfNpubHex = core.net.getPublicKeyXOnlyHex();
+                if (selfNpubHex == null || selfNpubHex.isEmpty()) {
+                    logger.warn("Cannot update chat note: self Nostr public key not available.");
+                    return null;
+                }
+
+                // Find or create the chat note for this partner
+                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
+                        partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+
+                var chatNote = chatNoteOpt.orElseGet(() -> {
+                    var newChatNote = new Note();
+                    newChatNote.tags.add(SystemTag.CHAT.value);
+                    newChatNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, partnerPubKeyHex);
+                    try {
+                        newChatNote.meta.put(Metadata.NOSTR_PUB_KEY.key, Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(partnerPubKeyHex)));
+                    } catch (Exception e) {
+                        logger.warn("Failed to encode npub for new chat note: {}", e.getMessage());
+                        newChatNote.meta.put(Metadata.NOSTR_PUB_KEY.key, "npub_error_" + partnerPubKeyHex.substring(0, 8));
+                    }
+                    // Try to find contact name for title
+                    core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) && partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key)))
+                            .stream().findFirst()
+                            .ifPresentOrElse(
+                                    contact -> newChatNote.setTitle("Chat with " + contact.getTitle()),
+                                    () -> newChatNote.setTitle("Chat with " + partnerPubKeyHex.substring(0, 12) + "...")
+                            );
+                    newChatNote.content.put(ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+                    return newChatNote;
+                });
+
+                var messages = (List<Map<String, String>>) chatNote.content.getOrDefault(ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+
+                // Check for duplicate messages (based on sender, content, and timestamp)
+                final String finalSenderPubKeyHex = senderPubKeyHex;
+                final Instant messageTimestamp = Instant.ofEpochSecond(timestampEpochSeconds);
+                boolean isDuplicate = messages.stream().anyMatch(msg ->
+                        finalSenderPubKeyHex.equals(msg.get("sender")) &&
+                                messageContent.equals(msg.get("text")) &&
+                                messageTimestamp.equals(Instant.parse(msg.get("timestamp")))
+                );
+
+                if (!isDuplicate) {
+                    var messageEntry = new HashMap<String, String>();
+                    messageEntry.put("sender", senderPubKeyHex);
+                    messageEntry.put("text", messageContent);
+                    messageEntry.put("timestamp", Instant.ofEpochSecond(timestampEpochSeconds).toString());
+                    messages.add(messageEntry);
+                    chatNote.content.put(ContentKey.MESSAGES.getKey(), messages);
+
+                    // Increment unread count if message is from partner
+                    if (!senderPubKeyHex.equals(selfNpubHex)) {
+                        int unreadCount = (Integer) chatNote.meta.getOrDefault(Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                        chatNote.meta.put(Metadata.UNREAD_MESSAGES_COUNT.key, unreadCount + 1);
+                    }
+
+                    core.saveNote(chatNote);
+                    core.fireCoreEvent(CoreEventType.CHAT_MESSAGE_ADDED, Map.of("chatNoteId", chatNote.id, "sender", senderPubKeyHex, "message", messageContent));
+                    logger.info("Added message to chat with {}: {}", partnerPubKeyHex.substring(0, 8), messageContent.substring(0, Math.min(messageContent.length(), 50)));
+                } else {
+                    logger.debug("Skipping duplicate message for chat with {}: {}", partnerPubKeyHex.substring(0, 8), messageContent.substring(0, Math.min(messageContent.length(), 50)));
+                }
+                return chatNote.id;
+            }
+
+            private static Object fireCoreEvent(Core core, Map<String, Object> params) {
+                var eventType = CoreEventType.valueOf((String) params.get(Planner.ToolParam.EVENT_TYPE.getKey()));
+                var eventData = params.get(Planner.ToolParam.EVENT_DATA.getKey());
+                core.fireCoreEvent(eventType, eventData);
+                return null;
+            }
+
+            private static Object suggestPlanSteps(Core core, Map<String, Object> params) {
+                var goalText = (String) params.get(Planner.ToolParam.GOAL_TEXT.getKey());
+                if (core.lm.isReady()) {
+                    return core.lm.decomposeTask(goalText).orElse(Collections.emptyList()).stream()
+                            .map(stepDesc -> {
+                                var step = new Planner.PlanStep();
+                                step.description = stepDesc;
+                                step.toolName = Tool.LOG_MESSAGE.name(); // Default to log message
+                                step.toolParams = Map.of(Planner.ToolParam.MESSAGE.getKey(), "Executing: " + stepDesc);
+                                return step;
+                            }).collect(Collectors.toList());
+                }
+                return Collections.emptyList();
+            }
+
+            private static Object scheduleSystemEvent(Core core, Map<String, Object> params) {
+                var eventType = SystemEventType.valueOf((String) params.get(Planner.ToolParam.EVENT_TYPE.getKey()));
+                var delaySeconds = ((Number) params.getOrDefault(Planner.ToolParam.DELAY_SECONDS.getKey(), 0L)).longValue();
+                var payload = (Map<String, Object>) params.getOrDefault(Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap());
+
+                core.scheduler.schedule(() -> core.fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
+                        Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name(),
+                        Planner.ToolParam.PAYLOAD.getKey(), payload,
+                        ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
+                )), delaySeconds, TimeUnit.SECONDS);
+                return null;
+            }
+
+            private static Object findNotesByTag(Core core, Map<String, Object> params) {
+                var tag = (String) params.get(Planner.ToolParam.TAG.getKey());
+                return core.notes.getAll(n -> n.tags.contains(tag));
+            }
+
+            private static Object forEach(Core core, Map<String, Object> params) {
+                var list = (List<Object>) params.get(Planner.ToolParam.LIST.getKey());
+                var loopVarName = (String) params.get(Planner.ToolParam.LOOP_VAR.getKey());
+                var loopSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.LOOP_STEPS.getKey());
+
+                if (list == null || loopSteps == null || loopSteps.isEmpty()) {
+                    logger.warn("FOR_EACH called with null list or empty loop steps.");
+                    return null;
+                }
+
+                // This is a simplified FOR_EACH. In a full planner, this would dynamically add steps.
+                // For now, it just logs the intent.
+                logger.info("FOR_EACH: Iterating {} items with loop variable '{}'. Steps: {}", list.size(), loopVarName, loopSteps.size());
+                return null;
+            }
+
+            private static Object executeSemanticQuery(Core core, Map<String, Object> params) {
+                var queryText = (String) params.get(Planner.ToolParam.QUERY_TEXT.getKey());
+                var minSimilarity = ((Number) params.getOrDefault(Planner.ToolParam.MIN_SIMILARITY.getKey(), 0.7)).doubleValue();
+                var maxResults = ((Number) params.getOrDefault(Planner.ToolParam.MAX_RESULTS.getKey(), 5)).intValue();
+
+                if (!core.lm.isReady()) {
+                    throw new RuntimeException("LLM service not ready for semantic query.");
+                }
+
+                return core.lm.generateEmbedding(queryText)
+                        .map(queryEmb -> core.notes.getAllNotes().stream()
+                                .filter(n -> n.getEmbeddingV1() != null && n.getEmbeddingV1().length == queryEmb.length)
+                                .map(n -> new AbstractMap.SimpleEntry<>(n, LM.cosineSimilarity(queryEmb, n.getEmbeddingV1())))
+                                .filter(entry -> entry.getValue() >= minSimilarity)
+                                .sorted(Map.Entry.<Note, Double>comparingByValue().reversed())
+                                .limit(maxResults)
+                                .map(Map.Entry::getKey)
+                                .collect(Collectors.toList()))
+                        .orElse(Collections.emptyList());
+            }
+
+            private static Object getSystemHealthMetrics(Core core, Map<String, Object> params) {
+                long pendingSystemEvents = core.notes.getAll(n -> n.tags.contains(SystemTag.SYSTEM_EVENT.value) &&
+                        Planner.PlanState.PENDING.name().equals(n.content.get(ContentKey.STATUS.getKey()))).size();
+                long activePlans = core.planner.getActivePlans().size();
+                long failedPlanStepsInActivePlans = core.planner.getActivePlans().values().stream()
+                        .flatMap(exec -> exec.steps.stream())
+                        .filter(step -> Planner.PlanStepState.FAILED.equals(step.status))
+                        .count();
+
+                return Map.of(
+                        "pendingSystemEvents", pendingSystemEvents,
+                        "activePlans", activePlans,
+                        "failedPlanStepsInActivePlans", failedPlanStepsInActivePlans
+                );
+            }
+
+            private static Object getConfigState(Core core, Map<String, Object> params) {
+                var configType = (String) params.get(Planner.ToolParam.CONFIG_TYPE.getKey());
+                return switch (configType) {
+                    case "nostr" -> core.json.convertValue(core.cfg.net, new TypeReference<Map<String, Object>>() {
+                    });
+                    case "ui" -> core.json.convertValue(core.cfg.ui, new TypeReference<Map<String, Object>>() {
+                    });
+                    case "llm" -> core.json.convertValue(core.cfg.lm, new TypeReference<Map<String, Object>>() {
+                    });
+                    default -> throw new IllegalArgumentException("Unknown config type: " + configType);
+                };
+            }
+
+            private static Object applyConfigState(Core core, Map<String, Object> params) {
+                var configType = (String) params.get(Planner.ToolParam.CONFIG_TYPE.getKey());
+                var stateMap = (Map<String, Object>) params.get(Planner.ToolParam.STATE_MAP.getKey());
+                try {
+                    switch (configType) {
+                        case "nostr" -> {
+                            var newConfig = core.json.convertValue(stateMap, Config.NostrSettings.class);
+                            core.cfg.net.privateKeyBech32 = newConfig.privateKeyBech32;
+                            core.cfg.net.publicKeyBech32 = newConfig.publicKeyBech32;
+                            core.cfg.net.myProfileNoteId = newConfig.myProfileNoteId;
+                            core.net.loadIdentity(); // Reload identity in Nostr service
+                            core.net.setEnabled(core.net.isEnabled()); // Reconnect relays if enabled
+                            core.fireCoreEvent(CoreEventType.CONFIG_CHANGED, "nostr_status_changed");
+                        }
+                        case "ui" -> {
+                            var newConfig = core.json.convertValue(stateMap, Config.UISettings.class);
+                            core.cfg.ui.theme = newConfig.theme;
+                            // core.cfg.ui.minimizeToTray = newConfig.minimizeToTray; // minimizeToTray is final
+                            core.fireCoreEvent(CoreEventType.CONFIG_CHANGED, "ui_theme_updated");
+                        }
+                        case "llm" -> {
+                            var newConfig = core.json.convertValue(stateMap, Config.LMSettings.class);
+                            core.cfg.lm.provider = newConfig.provider;
+                            core.cfg.lm.ollamaBaseUrl = newConfig.ollamaBaseUrl;
+                            core.cfg.lm.ollamaChatModelName = newConfig.ollamaChatModelName;
+                            core.cfg.lm.ollamaEmbeddingModelName = newConfig.ollamaEmbeddingModelName;
+                            core.lm.initialize(); // Re-initialize LM service
+                            core.fireCoreEvent(CoreEventType.CONFIG_CHANGED, "llm_status_changed");
+                        }
+                        default -> throw new IllegalArgumentException("Unknown config type: " + configType);
+                    }
+                    logger.info("Applied {} config state.", configType);
+                    return true;
+                } catch (Exception e) {
+                    logger.error("Failed to apply {} config state: {}", configType, e.getMessage(), e);
+                    throw new RuntimeException("Failed to apply config: " + e.getMessage(), e);
+                }
+            }
+
+            private static Object getSelfNostrInfo(Core core, Map<String, Object> params) {
+                return Map.of(
+                        "pubKeyHex", core.net.getPublicKeyXOnlyHex(),
+                        "pubKeyNpub", core.net.getPublicKeyBech32(),
+                        "myProfileNoteId", core.cfg.net.myProfileNoteId
+                );
+            }
+
+            // NEW: ADD_CONTACT tool implementation
+            private static Object addContact(Core core, Map<String, Object> params) {
+                var nostrPubKeyHex = (String) params.get(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+                if (nostrPubKeyHex == null || nostrPubKeyHex.isEmpty()) {
+                    throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for ADD_CONTACT.");
+                }
+
+                var npub = "";
+                try {
+                    npub = Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(nostrPubKeyHex));
+                } catch (Exception e) {
+                    logger.warn("Could not encode npub for hex {}: {}", nostrPubKeyHex, e.getMessage());
+                    npub = "npub_error_" + nostrPubKeyHex.substring(0, 8);
+                }
+                final String finalNpub = npub;
+
+                var contactNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+
+                var contactNote = contactNoteOpt.orElseGet(() -> {
+                    var newNote = new Note();
+                    newNote.tags.add(SystemTag.CONTACT.value);
+                    newNote.tags.add(SystemTag.NOSTR_CONTACT.value);
+                    newNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
+                    newNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
+                    newNote.setTitle(finalNpub.substring(0, 12) + "..."); // Default title
+                    return newNote;
+                });
+
+                // Ensure a chat note exists for this contact
+                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+
+                if (chatNoteOpt.isEmpty()) {
+                    var chatNote = new Note("Chat with " + contactNote.getTitle(), "");
+                    chatNote.tags.add(SystemTag.CHAT.value);
+                    chatNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
+                    chatNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
+                    chatNote.content.put(ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+                    core.saveNote(chatNote);
+                    logger.info("Created new chat note for contact {}.", contactNote.getTitle());
+                }
+
+                core.saveNote(contactNote);
+                logger.info("Added/updated contact for Nostr pubkey hex: {}", nostrPubKeyHex);
+                return contactNote.id;
+            }
+
+            // NEW: ACCEPT_FRIEND_REQUEST tool implementation
+            private static Object acceptFriendRequest(Core core, Map<String, Object> params) {
+                var senderNpub = (String) params.get(Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey());
+                var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
+
+                if (senderNpub == null || senderNpub.isEmpty()) {
+                    throw new IllegalArgumentException("FRIEND_REQUEST_SENDER_NPUB is required for ACCEPT_FRIEND_REQUEST.");
+                }
+
+                try {
+                    var senderPubKeyHex = Crypto.bytesToHex(Crypto.Bech32.nip19Decode(senderNpub));
+                    // 1. Add contact (this will also create a chat note if not exists)
+                    addContact(core, Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), senderPubKeyHex));
+
+                    // 2. Send confirmation DM
+                    core.net.sendDirectMessage(senderNpub, "Friend request accepted! Let's chat.");
+
+                    // 3. Remove actionable item
+                    core.fireCoreEvent(CoreEventType.ACTIONABLE_ITEM_REMOVED, actionableItemId);
+
+                    logger.info("Accepted friend request from {}", senderNpub);
+                    return true;
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to accept friend request: " + e.getMessage(), e);
+                }
+            }
+
+            // NEW: REJECT_FRIEND_REQUEST tool implementation
+            private static Object rejectFriendRequest(Core core, Map<String, Object> params) {
+                var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
+
+                if (actionableItemId == null || actionableItemId.isEmpty()) {
+                    throw new IllegalArgumentException("ACTIONABLE_ITEM_ID is required for REJECT_FRIEND_REQUEST.");
+                }
+
+                // Just remove the actionable item
+                core.fireCoreEvent(CoreEventType.ACTIONABLE_ITEM_REMOVED, actionableItemId);
+
+                logger.info("Rejected friend request (actionable item removed): {}", actionableItemId);
+                return true;
+            }
         }
     }
 
