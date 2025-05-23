@@ -5,9 +5,16 @@ import dumb.note.Netention;
 import javax.swing.*;
 import java.awt.*;
 import java.util.Optional;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class SimpleChat extends UI.BaseAppFrame {
     private final UI.BuddyListPanel buddyPanel;
+    private final List<UI.ActionableItem> actionableItems = new CopyOnWriteArrayList<>();
+    private final ReentrantLock actionableItemsLock = new ReentrantLock();
+    private JMenuItem inboxMenuItem; // To update the menu item text dynamically
 
     public SimpleChat(Netention.Core core) {
         super(core, "SimpleChat ✨", 900, 700);
@@ -69,6 +76,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         actionRegistry.register(UI.ActionID.ABOUT, new UI.AppAction("About SimpleChat", e ->
                 JOptionPane.showMessageDialog(this, "SimpleChat ✨\nA basic Nostr IM client.", "About SimpleChat", JOptionPane.INFORMATION_MESSAGE)
         ));
+        actionRegistry.register(UI.ActionID.SHOW_INBOX, new UI.AppAction("Inbox", e -> showInboxDialog()));
     }
 
     private void handleSimpleChatCoreEvent(Netention.Core.CoreEvent event) {
@@ -83,6 +91,28 @@ public class SimpleChat extends UI.BaseAppFrame {
             case CONFIG_CHANGED -> {
                 updateStatusBasedOnNostrState(); // Also called by super.handleCoreEventBase via updateActionStates
                 buddyPanel.refreshList();
+            }
+            case ACTIONABLE_ITEM_ADDED -> {
+                if (event.data() instanceof UI.ActionableItem item) {
+                    actionableItemsLock.lock();
+                    try {
+                        actionableItems.add(item);
+                    } finally {
+                        actionableItemsLock.unlock();
+                    }
+                    updateInboxMenuItemText();
+                }
+            }
+            case ACTIONABLE_ITEM_REMOVED -> {
+                if (event.data() instanceof String itemId) {
+                    actionableItemsLock.lock();
+                    try {
+                        actionableItems.removeIf(item -> item.id().equals(itemId));
+                    } finally {
+                        actionableItemsLock.unlock();
+                    }
+                    updateInboxMenuItemText();
+                }
             }
             default -> { /* No specific action */ }
         }
@@ -215,6 +245,35 @@ public class SimpleChat extends UI.BaseAppFrame {
         }, () -> JOptionPane.showMessageDialog(this, "Configuration note '" + configNoteId + "' not found.", "Config Error", JOptionPane.ERROR_MESSAGE));
     }
 
+    private void showInboxDialog() {
+        var inboxPanel = new UI.ActionableItemsPanel(core, this::executeActionableItem);
+        actionableItemsLock.lock();
+        try {
+            inboxPanel.refreshList(new ArrayList<>(actionableItems)); // Pass a copy
+        } finally {
+            actionableItemsLock.unlock();
+        }
+        UIUtil.showPanelInDialog(this, "Inbox", inboxPanel, new Dimension(500, 400), false);
+        updateStatus("Viewing Inbox.");
+    }
+
+    private void executeActionableItem(UI.ActionableItem item) {
+        item.action().run();
+        // The action itself should trigger a CoreEventType.ACTIONABLE_ITEM_REMOVED event
+        // if the item is no longer relevant, which will update the list.
+        // No explicit removal here to avoid race conditions with Core events.
+    }
+
+    private void updateInboxMenuItemText() {
+        if (inboxMenuItem != null) {
+            SwingUtilities.invokeLater(() -> {
+                int count = actionableItems.size();
+                inboxMenuItem.setText("Inbox" + (count > 0 ? " (" + count + ")" : ""));
+                inboxMenuItem.setForeground(count > 0 ? Color.ORANGE.darker() : UIManager.getColor("MenuItem.foreground"));
+            });
+        }
+    }
+
     private JMenuBar createSimpleChatMenuBar() {
         var mb = new JMenuBar();
         var fileMenu = new JMenu("File");
@@ -234,6 +293,14 @@ public class SimpleChat extends UI.BaseAppFrame {
         var helpMenu = new JMenu("Help");
         helpMenu.add(createMenuItem(UI.ActionID.ABOUT));
         mb.add(helpMenu);
+
+        // NEW: Actions Menu
+        var actionsMenu = new JMenu("Actions");
+        inboxMenuItem = createMenuItem(UI.ActionID.SHOW_INBOX); // Assign to class field
+        actionsMenu.add(inboxMenuItem);
+        mb.add(actionsMenu);
+
+        updateInboxMenuItemText(); // Initial update
         return mb;
     }
 }

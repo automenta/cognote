@@ -53,7 +53,8 @@ public class UI {
         LINK_NOTE, LLM_ACTIONS_MENU, DELETE_NOTE, TOGGLE_NOSTR, MY_PROFILE,
         PUBLISH_PROFILE, ADD_NOSTR_FRIEND, MANAGE_RELAYS, LLM_SETTINGS, SYNC_ALL, ABOUT,
         SHOW_MY_NOSTR_PROFILE_EDITOR, MANAGE_NOSTR_RELAYS_POPUP, CONFIGURE_NOSTR_IDENTITY_POPUP,
-        WINDOW_MENU, CASCADE_WINDOWS, TILE_WINDOWS_HORIZONTALLY, TILE_WINDOWS_VERTICALLY, CLOSE_ACTIVE_WINDOW, CLOSE_ALL_WINDOWS
+        WINDOW_MENU, CASCADE_WINDOWS, TILE_WINDOWS_HORIZONTALLY, TILE_WINDOWS_VERTICALLY, CLOSE_ACTIVE_WINDOW, CLOSE_ALL_WINDOWS,
+        SHOW_INBOX // NEW
     }
 
     interface Dirtyable {
@@ -1785,6 +1786,45 @@ public class UI {
                     default -> null;
                 };
             }
+        }
+    }
+
+    public static class ActionableItemsPanel extends JPanel {
+        private final Netention.Core core;
+        private final DefaultListModel<ActionableItem> listModel = new DefaultListModel<>();
+        private final JList<ActionableItem> list = new JList<>(listModel);
+        private final Consumer<ActionableItem> onExecuteAction;
+
+        public ActionableItemsPanel(Netention.Core core, Consumer<ActionableItem> onExecuteAction) {
+            super(new BorderLayout(5, 5));
+            setBorder(new EmptyBorder(5, 5, 5, 5));
+            this.core = core;
+            this.onExecuteAction = onExecuteAction;
+
+            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            list.setCellRenderer(new ActionableItemCellRenderer());
+            list.addMouseListener(new MouseAdapter() {
+                public void mouseClicked(MouseEvent e) {
+                    if (e.getClickCount() == 2) {
+                        ofNullable(list.getSelectedValue()).ifPresent(item -> {
+                            onExecuteAction.accept(item);
+                            // Refresh the list after action, assuming the action will lead to removal via CoreEvent
+                            // For immediate visual feedback, filter out the item.
+                            refreshList(new ArrayList<>(listModel.stream().filter(i -> !i.id().equals(item.id())).toList()));
+                        });
+                    }
+                }
+            });
+
+            add(new JScrollPane(list), BorderLayout.CENTER);
+            add(new JLabel("Double-click an item to act on it.", SwingConstants.CENTER), BorderLayout.SOUTH);
+        }
+
+        public void refreshList(List<ActionableItem> items) {
+            SwingUtilities.invokeLater(() -> {
+                listModel.clear();
+                items.forEach(listModel::addElement);
+            });
         }
     }
 
