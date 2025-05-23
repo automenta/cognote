@@ -113,4 +113,32 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
     public Netention.Note getNote() {
         return profileNote;
     }
+
+    public void setReadOnlyMode(boolean readOnly) {
+        nameField.setEditable(!readOnly);
+        aboutArea.setEditable(!readOnly);
+        pictureUrlField.setEditable(!readOnly);
+        
+        if (readOnly) {
+            // Remove document listeners to prevent accidental dirty state changes in read-only mode
+            DocumentListener[] nameListeners = nameField.getDocument().getDocumentListeners();
+            for (DocumentListener l : nameListeners) {
+                nameField.getDocument().removeDocumentListener(l);
+            }
+            DocumentListener[] aboutListeners = aboutArea.getDocument().getDocumentListeners();
+            for (DocumentListener l : aboutListeners) {
+                aboutArea.getDocument().removeDocumentListener(l);
+            }
+            DocumentListener[] pictureListeners = pictureUrlField.getDocument().getDocumentListeners();
+            for (DocumentListener l : pictureListeners) {
+                pictureUrlField.getDocument().removeDocumentListener(l);
+            }
+            setDirty(false); // Ensure it's not dirty in read-only mode
+        } else {
+            // If switching back to editable mode, re-add listeners if needed.
+            // For this application's current use case, ProfileEditorPanel is either
+            // created for editing (my profile) or for read-only viewing (contact profile).
+            // Re-adding listeners here is not strictly necessary for current functionality.
+        }
+    }
 }

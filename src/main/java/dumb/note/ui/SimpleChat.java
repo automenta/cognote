@@ -92,7 +92,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         actionRegistry.register(UI.ActionID.VIEW_CONTACT_PROFILE, new UI.AppAction("View Profile", e -> {
             Object selected = buddyPanel.buddies.getSelectedValue();
             if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
-                showProfileForContact(note);
+                displayContentForIdentifier(note.id); // Show profile in main panel
             }
         }));
     }
@@ -107,6 +107,7 @@ public class SimpleChat extends UI.BaseAppFrame {
             case CHAT_MESSAGE_ADDED -> {
                 if (event.data() instanceof Map<?,?> data && data.get("chatNoteId") instanceof String chatNoteId) {
                     core.notes.get(chatNoteId).ifPresent(chatNote -> {
+                        // Only increment unread count if the chat is not currently open
                         if (!(getEditorHostPanel().getComponentCount() > 0 && getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
                                 currentChatPanel.getChatNote().id.equals(chatNoteId))) {
                             int unreadCount = (Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
@@ -165,51 +166,53 @@ public class SimpleChat extends UI.BaseAppFrame {
     private void displayContentForIdentifier(String identifier) {
         if (!canSwitchOrCloseContent(false, null)) return;
 
-        core.notes.get(identifier)
-                .filter(n -> n.tags.contains(Netention.SystemTag.CHAT.value))
-                .ifPresentOrElse(chatNote -> {
-                    if (chatNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String partnerNpub) {
-                        setEditorComponent(new UI.ChatPanel(core, chatNote, partnerNpub, this::updateStatus));
-                        if ((Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0) > 0) {
-                            chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
-                            core.saveNote(chatNote);
-                            buddyPanel.refreshList();
-                        }
-                    } else {
-                        setEditorComponent(new JLabel("Error: Chat partner not found in note metadata.", SwingConstants.CENTER));
-                        updateStatus("Error: Chat partner not found for " + chatNote.getTitle());
-                    }
-                }, () -> {
-                    if (!identifier.startsWith("npub1")) {
-                        core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
-                                        identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
-                                .stream().findFirst()
-                                .ifPresentOrElse(this::showProfileForContact,
-                                        () -> setEditorComponent(new JLabel("Content not found for: " + identifier, SwingConstants.CENTER)));
-                        return;
-                    }
-                    core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
-                                    identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
-                            .stream().findFirst()
-                            .ifPresentOrElse(
-                                    this::showProfileForContact,
-                                    () -> core.notes.getAll(cn -> cn.tags.contains(Netention.SystemTag.CHAT.value) &&
-                                                    identifier.equals(cn.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
-                                            .stream().findFirst()
-                                            .ifPresentOrElse(chatNote -> displayContentForIdentifier(chatNote.id),
-                                                    () -> {
-                                                        setEditorComponent(new JLabel("Contact/chat not found for: " + identifier.substring(0, 12) + "...", SwingConstants.CENTER));
-                                                        updateStatus("Contact/chat not found for " + identifier.substring(0, 12) + "...");
-                                                    })
-                            );
-                });
-    }
+        // 1. Try to load as a Chat Note
+        Optional<Netention.Note> chatNoteOpt = core.notes.get(identifier)
+                .filter(n -> n.tags.contains(Netention.SystemTag.CHAT.value));
 
-    private void showProfileForContact(Netention.Note contactNote) {
-        var profileEditor = new UI.NoteEditorPanel(core, contactNote, this, () -> {}, null, _ -> {});
-        profileEditor.setReadOnlyMode(true);
-        UIUtil.showPanelInDialog(this, "Profile: " + contactNote.getTitle(), profileEditor, new Dimension(400, 500), false);
-        updateStatus("Viewing profile: " + contactNote.getTitle());
+        if (chatNoteOpt.isPresent()) {
+            Netention.Note chatNote = chatNoteOpt.get();
+            if (chatNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String partnerNpub) {
+                setEditorComponent(new UI.ChatPanel(core, chatNote, partnerNpub, this::updateStatus));
+                if ((Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0) > 0) {
+                    chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                    core.saveNote(chatNote);
+                    buddyPanel.refreshList(); // Refresh to clear unread count
+                }
+                updateStatus("Viewing chat with " + chatNote.getTitle());
+            } else {
+                setEditorComponent(new JLabel("Error: Chat partner not found in note metadata.", SwingConstants.CENTER));
+                updateStatus("Error: Chat partner not found for " + chatNote.getTitle());
+            }
+            return;
+        }
+
+        // 2. Try to load as a Contact Note (or resolve npub to contact)
+        Optional<Netention.Note> contactNoteOpt;
+        if (identifier.startsWith("npub1")) {
+            // If identifier is an npub, find the corresponding contact note
+            contactNoteOpt = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
+                    identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
+                    .stream().findFirst();
+        } else {
+            // If identifier is a note ID, check if it's a contact note
+            contactNoteOpt = core.notes.get(identifier)
+                    .filter(n -> n.tags.contains(Netention.SystemTag.CONTACT.value));
+        }
+
+        if (contactNoteOpt.isPresent()) {
+            Netention.Note contactNote = contactNoteOpt.get();
+            // Display contact profile in the main panel
+            var profileEditor = new ProfileEditorPanel(core, contactNote, isDirty -> {}); // No dirty listener needed for read-only view
+            profileEditor.setReadOnlyMode(true);
+            setEditorComponent(profileEditor);
+            updateStatus("Viewing profile: " + contactNote.getTitle());
+            return;
+        }
+
+        // 3. If nothing found, show a generic message
+        setEditorComponent(new JLabel("Content not found for: " + identifier, SwingConstants.CENTER));
+        updateStatus("Content not found for " + identifier);
     }
 
     private void showMyProfileEditor() {
