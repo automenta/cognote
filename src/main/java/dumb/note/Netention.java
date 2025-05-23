@@ -495,7 +495,7 @@ public class Netention {
                 if (step != null) {
                     step.result = result;
                     step.status = (result == null || (result instanceof String s && s.isEmpty())) ? Netention.PlanStepState.FAILED : Netention.PlanStepState.COMPLETED;
-                    logger.info("User interaction for step {} {}.", step.description, step.status == Netention.PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
+                    logger.info("User interaction for step {} {}. ", step.description, step.status == Netention.PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
                     if (step.id != null && result != null) exec.context.put(step.id + ".result", result);
                     step.endTime = Instant.now();
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
@@ -784,7 +784,7 @@ public class Netention {
         }
 
         public enum Tool {
-            LOG_MESSAGE, USER_INTERACTION, GET_NOTE_PROPERTY, PARSE_JSON, CREATE_NOTE, MODIFY_NOTE_CONTENT, DELETE_NOTE, ADD_CONTACT, IF_ELSE, DECRYPT_NOSTR_DM, UPDATE_CHAT_NOTE, FIRE_CORE_EVENT, SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY, CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS, GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, SEND_FRIEND_REQUEST, DECOMPOSE_GOAL, PLAN, GET_PLAN_DEPENDENCIES, ASSERT_KIF, QUERY, RETRACT, API, ECHO, FILE_OPERATIONS, GENERATE_TASK_LOGIC, INSPECT, EVAL_EXPR, GENERATE, REFLECT, REASON, DEFINE_CONCEPT, EXEC, GRAPH_SEARCH, CODE_WRITING, CODE_EXECUTION, FIND_ASSERTIONS, IDENTIFY_CONCEPTS, SUMMARIZE, ENHANCE, SEND_DM, CREATE_OR_UPDATE_CONTACT_NOTE;
+            LOG_MESSAGE, USER_INTERACTION, GET_NOTE_PROPERTY, PARSE_JSON, CREATE_NOTE, MODIFY_NOTE_CONTENT, DELETE_NOTE, ADD_CONTACT, IF_ELSE, DECRYPT_NOSTR_DM, UPDATE_CHAT_NOTE, FIRE_CORE_EVENT, SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY, CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS, GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, SEND_FRIEND_REQUEST, DECOMPOSE_GOAL, PLAN, GET_PLAN_DEPENDENCIES, ASSERT_KIF, QUERY, RETRACT, API, ECHO, FILE_OPERATIONS, GENERATE_TASK_LOGIC, INSPECT, EVAL_EXPR, GENERATE, REFLECT, REASON, DEFINE_CONCEPT, EXEC, GRAPH_SEARCH, CODE_WRITING, CODE_EXECUTION, FIND_ASSERTIONS, IDENTIFY_CONCEPTS, SUMMARIZE, ENHANCE, SEND_DM, CREATE_OR_UPDATE_CONTACT_NOTE, REMOVE_CONTACT;
 
             public static Tool fromString(String text) {
                 return Stream.of(values()).filter(t -> t.name().equalsIgnoreCase(text)).findFirst().orElseThrow(() -> new IllegalArgumentException("No enum constant Core.Tool." + text));
@@ -889,6 +889,7 @@ public class Netention {
                 tools.put(Tool.ACCEPT_FRIEND_REQUEST, Tools::acceptFriendRequest);
                 tools.put(Tool.REJECT_FRIEND_REQUEST, Tools::rejectFriendRequest);
                 tools.put(Tool.SEND_FRIEND_REQUEST, Tools::sendFriendRequest);
+                tools.put(Tool.REMOVE_CONTACT, Tools::removeContact);
             }
 
             private static Object logMessage(Core core, Map<String, Object> params) {
@@ -1060,6 +1061,46 @@ public class Netention {
                     throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for ADD_CONTACT.");
                 }
                 return upsertContactAndChatNote(core, nostrPubKeyHex, profileData);
+            }
+
+            private static Object removeContact(Core core, Map<String, Object> params) {
+                var nostrPubKeyHex = (String) params.get(ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+                if (nostrPubKeyHex == null || nostrPubKeyHex.isEmpty()) {
+                    throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for REMOVE_CONTACT.");
+                }
+
+                boolean removedContact = false;
+                boolean removedChat = false;
+
+                // Find and delete contact note
+                Optional<Netention.Note> contactNoteOpt = core.notes.getAll(n ->
+                        n.tags.contains(SystemTag.CONTACT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))
+                ).stream().findFirst();
+
+                if (contactNoteOpt.isPresent()) {
+                    core.deleteNote(contactNoteOpt.get().id);
+                    removedContact = true;
+                    logger.info("Removed contact note for hex: {}", nostrPubKeyHex.substring(0, 8));
+                } else {
+                    logger.warn("No contact note found for hex: {}", nostrPubKeyHex.substring(0, 8));
+                }
+
+                // Find and delete chat note
+                Optional<Netention.Note> chatNoteOpt = core.notes.getAll(n ->
+                        n.tags.contains(SystemTag.CHAT.value) &&
+                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))
+                ).stream().findFirst();
+
+                if (chatNoteOpt.isPresent()) {
+                    core.deleteNote(chatNoteOpt.get().id);
+                    removedChat = true;
+                    logger.info("Removed chat note for hex: {}", nostrPubKeyHex.substring(0, 8));
+                } else {
+                    logger.warn("No chat note found for hex: {}", nostrPubKeyHex.substring(0, 8));
+                }
+
+                return removedContact || removedChat;
             }
 
             private static Object ifElse(Core core, Map<String, Object> params) {

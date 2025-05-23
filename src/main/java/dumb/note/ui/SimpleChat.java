@@ -6,6 +6,8 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.BufferedInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -53,6 +55,20 @@ public class SimpleChat extends UI.BaseAppFrame {
             core.net.setEnabled(true);
         }
         updateActionStates();
+
+        buddyPanel.buddies.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showBuddyListContextMenu(e);
+                }
+            }
+
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    showBuddyListContextMenu(e);
+                }
+            }
+        });
     }
 
     public static void main(String[] ignoredArgs) {
@@ -359,6 +375,85 @@ public class SimpleChat extends UI.BaseAppFrame {
                 inboxMenuItem.setText("Inbox" + (count > 0 ? " (" + count + ")" : ""));
                 inboxMenuItem.setForeground(count > 0 ? Color.ORANGE.darker() : UIManager.getColor("MenuItem.foreground"));
             });
+        }
+    }
+
+    private void showBuddyListContextMenu(MouseEvent e) {
+        int index = buddyPanel.buddies.locationToIndex(e.getPoint());
+        if (index < 0) return;
+
+        buddyPanel.buddies.setSelectedIndex(index);
+        Object selected = buddyPanel.buddies.getSelectedValue();
+
+        if (selected instanceof Netention.Note selectedNote) {
+            JPopupMenu popup = new JPopupMenu();
+
+            // View Profile
+            if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value)) {
+                JMenuItem viewProfileItem = new JMenuItem("View Profile");
+                viewProfileItem.addActionListener(_ -> displayContentForIdentifier(selectedNote.id));
+                popup.add(viewProfileItem);
+            }
+
+            // Start Chat
+            if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value) || selectedNote.tags.contains(Netention.SystemTag.CHAT.value)) {
+                JMenuItem startChatItem = new JMenuItem("Start Chat");
+                startChatItem.addActionListener(_ -> {
+                    String chatPartnerPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
+                    if (chatPartnerPubKeyHex != null) {
+                        // Try to find an existing chat note for this partner
+                        Optional<Netention.Note> chatNoteOpt = core.notes.getAll(n ->
+                                n.tags.contains(Netention.SystemTag.CHAT.value) &&
+                                chatPartnerPubKeyHex.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key))
+                        ).stream().findFirst();
+
+                        Netention.Note chatNoteToDisplay;
+                        if (chatNoteOpt.isPresent()) {
+                            chatNoteToDisplay = chatNoteOpt.get();
+                        } else {
+                            // If no chat note exists, create a new one
+                            chatNoteToDisplay = new Netention.Note("Chat with " + selectedNote.getTitle(), "");
+                            chatNoteToDisplay.tags.add(Netention.SystemTag.CHAT.value);
+                            chatNoteToDisplay.meta.put(Netention.Metadata.NOSTR_PUB_KEY_HEX.key, chatPartnerPubKeyHex);
+                            chatNoteToDisplay.meta.put(Netention.Metadata.NOSTR_PUB_KEY.key, selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key));
+                            chatNoteToDisplay.content.put(Netention.ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
+                            core.saveNote(chatNoteToDisplay); // Save it so it appears in the buddy list
+                            Netention.Core.logger.info("Created new chat note for {}.", selectedNote.getTitle());
+                        }
+                        displayContentForIdentifier(chatNoteToDisplay.id);
+                    } else {
+                        JOptionPane.showMessageDialog(this, "Cannot start chat: Public key not found for this contact.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                });
+                popup.add(startChatItem);
+            }
+
+            // Remove Contact
+            if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value) && !selectedNote.tags.contains(Netention.SystemTag.MY_PROFILE.value)) {
+                JMenuItem removeContactItem = new JMenuItem("Remove Contact");
+                removeContactItem.addActionListener(_ -> {
+                    int confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to remove " + selectedNote.getTitle() + "? This will also delete the chat history.", "Confirm Removal", JOptionPane.YES_NO_OPTION);
+                    if (confirm == JOptionPane.YES_OPTION) {
+                        String nostrPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
+                        if (nostrPubKeyHex != null) {
+                            try {
+                                core.executeTool(Netention.Core.Tool.REMOVE_CONTACT, Map.of(Netention.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), nostrPubKeyHex));
+                                buddyPanel.refreshList();
+                                setEditorComponent(new JLabel("Select a chat or contact.", SwingConstants.CENTER)); // Clear current view
+                                updateStatus("Contact " + selectedNote.getTitle() + " removed.");
+                            } catch (Exception ex) {
+                                JOptionPane.showMessageDialog(this, "Failed to remove contact: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                                Netention.Core.logger.error("Failed to remove contact {}: {}", selectedNote.id, ex.getMessage(), ex);
+                            }
+                        }
+                    }
+                });
+                popup.add(removeContactItem);
+            }
+
+            if (popup.getComponentCount() > 0) {
+                popup.show(e.getComponent(), e.getX(), e.getY());
+            }
         }
     }
 
