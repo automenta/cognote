@@ -215,48 +215,71 @@ public class SimpleChat extends UI.BaseAppFrame {
     private void showMyProfileEditor() {
         if (!canSwitchOrCloseContent(false, null)) return;
         var myProfileNoteId = core.cfg.net.myProfileNoteId;
+        Netention.Note profileNote;
+
         if (myProfileNoteId == null || myProfileNoteId.isEmpty()) {
-            if (JOptionPane.showConfirmDialog(this, "My Profile note ID not configured. Create one now?", "👤 Profile Setup", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-                var newProfileNote = new Netention.Note("My Nostr Profile", "Bio: ...");
-                newProfileNote.tags.add(Netention.SystemTag.MY_PROFILE.value);
-                core.saveNote(newProfileNote);
-                core.cfg.net.myProfileNoteId = newProfileNote.id;
-                core.cfg.saveAllConfigs();
-                myProfileNoteId = newProfileNote.id;
-                updateStatus("Created and set new profile note.");
+            int choice = JOptionPane.showConfirmDialog(this, "Your Nostr profile note ID is not configured. Would you like to generate new keys and create a profile now?", "👤 Profile Setup", JOptionPane.YES_NO_CANCEL_OPTION);
+            if (choice == JOptionPane.YES_OPTION) {
+                String keyInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
+                myProfileNoteId = core.cfg.net.myProfileNoteId; // Get the newly set ID
+                profileNote = core.notes.get(myProfileNoteId).orElse(null);
+                if (profileNote == null) {
+                    JOptionPane.showMessageDialog(this, "Failed to create profile note after key generation.", "👤 Profile Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                updateStatus("Generated new Nostr keys and created profile note.");
             } else {
-                JOptionPane.showMessageDialog(this, "My Profile note ID not configured.", "👤 Profile Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Nostr profile setup cancelled.", "👤 Profile Setup", JOptionPane.INFORMATION_MESSAGE);
                 return;
+            }
+        } else {
+            profileNote = core.notes.get(myProfileNoteId).orElse(null);
+            if (profileNote == null) {
+                int choice = JOptionPane.showConfirmDialog(this, "Your configured profile note (ID: " + myProfileNoteId + ") was not found. Would you like to create a new one?", "👤 Profile Error", JOptionPane.YES_NO_OPTION);
+                if (choice == JOptionPane.YES_OPTION) {
+                    profileNote = new Netention.Note("My Nostr Profile", "Edit your profile details here.");
+                    profileNote.tags.add(Netention.SystemTag.MY_PROFILE.value);
+                    profileNote.tags.add(Netention.SystemTag.CONTACT.value);
+                    profileNote.tags.add(Netention.SystemTag.NOSTR_CONTACT.value);
+                    profileNote.meta.put(Netention.Metadata.NOSTR_PUB_KEY.key, core.net.getPublicKeyBech32());
+                    profileNote.meta.put(Netention.Metadata.NOSTR_PUB_KEY_HEX.key, core.net.getPublicKeyXOnlyHex());
+                    core.saveNote(profileNote);
+                    core.cfg.net.myProfileNoteId = profileNote.id;
+                    core.cfg.saveAllConfigs();
+                    updateStatus("Created new profile note.");
+                } else {
+                    JOptionPane.showMessageDialog(this, "My Profile note not found and not recreated.", "👤 Profile Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
             }
         }
 
-        core.notes.get(myProfileNoteId).ifPresentOrElse(profileNote -> {
-            var dialogContentPanel = new JPanel(new BorderLayout());
-            var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, isDirty -> SwingUtilities.invokeLater(() -> {
-                JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
-                publishButton.setEnabled(isDirty && core.net.isEnabled());
-            }));
-            profileEditor.onSaveCb = () -> {
-                updateStatus("Profile note saved.");
-                core.fireCoreEvent(Netention.Core.CoreEventType.NOTE_UPDATED, profileEditor.currentNote);
-            };
-            dialogContentPanel.add(profileEditor, BorderLayout.CENTER);
+        if (profileNote == null) {
+            JOptionPane.showMessageDialog(this, "Could not load or create profile note.", "👤 Profile Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
 
-            var publishButton = UIUtil.button("🚀 Publish Profile", null, _ -> {
-                profileEditor.saveNote(false);
-                core.net.publishProfile(profileEditor.currentNote);
-                updateStatus("Profile publish request sent.");
-                JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(dialogContentPanel), "Profile publish request sent.", "🚀 Nostr Profile", JOptionPane.INFORMATION_MESSAGE);
-            });
-            publishButton.setEnabled(profileEditor.isDirty() && core.net.isEnabled());
+        var dialogContentPanel = new JPanel(new BorderLayout());
+        ProfileEditorPanel profileEditor = new ProfileEditorPanel(core, profileNote, isDirty -> SwingUtilities.invokeLater(() -> {
+            JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
+            publishButton.setEnabled(isDirty && core.net.isEnabled());
+        }));
+        dialogContentPanel.add(profileEditor, BorderLayout.CENTER);
 
-            var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            bottomPanel.add(publishButton);
-            dialogContentPanel.add(bottomPanel, BorderLayout.SOUTH);
+        var publishButton = UIUtil.button("🚀 Publish Profile", null, _ -> {
+            profileEditor.saveChanges(); // Save changes to the note first
+            core.net.publishProfile(profileEditor.getNote()); // Publish the updated note
+            updateStatus("Profile publish request sent.");
+            JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(dialogContentPanel), "Profile publish request sent.", "🚀 Nostr Profile", JOptionPane.INFORMATION_MESSAGE);
+        });
+        publishButton.setEnabled(profileEditor.isDirty() && core.net.isEnabled());
 
-            UIUtil.showEditablePanelInDialog(this, "Edit My Nostr Profile", dialogContentPanel, new Dimension(500, 600), true, panel -> profileEditor.isUserModified());
+        var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        bottomPanel.add(publishButton);
+        dialogContentPanel.add(bottomPanel, BorderLayout.SOUTH);
 
-        }, () -> JOptionPane.showMessageDialog(this, "My Profile note not found (ID: " + core.cfg.net.myProfileNoteId + ").", "👤 Profile Error", JOptionPane.ERROR_MESSAGE));
+        UIUtil.showEditablePanelInDialog(this, "Edit My Nostr Profile", dialogContentPanel, new Dimension(500, 600), true, panel -> profileEditor.isDirty());
+        updateStatus("Viewing/Editing My Profile.");
     }
 
     private void manageNostrRelays() {
