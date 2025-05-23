@@ -11,7 +11,7 @@ import java.io.InputStream;
 import java.util.Optional;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Map; // NEW
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -19,14 +19,13 @@ public class SimpleChat extends UI.BaseAppFrame {
     private final UI.BuddyListPanel buddyPanel;
     private final List<UI.ActionableItem> actionableItems = new CopyOnWriteArrayList<>();
     private final ReentrantLock actionableItemsLock = new ReentrantLock();
-    private JMenuItem inboxMenuItem; // To update the menu item text dynamically
-    private Clip notificationSoundClip; // NEW
+    private JMenuItem inboxMenuItem;
+    private Clip notificationSoundClip;
 
     public SimpleChat(Netention.Core core) {
         super(core, "SimpleChat ✨", 900, 700);
         var contentPanelContainer = super.defaultEditorHostPanel;
 
-        // NEW: Initialize notification sound
         try (InputStream is = getClass().getResourceAsStream("/notification.wav");
              BufferedInputStream bis = new BufferedInputStream(is)) {
             if (is != null) {
@@ -39,7 +38,6 @@ public class SimpleChat extends UI.BaseAppFrame {
             Netention.Core.logger.error("Error loading notification sound: {}", e.getMessage());
             notificationSoundClip = null;
         }
-
 
         buddyPanel = new UI.BuddyListPanel(core, this::displayContentForIdentifier, this::showMyProfileEditor);
 
@@ -58,7 +56,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         if (core.cfg.net.privateKeyBech32 != null && !core.cfg.net.privateKeyBech32.isEmpty()) {
             core.net.setEnabled(true);
         }
-        updateActionStates(); // Will update nostrToggleMenuItem state
+        updateActionStates();
     }
 
     public static void main(String[] ignoredArgs) {
@@ -67,9 +65,6 @@ public class SimpleChat extends UI.BaseAppFrame {
 
     @Override
     protected Optional<UI.DirtyableSavableComponent> getActiveDirtyableSavableComponent() {
-        // SimpleChat doesn't have a main DirtyableSavableComponent in the editor area
-        // ChatPanel is not dirtyable/savable in the same way.
-        // Profile editor is in a dialog.
         return Optional.empty();
     }
 
@@ -91,14 +86,14 @@ public class SimpleChat extends UI.BaseAppFrame {
         }).setSelectedCalculator(() -> core.net.isEnabled()));
 
         actionRegistry.register(UI.ActionID.SHOW_MY_NOSTR_PROFILE_EDITOR, new UI.AppAction("My Profile...", e -> showMyProfileEditor()));
-        actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, this::displayContentForIdentifier))); // Changed callback
+        actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, this::displayContentForIdentifier)));
         actionRegistry.register(UI.ActionID.MANAGE_NOSTR_RELAYS_POPUP, new UI.AppAction("Manage Relays...", e -> manageNostrRelays()));
         actionRegistry.register(UI.ActionID.CONFIGURE_NOSTR_IDENTITY_POPUP, new UI.AppAction("Configure Identity...", e -> configureNostrIdentity()));
         actionRegistry.register(UI.ActionID.ABOUT, new UI.AppAction("About SimpleChat", e ->
                 JOptionPane.showMessageDialog(this, "SimpleChat ✨\nA basic Nostr IM client.", "About SimpleChat", JOptionPane.INFORMATION_MESSAGE)
         ));
         actionRegistry.register(UI.ActionID.SHOW_INBOX, new UI.AppAction("Inbox", e -> showInboxDialog()));
-        actionRegistry.register(UI.ActionID.VIEW_CONTACT_PROFILE, new UI.AppAction("View Profile", e -> { // NEW
+        actionRegistry.register(UI.ActionID.VIEW_CONTACT_PROFILE, new UI.AppAction("View Profile", e -> {
             Object selected = buddyPanel.buddies.getSelectedValue();
             if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
                 showProfileForContact(note);
@@ -113,17 +108,15 @@ public class SimpleChat extends UI.BaseAppFrame {
             return;
         }
         switch (event.type()) {
-            case CHAT_MESSAGE_ADDED -> { // NEW: Handle CHAT_MESSAGE_ADDED to update unread count
+            case CHAT_MESSAGE_ADDED -> {
                 if (event.data() instanceof Map<?,?> data && data.get("chatNoteId") instanceof String chatNoteId) {
                     core.notes.get(chatNoteId).ifPresent(chatNote -> {
-                        // If the current chat is NOT this one, increment unread count
                         if (!(getEditorHostPanel().getComponentCount() > 0 && getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
                                 currentChatPanel.getChatNote().id.equals(chatNoteId))) {
                             int unreadCount = (Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
                             chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, unreadCount + 1);
-                            core.saveNote(chatNote); // Save to persist unread count
+                            core.saveNote(chatNote);
 
-                            // NEW: Play sound and bring window to front if not focused
                             if (!isActive() && notificationSoundClip != null) {
                                 if (notificationSoundClip.isRunning()) notificationSoundClip.stop();
                                 notificationSoundClip.setFramePosition(0);
@@ -139,7 +132,7 @@ public class SimpleChat extends UI.BaseAppFrame {
             case NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED ->
                     SwingUtilities.invokeLater(buddyPanel::refreshList);
             case CONFIG_CHANGED -> {
-                updateStatusBasedOnNostrState(); // Also called by super.handleCoreEventBase via updateActionStates
+                updateStatusBasedOnNostrState();
                 buddyPanel.refreshList();
             }
             case ACTIONABLE_ITEM_ADDED -> {
@@ -164,7 +157,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                     updateInboxMenuItemText();
                 }
             }
-            default -> { /* No specific action */ }
+            default -> {}
         }
         updateActionStates();
     }
@@ -181,11 +174,10 @@ public class SimpleChat extends UI.BaseAppFrame {
                 .ifPresentOrElse(chatNote -> {
                     if (chatNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String partnerNpub) {
                         setEditorComponent(new UI.ChatPanel(core, chatNote, partnerNpub, this::updateStatus));
-                        // Reset unread count when chat is opened
                         if ((Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0) > 0) {
                             chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
                             core.saveNote(chatNote);
-                            buddyPanel.refreshList(); // Refresh buddy list to clear unread indicator
+                            buddyPanel.refreshList();
                         }
                     } else {
                         setEditorComponent(new JLabel("Error: Chat partner not found in note metadata.", SwingConstants.CENTER));
@@ -193,8 +185,9 @@ public class SimpleChat extends UI.BaseAppFrame {
                     }
                 }, () -> {
                     if (!identifier.startsWith("npub1")) {
-                        core.notes.get(identifier)
-                                .filter(n -> n.tags.contains(Netention.SystemTag.CONTACT.value))
+                        core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
+                                        identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
+                                .stream().findFirst()
                                 .ifPresentOrElse(this::showProfileForContact,
                                         () -> setEditorComponent(new JLabel("Content not found for: " + identifier, SwingConstants.CENTER)));
                         return;
@@ -216,11 +209,8 @@ public class SimpleChat extends UI.BaseAppFrame {
                 });
     }
 
-
     private void showProfileForContact(Netention.Note contactNote) {
-        var profileEditor = new UI.NoteEditorPanel(core, contactNote, this, () -> {
-        }, null, _ -> {
-        });
+        var profileEditor = new UI.NoteEditorPanel(core, contactNote, this, () -> {}, null, _ -> {});
         profileEditor.setReadOnlyMode(true);
         UIUtil.showPanelInDialog(this, "Profile: " + contactNote.getTitle(), profileEditor, new Dimension(400, 500), false);
         updateStatus("Viewing profile: " + contactNote.getTitle());
@@ -244,11 +234,9 @@ public class SimpleChat extends UI.BaseAppFrame {
             }
         }
 
-        final var finalMyProfileNoteId = myProfileNoteId;
-        core.notes.get(finalMyProfileNoteId).ifPresentOrElse(profileNote -> {
+        core.notes.get(myProfileNoteId).ifPresentOrElse(profileNote -> {
             var dialogContentPanel = new JPanel(new BorderLayout());
             var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, isDirty -> {
-                // Update the publish button's state when the profile editor's dirty state changes
                 SwingUtilities.invokeLater(() -> {
                     JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
                     publishButton.setEnabled(isDirty && core.net.isEnabled());
@@ -256,7 +244,7 @@ public class SimpleChat extends UI.BaseAppFrame {
             });
             profileEditor.onSaveCb = () -> {
                 updateStatus("Profile note saved.");
-                core.fireCoreEvent(Netention.Core.CoreEventType.NOTE_UPDATED, profileEditor.getCurrentNote());
+                core.fireCoreEvent(Netention.Core.CoreEventType.NOTE_UPDATED, profileEditor.currentNote);
             };
             dialogContentPanel.add(profileEditor, BorderLayout.CENTER);
 
@@ -266,7 +254,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                 updateStatus("Profile publish request sent.");
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(dialogContentPanel), "Profile publish request sent.", "🚀 Nostr Profile", JOptionPane.INFORMATION_MESSAGE);
             });
-            publishButton.setEnabled(profileEditor.isDirty() && core.net.isEnabled()); // Initial state
+            publishButton.setEnabled(profileEditor.isDirty() && core.net.isEnabled());
 
             var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
             bottomPanel.add(publishButton);
@@ -276,7 +264,6 @@ public class SimpleChat extends UI.BaseAppFrame {
 
         }, () -> JOptionPane.showMessageDialog(this, "My Profile note not found (ID: " + core.cfg.net.myProfileNoteId + ").", "👤 Profile Error", JOptionPane.ERROR_MESSAGE));
     }
-
 
     private void manageNostrRelays() {
         showConfigEditorDialog("config.nostr_relays", "Manage Nostr Relays");
@@ -298,8 +285,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                             buddyPanel.refreshList();
                         }
                     },
-                    _ -> {
-                    }
+                    _ -> {}
             );
             UIUtil.showEditablePanelInDialog(this, dialogTitle, configEditor, new Dimension(600, 400), true,
                     panel -> configEditor.userModifiedConfig);
@@ -310,7 +296,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         var inboxPanel = new UI.ActionableItemsPanel(core, this::executeActionableItem);
         actionableItemsLock.lock();
         try {
-            inboxPanel.refreshList(new ArrayList<>(actionableItems)); // Pass a copy
+            inboxPanel.refreshList(new ArrayList<>(actionableItems));
         } finally {
             actionableItemsLock.unlock();
         }
@@ -319,10 +305,9 @@ public class SimpleChat extends UI.BaseAppFrame {
     }
 
     private void executeActionableItem(UI.ActionableItem item) {
-        // Trigger a system event to handle the action via a plan
         if (item.type().equals("FRIEND_REQUEST")) {
             UIUtil.showConfirmationDialog(this, "Friend Request", "Accept friend request from " + item.description() + "?",
-                    () -> { // On Accept
+                    () -> {
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                                 Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.ACCEPT_FRIEND_REQUEST.name(),
                                 Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
@@ -332,7 +317,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                         ));
                         updateStatus("Friend request accepted.");
                     },
-                    () -> { // On Reject
+                    () -> {
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
                                 Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.REJECT_FRIEND_REQUEST.name(),
                                 Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
@@ -344,9 +329,6 @@ public class SimpleChat extends UI.BaseAppFrame {
         } else {
             item.action().run();
         }
-        // The action itself should trigger a CoreEventType.ACTIONABLE_ITEM_REMOVED event
-        // if the item is no longer relevant, which will update the list.
-        // No explicit removal here to avoid race conditions with Core events.
     }
 
     private void updateInboxMenuItemText() {
@@ -379,13 +361,12 @@ public class SimpleChat extends UI.BaseAppFrame {
         helpMenu.add(createMenuItem(UI.ActionID.ABOUT));
         mb.add(helpMenu);
 
-        // NEW: Actions Menu
         var actionsMenu = new JMenu("Actions");
-        inboxMenuItem = createMenuItem(UI.ActionID.SHOW_INBOX); // Assign to class field
+        inboxMenuItem = createMenuItem(UI.ActionID.SHOW_INBOX);
         actionsMenu.add(inboxMenuItem);
         mb.add(actionsMenu);
 
-        updateInboxMenuItemText(); // Initial update
+        updateInboxMenuItemText();
         return mb;
     }
 }
