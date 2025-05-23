@@ -1027,7 +1027,7 @@ public class Netention {
                     newNote.tags.add(SystemTag.NOSTR_CONTACT.value);
                     newNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
                     newNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
-                    newNote.setTitle(profileData != null && profileData.containsKey("name") ? (String) profileData.get("name") : finalNpub.substring(0, 12) + "...");
+                    newNote.setTitle(profileData != null && profileData.containsKey("name") ? (String) profileData.get("name") : "Unknown Contact (" + finalNpub.substring(0, 8) + "...)");
                     newNote.setText(profileData != null && profileData.containsKey("about") ? (String) profileData.get("about") : "");
                     return newNote;
                 });
