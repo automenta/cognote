@@ -54,7 +54,7 @@ public class UI {
         PUBLISH_PROFILE, ADD_NOSTR_FRIEND, MANAGE_RELAYS, LLM_SETTINGS, SYNC_ALL, ABOUT,
         SHOW_MY_NOSTR_PROFILE_EDITOR, MANAGE_NOSTR_RELAYS_POPUP, CONFIGURE_NOSTR_IDENTITY_POPUP,
         WINDOW_MENU, CASCADE_WINDOWS, TILE_WINDOWS_HORIZONTALLY, TILE_WINDOWS_VERTICALLY, CLOSE_ACTIVE_WINDOW, CLOSE_ALL_WINDOWS,
-        SHOW_INBOX // NEW
+        SHOW_INBOX
     }
 
     interface Dirtyable {
@@ -140,7 +140,7 @@ public class UI {
     }
 
     public record ActionableItem(String id, String planNoteId, String description, String type, Object rawData,
-                                 Runnable action, String sourceEventId) { // NEW: sourceEventId
+                                 Runnable action, String sourceEventId) {
     }
 
     abstract static class BaseAppFrame extends JFrame {
@@ -842,9 +842,10 @@ public class UI {
         public void setReadOnlyMode(boolean readOnly) {
             this.readOnlyMode = readOnly;
             if (currentNote != null) {
-                boolean editable = !isEffectivelyReadOnly() && !currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
+                boolean isMyProfileNote = currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
+                boolean editable = !isEffectivelyReadOnly() && !isMyProfileNote; // Corrected logic
                 titleF.setEditable(editable);
-                tagsF.setEditable(editable);
+                tagsF.setEditable(editable); // Apply corrected 'editable'
                 contentPane.setEditable(!isEffectivelyReadOnly());
                 updateServiceDependentButtonStates();
             }
@@ -1119,9 +1120,10 @@ public class UI {
 
                 boolean isMyProfileNote = currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
                 boolean effectivelyRO = isEffectivelyReadOnly();
+                boolean editable = !effectivelyRO && !isMyProfileNote; // Corrected logic
 
-                titleF.setEditable(!effectivelyRO && !isMyProfileNote);
-                tagsF.setEditable(editable);
+                titleF.setEditable(editable);
+                tagsF.setEditable(editable); // Apply corrected 'editable'
                 contentPane.setEditable(!effectivelyRO);
 
                 Stream.of(titleF, contentPane, tagsF).forEach(c -> c.setEnabled(true));
@@ -1396,7 +1398,7 @@ public class UI {
         private void sendMessage() {
             var textToSend = messageInput.getText().trim();
             if (textToSend.isEmpty()) return;
-            if (!core.net.isEnabled() || core.cfg.net.privateKeyBech32 == null || core.cfg.net.privateKeyBeach32.isEmpty()) {
+            if (!core.net.isEnabled() || core.cfg.net.privateKeyBech32 == null || core.cfg.net.privateKeyBech32.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Nostr not enabled/configured.", "Nostr Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
@@ -2503,13 +2505,13 @@ public class UI {
                 }
 
                 try {
-                    var pubKeyHex = Crypto.bytesToHex(Crypto.Bech32.nip19Decode(npub));
-                    core.executeTool(Netention.Core.Tool.ADD_CONTACT, Map.of(Netention.Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), pubKeyHex));
-                    JOptionPane.showMessageDialog(parent, "Contact added/updated.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    // Change from ADD_CONTACT to SEND_FRIEND_REQUEST
+                    core.executeTool(Netention.Core.Tool.SEND_FRIEND_REQUEST, Map.of(Netention.Planner.ToolParam.RECIPIENT_NPUB.getKey(), npub));
+                    JOptionPane.showMessageDialog(parent, "Friend request sent and contact added.", "Success", JOptionPane.INFORMATION_MESSAGE);
                     onContactAdded.accept(npub);
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(parent, "Failed to add contact: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                    logger.error("Failed to add Nostr contact {}: {}", npub, e.getMessage(), e);
+                    JOptionPane.showMessageDialog(parent, "Failed to send friend request: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    logger.error("Failed to send Nostr friend request to {}: {}", npub, e.getMessage(), e);
                 }
             }
         }
