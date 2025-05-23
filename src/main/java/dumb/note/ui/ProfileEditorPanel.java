@@ -1,6 +1,7 @@
 package dumb.note.ui;
 
 import dumb.note.Netention;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -11,10 +12,10 @@ import java.util.function.Consumer;
 
 public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableComponent {
     private final Netention.Core core;
-    private Netention.Note profileNote;
     private final JTextField nameField;
     private final JTextArea aboutArea;
     private final JTextField pictureUrlField;
+    private Netention.Note profileNote;
     private boolean dirty = false;
     private Consumer<Boolean> dirtyStateListener;
 
@@ -26,7 +27,7 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
         setLayout(new GridBagLayout());
         setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        GridBagConstraints gbc = new GridBagConstraints();
+        var gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
@@ -52,7 +53,7 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
         aboutArea = new JTextArea(profileNote.content.getOrDefault(Netention.ContentKey.PROFILE_ABOUT.getKey(), "").toString());
         aboutArea.setLineWrap(true);
         aboutArea.setWrapStyleWord(true);
-        JScrollPane aboutScrollPane = new JScrollPane(aboutArea);
+        var aboutScrollPane = new JScrollPane(aboutArea);
         aboutScrollPane.setPreferredSize(new Dimension(300, 100)); // Set a preferred size
         add(aboutScrollPane, gbc);
 
@@ -68,13 +69,21 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
         add(pictureUrlField, gbc);
 
         // Add document listeners to track dirty state
-        DocumentListener docListener = new DocumentListener() {
+        var docListener = new DocumentListener() {
             @Override
-            public void insertUpdate(DocumentEvent e) { setDirty(true); }
+            public void insertUpdate(DocumentEvent e) {
+                setDirty(true);
+            }
+
             @Override
-            public void removeUpdate(DocumentEvent e) { setDirty(true); }
+            public void removeUpdate(DocumentEvent e) {
+                setDirty(true);
+            }
+
             @Override
-            public void changedUpdate(DocumentEvent e) { setDirty(true); }
+            public void changedUpdate(DocumentEvent e) {
+                setDirty(true);
+            }
         };
 
         nameField.getDocument().addDocumentListener(docListener);
@@ -85,6 +94,11 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
         setDirty(false);
     }
 
+    @Override
+    public boolean isDirty() {
+        return dirty;
+    }
+
     private void setDirty(boolean dirty) {
         if (this.dirty != dirty) {
             this.dirty = dirty;
@@ -92,11 +106,6 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
                 dirtyStateListener.accept(dirty);
             }
         }
-    }
-
-    @Override
-    public boolean isDirty() {
-        return dirty;
     }
 
     @Override
@@ -118,21 +127,21 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
         nameField.setEditable(!readOnly);
         aboutArea.setEditable(!readOnly);
         pictureUrlField.setEditable(!readOnly);
-        
+
         if (readOnly) {
             // Remove document listeners to prevent accidental dirty state changes in read-only mode
-            DocumentListener[] nameListeners = nameField.getDocument().getDocumentListeners();
-            for (DocumentListener l : nameListeners) {
-                nameField.getDocument().removeDocumentListener(l);
-            }
-            DocumentListener[] aboutListeners = aboutArea.getDocument().getDocumentListeners();
-            for (DocumentListener l : aboutListeners) {
-                aboutArea.getDocument().removeDocumentListener(l);
-            }
-            DocumentListener[] pictureListeners = pictureUrlField.getDocument().getDocumentListeners();
-            for (DocumentListener l : pictureListeners) {
-                pictureUrlField.getDocument().removeDocumentListener(l);
-            }
+//            DocumentListener[] nameListeners = nameField.getDocument().getDocumentListeners();
+//            for (DocumentListener l : nameListeners) {
+//                nameField.getDocument().removeDocumentListener(l);
+//            }
+//            DocumentListener[] aboutListeners = aboutArea.getDocument().getDocumentListeners();
+//            for (DocumentListener l : aboutListeners) {
+//                aboutArea.getDocument().removeDocumentListener(l);
+//            }
+//            DocumentListener[] pictureListeners = pictureUrlField.getDocument().getDocumentListeners();
+//            for (DocumentListener l : pictureListeners) {
+//                pictureUrlField.getDocument().removeDocumentListener(l);
+//            }
             setDirty(false); // Ensure it's not dirty in read-only mode
         } else {
             // If switching back to editable mode, re-add listeners if needed.
@@ -140,5 +149,20 @@ public class ProfileEditorPanel extends JPanel implements UI.DirtyableSavableCom
             // created for editing (my profile) or for read-only viewing (contact profile).
             // Re-adding listeners here is not strictly necessary for current functionality.
         }
+    }
+
+    @Override
+    public @Nullable Netention.Note getAssociatedNote() {
+        return null;
+    }
+
+    @Override
+    public String getResourceTitle() {
+        return "";
+    }
+
+    @Override
+    public String getResourceType() {
+        return "";
     }
 }

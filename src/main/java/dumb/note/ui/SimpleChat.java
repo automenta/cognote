@@ -5,20 +5,22 @@ import dumb.note.Netention;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.BufferedInputStream;
-import java.io.InputStream;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class SimpleChat extends UI.BaseAppFrame {
-    private final UI.BuddyListPanel buddyPanel;
+    private final BuddyListPanel buddyPanel;
     private final List<UI.ActionableItem> actionableItems = new CopyOnWriteArrayList<>();
     private final ReentrantLock actionableItemsLock = new ReentrantLock();
     private JMenuItem inboxMenuItem;
@@ -28,8 +30,8 @@ public class SimpleChat extends UI.BaseAppFrame {
         super(core, "SimpleChat ✨", 900, 700);
         var contentPanelContainer = super.defaultEditorHostPanel;
 
-        try (InputStream is = getClass().getResourceAsStream("/notification.wav");
-             BufferedInputStream bis = new BufferedInputStream(is)) {
+        try (var is = getClass().getResourceAsStream("/notification.wav");
+             var bis = new BufferedInputStream(is)) {
             notificationSoundClip = AudioSystem.getClip();
             notificationSoundClip.open(AudioSystem.getAudioInputStream(bis));
         } catch (Exception e) {
@@ -37,7 +39,7 @@ public class SimpleChat extends UI.BaseAppFrame {
             notificationSoundClip = null;
         }
 
-        buddyPanel = new UI.BuddyListPanel(this, this::displayContentForIdentifier, this::showMyProfileEditor);
+        buddyPanel = new BuddyListPanel(this, this::displayContentForIdentifier, this::showMyProfileEditor);
 
         var splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buddyPanel, contentPanelContainer);
         splitPane.setDividerLocation(250);
@@ -83,7 +85,7 @@ public class SimpleChat extends UI.BaseAppFrame {
     private void populateActions() {
         actionRegistry.register(UI.ActionID.EXIT, new UI.AppAction("Exit", e -> handleWindowClose()));
         actionRegistry.register(UI.ActionID.TOGGLE_NOSTR, new UI.AppAction("Enable Nostr Connection", e -> {
-            boolean wantsEnable = false;
+            var wantsEnable = false;
             if (e.getSource() instanceof JCheckBoxMenuItem cbmi) wantsEnable = cbmi.isSelected();
             else wantsEnable = !core.net.isEnabled();
 
@@ -106,7 +108,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         ));
         actionRegistry.register(UI.ActionID.SHOW_INBOX, new UI.AppAction("Inbox", e -> showInboxDialog()));
         actionRegistry.register(UI.ActionID.VIEW_CONTACT_PROFILE, new UI.AppAction("View Profile", e -> {
-            Object selected = buddyPanel.buddies.getSelectedValue();
+            var selected = buddyPanel.buddies.getSelectedValue();
             if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
                 displayContentForIdentifier(note.id); // Show profile in main panel
             }
@@ -121,7 +123,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         }
         switch (event.type()) {
             case CHAT_MESSAGE_ADDED -> {
-                if (event.data() instanceof Map<?,?> data && data.get("chatNoteId") instanceof String chatNoteId) {
+                if (event.data() instanceof Map<?, ?> data && data.get("chatNoteId") instanceof String chatNoteId) {
                     core.notes.get(chatNoteId).ifPresent(chatNote -> {
                         // Only increment unread count if the chat is not currently open
                         if (!(getEditorHostPanel().getComponentCount() > 0 && getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
@@ -142,8 +144,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                 }
                 SwingUtilities.invokeLater(buddyPanel::refreshList);
             }
-            case NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED ->
-                    SwingUtilities.invokeLater(buddyPanel::refreshList);
+            case NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED -> SwingUtilities.invokeLater(buddyPanel::refreshList);
             case CONFIG_CHANGED -> {
                 updateStatusBasedOnNostrState();
                 buddyPanel.refreshList();
@@ -170,7 +171,8 @@ public class SimpleChat extends UI.BaseAppFrame {
                     updateInboxMenuItemText();
                 }
             }
-            default -> {}
+            default -> {
+            }
         }
         updateActionStates();
     }
@@ -183,11 +185,11 @@ public class SimpleChat extends UI.BaseAppFrame {
         if (!canSwitchOrCloseContent(false, null)) return;
 
         // 1. Try to load as a Chat Note
-        Optional<Netention.Note> chatNoteOpt = core.notes.get(identifier)
+        var chatNoteOpt = core.notes.get(identifier)
                 .filter(n -> n.tags.contains(Netention.SystemTag.CHAT.value));
 
         if (chatNoteOpt.isPresent()) {
-            Netention.Note chatNote = chatNoteOpt.get();
+            var chatNote = chatNoteOpt.get();
             if (chatNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String partnerNpub) {
                 setEditorComponent(new UI.ChatPanel(core, chatNote, partnerNpub, this::updateStatus));
                 if ((Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0) > 0) {
@@ -208,7 +210,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         if (identifier.startsWith("npub1")) {
             // If identifier is an npub, find the corresponding contact note
             contactNoteOpt = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
-                    identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
+                            identifier.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
                     .stream().findFirst();
         } else {
             // If identifier is a note ID, check if it's a contact note
@@ -217,9 +219,10 @@ public class SimpleChat extends UI.BaseAppFrame {
         }
 
         if (contactNoteOpt.isPresent()) {
-            Netention.Note contactNote = contactNoteOpt.get();
+            var contactNote = contactNoteOpt.get();
             // Display contact profile in the main panel
-            var profileEditor = new ProfileEditorPanel(core, contactNote, isDirty -> {}); // No dirty listener needed for read-only view
+            var profileEditor = new ProfileEditorPanel(core, contactNote, isDirty -> {
+            }); // No dirty listener needed for read-only view
             profileEditor.setReadOnlyMode(true);
             setEditorComponent(profileEditor);
             updateStatus("Viewing profile: " + contactNote.getTitle());
@@ -237,9 +240,9 @@ public class SimpleChat extends UI.BaseAppFrame {
         Netention.Note profileNote;
 
         if (myProfileNoteId == null || myProfileNoteId.isEmpty()) {
-            int choice = JOptionPane.showConfirmDialog(this, "Your Nostr profile note ID is not configured. Would you like to generate new keys and create a profile now?", "👤 Profile Setup", JOptionPane.YES_NO_CANCEL_OPTION);
+            var choice = JOptionPane.showConfirmDialog(this, "Your Nostr profile note ID is not configured. Would you like to generate new keys and create a profile now?", "👤 Profile Setup", JOptionPane.YES_NO_CANCEL_OPTION);
             if (choice == JOptionPane.YES_OPTION) {
-                String keyInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
+                var keyInfo = core.cfg.generateNewNostrKeysAndUpdateConfig();
                 myProfileNoteId = core.cfg.net.myProfileNoteId; // Get the newly set ID
                 profileNote = core.notes.get(myProfileNoteId).orElse(null);
                 if (profileNote == null) {
@@ -254,7 +257,7 @@ public class SimpleChat extends UI.BaseAppFrame {
         } else {
             profileNote = core.notes.get(myProfileNoteId).orElse(null);
             if (profileNote == null) {
-                int choice = JOptionPane.showConfirmDialog(this, "Your configured profile note (ID: " + myProfileNoteId + ") was not found. Would you like to create a new one?", "👤 Profile Error", JOptionPane.YES_NO_OPTION);
+                var choice = JOptionPane.showConfirmDialog(this, "Your configured profile note (ID: " + myProfileNoteId + ") was not found. Would you like to create a new one?", "👤 Profile Error", JOptionPane.YES_NO_OPTION);
                 if (choice == JOptionPane.YES_OPTION) {
                     profileNote = new Netention.Note("My Nostr Profile", "Edit your profile details here.");
                     profileNote.tags.add(Netention.SystemTag.MY_PROFILE.value);
@@ -279,8 +282,8 @@ public class SimpleChat extends UI.BaseAppFrame {
         }
 
         var dialogContentPanel = new JPanel(new BorderLayout());
-        ProfileEditorPanel profileEditor = new ProfileEditorPanel(core, profileNote, isDirty -> SwingUtilities.invokeLater(() -> {
-            JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
+        var profileEditor = new ProfileEditorPanel(core, profileNote, isDirty -> SwingUtilities.invokeLater(() -> {
+            var publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
             publishButton.setEnabled(isDirty && core.net.isEnabled());
         }));
         dialogContentPanel.add(profileEditor, BorderLayout.CENTER);
@@ -321,7 +324,8 @@ public class SimpleChat extends UI.BaseAppFrame {
                             buddyPanel.refreshList();
                         }
                     },
-                    _ -> {}
+                    _ -> {
+                    }
             );
             UIUtil.showEditablePanelInDialog(this, dialogTitle, configEditor, new Dimension(600, 400), true,
                     panel -> configEditor.userModifiedConfig);
@@ -348,7 +352,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                                 Netention.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.ACCEPT_FRIEND_REQUEST.name(),
                                 Netention.ToolParam.PAYLOAD.getKey(), Map.of(
                                         Netention.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(),
-                                        ((Map)(item.rawData())).get("senderNpub"),
+                                        ((Map) (item.rawData())).get("senderNpub"),
                                         Netention.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
                                 )
                         ));
@@ -371,7 +375,7 @@ public class SimpleChat extends UI.BaseAppFrame {
     private void updateInboxMenuItemText() {
         if (inboxMenuItem != null) {
             SwingUtilities.invokeLater(() -> {
-                int count = actionableItems.size();
+                var count = actionableItems.size();
                 inboxMenuItem.setText("Inbox" + (count > 0 ? " (" + count + ")" : ""));
                 inboxMenuItem.setForeground(count > 0 ? Color.ORANGE.darker() : UIManager.getColor("MenuItem.foreground"));
             });
@@ -379,32 +383,32 @@ public class SimpleChat extends UI.BaseAppFrame {
     }
 
     private void showBuddyListContextMenu(MouseEvent e) {
-        int index = buddyPanel.buddies.locationToIndex(e.getPoint());
+        var index = buddyPanel.buddies.locationToIndex(e.getPoint());
         if (index < 0) return;
 
         buddyPanel.buddies.setSelectedIndex(index);
-        Object selected = buddyPanel.buddies.getSelectedValue();
+        var selected = buddyPanel.buddies.getSelectedValue();
 
         if (selected instanceof Netention.Note selectedNote) {
-            JPopupMenu popup = new JPopupMenu();
+            var popup = new JPopupMenu();
 
             // View Profile
             if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value)) {
-                JMenuItem viewProfileItem = new JMenuItem("View Profile");
+                var viewProfileItem = new JMenuItem("View Profile");
                 viewProfileItem.addActionListener(_ -> displayContentForIdentifier(selectedNote.id));
                 popup.add(viewProfileItem);
             }
 
             // Start Chat
             if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value) || selectedNote.tags.contains(Netention.SystemTag.CHAT.value)) {
-                JMenuItem startChatItem = new JMenuItem("Start Chat");
+                var startChatItem = new JMenuItem("Start Chat");
                 startChatItem.addActionListener(_ -> {
-                    String chatPartnerPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
+                    var chatPartnerPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
                     if (chatPartnerPubKeyHex != null) {
                         // Try to find an existing chat note for this partner
-                        Optional<Netention.Note> chatNoteOpt = core.notes.getAll(n ->
+                        var chatNoteOpt = core.notes.getAll(n ->
                                 n.tags.contains(Netention.SystemTag.CHAT.value) &&
-                                chatPartnerPubKeyHex.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key))
+                                        chatPartnerPubKeyHex.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key))
                         ).stream().findFirst();
 
                         Netention.Note chatNoteToDisplay;
@@ -430,11 +434,11 @@ public class SimpleChat extends UI.BaseAppFrame {
 
             // Remove Contact
             if (selectedNote.tags.contains(Netention.SystemTag.CONTACT.value) && !selectedNote.tags.contains(Netention.SystemTag.MY_PROFILE.value)) {
-                JMenuItem removeContactItem = new JMenuItem("Remove Contact");
+                var removeContactItem = new JMenuItem("Remove Contact");
                 removeContactItem.addActionListener(_ -> {
-                    int confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to remove " + selectedNote.getTitle() + "? This will also delete the chat history.", "Confirm Removal", JOptionPane.YES_NO_OPTION);
+                    var confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to remove " + selectedNote.getTitle() + "? This will also delete the chat history.", "Confirm Removal", JOptionPane.YES_NO_OPTION);
                     if (confirm == JOptionPane.YES_OPTION) {
-                        String nostrPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
+                        var nostrPubKeyHex = (String) selectedNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key);
                         if (nostrPubKeyHex != null) {
                             try {
                                 core.executeTool(Netention.Core.Tool.REMOVE_CONTACT, Map.of(Netention.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), nostrPubKeyHex));
@@ -484,5 +488,177 @@ public class SimpleChat extends UI.BaseAppFrame {
 
         updateInboxMenuItemText();
         return mb;
+    }
+
+    static class BuddyListPanel extends JPanel {
+        private final Netention.Core core;
+        private final DefaultListModel<Object> list = new DefaultListModel<>();
+        final JList<Object> buddies = new JList<>(list);
+        private final JTextField searchField; // NEW
+
+        public BuddyListPanel(UI.BaseAppFrame ui, Consumer<String> onIdentifierSelected, Runnable onShowMyProfile) {
+            this.core = ui.core;
+            setLayout(new BorderLayout(5, 5));
+            setBorder(new EmptyBorder(5, 5, 5, 5));
+
+            searchField = new JTextField(); // NEW
+            searchField.putClientProperty("JTextField.placeholderText", "Search contacts/chats..."); // NEW
+            searchField.getDocument().addDocumentListener(new UI.FieldUpdateListener(_ -> refreshList())); // NEW
+
+            buddies.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            buddies.setCellRenderer(new BuddyListRenderer(core));
+            buddies.addListSelectionListener(e -> {
+                if (!e.getValueIsAdjusting() && buddies.getSelectedValue() != null) {
+                    var selected = buddies.getSelectedValue();
+                    if (selected instanceof Netention.Note note) onIdentifierSelected.accept(note.id);
+                    else if (selected instanceof String npub) onIdentifierSelected.accept(npub);
+                }
+            });
+            buddies.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    if (e.getClickCount() == 2) {
+                        if (buddies.getSelectedValue() instanceof Netention.Note note)
+                            onIdentifierSelected.accept(note.id);
+                    }
+                }
+
+                @Override // NEW: Right-click for context menu
+                public void mousePressed(MouseEvent e) {
+                    if (SwingUtilities.isRightMouseButton(e)) {
+                        var index = buddies.locationToIndex(e.getPoint());
+                        if (index != -1 && buddies.getCellBounds(index, index).contains(e.getPoint())) {
+                            buddies.setSelectedIndex(index);
+                            var selected = buddies.getSelectedValue();
+                            if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
+                                var menu = new JPopupMenu();
+                                menu.add(new JMenuItem(ui.actionRegistry.get(UI.ActionID.VIEW_CONTACT_PROFILE))); // Use action from registry
+                                menu.show(e.getComponent(), e.getX(), e.getY());
+                            }
+                        }
+                    }
+                }
+            });
+
+            add(new JScrollPane(buddies), BorderLayout.CENTER);
+
+            var buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
+            buttonPanel.add(UIUtil.button("👤", "My Profile", onShowMyProfile));
+            buttonPanel.add(UIUtil.button("➕🫂", "Add Contact", () ->
+                    UIUtil.addNostrContactDialog(this, core, onIdentifierSelected) // Pass onIdentifierSelected
+            ));
+            var topPanel = new JPanel(new BorderLayout(5, 5)); // NEW
+            topPanel.add(searchField, BorderLayout.NORTH); // NEW
+            topPanel.add(buttonPanel, BorderLayout.SOUTH); // NEW
+            add(topPanel, BorderLayout.NORTH); // NEW
+            refreshList();
+        }
+
+        public void refreshList() {
+            var selectedValue = buddies.getSelectedValue();
+            list.clear();
+
+            var searchTerm = searchField.getText().toLowerCase().trim(); // NEW
+
+            // Get all chats and contacts
+            var allChats = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CHAT.value));
+            var allContacts = core.notes.getAll(n -> n.tags.containsAll(List.of(Netention.SystemTag.CONTACT.value, Netention.SystemTag.NOSTR_CONTACT.value)));
+
+            // Filter based on search term
+            Predicate<Netention.Note> searchFilter = n -> {
+                if (searchTerm.isEmpty()) return true;
+                var title = n.getTitle().toLowerCase();
+                var npub = (String) n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
+                return title.contains(searchTerm) || (npub != null && npub.contains(searchTerm));
+            };
+
+            // Add chats first, sorted by unread count then last message time
+            allChats.stream()
+                    .filter(searchFilter) // NEW
+                    .sorted(Comparator
+                            .comparing((Netention.Note n) -> (Integer) n.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0), Comparator.reverseOrder()) // Unread first
+                            .thenComparing(n -> n.updatedAt, Comparator.reverseOrder())) // Then by last updated
+                    .forEach(list::addElement);
+
+            var npubsWithChats = IntStream.range(0, list.getSize())
+                    .mapToObj(list::getElementAt)
+                    .filter(Netention.Note.class::isInstance)
+                    .map(Netention.Note.class::cast)
+                    .filter(n -> n.tags.contains(Netention.SystemTag.CHAT.value))
+                    .map(n -> (String) n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+
+            // Add contacts that don't have an associated chat yet, filtered and sorted
+            allContacts.stream()
+                    .filter(searchFilter) // NEW
+                    .filter(contactNote -> {
+                        var contactNpub = (String) contactNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
+                        return contactNpub == null || !npubsWithChats.contains(contactNpub);
+                    })
+                    .sorted(Comparator.comparing(Netention.Note::getTitle, String.CASE_INSENSITIVE_ORDER))
+                    .forEach(list::addElement);
+
+            if (selectedValue != null && list.contains(selectedValue)) {
+                buddies.setSelectedValue(selectedValue, true);
+            } else if (!list.isEmpty()) {
+                buddies.setSelectedIndex(0);
+            }
+        }
+
+        static class BuddyListRenderer extends DefaultListCellRenderer {
+            private final Netention.Core core;
+
+            public BuddyListRenderer(Netention.Core core) {
+                this.core = core;
+            }
+
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                String text;
+                if (value instanceof Netention.Note note) {
+                    if (note.tags.contains(Netention.SystemTag.CHAT.value)) {
+                        var partnerNpub = (String) note.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
+                        var baseTitle = note.getTitle();
+                        String displayName;
+                        if (partnerNpub != null) {
+                            displayName = core.notes.getAll(c -> c.tags.contains(Netention.SystemTag.CONTACT.value) && partnerNpub.equals(c.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key)))
+                                    .stream().findFirst().map(Netention.Note::getTitle)
+                                    .orElseGet(() -> partnerNpub.substring(0, Math.min(10, partnerNpub.length())) + "...");
+                        } else {
+                            displayName = (baseTitle != null && !baseTitle.isEmpty() ? baseTitle : "Unknown Chat");
+                        }
+                        int unreadCount = (Integer) note.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
+                        text = "💬 " + displayName + (unreadCount > 0 ? " (" + unreadCount + ")" : "");
+                        if (unreadCount > 0) {
+                            setFont(getFont().deriveFont(Font.BOLD));
+                            setForeground(Color.BLUE.darker());
+                        } else {
+                            setFont(getFont().deriveFont(Font.PLAIN));
+                            setForeground(UIManager.getColor("List.foreground"));
+                        }
+                    } else if (note.tags.contains(Netention.SystemTag.CONTACT.value)) {
+                        text = "👤 " + note.getTitle();
+                        setFont(getFont().deriveFont(Font.PLAIN));
+                        setForeground(UIManager.getColor("List.foreground"));
+                    } else {
+                        text = note.getTitle();
+                        setFont(getFont().deriveFont(Font.PLAIN));
+                        setForeground(UIManager.getColor("List.foreground"));
+                    }
+                } else if (value instanceof String strValue) {
+                    text = "❔ " + strValue;
+                    setFont(getFont().deriveFont(Font.PLAIN));
+                    setForeground(UIManager.getColor("List.foreground"));
+                } else {
+                    text = value != null ? value.toString() : "";
+                    setFont(getFont().deriveFont(Font.PLAIN));
+                    setForeground(UIManager.getColor("List.foreground"));
+                }
+                setText(text);
+                return this;
+            }
+        }
     }
 }
