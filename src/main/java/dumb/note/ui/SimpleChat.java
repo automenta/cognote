@@ -2,11 +2,16 @@ package dumb.note.ui;
 
 import dumb.note.Netention;
 
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
 import javax.swing.*;
 import java.awt.*;
+import java.io.BufferedInputStream;
+import java.io.InputStream;
 import java.util.Optional;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map; // NEW
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -15,10 +20,26 @@ public class SimpleChat extends UI.BaseAppFrame {
     private final List<UI.ActionableItem> actionableItems = new CopyOnWriteArrayList<>();
     private final ReentrantLock actionableItemsLock = new ReentrantLock();
     private JMenuItem inboxMenuItem; // To update the menu item text dynamically
+    private Clip notificationSoundClip; // NEW
 
     public SimpleChat(Netention.Core core) {
         super(core, "SimpleChat ✨", 900, 700);
         var contentPanelContainer = super.defaultEditorHostPanel;
+
+        // NEW: Initialize notification sound
+        try (InputStream is = getClass().getResourceAsStream("/notification.wav");
+             BufferedInputStream bis = new BufferedInputStream(is)) {
+            if (is != null) {
+                notificationSoundClip = AudioSystem.getClip();
+                notificationSoundClip.open(AudioSystem.getAudioInputStream(bis));
+            } else {
+                Netention.Core.logger.warn("Notification sound file not found: /notification.wav");
+            }
+        } catch (Exception e) {
+            Netention.Core.logger.error("Error loading notification sound: {}", e.getMessage());
+            notificationSoundClip = null;
+        }
+
 
         buddyPanel = new UI.BuddyListPanel(core, this::displayContentForIdentifier, this::showMyProfileEditor);
 
@@ -70,13 +91,19 @@ public class SimpleChat extends UI.BaseAppFrame {
         }).setSelectedCalculator(() -> core.net.isEnabled()));
 
         actionRegistry.register(UI.ActionID.SHOW_MY_NOSTR_PROFILE_EDITOR, new UI.AppAction("My Profile...", e -> showMyProfileEditor()));
-        actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, _ -> buddyPanel.refreshList())));
+        actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, this::displayContentForIdentifier))); // Changed callback
         actionRegistry.register(UI.ActionID.MANAGE_NOSTR_RELAYS_POPUP, new UI.AppAction("Manage Relays...", e -> manageNostrRelays()));
         actionRegistry.register(UI.ActionID.CONFIGURE_NOSTR_IDENTITY_POPUP, new UI.AppAction("Configure Identity...", e -> configureNostrIdentity()));
         actionRegistry.register(UI.ActionID.ABOUT, new UI.AppAction("About SimpleChat", e ->
                 JOptionPane.showMessageDialog(this, "SimpleChat ✨\nA basic Nostr IM client.", "About SimpleChat", JOptionPane.INFORMATION_MESSAGE)
         ));
         actionRegistry.register(UI.ActionID.SHOW_INBOX, new UI.AppAction("Inbox", e -> showInboxDialog()));
+        actionRegistry.register(UI.ActionID.VIEW_CONTACT_PROFILE, new UI.AppAction("View Profile", e -> { // NEW
+            Object selected = buddyPanel.buddies.getSelectedValue();
+            if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
+                showProfileForContact(note);
+            }
+        }));
     }
 
     private void handleSimpleChatCoreEvent(Netention.Core.CoreEvent event) {
@@ -90,11 +117,20 @@ public class SimpleChat extends UI.BaseAppFrame {
                 if (event.data() instanceof Map<?,?> data && data.get("chatNoteId") instanceof String chatNoteId) {
                     core.notes.get(chatNoteId).ifPresent(chatNote -> {
                         // If the current chat is NOT this one, increment unread count
-                        if (!(getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
+                        if (!(getEditorHostPanel().getComponentCount() > 0 && getEditorHostPanel().getComponent(0) instanceof UI.ChatPanel currentChatPanel &&
                                 currentChatPanel.getChatNote().id.equals(chatNoteId))) {
                             int unreadCount = (Integer) chatNote.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0);
                             chatNote.meta.put(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, unreadCount + 1);
                             core.saveNote(chatNote); // Save to persist unread count
+
+                            // NEW: Play sound and bring window to front if not focused
+                            if (!isActive() && notificationSoundClip != null) {
+                                if (notificationSoundClip.isRunning()) notificationSoundClip.stop();
+                                notificationSoundClip.setFramePosition(0);
+                                notificationSoundClip.start();
+                                toFront();
+                                requestFocus();
+                            }
                         }
                     });
                 }
@@ -211,7 +247,12 @@ public class SimpleChat extends UI.BaseAppFrame {
         final var finalMyProfileNoteId = myProfileNoteId;
         core.notes.get(finalMyProfileNoteId).ifPresentOrElse(profileNote -> {
             var dialogContentPanel = new JPanel(new BorderLayout());
-            var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, _ -> {
+            var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, isDirty -> {
+                // Update the publish button's state when the profile editor's dirty state changes
+                SwingUtilities.invokeLater(() -> {
+                    JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
+                    publishButton.setEnabled(isDirty && core.net.isEnabled());
+                });
             });
             profileEditor.onSaveCb = () -> {
                 updateStatus("Profile note saved.");
@@ -225,7 +266,7 @@ public class SimpleChat extends UI.BaseAppFrame {
                 updateStatus("Profile publish request sent.");
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(dialogContentPanel), "Profile publish request sent.", "🚀 Nostr Profile", JOptionPane.INFORMATION_MESSAGE);
             });
-            publishButton.setEnabled(core.net.isEnabled());
+            publishButton.setEnabled(profileEditor.isDirty() && core.net.isEnabled()); // Initial state
 
             var bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
             bottomPanel.add(publishButton);

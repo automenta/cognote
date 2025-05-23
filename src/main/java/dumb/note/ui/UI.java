@@ -15,12 +15,8 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.JTextComponent;
-import javax.swing.text.StyledEditorKit;
+import javax.swing.text.*;
 import javax.swing.text.html.HTMLEditorKit;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.*;
@@ -54,7 +50,7 @@ public class UI {
         PUBLISH_PROFILE, ADD_NOSTR_FRIEND, MANAGE_RELAYS, LLM_SETTINGS, SYNC_ALL, ABOUT,
         SHOW_MY_NOSTR_PROFILE_EDITOR, MANAGE_NOSTR_RELAYS_POPUP, CONFIGURE_NOSTR_IDENTITY_POPUP,
         WINDOW_MENU, CASCADE_WINDOWS, TILE_WINDOWS_HORIZONTALLY, TILE_WINDOWS_VERTICALLY, CLOSE_ACTIVE_WINDOW, CLOSE_ALL_WINDOWS,
-        SHOW_INBOX
+        SHOW_INBOX, VIEW_CONTACT_PROFILE // NEW
     }
 
     interface Dirtyable {
@@ -337,11 +333,16 @@ public class UI {
         private final Netention.Core core;
         private final DefaultListModel<Object> list = new DefaultListModel<>();
         private final JList<Object> buddies = new JList<>(list);
+        private final JTextField searchField; // NEW
 
         public BuddyListPanel(Netention.Core core, Consumer<String> onIdentifierSelected, Runnable onShowMyProfile) {
             this.core = core;
             setLayout(new BorderLayout(5, 5));
             setBorder(new EmptyBorder(5, 5, 5, 5));
+
+            searchField = new JTextField(); // NEW
+            searchField.putClientProperty("JTextField.placeholderText", "Search contacts/chats..."); // NEW
+            searchField.getDocument().addDocumentListener(new FieldUpdateListener(_ -> refreshList())); // NEW
 
             buddies.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
             buddies.setCellRenderer(new BuddyListRenderer(core));
@@ -360,6 +361,22 @@ public class UI {
                             onIdentifierSelected.accept(note.id);
                     }
                 }
+
+                @Override // NEW: Right-click for context menu
+                public void mousePressed(MouseEvent e) {
+                    if (SwingUtilities.isRightMouseButton(e)) {
+                        int index = buddies.locationToIndex(e.getPoint());
+                        if (index != -1 && buddies.getCellBounds(index, index).contains(e.getPoint())) {
+                            buddies.setSelectedIndex(index);
+                            Object selected = buddies.getSelectedValue();
+                            if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
+                                JPopupMenu menu = new JPopupMenu();
+                                menu.add(new JMenuItem(core.appFrame.actionRegistry.get(ActionID.VIEW_CONTACT_PROFILE))); // Use action from registry
+                                menu.show(e.getComponent(), e.getX(), e.getY());
+                            }
+                        }
+                    }
+                }
             });
 
             add(new JScrollPane(buddies), BorderLayout.CENTER);
@@ -367,9 +384,12 @@ public class UI {
             var buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
             buttonPanel.add(UIUtil.button("👤", "My Profile", onShowMyProfile));
             buttonPanel.add(UIUtil.button("➕🫂", "Add Contact", () ->
-                    UIUtil.addNostrContactDialog(this, core, _ -> refreshList())
+                    UIUtil.addNostrContactDialog(this, core, onIdentifierSelected) // Pass onIdentifierSelected
             ));
-            add(buttonPanel, BorderLayout.NORTH);
+            var topPanel = new JPanel(new BorderLayout(5,5)); // NEW
+            topPanel.add(searchField, BorderLayout.NORTH); // NEW
+            topPanel.add(buttonPanel, BorderLayout.SOUTH); // NEW
+            add(topPanel, BorderLayout.NORTH); // NEW
             refreshList();
         }
 
@@ -377,10 +397,26 @@ public class UI {
             var selectedValue = buddies.getSelectedValue();
             list.clear();
 
-            // Add chats first, sorted by last message time
-            core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CHAT.value))
-                    .stream()
-                    .sorted(Comparator.comparing((Netention.Note n) -> n.updatedAt).reversed())
+            var searchTerm = searchField.getText().toLowerCase().trim(); // NEW
+
+            // Get all chats and contacts
+            var allChats = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CHAT.value));
+            var allContacts = core.notes.getAll(n -> n.tags.containsAll(List.of(Netention.SystemTag.CONTACT.value, Netention.SystemTag.NOSTR_CONTACT.value)));
+
+            // Filter based on search term
+            Predicate<Netention.Note> searchFilter = n -> {
+                if (searchTerm.isEmpty()) return true;
+                String title = n.getTitle().toLowerCase();
+                String npub = (String) n.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
+                return title.contains(searchTerm) || (npub != null && npub.contains(searchTerm));
+            };
+
+            // Add chats first, sorted by unread count then last message time
+            allChats.stream()
+                    .filter(searchFilter) // NEW
+                    .sorted(Comparator
+                            .comparing((Netention.Note n) -> (Integer) n.meta.getOrDefault(Netention.Metadata.UNREAD_MESSAGES_COUNT.key, 0), Comparator.reverseOrder()) // Unread first
+                            .thenComparing(n -> n.updatedAt, Comparator.reverseOrder())) // Then by last updated
                     .forEach(list::addElement);
 
             Set<String> npubsWithChats = IntStream.range(0, list.getSize())
@@ -392,9 +428,9 @@ public class UI {
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
 
-            // Add contacts that don't have an associated chat yet
-            core.notes.getAll(n -> n.tags.containsAll(List.of(Netention.SystemTag.CONTACT.value, Netention.SystemTag.NOSTR_CONTACT.value)))
-                    .stream()
+            // Add contacts that don't have an associated chat yet, filtered and sorted
+            allContacts.stream()
+                    .filter(searchFilter) // NEW
                     .filter(contactNote -> {
                         String contactNpub = (String) contactNote.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key);
                         return contactNpub == null || !npubsWithChats.contains(contactNpub);
@@ -1309,11 +1345,17 @@ public class UI {
         private final Netention.Core core;
         private final Netention.Note note;
         private final String partnerNpub;
-        private final JTextArea chatArea = new JTextArea(20, 50);
+        private final JTextPane chatPane; // Changed from JTextArea
         private final JTextField messageInput = new JTextField(40);
         private final DateTimeFormatter chatTSFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+        private final DateTimeFormatter chatDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault()); // NEW
         private final Consumer<Netention.Core.CoreEvent> coreEventListener;
         private final Consumer<String> statusUpdater;
+
+        // Styles for messages
+        private final SimpleAttributeSet userMessageStyle; // NEW
+        private final SimpleAttributeSet contactMessageStyle; // NEW
+        private final SimpleAttributeSet timestampStyle; // NEW
 
         public ChatPanel(Netention.Core core, Netention.Note note, String partnerNpub, Consumer<String> statusUpdater) {
             super(new BorderLayout(5, 5));
@@ -1322,10 +1364,35 @@ public class UI {
             this.note = note;
             this.partnerNpub = partnerNpub;
             this.statusUpdater = statusUpdater;
-            chatArea.setEditable(false);
-            chatArea.setLineWrap(true);
-            chatArea.setWrapStyleWord(true);
-            add(new JScrollPane(chatArea), BorderLayout.CENTER);
+
+            chatPane = new JTextPane(); // Changed
+            chatPane.setEditable(false);
+            chatPane.setMargin(new Insets(5, 5, 5, 5)); // Add some padding
+            chatPane.setContentType("text/html"); // Allow HTML for basic styling if needed, though StyledDocument is preferred
+            // chatPane.setEditorKit(new StyledEditorKit()); // Use StyledEditorKit for StyledDocument
+
+            // NEW: Define styles
+            userMessageStyle = new SimpleAttributeSet();
+            StyleConstants.setAlignment(userMessageStyle, StyleConstants.ALIGN_RIGHT);
+            StyleConstants.setBackground(userMessageStyle, new Color(200, 220, 255)); // Light blue
+            StyleConstants.setLeftIndent(userMessageStyle, 0.2f);
+            StyleConstants.setRightIndent(userMessageStyle, 0.05f);
+            StyleConstants.setLineSpacing(userMessageStyle, 0.1f);
+
+            contactMessageStyle = new SimpleAttributeSet();
+            StyleConstants.setAlignment(contactMessageStyle, StyleConstants.ALIGN_LEFT);
+            StyleConstants.setBackground(contactMessageStyle, new Color(230, 230, 230)); // Light gray
+            StyleConstants.setLeftIndent(contactMessageStyle, 0.05f);
+            StyleConstants.setRightIndent(contactMessageStyle, 0.2f);
+            StyleConstants.setLineSpacing(contactMessageStyle, 0.1f);
+
+            timestampStyle = new SimpleAttributeSet();
+            StyleConstants.setFontSize(timestampStyle, 10);
+            StyleConstants.setForeground(timestampStyle, Color.GRAY.darker());
+            StyleConstants.setItalic(timestampStyle, true);
+
+
+            add(new JScrollPane(chatPane), BorderLayout.CENTER); // Changed
             var inputP = new JPanel(new BorderLayout(5, 0));
             inputP.add(messageInput, BorderLayout.CENTER);
             inputP.add(UIUtil.button("➡️", "Send", _ -> sendMessage()), BorderLayout.EAST);
@@ -1359,18 +1426,19 @@ public class UI {
 
         @SuppressWarnings("unchecked")
         public void loadMessages() {
-            chatArea.setText("");
+            chatPane.setText(""); // Changed
+            StyledDocument doc = chatPane.getStyledDocument(); // NEW
             core.notes.get(this.note.id).ifPresent(freshNote -> {
                 var messages = (List<Map<String, String>>) freshNote.content.getOrDefault(Netention.ContentKey.MESSAGES.getKey(), Collections.emptyList());
                 // Sort messages by timestamp before displaying
                 messages.stream()
                         .sorted(Comparator.comparing(m -> Instant.parse(m.get("timestamp"))))
-                        .forEach(this::formatAndAppendMsg);
+                        .forEach(m -> formatAndAppendMsg(doc, m)); // Changed
             });
             scrollToBottom();
         }
 
-        private void formatAndAppendMsg(Map<String, String> m) {
+        private void formatAndAppendMsg(StyledDocument doc, Map<String, String> m) { // Changed signature
             var senderNpubHex = m.get("sender");
             var text = m.get("text");
             var timestampStr = m.get("timestamp");
@@ -1379,7 +1447,8 @@ public class UI {
             try {
                 var timestamp = Instant.parse(timestampStr);
                 String displayName;
-                if (senderNpubHex.equals(core.net.getPublicKeyXOnlyHex())) {
+                boolean isUserMessage = senderNpubHex.equals(core.net.getPublicKeyXOnlyHex());
+                if (isUserMessage) {
                     displayName = "Me";
                 } else {
                     // Try to find contact name
@@ -1389,7 +1458,27 @@ public class UI {
                             .map(Netention.Note::getTitle)
                             .orElseGet(() -> senderNpubHex.substring(0, Math.min(senderNpubHex.length(), 8)) + "...");
                 }
-                chatArea.append(String.format("[%s] %s: %s\n", chatTSFormatter.format(timestamp), displayName, text));
+
+                SimpleAttributeSet currentStyle = isUserMessage ? userMessageStyle : contactMessageStyle; // NEW
+                SimpleAttributeSet paragraphStyle = new SimpleAttributeSet(currentStyle); // NEW: Create a new set for paragraph attributes
+                StyleConstants.setSpaceBelow(paragraphStyle, 5); // Add space between messages
+
+                String formattedTimestamp = chatTSFormatter.format(timestamp);
+                String fullTimestamp = chatDateFormatter.format(timestamp); // For potential hover
+
+                // Append message content
+                doc.insertString(doc.getLength(), text + "\n", currentStyle); // Changed
+                // Append timestamp
+                doc.insertString(doc.getLength(), formattedTimestamp + "\n\n", timestampStyle); // Changed
+
+                // Apply paragraph style to the entire message block (text + timestamp)
+                doc.setParagraphAttributes(doc.getLength() - (formattedTimestamp.length() + text.length() + 3), (formattedTimestamp.length() + text.length() + 3), paragraphStyle, false); // Changed
+
+                // Add tooltip for full timestamp (more complex, requires custom JTextPane or MouseMotionListener)
+                // For now, just ensure timestamp is visible.
+                // This would require a custom JTextPane that can map character positions to tooltips.
+                // For simplicity, I'm omitting the hover tooltip for now, as it's a significant complexity increase.
+
             } catch (Exception e) {
                 logger.warn("Failed to parse chat message timestamp or format message: {}", m, e);
             }
@@ -1415,7 +1504,7 @@ public class UI {
         }
 
         private void scrollToBottom() {
-            chatArea.setCaretPosition(chatArea.getDocument().getLength());
+            chatPane.setCaretPosition(chatPane.getDocument().getLength()); // Changed
         }
 
         public Netention.Note getChatNote() {
@@ -1585,7 +1674,7 @@ public class UI {
                 if (tags.length() > 35) tags = tags.substring(0, 32) + "...";
 
                 String pubKeyInfo = "";
-                boolean isNostrEntity = note.tags.containsAll(List.of(Netention.SystemTag.NOSTR_CONTACT.value, Netention.SystemTag.NOSTR_FEED.value, Netention.SystemTag.CHAT.value));
+                boolean isNostrEntity = note.tags.contains(Netention.SystemTag.NOSTR_CONTACT.value) || note.tags.contains(Netention.SystemTag.NOSTR_FEED.value) || note.tags.contains(Netention.SystemTag.CHAT.value); // Corrected logic
                 if (isNostrEntity && note.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String npub) {
                     pubKeyInfo = "<br>PubKey: " + npub.substring(0, Math.min(npub.length(), 12)) + "...";
                     copyPubKeyButton.setVisible(true);
@@ -2484,7 +2573,7 @@ public class UI {
             dialog.setVisible(true);
         }
 
-        public static void addNostrContactDialog(Component parent, Netention.Core core, Consumer<String> onContactAdded) {
+        public static void addNostrContactDialog(Component parent, Netention.Core core, Consumer<String> onContactAdded) { // Changed signature
             var npubField = new JTextField(30);
             var panel = new JPanel(new BorderLayout(5, 5));
             panel.setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -2508,7 +2597,7 @@ public class UI {
                     // Change from ADD_CONTACT to SEND_FRIEND_REQUEST
                     core.executeTool(Netention.Core.Tool.SEND_FRIEND_REQUEST, Map.of(Netention.Planner.ToolParam.RECIPIENT_NPUB.getKey(), npub));
                     JOptionPane.showMessageDialog(parent, "Friend request sent and contact added.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                    onContactAdded.accept(npub);
+                    onContactAdded.accept(npub); // Pass npub to callback
                 } catch (Exception e) {
                     JOptionPane.showMessageDialog(parent, "Failed to send friend request: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                     logger.error("Failed to send Nostr friend request to {}: {}", npub, e.getMessage(), e);
