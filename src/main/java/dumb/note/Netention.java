@@ -22,8 +22,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BiFunction;
@@ -68,11 +66,7 @@ public class Netention {
     }
 
     public enum SystemTag {
-        SYSTEM_EVENT("#system_event"), SYSTEM_PROCESS_HANDLER("#system_process_handler"),
-        SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
-        NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
-        CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
-        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile"), FRIEND_REQUEST("#friend_request");
+        SYSTEM_EVENT("#system_event"), SYSTEM_PROCESS_HANDLER("#system_process_handler"), SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"), NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"), CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"), NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile"), FRIEND_REQUEST("#friend_request");
         public final String value;
 
         SystemTag(String value) {
@@ -90,10 +84,7 @@ public class Netention {
     }
 
     public enum Metadata {
-        PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
-        NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
-        PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition"),
-        UNREAD_MESSAGES_COUNT("unread_messages_count");
+        PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX, NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN, PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition"), UNREAD_MESSAGES_COUNT("unread_messages_count");
         public final String key;
 
         Metadata() {
@@ -107,9 +98,27 @@ public class Netention {
     }
 
     public enum ContentKey {
-        TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES,
-        PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN,
-        RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
+        TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES, PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN, RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
+
+        public String getKey() {
+            return name().toLowerCase();
+        }
+    }
+
+    public enum ToolParam {
+        MESSAGE, NOTE_ID, PROPERTY_PATH, FAIL_IF_NOT_FOUND, DEFAULT_VALUE, JSON_STRING, ID, TITLE, TEXT, AS_HTML, TAGS, CONTENT, METADATA, CONTENT_UPDATE, NOSTR_PUB_KEY_HEX, PROFILE_DATA, CONDITION, TRUE_STEPS, FALSE_STEPS, EVENT_PAYLOAD_MAP, PARTNER_PUB_KEY_HEX, SENDER_PUB_KEY_HEX, MESSAGE_CONTENT, TIMESTAMP_EPOCH_SECONDS, EVENT_TYPE, EVENT_DATA, GOAL_TEXT, PAYLOAD, DELAY_SECONDS, TAG, LIST, LOOP_VAR, LOOP_STEPS, QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID, FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID, RECIPIENT_NPUB;
+
+        public String getKey() {
+            return name().toLowerCase();
+        }
+    }
+
+    public enum PlanState {PENDING, RUNNING, COMPLETED, FAILED, STUCK, PARSING, FAILED_PARSING, FAILED_NO_STEPS}
+
+    public enum PlanStepState {PENDING, RUNNING, COMPLETED, FAILED, WAITING_FOR_USER, PENDING_RETRY}
+
+    public enum PlanStepKey {
+        ID, DESCRIPTION, TOOL_NAME, TOOL_PARAMS, DEPENDS_ON_STEP_IDS, STATUS, RESULT, OUTPUT_NOTE_ID, START_TIME, END_TIME, ALTERNATIVES, RETRY_COUNT, MAX_RETRIES, CURRENT_ALTERNATIVE_INDEX;
 
         public String getKey() {
             return name().toLowerCase();
@@ -149,11 +158,7 @@ public class Netention {
 
         public Note(String t, String txt) {
             this();
-            this.content.putAll(Map.of(
-                    Netention.ContentKey.TITLE.getKey(), t,
-                    Netention.ContentKey.TEXT.getKey(), txt,
-                    Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()
-            ));
+            this.content.putAll(Map.of(Netention.ContentKey.TITLE.getKey(), t, Netention.ContentKey.TEXT.getKey(), txt, Netention.ContentKey.CONTENT_TYPE.getKey(), ContentType.TEXT_PLAIN.getValue()));
         }
 
         public String getTitle() {
@@ -246,31 +251,27 @@ public class Netention {
         private static final Logger logger = LoggerFactory.getLogger(Planner.class);
         private static final int DEFAULT_MAX_RETRIES = 2;
         private final Core core;
-        private final Map<String, PlanExecution> activePlans = new ConcurrentHashMap<>();
-        private final ObjectMapper objectMapper = Core.createObjectMapper();
+        private final Map<String, PlanExecution> active = new ConcurrentHashMap<>();
+        private final ObjectMapper json = Core.createObjectMapper();
 
         public Planner(Core core) {
             this.core = core;
         }
 
         @SuppressWarnings("unchecked")
-        public void executePlan(Note goal, Map<String, Object> initialContext) {
+        public void execute(Note goal, Map<String, Object> initialContext) {
             if (goal == null) {
                 logger.warn("Goal note is null, cannot execute plan.");
                 return;
             }
 
-            var exe = activePlans.compute(goal.id, (k, existingExec) ->
-                    (existingExec != null && PlanState.RUNNING.equals(existingExec.currentStatus)) ?
-                            existingExec : new PlanExecution(goal.id, initialContext)
-            );
+            var exe = active.compute(goal.id, (k, existingExec) -> (existingExec != null && Netention.PlanState.RUNNING.equals(existingExec.currentStatus)) ? existingExec : new PlanExecution(goal.id, initialContext));
             if (exe.context.isEmpty() && !initialContext.isEmpty()) exe.context.putAll(initialContext);
 
 
-            if (!PlanState.RUNNING.equals(exe.currentStatus) || exe.steps.isEmpty()) {
-                exe.currentStatus = PlanState.PARSING;
-                goal.meta.putAll(Map.of(Metadata.PLAN_STATUS.key, exe.currentStatus.name(),
-                        Metadata.PLAN_START_TIME.key, Instant.now().toString()));
+            if (!Netention.PlanState.RUNNING.equals(exe.currentStatus) || exe.steps.isEmpty()) {
+                exe.currentStatus = Netention.PlanState.PARSING;
+                goal.meta.putAll(Map.of(Metadata.PLAN_STATUS.key, exe.currentStatus.name(), Metadata.PLAN_START_TIME.key, Instant.now().toString()));
                 core.saveNote(goal);
 
                 var planStepsData = goal.content.get(ContentKey.PLAN_STEPS.getKey());
@@ -278,7 +279,7 @@ public class Netention {
                     try {
                         for (var i = 0; i < rawStepsList.size(); i++) {
                             if (rawStepsList.get(i) instanceof Map rawStepObj) {
-                                var step = objectMapper.convertValue(rawStepObj, PlanStep.class);
+                                var step = json.convertValue(rawStepObj, PlanStep.class);
                                 if (step.id == null || step.id.isEmpty() || step.id.matches("step\\d+_id_placeholder")) {
                                     step.id = "step_" + i + "_" + UUID.randomUUID().toString().substring(0, 4);
                                 }
@@ -287,18 +288,17 @@ public class Netention {
                         }
                     } catch (Exception e) {
                         logger.error("Failed to parse plan steps for note {}", goal.id, e);
-                        exe.currentStatus = PlanState.FAILED_PARSING;
+                        exe.currentStatus = Netention.PlanState.FAILED_PARSING;
                         goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                         core.saveNote(goal);
-                        activePlans.remove(goal.id);
+                        active.remove(goal.id);
                         return;
                     }
                 }
 
                 if (exe.steps.isEmpty() && goal.tags.contains(SystemTag.GOAL_WITH_PLAN.value)) {
                     try {
-                        var initialSteps = (List<PlanStep>) core.executeTool(Core.Tool.SUGGEST_PLAN_STEPS,
-                                Map.of(ToolParam.GOAL_TEXT.getKey(), goal.getText().isEmpty() ? goal.getTitle() : goal.getText()));
+                        var initialSteps = (List<PlanStep>) core.executeTool(Core.Tool.SUGGEST_PLAN_STEPS, Map.of(Netention.ToolParam.GOAL_TEXT.getKey(), goal.getText().isEmpty() ? goal.getTitle() : goal.getText()));
                         if (initialSteps != null && !initialSteps.isEmpty()) exe.steps.addAll(initialSteps);
                         else addDefaultInitialStep(exe, goal);
                     } catch (Exception e) {
@@ -307,15 +307,15 @@ public class Netention {
                     }
                 } else if (exe.steps.isEmpty()) {
                     logger.warn("Plan {} has no steps defined and is not a typical user goal for LM suggestion.", goal.id);
-                    exe.currentStatus = PlanState.FAILED_NO_STEPS;
+                    exe.currentStatus = Netention.PlanState.FAILED_NO_STEPS;
                     goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                     core.saveNote(goal);
-                    activePlans.remove(goal.id);
+                    active.remove(goal.id);
                     return;
                 }
 
-                goal.content.put(ContentKey.PLAN_STEPS.getKey(), exe.steps.stream().map(s -> objectMapper.convertValue(s, Map.class)).collect(Collectors.toList()));
-                exe.currentStatus = PlanState.RUNNING;
+                goal.content.put(ContentKey.PLAN_STEPS.getKey(), exe.steps.stream().map(s -> json.convertValue(s, Map.class)).collect(Collectors.toList()));
+                exe.currentStatus = Netention.PlanState.RUNNING;
                 goal.meta.put(Metadata.PLAN_STATUS.key, exe.currentStatus.name());
                 core.saveNote(goal);
             }
@@ -323,28 +323,26 @@ public class Netention {
             tick();
         }
 
-        public void executePlan(Note goalNote) {
-            executePlan(goalNote, new HashMap<>());
+        public void execute(Note goal) {
+            execute(goal, new HashMap<>());
         }
 
         private void addDefaultInitialStep(PlanExecution execution, Note goalNote) {
             var initialStep = new PlanStep();
             initialStep.description = "Initial analysis of goal: " + goalNote.getTitle();
             initialStep.toolName = Core.Tool.LOG_MESSAGE.name();
-            initialStep.toolParams = Map.of(ToolParam.MESSAGE.getKey(), "Starting plan for: " + goalNote.getTitle());
+            initialStep.toolParams = Map.of(Netention.ToolParam.MESSAGE.getKey(), "Starting plan for: " + goalNote.getTitle());
             execution.steps.add(initialStep);
         }
 
         public synchronized void tick() {
-            activePlans.values().stream()
-                    .filter(exec -> PlanState.RUNNING.equals(exec.currentStatus) || exec.steps.stream().anyMatch(s -> PlanStepState.PENDING_RETRY.equals(s.status)))
-                    .forEach(this::processExecution);
+            active.values().stream().filter(exec -> Netention.PlanState.RUNNING.equals(exec.currentStatus) || exec.steps.stream().anyMatch(s -> Netention.PlanStepState.PENDING_RETRY.equals(s.status))).forEach(this::processExecution);
         }
 
         private void processExecution(PlanExecution exec) {
-            findNextRunnableStep(exec).ifPresentOrElse(currentStep -> {
-                if (PlanStepState.PENDING.equals(currentStep.status) || PlanStepState.PENDING_RETRY.equals(currentStep.status)) {
-                    currentStep.status = PlanStepState.RUNNING;
+            nextRunnableStep(exec).ifPresentOrElse(currentStep -> {
+                if (Netention.PlanStepState.PENDING.equals(currentStep.status) || Netention.PlanStepState.PENDING_RETRY.equals(currentStep.status)) {
+                    currentStep.status = Netention.PlanStepState.RUNNING;
                     currentStep.startTime = Instant.now();
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
                     executeStep(exec, currentStep);
@@ -353,41 +351,37 @@ public class Netention {
         }
 
         private void updateOverallPlanStatus(PlanExecution exec) {
-            var allCompleted = exec.steps.stream().allMatch(s -> PlanStepState.COMPLETED.equals(s.status));
-            var anyFailedNoAlternativesOrRetries = exec.steps.stream().anyMatch(s -> PlanStepState.FAILED.equals(s.status) && s.retryCount >= s.maxRetries && (s.alternatives.isEmpty() || s.currentAlternativeIndex >= s.alternatives.size() - 1));
-            var anyRunningOrWaiting = exec.steps.stream().anyMatch(s -> Set.of(PlanStepState.RUNNING, PlanStepState.WAITING_FOR_USER, PlanStepState.PENDING_RETRY).contains(s.status));
+            var allCompleted = exec.steps.stream().allMatch(s -> Netention.PlanStepState.COMPLETED.equals(s.status));
+            var anyFailedNoAlternativesOrRetries = exec.steps.stream().anyMatch(s -> Netention.PlanStepState.FAILED.equals(s.status) && s.retryCount >= s.maxRetries && (s.alternatives.isEmpty() || s.currentAlternativeIndex >= s.alternatives.size() - 1));
+            var anyRunningOrWaiting = exec.steps.stream().anyMatch(s -> Set.of(Netention.PlanStepState.RUNNING, Netention.PlanStepState.WAITING_FOR_USER, Netention.PlanStepState.PENDING_RETRY).contains(s.status));
 
-            if (allCompleted && !anyRunningOrWaiting) exec.currentStatus = PlanState.COMPLETED;
-            else if (anyFailedNoAlternativesOrRetries && !anyRunningOrWaiting) exec.currentStatus = PlanState.FAILED;
-            else if (!anyRunningOrWaiting && exec.steps.stream().noneMatch(s -> PlanStepState.PENDING.equals(s.status) || PlanStepState.PENDING_RETRY.equals(s.status))) {
-                exec.currentStatus = PlanState.STUCK;
+            if (allCompleted && !anyRunningOrWaiting) exec.currentStatus = Netention.PlanState.COMPLETED;
+            else if (anyFailedNoAlternativesOrRetries && !anyRunningOrWaiting)
+                exec.currentStatus = Netention.PlanState.FAILED;
+            else if (!anyRunningOrWaiting && exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING.equals(s.status) || Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
+                exec.currentStatus = Netention.PlanState.STUCK;
             }
 
-            if (!PlanState.RUNNING.equals(exec.currentStatus) && exec.steps.stream().noneMatch(s -> PlanStepState.PENDING_RETRY.equals(s.status))) {
+            if (!Netention.PlanState.RUNNING.equals(exec.currentStatus) && exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
                 core.notes.get(exec.planNoteId).ifPresent(n -> {
                     n.meta.put(Metadata.PLAN_STATUS.key, exec.currentStatus.name());
-                    if (Set.of(PlanState.COMPLETED, PlanState.FAILED, PlanState.STUCK).contains(exec.currentStatus)) {
+                    if (Set.of(Netention.PlanState.COMPLETED, Netention.PlanState.FAILED, Netention.PlanState.STUCK).contains(exec.currentStatus)) {
                         n.meta.put(Metadata.PLAN_END_TIME.key, Instant.now().toString());
                     }
                     core.saveNote(n);
                 });
-                if (Set.of(PlanState.COMPLETED, PlanState.FAILED, PlanState.STUCK).contains(exec.currentStatus)) {
-                    activePlans.remove(exec.planNoteId);
+                if (Set.of(Netention.PlanState.COMPLETED, Netention.PlanState.FAILED, Netention.PlanState.STUCK).contains(exec.currentStatus)) {
+                    active.remove(exec.planNoteId);
                 }
                 core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
             }
         }
 
-        private Optional<PlanStep> findNextRunnableStep(PlanExecution exec) {
-            return exec.steps.stream()
-                    .filter(step -> PlanStepState.PENDING.equals(step.status) || PlanStepState.PENDING_RETRY.equals(step.status))
-                    .filter(step -> step.dependsOnStepIds.isEmpty() || step.dependsOnStepIds.stream().allMatch(depId ->
-                            exec.getStepById(depId).map(depStep -> PlanStepState.COMPLETED.equals(depStep.status)).orElseGet(() -> {
-                                logger.warn("Dependency step {} not found for step {}", depId, step.id);
-                                return false;
-                            })
-                    ))
-                    .findFirst();
+        private Optional<PlanStep> nextRunnableStep(PlanExecution exec) {
+            return exec.steps.stream().filter(step -> Netention.PlanStepState.PENDING.equals(step.status) || Netention.PlanStepState.PENDING_RETRY.equals(step.status)).filter(step -> step.dependsOnStepIds.isEmpty() || step.dependsOnStepIds.stream().allMatch(depId -> exec.getStepById(depId).map(depStep -> Netention.PlanStepState.COMPLETED.equals(depStep.status)).orElseGet(() -> {
+                logger.warn("Dependency step {} not found for step {}", depId, step.id);
+                return false;
+            }))).findFirst();
         }
 
         private Object traversePath(Object current, String[] parts, int startIndex, PlanStep currentStepContext) {
@@ -397,7 +391,8 @@ public class Netention {
                 var part = parts[i];
                 int I = i;
                 c = switch (c) {
-                    case PlanStep ps when "result".equals(part) && I == startIndex && ps == currentStepContext -> ps.result;
+                    case PlanStep ps when "result".equals(part) && I == startIndex && ps == currentStepContext ->
+                            ps.result;
                     case Map map -> map.get(part);
                     case JsonNode jn -> jn.has(part) ? jn.get(part) : null;
                     default -> null;
@@ -459,11 +454,8 @@ public class Netention {
                     if (Core.Tool.USER_INTERACTION.equals(currentTool)) {
                         var callbackKey = planExec.planNoteId + "_" + step.id;
                         planExec.waitingCallbacks.put(callbackKey, step);
-                        step.status = PlanStepState.WAITING_FOR_USER;
-                        core.fireCoreEvent(Core.CoreEventType.USER_INTERACTION_REQUESTED, Map.of(
-                                ToolParam.PROMPT.getKey(), resolvedParams.getOrDefault(ToolParam.PROMPT.getKey(), "Provide input:"),
-                                ToolParam.CALLBACK_KEY.getKey(), callbackKey, ToolParam.PLAN_NOTE_ID.getKey(), planExec.planNoteId
-                        ));
+                        step.status = Netention.PlanStepState.WAITING_FOR_USER;
+                        core.fireCoreEvent(Core.CoreEventType.USER_INTERACTION_REQUESTED, Map.of(Netention.ToolParam.PROMPT.getKey(), resolvedParams.getOrDefault(Netention.ToolParam.PROMPT.getKey(), "Provide input:"), Netention.ToolParam.CALLBACK_KEY.getKey(), callbackKey, Netention.ToolParam.PLAN_NOTE_ID.getKey(), planExec.planNoteId));
                         core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
                         return;
                     }
@@ -471,25 +463,25 @@ public class Netention {
                     var result = core.executeTool(currentTool, resolvedParams);
                     step.result = result;
                     if (step.id != null && result != null) planExec.context.put(step.id + ".result", result);
-                    step.status = PlanStepState.COMPLETED;
+                    step.status = Netention.PlanStepState.COMPLETED;
                     logger.info("Step {} (Tool: {}) completed successfully.", step.description, currentToolNameStr);
                 } catch (Exception e) {
                     logger.error("Step {} (Tool: {}) failed: {}", step.description, currentToolNameStr, e.getMessage(), e);
                     if (step.currentAlternativeIndex < step.alternatives.size() - 1) {
                         step.currentAlternativeIndex++;
-                        step.status = PlanStepState.PENDING_RETRY;
+                        step.status = Netention.PlanStepState.PENDING_RETRY;
                         logger.info("Will try next alternative for step {}", step.description);
                     } else if (step.retryCount < step.maxRetries) {
                         step.retryCount++;
                         step.currentAlternativeIndex = -1;
-                        step.status = PlanStepState.PENDING_RETRY;
+                        step.status = Netention.PlanStepState.PENDING_RETRY;
                         logger.info("Will retry (attempt {}) step {}", step.retryCount, step.description);
                     } else {
-                        step.status = PlanStepState.FAILED;
+                        step.status = Netention.PlanStepState.FAILED;
                         step.result = e.getMessage();
                     }
                 } finally {
-                    if (Set.of(PlanStepState.COMPLETED, PlanStepState.FAILED).contains(step.status))
+                    if (Set.of(Netention.PlanStepState.COMPLETED, Netention.PlanStepState.FAILED).contains(step.status))
                         step.endTime = Instant.now();
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
                     SwingUtilities.invokeLater(this::tick);
@@ -498,52 +490,26 @@ public class Netention {
         }
 
         public void postUserInteractionResult(String callbackKey, Object result) {
-            activePlans.values().stream()
-                    .filter(exec -> exec.waitingCallbacks.containsKey(callbackKey))
-                    .findFirst().ifPresent(exec -> {
-                        var step = exec.waitingCallbacks.remove(callbackKey);
-                        if (step != null) {
-                            step.result = result;
-                            step.status = (result == null || (result instanceof String s && s.isEmpty())) ? PlanStepState.FAILED : PlanStepState.COMPLETED;
-                            logger.info("User interaction for step {} {}.", step.description, step.status == PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
-                            if (step.id != null && result != null) exec.context.put(step.id + ".result", result);
-                            step.endTime = Instant.now();
-                            core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
-                            SwingUtilities.invokeLater(this::tick);
-                        }
-                    });
+            active.values().stream().filter(exec -> exec.waitingCallbacks.containsKey(callbackKey)).findFirst().ifPresent(exec -> {
+                var step = exec.waitingCallbacks.remove(callbackKey);
+                if (step != null) {
+                    step.result = result;
+                    step.status = (result == null || (result instanceof String s && s.isEmpty())) ? Netention.PlanStepState.FAILED : Netention.PlanStepState.COMPLETED;
+                    logger.info("User interaction for step {} {}.", step.description, step.status == Netention.PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
+                    if (step.id != null && result != null) exec.context.put(step.id + ".result", result);
+                    step.endTime = Instant.now();
+                    core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
+                    SwingUtilities.invokeLater(this::tick);
+                }
+            });
         }
 
         public Optional<PlanExecution> getPlanExecution(String planNoteId) {
-            return ofNullable(activePlans.get(planNoteId));
+            return ofNullable(active.get(planNoteId));
         }
 
-        public Map<String, PlanExecution> getActivePlans() {
-            return Collections.unmodifiableMap(activePlans);
-        }
-
-        public enum PlanStepKey {
-            ID, DESCRIPTION, TOOL_NAME, TOOL_PARAMS, DEPENDS_ON_STEP_IDS, STATUS, RESULT, OUTPUT_NOTE_ID, START_TIME, END_TIME, ALTERNATIVES, RETRY_COUNT, MAX_RETRIES, CURRENT_ALTERNATIVE_INDEX;
-
-            public String getKey() {
-                return name().toLowerCase();
-            }
-        }
-
-        public enum PlanState {PENDING, RUNNING, COMPLETED, FAILED, STUCK, PARSING, FAILED_PARSING, FAILED_NO_STEPS}
-
-        public enum PlanStepState {PENDING, RUNNING, COMPLETED, FAILED, WAITING_FOR_USER, PENDING_RETRY}
-
-        public enum ToolParam {
-            MESSAGE, NOTE_ID, PROPERTY_PATH, FAIL_IF_NOT_FOUND, DEFAULT_VALUE, JSON_STRING, ID, TITLE, TEXT, AS_HTML, TAGS, CONTENT, METADATA, CONTENT_UPDATE,
-            NOSTR_PUB_KEY_HEX, PROFILE_DATA, CONDITION, TRUE_STEPS, FALSE_STEPS, EVENT_PAYLOAD_MAP, PARTNER_PUB_KEY_HEX, SENDER_PUB_KEY_HEX,
-            MESSAGE_CONTENT, TIMESTAMP_EPOCH_SECONDS, EVENT_TYPE, EVENT_DATA, GOAL_TEXT, PAYLOAD, DELAY_SECONDS, TAG, LIST, LOOP_VAR, LOOP_STEPS,
-            QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID,
-            FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID, RECIPIENT_NPUB;
-
-            public String getKey() {
-                return name().toLowerCase();
-            }
+        public Map<String, PlanExecution> getActive() {
+            return Collections.unmodifiableMap(active);
         }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
@@ -555,7 +521,7 @@ public class Netention {
             public String description;
             public String toolName;
             public Map<String, Object> toolParams = new HashMap<>();
-            public PlanStepState status = PlanStepState.PENDING;
+            public Netention.PlanStepState status = Netention.PlanStepState.PENDING;
             public Object result;
             public String outputNoteId;
             public Instant startTime, endTime;
@@ -568,7 +534,7 @@ public class Netention {
             public final List<PlanStep> steps = new CopyOnWriteArrayList<>();
             public final Map<String, Object> context = new ConcurrentHashMap<>();
             public final Map<String, PlanStep> waitingCallbacks = new ConcurrentHashMap<>();
-            public PlanState currentStatus = PlanState.PENDING;
+            public Netention.PlanState currentStatus = Netention.PlanState.PENDING;
 
             public PlanExecution(String planNoteId) {
                 this.planNoteId = planNoteId;
@@ -598,12 +564,12 @@ public class Netention {
         public final Planner planner;
         public final Map<Tool, BiFunction<Core, Map<String, Object>, Object>> tools = new ConcurrentHashMap<>();
         public final ObjectMapper json = createObjectMapper();
-        private final List<Consumer<CoreEvent>> coreEventListeners = new CopyOnWriteArrayList<>();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             var t = new Thread(r, "NetentionCoreScheduler");
             t.setDaemon(true);
             return t;
         });
+        private final List<Consumer<CoreEvent>> coreEventListeners = new CopyOnWriteArrayList<>();
 
         public Core() {
             var dDir = Paths.get(System.getProperty("user.home"), ".netention", "data");
@@ -634,18 +600,10 @@ public class Netention {
                 }
             });
 
-            fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.LOAD_ALL_CONFIGS_REQUESTED.name(),
-                    Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
-                    ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
-            ));
+            fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), SystemEventType.LOAD_ALL_CONFIGS_REQUESTED.name(), ToolParam.PAYLOAD.getKey(), Collections.emptyMap(), ContentKey.STATUS.getKey(), PlanState.PENDING.name()));
             this.lm = new LM(cfg);
-            this.net = new Nostr(cfg, this, this::handleRawNostrEvent, () -> cfg.net.publicKeyBech32);
-            scheduler.schedule(() -> fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(),
-                    Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap(),
-                    ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
-            )), 30, TimeUnit.SECONDS);
+            this.net = new Nostr(cfg, this, this::handleRawNostrEvent);
+            scheduler.schedule(() -> fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(), ToolParam.PAYLOAD.getKey(), Collections.emptyMap(), ContentKey.STATUS.getKey(), PlanState.PENDING.name())), 30, TimeUnit.SECONDS);
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 logger.info("Netention stop...");
@@ -657,10 +615,7 @@ public class Netention {
         }
 
         public static ObjectMapper createObjectMapper() {
-            return new ObjectMapper().registerModule(new JavaTimeModule())
-                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-                    .configure(SerializationFeature.INDENT_OUTPUT, true)
-                    .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+            return new ObjectMapper().registerModule(new JavaTimeModule()).configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false).configure(SerializationFeature.INDENT_OUTPUT, true).setSerializationInclusion(JsonInclude.Include.NON_NULL);
         }
 
         static Object getNoteSpecificProperty(Note n, String propertyNameStr) {
@@ -693,12 +648,12 @@ public class Netention {
                 var details = (Map<String, Object>) eventDetailsMap;
                 var systemEventNote = new Note();
                 systemEventNote.tags.add(SystemTag.SYSTEM_EVENT.value);
-                var eventTypeVal = details.get(Planner.ToolParam.EVENT_TYPE.getKey());
+                var eventTypeVal = details.get(ToolParam.EVENT_TYPE.getKey());
                 systemEventNote.content.put(ContentKey.EVENT_TYPE.getKey(), Objects.requireNonNullElse(eventTypeVal, SystemEventType.UNKNOWN_EVENT_TYPE.name()).toString());
                 if (eventTypeVal == null)
                     logger.error("SYSTEM_EVENT_REQUESTED fired with null eventType in data: {}", data);
-                systemEventNote.content.put(ContentKey.PAYLOAD.getKey(), Objects.requireNonNullElse(details.get(Planner.ToolParam.PAYLOAD.getKey()), Collections.emptyMap()));
-                systemEventNote.content.put(ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name());
+                systemEventNote.content.put(ContentKey.PAYLOAD.getKey(), Objects.requireNonNullElse(details.get(ToolParam.PAYLOAD.getKey()), Collections.emptyMap()));
+                systemEventNote.content.put(ContentKey.STATUS.getKey(), PlanState.PENDING.name());
                 saveNote(systemEventNote);
             } else {
                 coreEventListeners.forEach(l -> SwingUtilities.invokeLater(() -> l.accept(event)));
@@ -730,12 +685,7 @@ public class Netention {
                     case 4 -> SystemEventType.NOSTR_KIND4_RECEIVED;
                     default -> SystemEventType.NOSTR_KIND_UNKNOWN_RECEIVED;
                 };
-                fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                        Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name(),
-                        Planner.ToolParam.PAYLOAD.getKey(), json.convertValue(event, Map.class),
-                        ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name(),
-                        "originalKind", event.kind
-                ));
+                fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), eventType.name(), ToolParam.PAYLOAD.getKey(), json.convertValue(event, Map.class), ContentKey.STATUS.getKey(), PlanState.PENDING.name(), "originalKind", event.kind));
             } catch (Exception e) {
                 logger.error("Failed to process raw NostrEvent for system event note: {}", e.getMessage(), e);
             }
@@ -755,187 +705,52 @@ public class Netention {
                 if (eventTypeMatches && statusMatches) {
                     logger.info("System trigger matched for handler {} by event note {}", handlerNote.id, triggeredNote.id);
                     var existingExecution = planner.getPlanExecution(handlerNote.id).orElse(null);
-                    if (existingExecution != null && Planner.PlanState.RUNNING.equals(existingExecution.currentStatus)) {
+                    if (existingExecution != null && PlanState.RUNNING.equals(existingExecution.currentStatus)) {
                         logger.warn("Handler plan {} is already running. Skipping new trigger by {}.", handlerNote.id, triggeredNote.id);
                         continue;
                     }
                     Map<String, Object> planContext = new HashMap<>();
                     planContext.put("trigger", Map.of("sourceEventNoteId", triggeredNote.id, "eventContent", new HashMap<>(triggeredNote.content)));
-                    planner.executePlan(handlerNote, planContext);
+                    planner.execute(handlerNote, planContext);
                 }
             }
         }
 
         private void bootstrapSystemNotes() {
             logger.info("Bootstrapping system notes...");
-            PlanDefBuilder.create("system_listener_nostr_kind0_handler")
-                    .title("System Listener: Nostr Kind 0 (Profile) Handler")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.NOSTR_KIND0_RECEIVED, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s0a_get_self_info", Tool.GET_SELF_NOSTR_INFO, Map.of())
-                    .step("s1_parse_profile", Tool.PARSE_JSON, Map.of(Planner.ToolParam.JSON_STRING, "$s0_get_payload.result.content"), "s0_get_payload")
-                    .step("s2_if_self_profile", Tool.IF_ELSE, Map.of(
-                            Planner.ToolParam.CONDITION, "$s0_get_payload.result.pubkey == $s0a_get_self_info.result.pubKeyHex",
-                            Planner.ToolParam.TRUE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$s0a_get_self_info.result.myProfileNoteId", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.PROFILE_NAME.getKey(), "$s1_parse_profile.result.name", ContentKey.PROFILE_ABOUT.getKey(), "$s1_parse_profile.result.about", ContentKey.PROFILE_PICTURE_URL.getKey(), "$s1_parse_profile.result.picture", "metadataUpdate", Map.of(Metadata.PROFILE_LAST_UPDATED_AT.key, "NOW")))),
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Updated own Nostr profile from Kind 0 event."))
-                            ),
-                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", Planner.ToolParam.PROFILE_DATA.getKey(), "$s1_parse_profile.result")))
-                    ), "s0_get_payload", "s0a_get_self_info", "s1_parse_profile")
-                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_self_profile")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_nostr_kind0_handler").title("System Listener: Nostr Kind 0 (Profile) Handler").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.NOSTR_KIND0_RECEIVED, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s0a_get_self_info", Tool.GET_SELF_NOSTR_INFO, Map.of()).step("s1_parse_profile", Tool.PARSE_JSON, Map.of(ToolParam.JSON_STRING, "$s0_get_payload.result.content"), "s0_get_payload").step("s2_if_self_profile", Tool.IF_ELSE, Map.of(ToolParam.CONDITION, "$s0_get_payload.result.pubkey == $s0a_get_self_info.result.pubKeyHex", ToolParam.TRUE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOTE_ID.getKey(), "$s0a_get_self_info.result.myProfileNoteId", ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.PROFILE_NAME.getKey(), "$s1_parse_profile.result.name", ContentKey.PROFILE_ABOUT.getKey(), "$s1_parse_profile.result.about", ContentKey.PROFILE_PICTURE_URL.getKey(), "$s1_parse_profile.result.picture", "metadataUpdate", Map.of(Metadata.PROFILE_LAST_UPDATED_AT.key, "NOW")))), Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.MESSAGE.getKey(), "Updated own Nostr profile from Kind 0 event."))), ToolParam.FALSE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", ToolParam.PROFILE_DATA.getKey(), "$s1_parse_profile.result")))), "s0_get_payload", "s0a_get_self_info", "s1_parse_profile").step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_self_profile").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_nostr_kind1_handler")
-                    .title("System Listener: Nostr Kind 1 Handler")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.NOSTR_KIND1_RECEIVED, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_check_exists", Tool.GET_NOTE_PROPERTY, "Check if Nostr event note already exists", Map.of(Planner.ToolParam.NOTE_ID, "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.PROPERTY_PATH, NoteProperty.ID.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false), "s0_get_payload")
-                    .step("s2_if_else", Tool.IF_ELSE, "Process if new, else log", Map.of(
-                            Planner.ToolParam.CONDITION, "$s1_check_exists.result == null",
-                            Planner.ToolParam.TRUE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.ID.getKey(), "nostr_event_$s0_get_payload.result.id", Planner.ToolParam.TITLE.getKey(), "Nostr: $s0_get_payload.result.content_substring_30", Planner.ToolParam.TEXT.getKey(), "$s0_get_payload.result.content", Planner.ToolParam.TAGS.getKey(), List.of(SystemTag.NOSTR_FEED.value), Planner.ToolParam.METADATA.getKey(), Map.of(Metadata.NOSTR_EVENT_ID.key, "$s0_get_payload.result.id", Metadata.NOSTR_PUB_KEY_HEX.key, "$s0_get_payload.result.pubkey", Metadata.NOSTR_PUB_KEY.key, "$s0_get_payload.result.pubkey_npub", Metadata.NOSTR_RAW_EVENT.key, "$s0_get_payload.result", Metadata.CREATED_AT_FROM_EVENT.key, "$s0_get_payload.result.created_at"))),
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))
-                            ),
-                            Planner.ToolParam.FALSE_STEPS, List.of(Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.MESSAGE.getKey(), "Skipping duplicate Nostr Kind 1 event: $s0_get_payload.result.id")))
-                    ), "s0_get_payload", "s1_check_exists")
-                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_else")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_nostr_kind1_handler").title("System Listener: Nostr Kind 1 Handler").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.NOSTR_KIND1_RECEIVED, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s1_check_exists", Tool.GET_NOTE_PROPERTY, "Check if Nostr event note already exists", Map.of(ToolParam.NOTE_ID, "nostr_event_$s0_get_payload.result.id", ToolParam.PROPERTY_PATH, NoteProperty.ID.getKey(), ToolParam.FAIL_IF_NOT_FOUND, false), "s0_get_payload").step("s2_if_else", Tool.IF_ELSE, "Process if new, else log", Map.of(ToolParam.CONDITION, "$s1_check_exists.result == null", ToolParam.TRUE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.CREATE_NOTE.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.ID.getKey(), "nostr_event_$s0_get_payload.result.id", ToolParam.TITLE.getKey(), "Nostr: $s0_get_payload.result.content_substring_30", ToolParam.TEXT.getKey(), "$s0_get_payload.result.content", ToolParam.TAGS.getKey(), List.of(SystemTag.NOSTR_FEED.value), ToolParam.METADATA.getKey(), Map.of(Metadata.NOSTR_EVENT_ID.key, "$s0_get_payload.result.id", Metadata.NOSTR_PUB_KEY_HEX.key, "$s0_get_payload.result.pubkey", Metadata.NOSTR_PUB_KEY.key, "$s0_get_payload.result.pubkey_npub", Metadata.NOSTR_RAW_EVENT.key, "$s0_get_payload.result", Metadata.CREATED_AT_FROM_EVENT.key, "$s0_get_payload.result.created_at"))), Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))), ToolParam.FALSE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.LOG_MESSAGE.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.MESSAGE.getKey(), "Skipping duplicate Nostr Kind 1 event: $s0_get_payload.result.id")))), "s0_get_payload", "s1_check_exists").step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_else").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_nostr_kind4_handler")
-                    .title("System Listener: Nostr Kind 4 (DM) Handler")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.NOSTR_KIND4_RECEIVED, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(Planner.ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload")
-                    .step("s2_if_friend_request", Tool.IF_ELSE, "Check if friend request", Map.of(
-                            Planner.ToolParam.CONDITION, "$s1_decrypt_dm.result.isFriendRequest == true",
-                            Planner.ToolParam.TRUE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(
-                                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.SYSTEM_EVENT_REQUESTED.name(),
-                                            Planner.ToolParam.PAYLOAD.getKey(), Map.of(
-                                                    Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.FRIEND_REQUEST_RECEIVED.name(),
-                                                    Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), "$s0_get_payload.result.pubkey_npub",
-                                                    "sourceEventId", "$s0_get_payload.result.id"
-                                            )
-                                    ))
-                            ),
-                            Planner.ToolParam.FALSE_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(
-                                            Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey",
-                                            Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey",
-                                            Planner.ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText",
-                                            Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at"
-                                    )),
-                                    Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey"))
-                            )
-                    ), "s1_decrypt_dm")
-                    .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_friend_request")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_nostr_kind4_handler").title("System Listener: Nostr Kind 4 (DM) Handler").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.NOSTR_KIND4_RECEIVED, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload").step("s2_if_friend_request", Tool.IF_ELSE, "Check if friend request", Map.of(ToolParam.CONDITION, "$s1_decrypt_dm.result.isFriendRequest == true", ToolParam.TRUE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.EVENT_TYPE.getKey(), CoreEventType.SYSTEM_EVENT_REQUESTED.name(), ToolParam.PAYLOAD.getKey(), Map.of(ToolParam.EVENT_TYPE.getKey(), SystemEventType.FRIEND_REQUEST_RECEIVED.name(), ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), "$s0_get_payload.result.pubkey_npub", "sourceEventId", "$s0_get_payload.result.id")))), ToolParam.FALSE_STEPS, List.of(Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.UPDATE_CHAT_NOTE.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.PARTNER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", ToolParam.SENDER_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey", ToolParam.MESSAGE_CONTENT.getKey(), "$s1_decrypt_dm.result.decryptedText", ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey(), "$s0_get_payload.result.created_at")), Map.of(PlanStepKey.TOOL_NAME.getKey(), Tool.ADD_CONTACT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOSTR_PUB_KEY_HEX.getKey(), "$s0_get_payload.result.pubkey")))), "s1_decrypt_dm").step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_friend_request").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_friend_request_received_handler")
-                    .title("System Listener: Friend Request Received")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.FRIEND_REQUEST_RECEIVED, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_create_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
-                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_ADDED.name(),
-                            Planner.ToolParam.EVENT_DATA.getKey(), Map.of(
-                                    "id", "friend_request_$s0_get_payload.result.friendRequestSenderNpub",
-                                    "type", "FRIEND_REQUEST",
-                                    "description", "Friend request from $s0_get_payload.result.friendRequestSenderNpub_npub",
-                                    "sourceEventId", "$s0_get_payload.result.sourceEventId",
-                                    "data", Map.of("senderNpub", "$s0_get_payload.result.friendRequestSenderNpub")
-                            )
-                    ), "s0_get_payload")
-                    .step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_create_actionable_item")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_friend_request_received_handler").title("System Listener: Friend Request Received").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.FRIEND_REQUEST_RECEIVED, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s1_create_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(ToolParam.EVENT_TYPE, CoreEventType.ACTIONABLE_ITEM_ADDED.name(), ToolParam.EVENT_DATA, Map.of("id", "friend_request_$s0_get_payload.result.friendRequestSenderNpub", "type", "FRIEND_REQUEST", "description", "Friend request from $s0_get_payload.result.friendRequestSenderNpub_npub", "sourceEventId", "$s0_get_payload.result.sourceEventId", "data", Map.of("senderNpub", "$s0_get_payload.result.friendRequestSenderNpub"))), "s0_get_payload").step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_create_actionable_item").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_accept_friend_request_handler")
-                    .title("System Listener: Accept Friend Request")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.ACCEPT_FRIEND_REQUEST, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_add_contact", Tool.ADD_CONTACT, Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX, "$s0_get_payload.result.senderNpub"), "s0_get_payload")
-                    .step("s2_send_confirmation_dm", Tool.SEND_DM, Map.of(
-                            Planner.ToolParam.RECIPIENT_NPUB.getKey(), "$s0_get_payload.result.senderNpub",
-                            Planner.ToolParam.MESSAGE.getKey(), "Friend request accepted! Let's chat."
-                    ), "s1_add_contact")
-                    .step("s3_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
-                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_REMOVED.name(),
-                            Planner.ToolParam.EVENT_DATA.getKey(), "$s0_get_payload.result.actionableItemId"
-                    ), "s2_send_confirmation_dm")
-                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_remove_actionable_item")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_accept_friend_request_handler").title("System Listener: Accept Friend Request").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.ACCEPT_FRIEND_REQUEST, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s1_add_contact", Tool.ADD_CONTACT, Map.of(ToolParam.NOSTR_PUB_KEY_HEX, "$s0_get_payload.result.senderNpub"), "s0_get_payload").step("s2_send_confirmation_dm", Tool.SEND_DM, Map.of(ToolParam.RECIPIENT_NPUB, "$s0_get_payload.result.senderNpub", ToolParam.MESSAGE, "Friend request accepted! Let's chat."), "s1_add_contact").step("s3_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(ToolParam.EVENT_TYPE, CoreEventType.ACTIONABLE_ITEM_REMOVED.name(), ToolParam.EVENT_DATA, "$s0_get_payload.result.actionableItemId"), "s2_send_confirmation_dm").step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_remove_actionable_item").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_reject_friend_request_handler")
-                    .title("System Listener: Reject Friend Request")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.REJECT_FRIEND_REQUEST, Planner.PlanState.PENDING)
-                    .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
-                    .step("s1_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(
-                            Planner.ToolParam.EVENT_TYPE.getKey(), CoreEventType.ACTIONABLE_ITEM_REMOVED.name(),
-                            Planner.ToolParam.EVENT_DATA.getKey(), "$s0_get_payload.result.actionableItemId"
-                    ), "s0_get_payload")
-                    .step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_remove_actionable_item")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_reject_friend_request_handler").title("System Listener: Reject Friend Request").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.REJECT_FRIEND_REQUEST, PlanState.PENDING).step("s0_get_payload", Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload")).step("s1_remove_actionable_item", Tool.FIRE_CORE_EVENT, Map.of(ToolParam.EVENT_TYPE, CoreEventType.ACTIONABLE_ITEM_REMOVED.name(), ToolParam.EVENT_DATA, "$s0_get_payload.result.actionableItemId"), "s0_get_payload").step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_remove_actionable_item").bootstrap(this);
 
 
             for (var type : new String[]{"nostr", "ui", "llm"}) {
                 var eventType = SystemEventType.valueOf("SAVE_" + type.toUpperCase() + "_CONFIG_REQUESTED");
-                PlanDefBuilder.create("system_listener_save_" + type + "_config_handler")
-                        .title("System Listener: Save " + type.toUpperCase() + " Config")
-                        .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                        .trigger(eventType, Planner.PlanState.PENDING)
-                        .step("s1_get_state", Tool.GET_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type))
-                        .step("s2_save_to_note", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.CONTENT_UPDATE, "$s1_get_state.result"), "s1_get_state")
-                        .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_save_to_note")
-                        .bootstrap(this);
+                PlanDefBuilder.create("system_listener_save_" + type + "_config_handler").title("System Listener: Save " + type.toUpperCase() + " Config").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(eventType, PlanState.PENDING).step("s1_get_state", Tool.GET_CONFIG_STATE, Map.of(ToolParam.CONFIG_TYPE, type)).step("s2_save_to_note", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, ToolParam.CONTENT_UPDATE, "$s1_get_state.result"), "s1_get_state").step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_save_to_note").bootstrap(this);
             }
 
-            var loadAllConfigsBuilder = PlanDefBuilder.create("system_listener_load_all_configs_handler")
-                    .title("System Listener: Load All Configurations")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.LOAD_ALL_CONFIGS_REQUESTED, Planner.PlanState.PENDING);
+            var loadAllConfigsBuilder = PlanDefBuilder.create("system_listener_load_all_configs_handler").title("System Listener: Load All Configurations").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.LOAD_ALL_CONFIGS_REQUESTED, PlanState.PENDING);
             List<String> lastApplyStepIds = new ArrayList<>();
             for (var type : List.of("nostr", "ui", "llm")) {
                 var getId = "s_load_" + type + "_get_content";
                 var applyId = "s_load_" + type + "_apply";
-                loadAllConfigsBuilder.step(getId, Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, Planner.ToolParam.PROPERTY_PATH, NoteProperty.CONTENT.getKey(), Planner.ToolParam.FAIL_IF_NOT_FOUND, false));
-                loadAllConfigsBuilder.step(applyId, Tool.APPLY_CONFIG_STATE, Map.of(Planner.ToolParam.CONFIG_TYPE, type, Planner.ToolParam.STATE_MAP, "$" + getId + ".result"), getId);
+                loadAllConfigsBuilder.step(getId, Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, Config.CONFIG_NOTE_PREFIX + type, ToolParam.PROPERTY_PATH, NoteProperty.CONTENT.getKey(), ToolParam.FAIL_IF_NOT_FOUND, false));
+                loadAllConfigsBuilder.step(applyId, Tool.APPLY_CONFIG_STATE, Map.of(ToolParam.CONFIG_TYPE, type, ToolParam.STATE_MAP, "$" + getId + ".result"), getId);
                 lastApplyStepIds.add(applyId);
             }
-            loadAllConfigsBuilder.step("s_load_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), lastApplyStepIds.toArray(String[]::new))
-                    .bootstrap(this);
+            loadAllConfigsBuilder.step("s_load_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), lastApplyStepIds.toArray(String[]::new)).bootstrap(this);
 
 
-            PlanDefBuilder.create("system_listener_persistent_query_handler")
-                    .title("System Listener: Persistent Query Handler")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.EVALUATE_PERSISTENT_QUERIES, Planner.PlanState.PENDING)
-                    .step("s1_log_start", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Evaluating persistent queries..."))
-                    .step("s2_find_queries", Tool.FIND_NOTES_BY_TAG, Map.of(Planner.ToolParam.TAG, SystemTag.PERSISTENT_QUERY.value))
-                    .step("s3_foreach_query", Tool.FOR_EACH, Map.of(
-                            Planner.ToolParam.LIST, "$s2_find_queries.result", Planner.ToolParam.LOOP_VAR, "queryNote",
-                            Planner.ToolParam.LOOP_STEPS, List.of(
-                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_1_get_content", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.GET_NOTE_PROPERTY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.PROPERTY_PATH.getKey(), NoteProperty.CONTENT.getKey())),
-                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_2_exec_query", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.EXECUTE_SEMANTIC_QUERY.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), "$s3_1_get_content.result"),
-                                    Map.of(Planner.PlanStepKey.ID.getKey(), "s3_3_update_note", Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(Planner.ToolParam.NOTE_ID.getKey(), "$queryNote.id", Planner.ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.RESULTS.getKey(), "$s3_2_exec_query.result", ContentKey.LAST_RUN.getKey(), "NOW")))
-                            )
-                    ), "s2_find_queries")
-                    .step("s4_reschedule", Tool.SCHEDULE_SYSTEM_EVENT, Map.of(Planner.ToolParam.EVENT_TYPE, SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(), Planner.ToolParam.DELAY_SECONDS, 3600L), "s3_foreach_query")
-                    .step("s5_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s4_reschedule")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_persistent_query_handler").title("System Listener: Persistent Query Handler").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.EVALUATE_PERSISTENT_QUERIES, PlanState.PENDING).step("s1_log_start", Tool.LOG_MESSAGE, Map.of(ToolParam.MESSAGE, "Evaluating persistent queries...")).step("s2_find_queries", Tool.FIND_NOTES_BY_TAG, Map.of(ToolParam.TAG, SystemTag.PERSISTENT_QUERY.value)).step("s3_foreach_query", Tool.FOR_EACH, Map.of(ToolParam.LIST, "$s2_find_queries.result", ToolParam.LOOP_VAR, "queryNote", ToolParam.LOOP_STEPS, List.of(Map.of(PlanStepKey.ID.getKey(), "s3_1_get_content", PlanStepKey.TOOL_NAME.getKey(), Tool.GET_NOTE_PROPERTY.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOTE_ID.getKey(), "$queryNote.id", ToolParam.PROPERTY_PATH.getKey(), NoteProperty.CONTENT.getKey())), Map.of(PlanStepKey.ID.getKey(), "s3_2_exec_query", PlanStepKey.TOOL_NAME.getKey(), Tool.EXECUTE_SEMANTIC_QUERY.name(), PlanStepKey.TOOL_PARAMS.getKey(), "$s3_1_get_content.result"), Map.of(PlanStepKey.ID.getKey(), "s3_3_update_note", PlanStepKey.TOOL_NAME.getKey(), Tool.MODIFY_NOTE_CONTENT.name(), PlanStepKey.TOOL_PARAMS.getKey(), Map.of(ToolParam.NOTE_ID.getKey(), "$queryNote.id", ToolParam.CONTENT_UPDATE.getKey(), Map.of(ContentKey.RESULTS.getKey(), "$s3_2_exec_query.result", ContentKey.LAST_RUN.getKey(), "NOW"))))), "s2_find_queries").step("s4_reschedule", Tool.SCHEDULE_SYSTEM_EVENT, Map.of(ToolParam.EVENT_TYPE, SystemEventType.EVALUATE_PERSISTENT_QUERIES.name(), ToolParam.DELAY_SECONDS, 3600L), "s3_foreach_query").step("s5_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s4_reschedule").bootstrap(this);
 
-            PlanDefBuilder.create("system_listener_stalled_plan_handler")
-                    .title("System Listener: Stalled Plan Handler")
-                    .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
-                    .trigger(SystemEventType.STALLED_PLAN_DETECTED, Planner.PlanState.PENDING)
-                    .step("s1_get_plan_id", Tool.GET_NOTE_PROPERTY, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload.planNoteId"))
-                    .step("s2_log_stalled", Tool.LOG_MESSAGE, Map.of(Planner.ToolParam.MESSAGE, "Stalled plan detected: $s1_get_plan_id.result. Consider user notification or automated actions."), "s1_get_plan_id")
-                    .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_log_stalled")
-                    .bootstrap(this);
+            PlanDefBuilder.create("system_listener_stalled_plan_handler").title("System Listener: Stalled Plan Handler").tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value).trigger(SystemEventType.STALLED_PLAN_DETECTED, PlanState.PENDING).step("s1_get_plan_id", Tool.GET_NOTE_PROPERTY, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.PROPERTY_PATH, "content.payload.planNoteId")).step("s2_log_stalled", Tool.LOG_MESSAGE, Map.of(ToolParam.MESSAGE, "Stalled plan detected: $s1_get_plan_id.result. Consider user notification or automated actions."), "s1_get_plan_id").step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_log_stalled").bootstrap(this);
         }
 
         public Object executeTool(Tool tool, Map<String, Object> params) {
@@ -953,47 +768,26 @@ public class Netention {
             if (sourceNote == null || sourceNote.getEmbeddingV1() == null || !lm.isReady())
                 return Collections.emptyList();
             var sourceEmbedding = sourceNote.getEmbeddingV1();
-            return notes.getAllNotes().stream()
-                    .filter(n -> {
-                        if (n.id.equals(sourceNote.id) || n.getEmbeddingV1() == null || n.getEmbeddingV1().length != sourceEmbedding.length)
-                            return false;
-                        return !n.tags.contains(SystemTag.CONFIG.value);
-                    })
-                    .map(candidateNote -> new AbstractMap.SimpleEntry<>(candidateNote, LM.cosineSimilarity(sourceEmbedding, candidateNote.getEmbeddingV1())))
-                    .filter(entry -> entry.getValue() > minSimilarity)
-                    .sorted(Map.Entry.<Note, Double>comparingByValue().reversed())
-                    .limit(maxResults)
-                    .map(Map.Entry::getKey)
-                    .collect(Collectors.toList());
+            return notes.getAllNotes().stream().filter(n -> {
+                if (n.id.equals(sourceNote.id) || n.getEmbeddingV1() == null || n.getEmbeddingV1().length != sourceEmbedding.length)
+                    return false;
+                return !n.tags.contains(SystemTag.CONFIG.value);
+            }).map(candidateNote -> new AbstractMap.SimpleEntry<>(candidateNote, LM.cosineSimilarity(sourceEmbedding, candidateNote.getEmbeddingV1()))).filter(entry -> entry.getValue() > minSimilarity).sorted(Map.Entry.<Note, Double>comparingByValue().reversed()).limit(maxResults).map(Map.Entry::getKey).collect(Collectors.toList());
         }
 
         public enum CoreEventType {
-            NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED, PLAN_UPDATED, USER_INTERACTION_REQUESTED, DISTRIBUTED_LM_RESULT,
-            CONFIG_CHANGED, STATUS_MESSAGE, CHAT_MESSAGE_ADDED, ACTIONABLE_ITEM_ADDED, ACTIONABLE_ITEM_REMOVED, SYSTEM_EVENT_REQUESTED
+            NOTE_ADDED, NOTE_UPDATED, NOTE_DELETED, PLAN_UPDATED, USER_INTERACTION_REQUESTED, DISTRIBUTED_LM_RESULT, CONFIG_CHANGED, STATUS_MESSAGE, CHAT_MESSAGE_ADDED, ACTIONABLE_ITEM_ADDED, ACTIONABLE_ITEM_REMOVED, SYSTEM_EVENT_REQUESTED
         }
 
         public enum SystemEventType {
-            NOSTR_KIND0_RECEIVED, NOSTR_KIND1_RECEIVED, NOSTR_KIND4_RECEIVED, NOSTR_KIND_UNKNOWN_RECEIVED,
-            SAVE_NOSTR_CONFIG_REQUESTED, SAVE_UI_CONFIG_REQUESTED, SAVE_LLM_CONFIG_REQUESTED,
-            LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE,
-            FRIEND_REQUEST_RECEIVED, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST
+            NOSTR_KIND0_RECEIVED, NOSTR_KIND1_RECEIVED, NOSTR_KIND4_RECEIVED, NOSTR_KIND_UNKNOWN_RECEIVED, SAVE_NOSTR_CONFIG_REQUESTED, SAVE_UI_CONFIG_REQUESTED, SAVE_LLM_CONFIG_REQUESTED, LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE, FRIEND_REQUEST_RECEIVED, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST
         }
 
         public enum Tool {
-            LOG_MESSAGE, USER_INTERACTION, GET_NOTE_PROPERTY, PARSE_JSON, CREATE_NOTE, MODIFY_NOTE_CONTENT, DELETE_NOTE,
-            ADD_CONTACT, IF_ELSE, DECRYPT_NOSTR_DM, UPDATE_CHAT_NOTE, FIRE_CORE_EVENT,
-            SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY,
-            CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS,
-            GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO,
-            ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, SEND_FRIEND_REQUEST,
-            DECOMPOSE_GOAL, PLAN, GET_PLAN_DEPENDENCIES, ASSERT_KIF, QUERY, RETRACT,
-            API, ECHO, FILE_OPERATIONS, GENERATE_TASK_LOGIC, INSPECT, EVAL_EXPR,
-            GENERATE, REFLECT, REASON, DEFINE_CONCEPT, EXEC, GRAPH_SEARCH,
-            CODE_WRITING, CODE_EXECUTION, FIND_ASSERTIONS, IDENTIFY_CONCEPTS, SUMMARIZE, ENHANCE;
+            LOG_MESSAGE, USER_INTERACTION, GET_NOTE_PROPERTY, PARSE_JSON, CREATE_NOTE, MODIFY_NOTE_CONTENT, DELETE_NOTE, ADD_CONTACT, IF_ELSE, DECRYPT_NOSTR_DM, UPDATE_CHAT_NOTE, FIRE_CORE_EVENT, SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY, CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS, GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, SEND_FRIEND_REQUEST, DECOMPOSE_GOAL, PLAN, GET_PLAN_DEPENDENCIES, ASSERT_KIF, QUERY, RETRACT, API, ECHO, FILE_OPERATIONS, GENERATE_TASK_LOGIC, INSPECT, EVAL_EXPR, GENERATE, REFLECT, REASON, DEFINE_CONCEPT, EXEC, GRAPH_SEARCH, CODE_WRITING, CODE_EXECUTION, FIND_ASSERTIONS, IDENTIFY_CONCEPTS, SUMMARIZE, ENHANCE, SEND_DM, CREATE_OR_UPDATE_CONTACT_NOTE;
 
             public static Tool fromString(String text) {
-                return Stream.of(values()).filter(t -> t.name().equalsIgnoreCase(text)).findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException("No enum constant Core.Tool." + text));
+                return Stream.of(values()).filter(t -> t.name().equalsIgnoreCase(text)).findFirst().orElseThrow(() -> new IllegalArgumentException("No enum constant Core.Tool." + text));
             }
         }
 
@@ -1022,33 +816,29 @@ public class Netention {
                 return this;
             }
 
-            public PlanDefBuilder trigger(SystemEventType eventType, Planner.PlanState status) {
+            public PlanDefBuilder trigger(SystemEventType eventType, PlanState status) {
                 this.contentProperties.put("triggerEventType", eventType.name());
                 this.contentProperties.put("triggerStatus", status.name());
                 return this;
             }
 
-            public PlanDefBuilder step(String id, Tool tool, Map<Planner.ToolParam, Object> params, String... dependsOn) {
+            public PlanDefBuilder step(String id, Tool tool, Map<ToolParam, Object> params, String... dependsOn) {
                 Map<String, Object> stepMap = new HashMap<>();
-                stepMap.put(Planner.PlanStepKey.ID.getKey(), id);
-                stepMap.put(Planner.PlanStepKey.TOOL_NAME.getKey(), tool.name());
-                stepMap.put(Planner.PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream()
-                        .collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
-                if (dependsOn.length > 0)
-                    stepMap.put(Planner.PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
+                stepMap.put(PlanStepKey.ID.getKey(), id);
+                stepMap.put(PlanStepKey.TOOL_NAME.getKey(), tool.name());
+                stepMap.put(PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream().collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
+                if (dependsOn.length > 0) stepMap.put(PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
                 this.steps.add(stepMap);
                 return this;
             }
 
-            public PlanDefBuilder step(String id, Tool tool, String description, Map<Planner.ToolParam, Object> params, String... dependsOn) {
+            public PlanDefBuilder step(String id, Tool tool, String description, Map<ToolParam, Object> params, String... dependsOn) {
                 Map<String, Object> stepMap = new HashMap<>();
-                stepMap.put(Planner.PlanStepKey.ID.getKey(), id);
-                stepMap.put(Planner.PlanStepKey.DESCRIPTION.getKey(), description);
-                stepMap.put(Planner.PlanStepKey.TOOL_NAME.getKey(), tool.name());
-                stepMap.put(Planner.PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream()
-                        .collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
-                if (dependsOn.length > 0)
-                    stepMap.put(Planner.PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
+                stepMap.put(PlanStepKey.ID.getKey(), id);
+                stepMap.put(PlanStepKey.DESCRIPTION.getKey(), description);
+                stepMap.put(PlanStepKey.TOOL_NAME.getKey(), tool.name());
+                stepMap.put(PlanStepKey.TOOL_PARAMS.getKey(), params.entrySet().stream().collect(Collectors.toMap(e -> e.getKey().getKey(), Map.Entry::getValue)));
+                if (dependsOn.length > 0) stepMap.put(PlanStepKey.DEPENDS_ON_STEP_IDS.getKey(), List.of(dependsOn));
                 this.steps.add(stepMap);
                 return this;
             }
@@ -1102,15 +892,15 @@ public class Netention {
             }
 
             private static Object logMessage(Core core, Map<String, Object> params) {
-                logger.info("TOOL_LOG: {}", params.get(Planner.ToolParam.MESSAGE.getKey()));
+                logger.info("TOOL_LOG: {}", params.get(ToolParam.MESSAGE.getKey()));
                 return null;
             }
 
             private static Object getNoteProperty(Core core, Map<String, Object> params) {
-                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
-                var propertyPath = (String) params.get(Planner.ToolParam.PROPERTY_PATH.getKey());
-                var failIfNotFound = (Boolean) params.getOrDefault(Planner.ToolParam.FAIL_IF_NOT_FOUND.getKey(), true);
-                var defaultValue = params.get(Planner.ToolParam.DEFAULT_VALUE.getKey());
+                var noteId = (String) params.get(ToolParam.NOTE_ID.getKey());
+                var propertyPath = (String) params.get(ToolParam.PROPERTY_PATH.getKey());
+                var failIfNotFound = (Boolean) params.getOrDefault(ToolParam.FAIL_IF_NOT_FOUND.getKey(), true);
+                var defaultValue = params.get(ToolParam.DEFAULT_VALUE.getKey());
 
                 return core.notes.get(noteId).map(n -> {
                     try {
@@ -1155,14 +945,13 @@ public class Netention {
                         return defaultValue;
                     }
                 }).orElseGet(() -> {
-                    if (failIfNotFound)
-                        throw new RuntimeException("Note with ID " + noteId + " not found.");
+                    if (failIfNotFound) throw new RuntimeException("Note with ID " + noteId + " not found.");
                     return defaultValue;
                 });
             }
 
             private static Object parseJson(Core core, Map<String, Object> params) {
-                var jsonString = (String) params.get(Planner.ToolParam.JSON_STRING.getKey());
+                var jsonString = (String) params.get(ToolParam.JSON_STRING.getKey());
                 try {
                     return core.json.readTree(jsonString);
                 } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -1172,38 +961,38 @@ public class Netention {
 
             private static Object createNote(Core core, Map<String, Object> params) {
                 var note = new Note();
-                ofNullable((String) params.get(Planner.ToolParam.ID.getKey())).ifPresent(id -> note.id = id);
-                ofNullable((String) params.get(Planner.ToolParam.TITLE.getKey())).ifPresent(note::setTitle);
-                ofNullable((String) params.get(Planner.ToolParam.TEXT.getKey())).ifPresent(text -> {
-                    if (Boolean.TRUE.equals(params.get(Planner.ToolParam.AS_HTML.getKey()))) note.setHtmlText(text);
+                ofNullable((String) params.get(ToolParam.ID.getKey())).ifPresent(id -> note.id = id);
+                ofNullable((String) params.get(ToolParam.TITLE.getKey())).ifPresent(note::setTitle);
+                ofNullable((String) params.get(ToolParam.TEXT.getKey())).ifPresent(text -> {
+                    if (Boolean.TRUE.equals(params.get(ToolParam.AS_HTML.getKey()))) note.setHtmlText(text);
                     else note.setText(text);
                 });
-                ofNullable((List<String>) params.get(Planner.ToolParam.TAGS.getKey())).ifPresent(tags -> note.tags.addAll(tags));
-                ofNullable((Map<String, Object>) params.get(Planner.ToolParam.CONTENT.getKey())).ifPresent(content -> note.content.putAll(content));
-                ofNullable((Map<String, Object>) params.get(Planner.ToolParam.METADATA.getKey())).ifPresent(meta -> note.meta.putAll(meta));
+                ofNullable((List<String>) params.get(ToolParam.TAGS.getKey())).ifPresent(note.tags::addAll);
+                ofNullable((Map<String, Object>) params.get(ToolParam.CONTENT.getKey())).ifPresent(note.content::putAll);
+                ofNullable((Map<String, Object>) params.get(ToolParam.METADATA.getKey())).ifPresent(note.meta::putAll);
                 return core.saveNote(note);
             }
 
             private static Object modifyNoteContent(Core core, Map<String, Object> params) {
-                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
-                var contentUpdate = (Map<String, Object>) params.get(Planner.ToolParam.CONTENT_UPDATE.getKey());
+                var noteId = (String) params.get(ToolParam.NOTE_ID.getKey());
+                var contentUpdate = (Map<String, Object>) params.get(ToolParam.CONTENT_UPDATE.getKey());
                 return core.notes.get(noteId).map(n -> {
-                    contentUpdate.forEach((key, value) -> {
-                        if ("metadataUpdate".equals(key) && value instanceof Map<?, ?> metaUpdates) {
+                    contentUpdate.forEach((key, v) -> {
+                        if ("metadataUpdate".equals(key) && v instanceof Map<?, ?> metaUpdates) {
                             metaUpdates.forEach((metaKey, metaValue) -> {
                                 if ("NOW".equals(metaValue)) n.meta.put((String) metaKey, Instant.now().toString());
                                 else n.meta.put((String) metaKey, metaValue);
                             });
-                        } else if ("tagsAdd".equals(key) && value instanceof List<?> tagsToAdd) {
+                        } else if ("tagsAdd".equals(key) && v instanceof List<?> tagsToAdd) {
                             tagsToAdd.forEach(tag -> n.tags.add(String.valueOf(tag)));
-                        } else if ("tagsRemove".equals(key) && value instanceof List<?> tagsToRemove) {
+                        } else if ("tagsRemove".equals(key) && v instanceof List<?> tagsToRemove) {
                             tagsToRemove.forEach(tag -> n.tags.remove(String.valueOf(tag)));
                         } else if ("title".equals(key)) {
-                            n.setTitle(String.valueOf(value));
+                            n.setTitle(String.valueOf(v));
                         } else if ("text".equals(key)) {
-                            n.setText(String.valueOf(value));
+                            n.setText(String.valueOf(v));
                         } else {
-                            n.content.put(key, value);
+                            n.content.put(key, v);
                         }
                     });
                     return core.saveNote(n);
@@ -1211,7 +1000,7 @@ public class Netention {
             }
 
             private static Object deleteNote(Core core, Map<String, Object> params) {
-                var noteId = (String) params.get(Planner.ToolParam.NOTE_ID.getKey());
+                var noteId = (String) params.get(ToolParam.NOTE_ID.getKey());
                 return core.deleteNote(noteId);
             }
 
@@ -1229,8 +1018,7 @@ public class Netention {
                 }
                 final String finalNpub = npub;
 
-                var contactNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) &&
-                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+                var contactNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) && nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
 
                 var contactNote = contactNoteOpt.orElseGet(() -> {
                     var newNote = new Note();
@@ -1250,8 +1038,7 @@ public class Netention {
                 }
                 contactNote.meta.put(Metadata.LAST_SEEN.key, Instant.now().toString());
 
-                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
-                        nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) && nostrPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
 
                 if (chatNoteOpt.isEmpty()) {
                     var chatNote = new Note("Chat with " + contactNote.getTitle(), "");
@@ -1267,8 +1054,8 @@ public class Netention {
             }
 
             private static Object addContact(Core core, Map<String, Object> params) {
-                var nostrPubKeyHex = (String) params.get(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
-                var profileData = (Map<String, Object>) params.get(Planner.ToolParam.PROFILE_DATA.getKey());
+                var nostrPubKeyHex = (String) params.get(ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+                var profileData = (Map<String, Object>) params.get(ToolParam.PROFILE_DATA.getKey());
                 if (nostrPubKeyHex == null || nostrPubKeyHex.isEmpty()) {
                     throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for ADD_CONTACT.");
                 }
@@ -1276,9 +1063,9 @@ public class Netention {
             }
 
             private static Object ifElse(Core core, Map<String, Object> params) {
-                var condition = (Boolean) params.get(Planner.ToolParam.CONDITION.getKey());
-                var trueSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.TRUE_STEPS.getKey());
-                var falseSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.FALSE_STEPS.getKey());
+                var condition = (Boolean) params.get(ToolParam.CONDITION.getKey());
+                var trueSteps = (List<Map<String, Object>>) params.get(ToolParam.TRUE_STEPS.getKey());
+                var falseSteps = (List<Map<String, Object>>) params.get(ToolParam.FALSE_STEPS.getKey());
 
                 List<Map<String, Object>> stepsToExecute = condition ? trueSteps : falseSteps;
                 if (stepsToExecute != null && !stepsToExecute.isEmpty()) {
@@ -1288,7 +1075,7 @@ public class Netention {
             }
 
             private static Object decryptNostrDm(Core core, Map<String, Object> params) {
-                var eventPayload = (Map<String, Object>) params.get(Planner.ToolParam.EVENT_PAYLOAD_MAP.getKey());
+                var eventPayload = (Map<String, Object>) params.get(ToolParam.EVENT_PAYLOAD_MAP.getKey());
                 var content = (String) eventPayload.get("content");
                 var pubkey = (String) eventPayload.get("pubkey");
                 var tags = (List<List<String>>) eventPayload.get("tags");
@@ -1318,7 +1105,7 @@ public class Netention {
                         throw new RuntimeException("DM is neither sent by nor to me. Pubkey: " + pubkey + ", Recipient: " + recipientPubKeyHex + ", Self: " + selfNpubHex);
                     }
 
-                    decryptedBytes = Crypto.nip04Decrypt(content, Crypto.getSharedSecretWithRetry(core.net.privateKeyRaw, Crypto.hexToBytes(partnerPubKeyHex)));
+                    decryptedBytes = Crypto.nip04Decrypt(content, Crypto.getSharedSecretWithRetry(core.net.privateKeyRaw, Crypto.hexToBytes(partnerPubKeyHex))).getBytes();
                     var decryptedText = new String(decryptedBytes, java.nio.charset.StandardCharsets.UTF_8);
 
                     boolean isFriendRequest = decryptedText.equalsIgnoreCase("Hello! I'd like to connect on Netention.");
@@ -1342,10 +1129,10 @@ public class Netention {
             }
 
             private static Object updateChatNote(Core core, Map<String, Object> params) {
-                var partnerPubKeyHex = (String) params.get(Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey());
-                var senderPubKeyHex = (String) params.get(Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey());
-                var messageContent = (String) params.get(Planner.ToolParam.MESSAGE_CONTENT.getKey());
-                var timestampEpochSeconds = (Long) params.get(Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey());
+                var partnerPubKeyHex = (String) params.get(ToolParam.PARTNER_PUB_KEY_HEX.getKey());
+                var senderPubKeyHex = (String) params.get(ToolParam.SENDER_PUB_KEY_HEX.getKey());
+                var messageContent = (String) params.get(ToolParam.MESSAGE_CONTENT.getKey());
+                var timestampEpochSeconds = (Long) params.get(ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey());
 
                 var selfNpubHex = core.net.getPublicKeyXOnlyHex();
                 if (selfNpubHex == null || selfNpubHex.isEmpty()) {
@@ -1353,8 +1140,7 @@ public class Netention {
                     return null;
                 }
 
-                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
-                        partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
+                var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) && partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst();
 
                 var chatNote = chatNoteOpt.orElseGet(() -> {
                     var newChatNote = new Note();
@@ -1366,12 +1152,7 @@ public class Netention {
                         logger.warn("Failed to encode npub for new chat note: {}", e.getMessage());
                         newChatNote.meta.put(Metadata.NOSTR_PUB_KEY.key, "npub_error_" + partnerPubKeyHex.substring(0, 8));
                     }
-                    core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) && partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key)))
-                            .stream().findFirst()
-                            .ifPresentOrElse(
-                                    contact -> newChatNote.setTitle("Chat with " + contact.getTitle()),
-                                    () -> newChatNote.setTitle("Chat with " + partnerPubKeyHex.substring(0, 12) + "...")
-                            );
+                    core.notes.getAll(n -> n.tags.contains(SystemTag.CONTACT.value) && partnerPubKeyHex.equals(n.meta.get(Metadata.NOSTR_PUB_KEY_HEX.key))).stream().findFirst().ifPresentOrElse(contact -> newChatNote.setTitle("Chat with " + contact.getTitle()), () -> newChatNote.setTitle("Chat with " + partnerPubKeyHex.substring(0, 12) + "..."));
                     newChatNote.content.put(ContentKey.MESSAGES.getKey(), new ArrayList<Map<String, String>>());
                     return newChatNote;
                 });
@@ -1380,11 +1161,7 @@ public class Netention {
 
                 final String finalSenderPubKeyHex = senderPubKeyHex;
                 final Instant messageTimestamp = Instant.ofEpochSecond(timestampEpochSeconds);
-                boolean isDuplicate = messages.stream().anyMatch(msg ->
-                        finalSenderPubKeyHex.equals(msg.get("sender")) &&
-                                messageContent.equals(msg.get("text")) &&
-                                messageTimestamp.equals(Instant.parse(msg.get("timestamp")))
-                );
+                boolean isDuplicate = messages.stream().anyMatch(msg -> finalSenderPubKeyHex.equals(msg.get("sender")) && messageContent.equals(msg.get("text")) && messageTimestamp.equals(Instant.parse(msg.get("timestamp"))));
 
                 if (!isDuplicate) {
                     var messageEntry = new HashMap<String, String>();
@@ -1409,49 +1186,44 @@ public class Netention {
             }
 
             private static Object fireCoreEvent(Core core, Map<String, Object> params) {
-                var eventType = CoreEventType.valueOf((String) params.get(Planner.ToolParam.EVENT_TYPE.getKey()));
-                var eventData = params.get(Planner.ToolParam.EVENT_DATA.getKey());
+                var eventType = CoreEventType.valueOf((String) params.get(ToolParam.EVENT_TYPE.getKey()));
+                var eventData = params.get(ToolParam.EVENT_DATA.getKey());
                 core.fireCoreEvent(eventType, eventData);
                 return null;
             }
 
             private static Object suggestPlanSteps(Core core, Map<String, Object> params) {
-                var goalText = (String) params.get(Planner.ToolParam.GOAL_TEXT.getKey());
+                var goalText = (String) params.get(ToolParam.GOAL_TEXT.getKey());
                 if (core.lm.isReady()) {
-                    return core.lm.decomposeTask(goalText).orElse(Collections.emptyList()).stream()
-                            .map(stepDesc -> {
-                                var step = new Planner.PlanStep();
-                                step.description = stepDesc;
-                                step.toolName = Tool.LOG_MESSAGE.name();
-                                step.toolParams = Map.of(Planner.ToolParam.MESSAGE.getKey(), "Executing: " + stepDesc);
-                                return step;
-                            }).collect(Collectors.toList());
+                    return core.lm.decomposeTask(goalText).orElse(Collections.emptyList()).stream().map(stepDesc -> {
+                        var step = new Planner.PlanStep();
+                        step.description = stepDesc;
+                        step.toolName = Tool.LOG_MESSAGE.name();
+                        step.toolParams = Map.of(ToolParam.MESSAGE.getKey(), "Executing: " + stepDesc);
+                        return step;
+                    }).collect(Collectors.toList());
                 }
                 return Collections.emptyList();
             }
 
             private static Object scheduleSystemEvent(Core core, Map<String, Object> params) {
-                var eventType = SystemEventType.valueOf((String) params.get(Planner.ToolParam.EVENT_TYPE.getKey()));
-                var delaySeconds = ((Number) params.getOrDefault(Planner.ToolParam.DELAY_SECONDS.getKey(), 0L)).longValue();
-                var payload = (Map<String, Object>) params.getOrDefault(Planner.ToolParam.PAYLOAD.getKey(), Collections.emptyMap());
+                var eventType = SystemEventType.valueOf((String) params.get(ToolParam.EVENT_TYPE.getKey()));
+                var delaySeconds = ((Number) params.getOrDefault(ToolParam.DELAY_SECONDS.getKey(), 0L)).longValue();
+                var payload = (Map<String, Object>) params.getOrDefault(ToolParam.PAYLOAD.getKey(), Collections.emptyMap());
 
-                core.scheduler.schedule(() -> core.fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                        Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name(),
-                        Planner.ToolParam.PAYLOAD.getKey(), payload,
-                        ContentKey.STATUS.getKey(), Planner.PlanState.PENDING.name()
-                )), delaySeconds, TimeUnit.SECONDS);
+                core.scheduler.schedule(() -> core.fireCoreEvent(CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), eventType.name(), ToolParam.PAYLOAD.getKey(), payload, ContentKey.STATUS.getKey(), PlanState.PENDING.name())), delaySeconds, TimeUnit.SECONDS);
                 return null;
             }
 
             private static Object findNotesByTag(Core core, Map<String, Object> params) {
-                var tag = (String) params.get(Planner.ToolParam.TAG.getKey());
+                var tag = (String) params.get(ToolParam.TAG.getKey());
                 return core.notes.getAll(n -> n.tags.contains(tag));
             }
 
             private static Object forEach(Core core, Map<String, Object> params) {
-                var list = (List<Object>) params.get(Planner.ToolParam.LIST.getKey());
-                var loopVarName = (String) params.get(Planner.ToolParam.LOOP_VAR.getKey());
-                var loopSteps = (List<Map<String, Object>>) params.get(Planner.ToolParam.LOOP_STEPS.getKey());
+                var list = (List<Object>) params.get(ToolParam.LIST.getKey());
+                var loopVarName = (String) params.get(ToolParam.LOOP_VAR.getKey());
+                var loopSteps = (List<Map<String, Object>>) params.get(ToolParam.LOOP_STEPS.getKey());
 
                 if (list == null || loopSteps == null || loopSteps.isEmpty()) {
                     logger.warn("FOR_EACH called with null list or empty loop steps.");
@@ -1463,44 +1235,27 @@ public class Netention {
             }
 
             private static Object executeSemanticQuery(Core core, Map<String, Object> params) {
-                var queryText = (String) params.get(Planner.ToolParam.QUERY_TEXT.getKey());
-                var minSimilarity = ((Number) params.getOrDefault(Planner.ToolParam.MIN_SIMILARITY.getKey(), 0.7)).doubleValue();
-                var maxResults = ((Number) params.getOrDefault(Planner.ToolParam.MAX_RESULTS.getKey(), 5)).intValue();
+                var queryText = (String) params.get(ToolParam.QUERY_TEXT.getKey());
+                var minSimilarity = ((Number) params.getOrDefault(ToolParam.MIN_SIMILARITY.getKey(), 0.7)).doubleValue();
+                var maxResults = ((Number) params.getOrDefault(ToolParam.MAX_RESULTS.getKey(), 5)).intValue();
 
                 if (!core.lm.isReady()) {
                     throw new RuntimeException("LLM service not ready for semantic query.");
                 }
 
-                return core.lm.generateEmbedding(queryText)
-                        .map(queryEmb -> core.notes.getAllNotes().stream()
-                                .filter(n -> n.getEmbeddingV1() != null && n.getEmbeddingV1().length == queryEmb.length)
-                                .map(n -> new AbstractMap.SimpleEntry<>(n, LM.cosineSimilarity(queryEmb, n.getEmbeddingV1())))
-                                .filter(entry -> entry.getValue() >= minSimilarity)
-                                .sorted(Map.Entry.<Note, Double>comparingByValue().reversed())
-                                .limit(maxResults)
-                                .map(Map.Entry::getKey)
-                                .collect(Collectors.toList()))
-                        .orElse(Collections.emptyList());
+                return core.lm.generateEmbedding(queryText).map(queryEmb -> core.notes.getAllNotes().stream().filter(n -> n.getEmbeddingV1() != null && n.getEmbeddingV1().length == queryEmb.length).map(n -> new AbstractMap.SimpleEntry<>(n, LM.cosineSimilarity(queryEmb, n.getEmbeddingV1()))).filter(entry -> entry.getValue() >= minSimilarity).sorted(Map.Entry.<Note, Double>comparingByValue().reversed()).limit(maxResults).map(Map.Entry::getKey).collect(Collectors.toList())).orElse(Collections.emptyList());
             }
 
             private static Object getSystemHealthMetrics(Core core, Map<String, Object> params) {
-                long pendingSystemEvents = core.notes.getAll(n -> n.tags.contains(SystemTag.SYSTEM_EVENT.value) &&
-                        Planner.PlanState.PENDING.name().equals(n.content.get(ContentKey.STATUS.getKey()))).size();
-                long activePlans = core.planner.getActivePlans().size();
-                long failedPlanStepsInActivePlans = core.planner.getActivePlans().values().stream()
-                        .flatMap(exec -> exec.steps.stream())
-                        .filter(step -> Planner.PlanStepState.FAILED.equals(step.status))
-                        .count();
+                long pendingSystemEvents = core.notes.getAll(n -> n.tags.contains(SystemTag.SYSTEM_EVENT.value) && PlanState.PENDING.name().equals(n.content.get(ContentKey.STATUS.getKey()))).size();
+                long activePlans = core.planner.getActive().size();
+                long failedPlanStepsInActivePlans = core.planner.getActive().values().stream().flatMap(exec -> exec.steps.stream()).filter(step -> PlanStepState.FAILED.equals(step.status)).count();
 
-                return Map.of(
-                        "pendingSystemEvents", pendingSystemEvents,
-                        "activePlans", activePlans,
-                        "failedPlanStepsInActivePlans", failedPlanStepsInActivePlans
-                );
+                return Map.of("pendingSystemEvents", pendingSystemEvents, "activePlans", activePlans, "failedPlanStepsInActivePlans", failedPlanStepsInActivePlans);
             }
 
             private static Object getConfigState(Core core, Map<String, Object> params) {
-                var configType = (String) params.get(Planner.ToolParam.CONFIG_TYPE.getKey());
+                var configType = (String) params.get(ToolParam.CONFIG_TYPE.getKey());
                 return switch (configType) {
                     case "nostr" -> core.json.convertValue(core.cfg.net, new TypeReference<Map<String, Object>>() {
                     });
@@ -1513,8 +1268,8 @@ public class Netention {
             }
 
             private static Object applyConfigState(Core core, Map<String, Object> params) {
-                var configType = (String) params.get(Planner.ToolParam.CONFIG_TYPE.getKey());
-                var stateMap = (Map<String, Object>) params.get(Planner.ToolParam.STATE_MAP.getKey());
+                var configType = (String) params.get(ToolParam.CONFIG_TYPE.getKey());
+                var stateMap = (Map<String, Object>) params.get(ToolParam.STATE_MAP.getKey());
                 try {
                     switch (configType) {
                         case "nostr" -> {
@@ -1537,7 +1292,7 @@ public class Netention {
                             core.cfg.lm.ollamaBaseUrl = newConfig.ollamaBaseUrl;
                             core.cfg.lm.ollamaChatModelName = newConfig.ollamaChatModelName;
                             core.cfg.lm.ollamaEmbeddingModelName = newConfig.ollamaEmbeddingModelName;
-                            core.lm.initialize();
+                            core.lm.init();
                             core.fireCoreEvent(CoreEventType.CONFIG_CHANGED, "llm_status_changed");
                         }
                         default -> throw new IllegalArgumentException("Unknown config type: " + configType);
@@ -1551,16 +1306,12 @@ public class Netention {
             }
 
             private static Object getSelfNostrInfo(Core core, Map<String, Object> params) {
-                return Map.of(
-                        "pubKeyHex", core.net.getPublicKeyXOnlyHex(),
-                        "pubKeyNpub", core.net.getPublicKeyBech32(),
-                        "myProfileNoteId", core.cfg.net.myProfileNoteId
-                );
+                return Map.of("pubKeyHex", core.net.getPublicKeyXOnlyHex(), "pubKeyNpub", core.net.getPublicKeyBech32(), "myProfileNoteId", core.cfg.net.myProfileNoteId);
             }
 
             private static Object acceptFriendRequest(Core core, Map<String, Object> params) {
-                var senderNpub = (String) params.get(Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey());
-                var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
+                var senderNpub = (String) params.get(ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey());
+                var actionableItemId = (String) params.get(ToolParam.ACTIONABLE_ITEM_ID.getKey());
 
                 if (senderNpub == null || senderNpub.isEmpty()) {
                     throw new IllegalArgumentException("FRIEND_REQUEST_SENDER_NPUB is required for ACCEPT_FRIEND_REQUEST.");
@@ -1582,7 +1333,7 @@ public class Netention {
             }
 
             private static Object rejectFriendRequest(Core core, Map<String, Object> params) {
-                var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
+                var actionableItemId = (String) params.get(ToolParam.ACTIONABLE_ITEM_ID.getKey());
 
                 if (actionableItemId == null || actionableItemId.isEmpty()) {
                     throw new IllegalArgumentException("ACTIONABLE_ITEM_ID is required for REJECT_FRIEND_REQUEST.");
@@ -1595,7 +1346,7 @@ public class Netention {
             }
 
             private static Object sendFriendRequest(Core core, Map<String, Object> params) {
-                var recipientNpub = (String) params.get(Planner.ToolParam.RECIPIENT_NPUB.getKey());
+                var recipientNpub = (String) params.get(ToolParam.RECIPIENT_NPUB.getKey());
                 if (recipientNpub == null || recipientNpub.isEmpty()) {
                     throw new IllegalArgumentException("RECIPIENT_NPUB is required for SEND_FRIEND_REQUEST.");
                 }
@@ -1734,8 +1485,7 @@ public class Netention {
                 logger.error("Core reference not available in Config.");
                 return;
             }
-            Stream.of(Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED, Core.SystemEventType.SAVE_UI_CONFIG_REQUESTED, Core.SystemEventType.SAVE_LLM_CONFIG_REQUESTED)
-                    .forEach(eventType -> coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), eventType.name())));
+            Stream.of(Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED, Core.SystemEventType.SAVE_UI_CONFIG_REQUESTED, Core.SystemEventType.SAVE_LLM_CONFIG_REQUESTED).forEach(eventType -> coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), eventType.name())));
             logger.info("Fired events to save all configurations via plans.");
         }
 
@@ -1762,7 +1512,7 @@ public class Netention {
                 notes.save(profileNote);
 
                 if (coreRef != null)
-                    coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(Planner.ToolParam.EVENT_TYPE.getKey(), Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED.name()));
+                    coreRef.fireCoreEvent(Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(ToolParam.EVENT_TYPE.getKey(), Core.SystemEventType.SAVE_NOSTR_CONFIG_REQUESTED.name()));
                 else saveConfigObjectToNote(net, "nostr");
                 return "nsec: " + net.privateKeyBech32 + "\nnpub: " + net.publicKeyBech32;
             } catch (Exception e) {
@@ -1779,21 +1529,21 @@ public class Netention {
         }
 
         public static class UISettings {
-            @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Nimbus (Dark)", "System"}, group = "Appearance")
-            public String theme = "Nimbus (Dark)";
             @Field(label = "Minimize to System Tray", tooltip = "If enabled, closing the window minimizes to tray instead of exiting.", group = "Behavior")
             public final boolean minimizeToTray = true;
+            @Field(label = "Theme", type = FieldType.COMBO_BOX, choices = {"Nimbus (Dark)", "System"}, group = "Appearance")
+            public String theme = "Nimbus (Dark)";
         }
 
         public static class LMSettings {
             @Field(label = "Provider", type = FieldType.COMBO_BOX, choices = {"NONE", "OLLAMA"})
-            public final String provider = "NONE";
+            public String provider = "NONE";
             @Field(label = "Base URL", group = "Ollama")
-            public final String ollamaBaseUrl = "http://localhost:11434";
+            public String ollamaBaseUrl = "http://localhost:11434";
             @Field(label = "Chat Model", group = "Ollama")
-            public final String ollamaChatModelName = "llama3";
+            public String ollamaChatModelName = "llama3";
             @Field(label = "Embedding Model", group = "Ollama")
-            public final String ollamaEmbeddingModelName = "nomic-embed-text";
+            public String ollamaEmbeddingModelName = "nomic-embed-text";
         }
     }
 

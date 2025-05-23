@@ -24,7 +24,7 @@ import java.util.stream.Stream;
 import static java.util.Optional.ofNullable;
 
 public class App extends UI.BaseAppFrame {
-    private static final Logger logger = LoggerFactory.getLogger(UI.class);
+    private static final Logger logger = LoggerFactory.getLogger(App.class);
 
     public static void main(String[] args) {
         var core = new Netention.Core();
@@ -75,12 +75,10 @@ public class App extends UI.BaseAppFrame {
         desktopPane.setBackground(UIManager.getColor("control") != null ? UIManager.getColor("control").darker() : Color.DARK_GRAY);
 
         inspectorPanel = new UI.InspectorPanel(core, this, this::display, this::getActionableItemsForNote);
+        // This part of NEW_FROM_TEMPLATE needs to be in the action itself or callable
         navPanel = new UI.NavPanel(core, this, this::display, this::display, this::display,
                 () -> actionRegistry.get(UI.ActionID.NEW_NOTE).actionPerformed(null),
-                templateNote -> {
-                    // This part of NEW_FROM_TEMPLATE needs to be in the action itself or callable
-                    createNewNoteFromTemplate(templateNote);
-                });
+                this::createNewNoteFromTemplate);
 
 
         contentInspectorSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, desktopPane, inspectorPanel);
@@ -205,7 +203,7 @@ public class App extends UI.BaseAppFrame {
             inspectorPanel.setVisible(show);
             contentInspectorSplit.setDividerLocation(show ? contentInspectorSplit.getResizeWeight() : contentInspectorSplit.getWidth() - contentInspectorSplit.getDividerSize());
             contentInspectorSplit.revalidate();
-        }).setSelectedCalculator(() -> inspectorPanel.isVisible()));
+        }).setSelectedCalculator(inspectorPanel::isVisible));
 
         actionRegistry.register(UI.ActionID.TOGGLE_NAV_PANEL, new UI.AppAction("Toggle Navigation Panel", KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK), e -> {
             boolean show = !(e.getSource() instanceof JCheckBoxMenuItem) || ((JCheckBoxMenuItem) e.getSource()).isSelected();
@@ -213,7 +211,7 @@ public class App extends UI.BaseAppFrame {
             navPanel.setVisible(show);
             mainSplitPane.setDividerLocation(show ? navPanel.getPreferredSize().width : 0);
             mainSplitPane.revalidate();
-        }).setSelectedCalculator(() -> navPanel.isVisible()));
+        }).setSelectedCalculator(navPanel::isVisible));
 
         actionRegistry.register(UI.ActionID.SAVE_NOTE, new UI.AppAction("Save Note", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK), e -> saveActiveDirtyableSavableComponent(false))
                 .setEnabledCalculator(() -> getActiveDirtyableSavableComponent().map(UI.DirtyableSavableComponent::isDirty).orElse(false)));
@@ -267,7 +265,7 @@ public class App extends UI.BaseAppFrame {
             statusPanel.updateStatus(statusMsg);
             core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "nostr_status_changed");
             updateActionStates(); // This will update the JCheckBoxMenuItem's selected state via setSelectedCalculator
-        }).setSelectedCalculator(() -> core.net.isEnabled()));
+        }).setSelectedCalculator(core.net::isEnabled));
 
         actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, npub -> statusPanel.updateStatus("Friend " + npub.substring(0, 10) + "... added."))));
         actionRegistry.register(UI.ActionID.MANAGE_RELAYS, new UI.AppAction("Manage Relays...", e -> navPanel.selectViewAndNote(UI.NavPanel.View.SETTINGS, "config.nostr_relays")));
@@ -727,7 +725,7 @@ public class App extends UI.BaseAppFrame {
 
             Point lastLocation = Arrays.stream(frames)
                     .filter(f -> f != this)
-                    .max(Comparator.comparingInt(f -> mdiApp.desktopPane.getComponentZOrder(f)))
+                    .max(Comparator.comparingInt(mdiApp.desktopPane::getComponentZOrder))
                     .map(Component::getLocation)
                     .orElse(new Point(5, 5));
 

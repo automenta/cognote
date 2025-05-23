@@ -17,6 +17,8 @@ import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.text.*;
 import javax.swing.text.html.HTMLEditorKit;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.*;
@@ -145,7 +147,6 @@ public class UI {
         protected final JLabel statusBarLabel;
         protected final JPanel defaultEditorHostPanel;
         protected final ActionRegistry actionRegistry = new ActionRegistry();
-
 
         public BaseAppFrame(Netention.Core core, String title, int width, int height) {
             this.core = core;
@@ -332,11 +333,11 @@ public class UI {
     static class BuddyListPanel extends JPanel {
         private final Netention.Core core;
         private final DefaultListModel<Object> list = new DefaultListModel<>();
-        private final JList<Object> buddies = new JList<>(list);
+        final JList<Object> buddies = new JList<>(list);
         private final JTextField searchField; // NEW
 
-        public BuddyListPanel(Netention.Core core, Consumer<String> onIdentifierSelected, Runnable onShowMyProfile) {
-            this.core = core;
+        public BuddyListPanel(BaseAppFrame ui, Consumer<String> onIdentifierSelected, Runnable onShowMyProfile) {
+            this.core = ui.core;
             setLayout(new BorderLayout(5, 5));
             setBorder(new EmptyBorder(5, 5, 5, 5));
 
@@ -371,7 +372,7 @@ public class UI {
                             Object selected = buddies.getSelectedValue();
                             if (selected instanceof Netention.Note note && note.tags.contains(Netention.SystemTag.CONTACT.value)) {
                                 JPopupMenu menu = new JPopupMenu();
-                                menu.add(new JMenuItem(core.appFrame.actionRegistry.get(ActionID.VIEW_CONTACT_PROFILE))); // Use action from registry
+                                menu.add(new JMenuItem(ui.actionRegistry.get(ActionID.VIEW_CONTACT_PROFILE))); // Use action from registry
                                 menu.show(e.getComponent(), e.getX(), e.getY());
                             }
                         }
@@ -621,22 +622,20 @@ public class UI {
 
         public void selectViewAndNote(View view, String noteId) {
             viewSelector.setSelectedItem(view);
-            SwingUtilities.invokeLater(() -> {
-                core.notes.get(noteId).ifPresent(noteToSelect -> {
-                    int index = -1;
-                    for (int i = 0; i < listModel.getSize(); i++) {
-                        if (listModel.getElementAt(i).id.equals(noteToSelect.id)) {
-                            index = i;
-                            break;
-                        }
+            SwingUtilities.invokeLater(() -> core.notes.get(noteId).ifPresent(noteToSelect -> {
+                int index = -1;
+                for (int i = 0; i < listModel.getSize(); i++) {
+                    if (listModel.getElementAt(i).id.equals(noteToSelect.id)) {
+                        index = i;
+                        break;
                     }
-                    if (index >= 0) {
-                        list.setSelectedIndex(index);
-                        list.ensureIndexIsVisible(index);
-                    }
-                    uiRef.display(noteToSelect);
-                });
-            });
+                }
+                if (index >= 0) {
+                    list.setSelectedIndex(index);
+                    list.ensureIndexIsVisible(index);
+                }
+                uiRef.display(noteToSelect);
+            }));
         }
 
         @SuppressWarnings("unchecked")
@@ -652,7 +651,7 @@ public class UI {
             }
             if (note.tags.contains(Netention.SystemTag.SYSTEM_EVENT.value)) {
                 var status = (String) note.content.getOrDefault(Netention.ContentKey.STATUS.getKey(), "");
-                if (Set.of("PROCESSED", "FAILED_PROCESSING", Netention.Planner.PlanState.FAILED.name()).contains(status)) {
+                if (Set.of("PROCESSED", "FAILED_PROCESSING", Netention.PlanState.FAILED.name()).contains(status)) {
                     contextMenu.add(UIUtil.menuItem("🗑️ Delete Processed/Failed Event", _ -> {
                         if (JOptionPane.showConfirmDialog(this, "Delete system event note '" + note.getTitle() + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                             core.deleteNote(note.id);
@@ -977,7 +976,7 @@ public class UI {
             if (core.lm.isReady() && currentNote.content.get(Netention.ContentKey.PLAN_STEPS.getKey()) == null) {
                 try {
                     @SuppressWarnings("unchecked")
-                    var steps = (List<Netention.Planner.PlanStep>) core.executeTool(Netention.Core.Tool.SUGGEST_PLAN_STEPS, Map.of(Netention.Planner.ToolParam.GOAL_TEXT.getKey(), currentNote.getContentForEmbedding()));
+                    var steps = (List<Netention.Planner.PlanStep>) core.executeTool(Netention.Core.Tool.SUGGEST_PLAN_STEPS, Map.of(Netention.ToolParam.GOAL_TEXT.getKey(), currentNote.getContentForEmbedding()));
                     if (steps != null && !steps.isEmpty()) {
                         currentNote.content.put(Netention.ContentKey.PLAN_STEPS.getKey(), steps.stream().map(s -> core.json.convertValue(s, Map.class)).collect(Collectors.toList()));
                     }
@@ -1107,7 +1106,7 @@ public class UI {
         @SuppressWarnings("unchecked")
         private void handleSuggestPlanAction() {
             var future = CompletableFuture.runAsync(() -> {
-                var steps = (List<Netention.Planner.PlanStep>) core.executeTool(Netention.Core.Tool.SUGGEST_PLAN_STEPS, Map.of(Netention.Planner.ToolParam.GOAL_TEXT.getKey(), currentNote.getContentForEmbedding()));
+                var steps = (List<Netention.Planner.PlanStep>) core.executeTool(Netention.Core.Tool.SUGGEST_PLAN_STEPS, Map.of(Netention.ToolParam.GOAL_TEXT.getKey(), currentNote.getContentForEmbedding()));
                 if (steps != null && !steps.isEmpty()) {
                     currentNote.content.put(Netention.ContentKey.PLAN_STEPS.getKey(), steps.stream().map(s -> core.json.convertValue(s, Map.class)).collect(Collectors.toList()));
                     if (!currentNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value)) {
@@ -1601,7 +1600,7 @@ public class UI {
                     if (!contextNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value))
                         contextNote.tags.add(Netention.SystemTag.GOAL_WITH_PLAN.value);
                     core.saveNote(contextNote);
-                    core.planner.executePlan(contextNote);
+                    core.planner.execute(contextNote);
                 }
             }), BorderLayout.SOUTH);
             tabbedPane.addTab(Tab.PLAN.title, planPanel);
@@ -1766,7 +1765,7 @@ public class UI {
             var root = new DefaultMutableTreeNode("Plan Dependencies");
             if (contextNote != null && contextNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value)) {
                 try {
-                    var graphContext = (Map<String, Object>) core.executeTool(Netention.Core.Tool.GET_PLAN_GRAPH_CONTEXT, Map.of(Netention.Planner.ToolParam.NOTE_ID.getKey(), contextNote.id));
+                    var graphContext = (Map<String, Object>) core.executeTool(Netention.Core.Tool.GET_PLAN_GRAPH_CONTEXT, Map.of(Netention.ToolParam.NOTE_ID.getKey(), contextNote.id));
                     if (graphContext != null && !graphContext.isEmpty()) {
                         var mainNodeData = new HashMap<>(graphContext);
                         mainNodeData.put(Netention.NoteProperty.TITLE.getKey(), "Self: " + graphContext.get(Netention.NoteProperty.TITLE.getKey()));
@@ -1862,7 +1861,7 @@ public class UI {
             }
         }
 
-        static class ActionableItemCellRenderer extends DefaultListCellRenderer {
+        public static class ActionableItemCellRenderer extends DefaultListCellRenderer {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
@@ -1893,7 +1892,7 @@ public class UI {
             private List<Netention.Planner.PlanStep> steps = new ArrayList<>();
 
             public void setPlanExecution(Netention.Planner.PlanExecution exec) {
-                this.steps = (exec != null && exec.steps != null) ? new ArrayList<>(exec.steps) : new ArrayList<>();
+                this.steps = exec != null ? new ArrayList<>(exec.steps) : new ArrayList<>();
                 fireTableDataChanged();
             }
 
@@ -1929,19 +1928,15 @@ public class UI {
     }
 
     public static class ActionableItemsPanel extends JPanel {
-        private final Netention.Core core;
         private final DefaultListModel<ActionableItem> listModel = new DefaultListModel<>();
         private final JList<ActionableItem> list = new JList<>(listModel);
-        private final Consumer<ActionableItem> onExecuteAction;
 
         public ActionableItemsPanel(Netention.Core core, Consumer<ActionableItem> onExecuteAction) {
             super(new BorderLayout(5, 5));
             setBorder(new EmptyBorder(5, 5, 5, 5));
-            this.core = core;
-            this.onExecuteAction = onExecuteAction;
 
             list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            list.setCellRenderer(new ActionableItemCellRenderer());
+            list.setCellRenderer(new InspectorPanel.ActionableItemCellRenderer());
             list.addMouseListener(new MouseAdapter() {
                 public void mouseClicked(MouseEvent e) {
                     if (e.getClickCount() == 2) {
@@ -1949,7 +1944,10 @@ public class UI {
                             onExecuteAction.accept(item);
                             // Refresh the list after action, assuming the action will lead to removal via CoreEvent
                             // For immediate visual feedback, filter out the item.
-                            refreshList(new ArrayList<>(listModel.stream().filter(i -> !i.id().equals(item.id())).toList()));
+                            var ii = item.id();
+                            refreshList(Stream.of(listModel.toArray())
+                                .filter(i -> i instanceof ActionableItem a && !a.id().equals(ii))
+                                .map(z -> (ActionableItem)z).toList());
                         });
                     }
                 }
@@ -2396,22 +2394,20 @@ public class UI {
                     }
 
                     var editor = (component instanceof JScrollPane scp) ? (JComponent) scp.getViewport().getView() : component;
-                    Object valueToSet = null;
-                    if (editor instanceof JTextArea ta && cf.type() == Netention.FieldType.TEXT_AREA) {
-                        valueToSet = new ArrayList<>(Arrays.asList(ta.getText().split("\\n")));
-                    } else if (editor instanceof JPasswordField pf) {
-                        valueToSet = new String(pf.getPassword());
-                    } else if (editor instanceof JTextField tf) {
-                        valueToSet = tf.getText();
-                    } else if (editor instanceof JComboBox<?> cb) {
-                        valueToSet = cb.getSelectedItem();
-                    } else if (editor instanceof JCheckBox chkbx) {
-                        valueToSet = chkbx.isSelected();
-                    } else {
-                        logger.warn("Unhandled component type for field {}: {}", field.getName(), editor.getClass().getName());
-                        return;
+                    Object v = null;
+                    switch (editor) {
+                        case JTextArea ta when cf.type() == Netention.FieldType.TEXT_AREA ->
+                                v = new ArrayList<>(Arrays.asList(ta.getText().split("\\n")));
+                        case JPasswordField pf -> v = new String(pf.getPassword());
+                        case JTextField tf -> v = tf.getText();
+                        case JComboBox<?> cb -> v = cb.getSelectedItem();
+                        case JCheckBox chkbx -> v = chkbx.isSelected();
+                        default -> {
+                            logger.warn("Unhandled component type for field {}: {}", field.getName(), editor.getClass().getName());
+                            return;
+                        }
                     }
-                    field.set(configObjInstance, valueToSet);
+                    field.set(configObjInstance, v);
                 } catch (IllegalAccessException e) {
                     logger.error("Error saving config field {}: {}", field.getName(), e.getMessage(), e);
                 }
@@ -2500,118 +2496,4 @@ public class UI {
         }
     }
 
-    public static class UIUtil {
-        public static JButton button(String text, String tooltip, ActionListener listener) {
-            var b = new JButton(text);
-            b.setToolTipText(tooltip);
-            b.addActionListener(listener);
-            return b;
-        }
-
-        public static JButton button(String text, String tooltip, String actionCommand, ActionListener listener) {
-            var b = new JButton(text);
-            b.setToolTipText(tooltip);
-            b.setActionCommand(actionCommand);
-            b.addActionListener(listener);
-            return b;
-        }
-
-        public static JMenuItem menuItem(String text, String actionCommand, ActionListener listener) {
-            var item = new JMenuItem(text);
-            item.setActionCommand(actionCommand);
-            item.addActionListener(listener);
-            return item;
-        }
-
-        public static JMenuItem menuItem(String text, ActionListener listener) {
-            var item = new JMenuItem(text);
-            item.addActionListener(listener);
-            return item;
-        }
-
-        public static void addLabelAndComponent(JPanel panel, GridBagConstraints gbc, int row, String labelText, JComponent component) {
-            gbc.gridx = 0;
-            gbc.gridy = row;
-            gbc.gridwidth = 1;
-            gbc.weightx = 0.0;
-            panel.add(new JLabel(labelText), gbc);
-            gbc.gridx = 1;
-            gbc.weightx = 1.0;
-            panel.add(component, gbc);
-        }
-
-        public static void showPanelInDialog(Component parent, String title, JComponent panel, Dimension size, boolean modal) {
-            var dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), title, modal);
-            dialog.setContentPane(panel);
-            dialog.setPreferredSize(size);
-            dialog.pack();
-            dialog.setLocationRelativeTo(parent);
-            dialog.setVisible(true);
-        }
-
-        public static void showEditablePanelInDialog(Component parent, String title, JComponent panel, Dimension size, boolean modal, Predicate<JComponent> isDirtyCheck) {
-            var dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), title, modal);
-            dialog.setContentPane(panel);
-            dialog.setPreferredSize(size);
-            dialog.pack();
-            dialog.setLocationRelativeTo(parent);
-
-            dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-            dialog.addWindowListener(new WindowAdapter() {
-                @Override
-                public void windowClosing(WindowEvent e) {
-                    if (isDirtyCheck.test(panel)) {
-                        int result = JOptionPane.showConfirmDialog(dialog, "You have unsaved changes. Discard them?", "Unsaved Changes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-                        if (result == JOptionPane.YES_OPTION) {
-                            dialog.dispose();
-                        }
-                    } else {
-                        dialog.dispose();
-                    }
-                }
-            });
-            dialog.setVisible(true);
-        }
-
-        public static void addNostrContactDialog(Component parent, Netention.Core core, Consumer<String> onContactAdded) { // Changed signature
-            var npubField = new JTextField(30);
-            var panel = new JPanel(new BorderLayout(5, 5));
-            panel.setBorder(new EmptyBorder(10, 10, 10, 10));
-            panel.add(new JLabel("Enter Nostr Public Key (npub):"), BorderLayout.NORTH);
-            panel.add(npubField, BorderLayout.CENTER);
-
-            int result = JOptionPane.showConfirmDialog(parent, panel, "Add Nostr Contact", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-            if (result == JOptionPane.OK_OPTION) {
-                var npub = npubField.getText().trim();
-                if (npub.isEmpty()) {
-                    JOptionPane.showMessageDialog(parent, "Npub cannot be empty.", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                if (!npub.startsWith("npub1")) {
-                    JOptionPane.showMessageDialog(parent, "Invalid npub format. Must start with 'npub1'.", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-
-                try {
-                    // Change from ADD_CONTACT to SEND_FRIEND_REQUEST
-                    core.executeTool(Netention.Core.Tool.SEND_FRIEND_REQUEST, Map.of(Netention.Planner.ToolParam.RECIPIENT_NPUB.getKey(), npub));
-                    JOptionPane.showMessageDialog(parent, "Friend request sent and contact added.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                    onContactAdded.accept(npub); // Pass npub to callback
-                } catch (Exception e) {
-                    JOptionPane.showMessageDialog(parent, "Failed to send friend request: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                    logger.error("Failed to send Nostr friend request to {}: {}", npub, e.getMessage(), e);
-                }
-            }
-        }
-
-        public static void showConfirmationDialog(Component parent, String title, String message, Runnable onConfirm, Runnable onCancel) {
-            int result = JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-            if (result == JOptionPane.YES_OPTION) {
-                if (onConfirm != null) onConfirm.run();
-            } else {
-                if (onCancel != null) onCancel.run();
-            }
-        }
-    }
 }

@@ -129,4 +129,14 @@ class UIUtil {
             }
         }
     }
+
+    public static void showConfirmationDialog(Component parent, String title, String message, Runnable onConfirm, Runnable onCancel) {
+        int result = JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (result == JOptionPane.YES_OPTION) {
+            if (onConfirm != null) onConfirm.run();
+        } else {
+            if (onCancel != null) onCancel.run();
+        }
+    }
+
 }

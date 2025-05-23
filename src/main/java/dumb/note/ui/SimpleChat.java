@@ -8,10 +8,10 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.BufferedInputStream;
 import java.io.InputStream;
-import java.util.Optional;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -28,18 +28,14 @@ public class SimpleChat extends UI.BaseAppFrame {
 
         try (InputStream is = getClass().getResourceAsStream("/notification.wav");
              BufferedInputStream bis = new BufferedInputStream(is)) {
-            if (is != null) {
-                notificationSoundClip = AudioSystem.getClip();
-                notificationSoundClip.open(AudioSystem.getAudioInputStream(bis));
-            } else {
-                Netention.Core.logger.warn("Notification sound file not found: /notification.wav");
-            }
+            notificationSoundClip = AudioSystem.getClip();
+            notificationSoundClip.open(AudioSystem.getAudioInputStream(bis));
         } catch (Exception e) {
             Netention.Core.logger.error("Error loading notification sound: {}", e.getMessage());
             notificationSoundClip = null;
         }
 
-        buddyPanel = new UI.BuddyListPanel(core, this::displayContentForIdentifier, this::showMyProfileEditor);
+        buddyPanel = new UI.BuddyListPanel(this, this::displayContentForIdentifier, this::showMyProfileEditor);
 
         var splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buddyPanel, contentPanelContainer);
         splitPane.setDividerLocation(250);
@@ -83,7 +79,7 @@ public class SimpleChat extends UI.BaseAppFrame {
             updateStatusBasedOnNostrState();
             core.fireCoreEvent(Netention.Core.CoreEventType.CONFIG_CHANGED, "nostr_status_changed_simple_chat");
             updateActionStates();
-        }).setSelectedCalculator(() -> core.net.isEnabled()));
+        }).setSelectedCalculator(core.net::isEnabled));
 
         actionRegistry.register(UI.ActionID.SHOW_MY_NOSTR_PROFILE_EDITOR, new UI.AppAction("My Profile...", e -> showMyProfileEditor()));
         actionRegistry.register(UI.ActionID.ADD_NOSTR_FRIEND, new UI.AppAction("Add Nostr Contact...", e -> UIUtil.addNostrContactDialog(this, core, this::displayContentForIdentifier)));
@@ -236,12 +232,10 @@ public class SimpleChat extends UI.BaseAppFrame {
 
         core.notes.get(myProfileNoteId).ifPresentOrElse(profileNote -> {
             var dialogContentPanel = new JPanel(new BorderLayout());
-            var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, isDirty -> {
-                SwingUtilities.invokeLater(() -> {
-                    JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
-                    publishButton.setEnabled(isDirty && core.net.isEnabled());
-                });
-            });
+            var profileEditor = new UI.NoteEditorPanel(core, profileNote, this, null, null, isDirty -> SwingUtilities.invokeLater(() -> {
+                JButton publishButton = (JButton) ((JPanel) dialogContentPanel.getComponent(1)).getComponent(0);
+                publishButton.setEnabled(isDirty && core.net.isEnabled());
+            }));
             profileEditor.onSaveCb = () -> {
                 updateStatus("Profile note saved.");
                 core.fireCoreEvent(Netention.Core.CoreEventType.NOTE_UPDATED, profileEditor.currentNote);
@@ -309,19 +303,20 @@ public class SimpleChat extends UI.BaseAppFrame {
             UIUtil.showConfirmationDialog(this, "Friend Request", "Accept friend request from " + item.description() + "?",
                     () -> {
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.ACCEPT_FRIEND_REQUEST.name(),
-                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
-                                        Netention.Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), item.data().get("senderNpub"),
-                                        Netention.Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
+                                Netention.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.ACCEPT_FRIEND_REQUEST.name(),
+                                Netention.ToolParam.PAYLOAD.getKey(), Map.of(
+                                        Netention.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(),
+                                        ((Map)(item.rawData())).get("senderNpub"),
+                                        Netention.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
                                 )
                         ));
                         updateStatus("Friend request accepted.");
                     },
                     () -> {
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.REJECT_FRIEND_REQUEST.name(),
-                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(
-                                        Netention.Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
+                                Netention.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.REJECT_FRIEND_REQUEST.name(),
+                                Netention.ToolParam.PAYLOAD.getKey(), Map.of(
+                                        Netention.ToolParam.ACTIONABLE_ITEM_ID.getKey(), item.id()
                                 )
                         ));
                         updateStatus("Friend request rejected.");

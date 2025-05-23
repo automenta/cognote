@@ -33,7 +33,7 @@ public class Nostr {
     private final Queue<NostrAction> queue = new ConcurrentLinkedQueue<>();
     private final Consumer<NostrEvent> rawEventConsumer;
     private final HttpClient http;
-    private byte[] privateKeyRaw;
+    byte[] privateKeyRaw;
     private String publicKeyXOnlyHex;
     private volatile boolean enabled = false;
 

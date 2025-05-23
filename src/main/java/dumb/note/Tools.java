@@ -39,15 +39,17 @@ public class Tools {
                     });
                 });
 
+        /*
         Stream.of(Netention.Core.Tool.values())
                 .filter(Netention.Core.Tool::isPlaceholder)
                 .filter(toolEnum -> !toolMap.containsKey(toolEnum))
                 .forEach(toolEnum -> toolMap.put(toolEnum, (c, p) -> toolEnum.name() + " (placeholder). Params: " + p));
+         */
     }
 
     @ToolAction(tool = Netention.Core.Tool.LOG_MESSAGE)
     public static Object logMessage(Netention.Core core, Map<String, Object> params) {
-        var message = Objects.toString(params.get(Netention.Planner.ToolParam.MESSAGE.getKey()), "No message provided.");
+        var message = Objects.toString(params.get(Netention.ToolParam.MESSAGE.getKey()), "No message provided.");
         Netention.Core.logger.info("TOOL_LOG: {}", message);
         return "Logged: " + message;
     }
@@ -59,7 +61,7 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.PARSE_JSON)
     public static Object parseJson(Netention.Core core, Map<String, Object> params) {
-        var jsonString = Objects.toString(params.get(Netention.Planner.ToolParam.JSON_STRING.getKey()), null);
+        var jsonString = Objects.toString(params.get(Netention.ToolParam.JSON_STRING.getKey()), null);
         if (jsonString == null)
             throw new IllegalArgumentException("jsonString parameter is required for ParseJson tool.");
         try {
@@ -72,11 +74,11 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.GET_NOTE_PROPERTY)
     public static Object getNoteProperty(Netention.Core core, Map<String, Object> params) {
-        var noteId = (String) params.get(Netention.Planner.ToolParam.NOTE_ID.getKey());
-        var propertyPath = (String) params.get(Netention.Planner.ToolParam.PROPERTY_PATH.getKey());
-        var fifnRaw = params.get(Netention.Planner.ToolParam.FAIL_IF_NOT_FOUND.getKey());
+        var noteId = (String) params.get(Netention.ToolParam.NOTE_ID.getKey());
+        var propertyPath = (String) params.get(Netention.ToolParam.PROPERTY_PATH.getKey());
+        var fifnRaw = params.get(Netention.ToolParam.FAIL_IF_NOT_FOUND.getKey());
         var failIfNotFound = fifnRaw instanceof Boolean b ? b : (!(fifnRaw instanceof String s) || Boolean.parseBoolean(s));
-        var defaultValue = params.get(Netention.Planner.ToolParam.DEFAULT_VALUE.getKey());
+        var defaultValue = params.get(Netention.ToolParam.DEFAULT_VALUE.getKey());
 
         var noteOpt = core.notes.get(noteId);
         if (noteOpt.isEmpty()) {
@@ -122,10 +124,10 @@ public class Tools {
     @ToolAction(tool = Netention.Core.Tool.CREATE_NOTE)
     public static Object createNote(Netention.Core core, Map<String, Object> params) {
         var newNote = new Netention.Note();
-        if (params.containsKey(Netention.Planner.ToolParam.ID.getKey()))
-            newNote.id = (String) params.get(Netention.Planner.ToolParam.ID.getKey());
+        if (params.containsKey(Netention.ToolParam.ID.getKey()))
+            newNote.id = (String) params.get(Netention.ToolParam.ID.getKey());
 
-        var titleTemplate = (String) params.getOrDefault(Netention.Planner.ToolParam.TITLE.getKey(), "New Note from Plan");
+        var titleTemplate = (String) params.getOrDefault(Netention.ToolParam.TITLE.getKey(), "New Note from Plan");
         var titleMatcher = Pattern.compile("\\$([a-zA-Z0-9_.]+)_substring_(\\d+)").matcher(titleTemplate);
         if (titleMatcher.find()) {
             var prefix = titleTemplate.substring(0, titleMatcher.start());
@@ -139,16 +141,16 @@ public class Tools {
             } else newNote.setTitle(titleTemplate);
         } else newNote.setTitle(titleTemplate);
 
-        var text = (String) params.getOrDefault(Netention.Planner.ToolParam.TEXT.getKey(), "");
-        if (Boolean.TRUE.equals(params.get(Netention.Planner.ToolParam.AS_HTML.getKey()))) newNote.setHtmlText(text);
+        var text = (String) params.getOrDefault(Netention.ToolParam.TEXT.getKey(), "");
+        if (Boolean.TRUE.equals(params.get(Netention.ToolParam.AS_HTML.getKey()))) newNote.setHtmlText(text);
         else newNote.setText(text);
 
-        if (params.get(Netention.Planner.ToolParam.TAGS.getKey()) instanceof List)
-            newNote.tags.addAll((List<String>) params.get(Netention.Planner.ToolParam.TAGS.getKey()));
-        if (params.get(Netention.Planner.ToolParam.CONTENT.getKey()) instanceof Map)
-            newNote.content.putAll((Map<String, Object>) params.get(Netention.Planner.ToolParam.CONTENT.getKey()));
+        if (params.get(Netention.ToolParam.TAGS.getKey()) instanceof List)
+            newNote.tags.addAll((List<String>) params.get(Netention.ToolParam.TAGS.getKey()));
+        if (params.get(Netention.ToolParam.CONTENT.getKey()) instanceof Map)
+            newNote.content.putAll((Map<String, Object>) params.get(Netention.ToolParam.CONTENT.getKey()));
 
-        Map<String, Object> metadata = params.get(Netention.Planner.ToolParam.METADATA.getKey()) instanceof Map ? new HashMap<>((Map<String, Object>) params.get(Netention.Planner.ToolParam.METADATA.getKey())) : new HashMap<>();
+        Map<String, Object> metadata = params.get(Netention.ToolParam.METADATA.getKey()) instanceof Map ? new HashMap<>((Map<String, Object>) params.get(Netention.ToolParam.METADATA.getKey())) : new HashMap<>();
         if (metadata.containsKey(Netention.Metadata.CREATED_AT_FROM_EVENT.key)) {
             var tsValue = metadata.remove(Netention.Metadata.CREATED_AT_FROM_EVENT.key);
             var eventTime = (tsValue instanceof Number n) ? Instant.ofEpochSecond(n.longValue()) : ((tsValue instanceof Instant i) ? i : null);
@@ -182,8 +184,8 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.MODIFY_NOTE_CONTENT)
     public static Object modifyNoteContent(Netention.Core core, Map<String, Object> params) {
-        var noteId = (String) params.get(Netention.Planner.ToolParam.NOTE_ID.getKey());
-        var contentUpdate = (Map<String, Object>) params.get(Netention.Planner.ToolParam.CONTENT_UPDATE.getKey());
+        var noteId = (String) params.get(Netention.ToolParam.NOTE_ID.getKey());
+        var contentUpdate = (Map<String, Object>) params.get(Netention.ToolParam.CONTENT_UPDATE.getKey());
         if (noteId == null || contentUpdate == null)
             throw new IllegalArgumentException("noteId and contentUpdate are required.");
 
@@ -208,14 +210,14 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.DELETE_NOTE)
     public static Object deleteNote(Netention.Core core, Map<String, Object> params) {
-        return core.deleteNote((String) params.get(Netention.Planner.ToolParam.NOTE_ID.getKey()));
+        return core.deleteNote((String) params.get(Netention.ToolParam.NOTE_ID.getKey()));
     }
 
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.CREATE_LINKS)
     public static Object createLinks(Netention.Core core, Map<String, Object> params) {
-        var sourceNoteId = (String) params.get(Netention.Planner.ToolParam.SOURCE_NOTE_ID.getKey());
-        var linksToAdd = (List<Map<String, String>>) params.get(Netention.Planner.ToolParam.LINKS.getKey());
+        var sourceNoteId = (String) params.get(Netention.ToolParam.SOURCE_NOTE_ID.getKey());
+        var linksToAdd = (List<Map<String, String>>) params.get(Netention.ToolParam.LINKS.getKey());
         if (sourceNoteId == null || linksToAdd == null)
             throw new IllegalArgumentException("sourceNoteId and links required.");
         core.notes.get(sourceNoteId).ifPresent(sourceNote -> {
@@ -228,8 +230,8 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.CREATE_OR_UPDATE_CONTACT_NOTE)
     public static Object createOrUpdateContactNote(Netention.Core core, Map<String, Object> params) {
-        var nostrPubKeyHex = (String) params.get(Netention.Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
-        var profileData = (Map<String, Object>) params.get(Netention.Planner.ToolParam.PROFILE_DATA.getKey());
+        var nostrPubKeyHex = (String) params.get(Netention.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+        var profileData = (Map<String, Object>) params.get(Netention.ToolParam.PROFILE_DATA.getKey());
         if (nostrPubKeyHex == null) throw new IllegalArgumentException("nostrPubKeyHex is required.");
         try {
             var nostrPubKeyNpub = Crypto.Bech32.nip19Encode("npub", Crypto.hexToBytes(nostrPubKeyHex));
@@ -259,7 +261,7 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.DECRYPT_NOSTR_DM)
     public static Object decryptNostrDM(Netention.Core core, Map<String, Object> params) {
-        if (!(params.get(Netention.Planner.ToolParam.EVENT_PAYLOAD_MAP.getKey()) instanceof Map eventMap))
+        if (!(params.get(Netention.ToolParam.EVENT_PAYLOAD_MAP.getKey()) instanceof Map eventMap))
             throw new IllegalArgumentException("eventPayloadMap (Map) required for DecryptNostrDM.");
         var content = (String) eventMap.get("content");
         var pubkey = (String) eventMap.get("pubkey");
@@ -283,10 +285,10 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.UPDATE_CHAT_NOTE)
     public static Object updateChatNote(Netention.Core core, Map<String, Object> params) {
-        var partnerPubKeyHex = (String) params.get(Netention.Planner.ToolParam.PARTNER_PUB_KEY_HEX.getKey());
-        var senderPubKeyHex = (String) params.get(Netention.Planner.ToolParam.SENDER_PUB_KEY_HEX.getKey());
-        var messageContent = (String) params.get(Netention.Planner.ToolParam.MESSAGE_CONTENT.getKey());
-        var tsEpochObj = params.get(Netention.Planner.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey());
+        var partnerPubKeyHex = (String) params.get(Netention.ToolParam.PARTNER_PUB_KEY_HEX.getKey());
+        var senderPubKeyHex = (String) params.get(Netention.ToolParam.SENDER_PUB_KEY_HEX.getKey());
+        var messageContent = (String) params.get(Netention.ToolParam.MESSAGE_CONTENT.getKey());
+        var tsEpochObj = params.get(Netention.ToolParam.TIMESTAMP_EPOCH_SECONDS.getKey());
         if (partnerPubKeyHex == null || senderPubKeyHex == null || messageContent == null || tsEpochObj == null)
             throw new IllegalArgumentException("Missing params for UpdateChatNote");
 
@@ -324,14 +326,14 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.SUGGEST_PLAN_STEPS)
     public static Object suggestPlanSteps(Netention.Core core, Map<String, Object> params) {
-        var goalText = (String) params.get(Netention.Planner.ToolParam.GOAL_TEXT.getKey());
+        var goalText = (String) params.get(Netention.ToolParam.GOAL_TEXT.getKey());
         if (goalText == null || goalText.trim().isEmpty() || !core.lm.isReady()) return Collections.emptyList();
         return core.lm.decomposeTask(goalText).map(tasks -> tasks.stream().map(taskDesc -> {
             var step = new Netention.Planner.PlanStep();
             step.description = taskDesc;
             step.toolName = Netention.Core.Tool.USER_INTERACTION.name();
-            step.toolParams = Map.of(Netention.Planner.ToolParam.PROMPT.getKey(), "Define tool for: " + taskDesc);
-            step.alternatives.add(new Netention.Planner.AlternativeExecution(Netention.Core.Tool.LOG_MESSAGE.name(), Map.of(Netention.Planner.ToolParam.MESSAGE.getKey(), "Alt log: " + taskDesc), 0.5, "Fallback"));
+            step.toolParams = Map.of(Netention.ToolParam.PROMPT.getKey(), "Define tool for: " + taskDesc);
+            step.alternatives.add(new Netention.Planner.AlternativeExecution(Netention.Core.Tool.LOG_MESSAGE.name(), Map.of(Netention.ToolParam.MESSAGE.getKey(), "Alt log: " + taskDesc), 0.5, "Fallback"));
             return step;
         }).collect(Collectors.toList())).orElse(Collections.emptyList());
     }
@@ -339,7 +341,7 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.GET_PLAN_GRAPH_CONTEXT)
     public static Object getPlanGraphContext(Netention.Core core, Map<String, Object> params) {
-        var noteId = (String) params.get(Netention.Planner.ToolParam.NOTE_ID.getKey());
+        var noteId = (String) params.get(Netention.ToolParam.NOTE_ID.getKey());
         Map<String, Object> rootNode = new HashMap<>();
         core.notes.get(noteId).ifPresent(n -> {
             rootNode.putAll(Map.of(Netention.NoteProperty.ID.getKey(), n.id, Netention.NoteProperty.TITLE.getKey(), n.getTitle(), Netention.ContentKey.STATUS.getKey(), n.meta.get(Netention.Metadata.PLAN_STATUS.key)));
@@ -358,22 +360,22 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.IF_ELSE)
     public static Object ifElse(Netention.Core core, Map<String, Object> params) {
-        var conditionResult = params.get(Netention.Planner.ToolParam.CONDITION.getKey());
-        var trueSteps = (List<Map<String, Object>>) params.get(Netention.Planner.ToolParam.TRUE_STEPS.getKey());
-        var falseSteps = (List<Map<String, Object>>) params.get(Netention.Planner.ToolParam.FALSE_STEPS.getKey());
+        var conditionResult = params.get(Netention.ToolParam.CONDITION.getKey());
+        var trueSteps = (List<Map<String, Object>>) params.get(Netention.ToolParam.TRUE_STEPS.getKey());
+        var falseSteps = (List<Map<String, Object>>) params.get(Netention.ToolParam.FALSE_STEPS.getKey());
         var stepsToExecute = Boolean.TRUE.equals(conditionResult) ? trueSteps : falseSteps;
         Object lastResult = null;
 
         if (stepsToExecute != null) {
-            var currentPlanExecOpt = core.planner.getActivePlans().values().stream()
-                    .filter(pe -> pe.steps.stream().anyMatch(s -> Netention.Core.Tool.IF_ELSE.name().equals(s.toolName) && Netention.Planner.PlanStepState.RUNNING.equals(s.status) && Objects.equals(s.toolParams, params)))
+            var currentPlanExecOpt = core.planner.getActive().values().stream()
+                    .filter(pe -> pe.steps.stream().anyMatch(s -> Netention.Core.Tool.IF_ELSE.name().equals(s.toolName) && Netention.PlanStepState.RUNNING.equals(s.status) && Objects.equals(s.toolParams, params)))
                     .findFirst();
             if (currentPlanExecOpt.isEmpty())
                 Netention.Core.logger.warn("IfElse tool could not determine current plan execution context.");
 
             for (var stepDef : stepsToExecute) {
-                var toolNameStr = (String) stepDef.get(Netention.Planner.PlanStepKey.TOOL_NAME.getKey());
-                var toolParams = (Map<String, Object>) stepDef.get(Netention.Planner.PlanStepKey.TOOL_PARAMS.getKey());
+                var toolNameStr = (String) stepDef.get(Netention.PlanStepKey.TOOL_NAME.getKey());
+                var toolParams = (Map<String, Object>) stepDef.get(Netention.PlanStepKey.TOOL_PARAMS.getKey());
                 Map<String, Object> resolvedSubParams = new HashMap<>();
                 if (toolParams != null) {
                     if (currentPlanExecOpt.isPresent()) {
@@ -397,9 +399,9 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.FOR_EACH)
     public static Object forEach(Netention.Core core, Map<String, Object> params) {
-        var itemListRaw = params.get(Netention.Planner.ToolParam.LIST.getKey());
-        var loopVarName = (String) params.get(Netention.Planner.ToolParam.LOOP_VAR.getKey());
-        var loopStepsDef = (List<Map<String, Object>>) params.get(Netention.Planner.ToolParam.LOOP_STEPS.getKey());
+        var itemListRaw = params.get(Netention.ToolParam.LIST.getKey());
+        var loopVarName = (String) params.get(Netention.ToolParam.LOOP_VAR.getKey());
+        var loopStepsDef = (List<Map<String, Object>>) params.get(Netention.ToolParam.LOOP_STEPS.getKey());
 
         if (!(itemListRaw instanceof List<?> itemList))
             throw new ClassCastException("Parameter 'list' must be a List.");
@@ -407,8 +409,8 @@ public class Tools {
             throw new IllegalArgumentException("list, loopVar, loopSteps required.");
 
         List<Object> results = new ArrayList<>();
-        var currentPlanExecOpt = core.planner.getActivePlans().values().stream()
-                .filter(pe -> pe.steps.stream().anyMatch(s -> Netention.Core.Tool.FOR_EACH.name().equals(s.toolName) && Netention.Planner.PlanStepState.RUNNING.equals(s.status) && Objects.equals(s.toolParams, params)))
+        var currentPlanExecOpt = core.planner.getActive().values().stream()
+                .filter(pe -> pe.steps.stream().anyMatch(s -> Netention.Core.Tool.FOR_EACH.name().equals(s.toolName) && Netention.PlanStepState.RUNNING.equals(s.status) && Objects.equals(s.toolParams, params)))
                 .findFirst();
         if (currentPlanExecOpt.isEmpty() && !itemList.isEmpty())
             Netention.Core.logger.warn("ForEach tool could not determine current plan execution context.");
@@ -421,8 +423,8 @@ public class Tools {
 
             lastSubResult = null;
             for (var stepDef : loopStepsDef) {
-                var toolNameStr = (String) stepDef.get(Netention.Planner.PlanStepKey.TOOL_NAME.getKey());
-                var toolParamsObj = stepDef.get(Netention.Planner.PlanStepKey.TOOL_PARAMS.getKey());
+                var toolNameStr = (String) stepDef.get(Netention.PlanStepKey.TOOL_NAME.getKey());
+                var toolParamsObj = stepDef.get(Netention.PlanStepKey.TOOL_PARAMS.getKey());
                 Map<String, Object> resolvedSubParams;
 
                 switch (toolParamsObj) {
@@ -447,8 +449,8 @@ public class Tools {
                 try {
                     var currentSubStepResult = core.executeTool(Netention.Core.Tool.fromString(toolNameStr), resolvedSubParams);
                     lastSubResult = currentSubStepResult;
-                    if (stepDef.containsKey(Netention.Planner.PlanStepKey.ID.getKey()))
-                        tempExecForLoopVar.context.put(stepDef.get(Netention.Planner.PlanStepKey.ID.getKey()) + ".result", currentSubStepResult);
+                    if (stepDef.containsKey(Netention.PlanStepKey.ID.getKey()))
+                        tempExecForLoopVar.context.put(stepDef.get(Netention.PlanStepKey.ID.getKey()) + ".result", currentSubStepResult);
                 } catch (Exception e) {
                     throw new RuntimeException("Error in ForEach sub-step " + toolNameStr + " for item " + item + ": " + e.getMessage(), e);
                 }
@@ -460,7 +462,7 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.FIND_NOTES_BY_TAG)
     public static Object findNotesByTag(Netention.Core core, Map<String, Object> params) {
-        var tag = (String) params.get(Netention.Planner.ToolParam.TAG.getKey());
+        var tag = (String) params.get(Netention.ToolParam.TAG.getKey());
         if (tag == null) throw new IllegalArgumentException("tag parameter required.");
         return core.notes.getAll(n -> n.tags.contains(tag)).stream()
                 .map(n -> Map.of(Netention.NoteProperty.ID.getKey(), n.id, Netention.NoteProperty.TITLE.getKey(), n.getTitle()))
@@ -469,13 +471,13 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.EXECUTE_SEMANTIC_QUERY)
     public static Object executeSemanticQuery(Netention.Core core, Map<String, Object> params) {
-        var queryText = (String) params.get(Netention.Planner.ToolParam.QUERY_TEXT.getKey());
+        var queryText = (String) params.get(Netention.ToolParam.QUERY_TEXT.getKey());
         if (queryText == null || !core.lm.isReady()) return Collections.emptyList();
         var queryEmb = core.lm.generateEmbedding(queryText);
         if (queryEmb.isEmpty()) return Collections.emptyList();
 
-        var minSimilarity = ((Number) params.getOrDefault(Netention.Planner.ToolParam.MIN_SIMILARITY.getKey(), 0.6)).doubleValue();
-        var maxResults = ((Number) params.getOrDefault(Netention.Planner.ToolParam.MAX_RESULTS.getKey(), 5)).longValue();
+        var minSimilarity = ((Number) params.getOrDefault(Netention.ToolParam.MIN_SIMILARITY.getKey(), 0.6)).doubleValue();
+        var maxResults = ((Number) params.getOrDefault(Netention.ToolParam.MAX_RESULTS.getKey(), 5)).longValue();
 
         return core.notes.getAllNotes().stream()
                 .filter(n -> {
@@ -493,7 +495,7 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.GET_CONFIG_STATE)
     public static Object getConfigState(Netention.Core core, Map<String, Object> params) {
-        var type = (String) params.get(Netention.Planner.ToolParam.CONFIG_TYPE.getKey());
+        var type = (String) params.get(Netention.ToolParam.CONFIG_TYPE.getKey());
         var configInstance = switch (type) {
             case "nostr" -> core.cfg.net;
             case "ui" -> core.cfg.ui;
@@ -507,8 +509,8 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.APPLY_CONFIG_STATE)
     public static Object applyConfigState(Netention.Core core, Map<String, Object> params) {
-        var type = (String) params.get(Netention.Planner.ToolParam.CONFIG_TYPE.getKey());
-        var stateMap = (Map<String, Object>) params.get(Netention.Planner.ToolParam.STATE_MAP.getKey());
+        var type = (String) params.get(Netention.ToolParam.CONFIG_TYPE.getKey());
+        var stateMap = (Map<String, Object>) params.get(Netention.ToolParam.STATE_MAP.getKey());
         if (stateMap == null) {
             Netention.Core.logger.warn("ApplyConfigState called with null stateMap for type {}, skipping.", type);
             return "Skipped: null stateMap";
@@ -546,8 +548,8 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.FIRE_CORE_EVENT)
     public static Object fireCoreEventTool(Netention.Core core, Map<String, Object> params) {
-        var eventTypeStr = (String) params.get(Netention.Planner.ToolParam.EVENT_TYPE.getKey());
-        var eventData = (Map<String, Object>) params.get(Netention.Planner.ToolParam.EVENT_DATA.getKey());
+        var eventTypeStr = (String) params.get(Netention.ToolParam.EVENT_TYPE.getKey());
+        var eventData = (Map<String, Object>) params.get(Netention.ToolParam.EVENT_DATA.getKey());
         if (eventTypeStr == null)
             throw new IllegalArgumentException("eventType is required for FireCoreEvent tool.");
         try {
@@ -562,16 +564,16 @@ public class Tools {
     @SuppressWarnings("unchecked")
     @ToolAction(tool = Netention.Core.Tool.SCHEDULE_SYSTEM_EVENT)
     public static Object scheduleSystemEvent(Netention.Core core, Map<String, Object> params) {
-        var eventType = (String) params.get(Netention.Planner.ToolParam.EVENT_TYPE.getKey());
-        var payload = (Map<String, Object>) params.get(Netention.Planner.ToolParam.PAYLOAD.getKey());
-        var delaySecondsNum = (Number) params.get(Netention.Planner.ToolParam.DELAY_SECONDS.getKey());
+        var eventType = (String) params.get(Netention.ToolParam.EVENT_TYPE.getKey());
+        var payload = (Map<String, Object>) params.get(Netention.ToolParam.PAYLOAD.getKey());
+        var delaySecondsNum = (Number) params.get(Netention.ToolParam.DELAY_SECONDS.getKey());
         if (eventType == null || delaySecondsNum == null)
             throw new IllegalArgumentException("eventType and delaySeconds required.");
         var delaySeconds = delaySecondsNum.longValue();
         core.scheduler.schedule(() -> core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), eventType,
-                Netention.Planner.ToolParam.PAYLOAD.getKey(), Objects.requireNonNullElse(payload, Collections.emptyMap()),
-                Netention.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
+                Netention.ToolParam.EVENT_TYPE.getKey(), eventType,
+                Netention.ToolParam.PAYLOAD.getKey(), Objects.requireNonNullElse(payload, Collections.emptyMap()),
+                Netention.ContentKey.STATUS.getKey(), Netention.PlanState.PENDING.name()
         )), delaySeconds, TimeUnit.SECONDS);
         return "System event " + eventType + " scheduled in " + delaySeconds + "s.";
     }
@@ -579,9 +581,9 @@ public class Tools {
     @ToolAction(tool = Netention.Core.Tool.GET_SYSTEM_HEALTH_METRICS)
     public static Object getSystemHealthMetrics(Netention.Core core, Map<String, Object> params) {
         Map<String, Object> metrics = new HashMap<>();
-        metrics.put("pendingSystemEvents", core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.SYSTEM_EVENT.value) && Netention.Planner.PlanState.PENDING.name().equals(n.content.get(Netention.ContentKey.STATUS.getKey()))).size());
-        metrics.put("activePlans", core.planner.getActivePlans().size());
-        metrics.put("failedPlanStepsInActivePlans", core.planner.getActivePlans().values().stream().flatMap(exec -> exec.steps.stream()).filter(step -> Netention.Planner.PlanStepState.FAILED.equals(step.status)).count());
+        metrics.put("pendingSystemEvents", core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.SYSTEM_EVENT.value) && Netention.PlanState.PENDING.name().equals(n.content.get(Netention.ContentKey.STATUS.getKey()))).size());
+        metrics.put("activePlans", core.planner.getActive().size());
+        metrics.put("failedPlanStepsInActivePlans", core.planner.getActive().values().stream().flatMap(exec -> exec.steps.stream()).filter(step -> Netention.PlanStepState.FAILED.equals(step.status)).count());
         metrics.put("nostrStatus", core.net.isEnabled() ? "ENABLED" : "DISABLED");
         metrics.put("lmStatus", core.lm.isReady() ? "READY" : "NOT_READY");
         return metrics;
@@ -589,19 +591,19 @@ public class Tools {
 
     @ToolAction(tool = Netention.Core.Tool.IDENTIFY_STALLED_PLANS)
     public static Object identifyStalledPlans(Netention.Core core, Map<String, Object> params) {
-        var stallThresholdSeconds = ((Number) params.getOrDefault(Netention.Planner.ToolParam.STALL_THRESHOLD_SECONDS.getKey(), 3600L)).longValue();
+        var stallThresholdSeconds = ((Number) params.getOrDefault(Netention.ToolParam.STALL_THRESHOLD_SECONDS.getKey(), 3600L)).longValue();
         List<String> stalledPlanNoteIds = new ArrayList<>();
-        core.planner.getActivePlans().forEach((planNoteId, exec) -> {
-            if (Netention.Planner.PlanState.RUNNING.equals(exec.currentStatus) || Netention.Planner.PlanState.STUCK.equals(exec.currentStatus)) {
+        core.planner.getActive().forEach((planNoteId, exec) -> {
+            if (Netention.PlanState.RUNNING.equals(exec.currentStatus) || Netention.PlanState.STUCK.equals(exec.currentStatus)) {
                 var recentProgress = exec.steps.stream().anyMatch(step -> step.endTime != null && Duration.between(step.endTime, Instant.now()).getSeconds() < stallThresholdSeconds);
                 if (!recentProgress) {
-                    var stuckRunningStep = exec.steps.stream().anyMatch(step -> Netention.Planner.PlanStepState.RUNNING.equals(step.status) && step.startTime != null && Duration.between(step.startTime, Instant.now()).getSeconds() > stallThresholdSeconds);
-                    if (stuckRunningStep || Netention.Planner.PlanState.STUCK.equals(exec.currentStatus)) {
+                    var stuckRunningStep = exec.steps.stream().anyMatch(step -> Netention.PlanStepState.RUNNING.equals(step.status) && step.startTime != null && Duration.between(step.startTime, Instant.now()).getSeconds() > stallThresholdSeconds);
+                    if (stuckRunningStep || Netention.PlanState.STUCK.equals(exec.currentStatus)) {
                         stalledPlanNoteIds.add(planNoteId);
                         core.fireCoreEvent(Netention.Core.CoreEventType.SYSTEM_EVENT_REQUESTED, Map.of(
-                                Netention.Planner.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.STALLED_PLAN_DETECTED.name(),
-                                Netention.Planner.ToolParam.PAYLOAD.getKey(), Map.of(Netention.Planner.ToolParam.PLAN_NOTE_ID.getKey(), planNoteId, Netention.Metadata.PLAN_STATUS.key, exec.currentStatus.name()),
-                                Netention.ContentKey.STATUS.getKey(), Netention.Planner.PlanState.PENDING.name()
+                                Netention.ToolParam.EVENT_TYPE.getKey(), Netention.Core.SystemEventType.STALLED_PLAN_DETECTED.name(),
+                                Netention.ToolParam.PAYLOAD.getKey(), Map.of(Netention.ToolParam.PLAN_NOTE_ID.getKey(), planNoteId, Netention.Metadata.PLAN_STATUS.key, exec.currentStatus.name()),
+                                Netention.ContentKey.STATUS.getKey(), Netention.PlanState.PENDING.name()
                         ));
                     }
                 }
