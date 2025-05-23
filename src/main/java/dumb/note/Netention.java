@@ -72,7 +72,7 @@ public class Netention {
         SYSTEM_NOTE("#system_note"), CONFIG("config"), GOAL_WITH_PLAN("#goal_with_plan"),
         NOSTR_FEED("nostr_feed"), CONTACT("contact"), NOSTR_CONTACT("nostr_contact"),
         CHAT("chat"), TEMPLATE("#template"), PERSISTENT_QUERY("#persistent_query"),
-        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile"), FRIEND_REQUEST("#friend_request"); // NEW: FRIEND_REQUEST
+        NOSTR_RELAY("#nostr_relay"), MY_PROFILE("#my_profile"), FRIEND_REQUEST("#friend_request");
         public final String value;
 
         SystemTag(String value) {
@@ -93,7 +93,7 @@ public class Netention {
         PLAN_STATUS, PLAN_START_TIME, PLAN_END_TIME, NOSTR_EVENT_ID, NOSTR_PUB_KEY_HEX,
         NOSTR_RAW_EVENT, CREATED_AT_FROM_EVENT, NOSTR_PUB_KEY, LAST_SEEN,
         PROFILE_LAST_UPDATED_AT, LLM_SUMMARY("llm:summary"), LLM_DECOMPOSITION("llm:decomposition"),
-        UNREAD_MESSAGES_COUNT("unread_messages_count"); // NEW: UNREAD_MESSAGES_COUNT
+        UNREAD_MESSAGES_COUNT("unread_messages_count");
         public final String key;
 
         Metadata() {
@@ -544,7 +544,7 @@ public class Netention {
             NOSTR_PUB_KEY_HEX, PROFILE_DATA, CONDITION, TRUE_STEPS, FALSE_STEPS, EVENT_PAYLOAD_MAP, PARTNER_PUB_KEY_HEX, SENDER_PUB_KEY_HEX,
             MESSAGE_CONTENT, TIMESTAMP_EPOCH_SECONDS, EVENT_TYPE, EVENT_DATA, GOAL_TEXT, PAYLOAD, DELAY_SECONDS, TAG, LIST, LOOP_VAR, LOOP_STEPS,
             QUERY_TEXT, MIN_SIMILARITY, MAX_RESULTS, SOURCE_NOTE_ID, LINKS, STALL_THRESHOLD_SECONDS, CONFIG_TYPE, STATE_MAP, PROMPT, CALLBACK_KEY, PLAN_NOTE_ID,
-            FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID; // NEW: FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID
+            FRIEND_REQUEST_SENDER_NPUB, ACTIONABLE_ITEM_ID, RECIPIENT_NPUB; // NEW: RECIPIENT_NPUB
 
             public String getKey() {
                 return name().toLowerCase();
@@ -815,7 +815,7 @@ public class Netention {
                     .trigger(SystemEventType.NOSTR_KIND4_RECEIVED, Planner.PlanState.PENDING)
                     .step("s0_get_payload", Tool.GET_NOTE_PROPERTY, "Get Nostr event object", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.PROPERTY_PATH, "content.payload"))
                     .step("s1_decrypt_dm", Tool.DECRYPT_NOSTR_DM, "Decrypt DM content", Map.of(Planner.ToolParam.EVENT_PAYLOAD_MAP, "$s0_get_payload.result"), "s0_get_payload")
-                    .step("s2_if_friend_request", Tool.IF_ELSE, "Check if friend request", Map.of( // NEW: Friend Request Check
+                    .step("s2_if_friend_request", Tool.IF_ELSE, "Check if friend request", Map.of(
                             Planner.ToolParam.CONDITION, "$s1_decrypt_dm.result.isFriendRequest == true",
                             Planner.ToolParam.TRUE_STEPS, List.of(
                                     Map.of(Planner.PlanStepKey.TOOL_NAME.getKey(), Tool.FIRE_CORE_EVENT.name(), Planner.PlanStepKey.TOOL_PARAMS.getKey(), Map.of(
@@ -823,7 +823,7 @@ public class Netention {
                                             Planner.ToolParam.PAYLOAD.getKey(), Map.of(
                                                     Planner.ToolParam.EVENT_TYPE.getKey(), SystemEventType.FRIEND_REQUEST_RECEIVED.name(),
                                                     Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey(), "$s0_get_payload.result.pubkey_npub",
-                                                    "sourceEventId", "$s0_get_payload.result.id" // Pass original event ID
+                                                    "sourceEventId", "$s0_get_payload.result.id"
                                             )
                                     ))
                             ),
@@ -840,7 +840,7 @@ public class Netention {
                     .step("s3_mark_processed", Tool.MODIFY_NOTE_CONTENT, "Mark system event as processed", Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s2_if_friend_request")
                     .bootstrap(this);
 
-            // NEW: Handler for Friend Request Received
+            // Handler for Friend Request Received
             PlanDefBuilder.create("system_listener_friend_request_received_handler")
                     .title("System Listener: Friend Request Received")
                     .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
@@ -859,7 +859,7 @@ public class Netention {
                     .step("s2_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s1_create_actionable_item")
                     .bootstrap(this);
 
-            // NEW: Handler for Accept Friend Request
+            // Handler for Accept Friend Request
             PlanDefBuilder.create("system_listener_accept_friend_request_handler")
                     .title("System Listener: Accept Friend Request")
                     .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
@@ -877,7 +877,7 @@ public class Netention {
                     .step("s4_mark_processed", Tool.MODIFY_NOTE_CONTENT, Map.of(Planner.ToolParam.NOTE_ID, "$trigger.sourceEventNoteId", Planner.ToolParam.CONTENT_UPDATE, Map.of(ContentKey.STATUS.getKey(), "PROCESSED")), "s3_remove_actionable_item")
                     .bootstrap(this);
 
-            // NEW: Handler for Reject Friend Request
+            // Handler for Reject Friend Request
             PlanDefBuilder.create("system_listener_reject_friend_request_handler")
                     .title("System Listener: Reject Friend Request")
                     .tags(SystemTag.SYSTEM_PROCESS_HANDLER.value, SystemTag.SYSTEM_NOTE.value)
@@ -985,7 +985,7 @@ public class Netention {
             NOSTR_KIND0_RECEIVED, NOSTR_KIND1_RECEIVED, NOSTR_KIND4_RECEIVED, NOSTR_KIND_UNKNOWN_RECEIVED,
             SAVE_NOSTR_CONFIG_REQUESTED, SAVE_UI_CONFIG_REQUESTED, SAVE_LLM_CONFIG_REQUESTED,
             LOAD_ALL_CONFIGS_REQUESTED, EVALUATE_PERSISTENT_QUERIES, STALLED_PLAN_DETECTED, UNKNOWN_EVENT_TYPE,
-            FRIEND_REQUEST_RECEIVED, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST // NEW: Friend Request Events
+            FRIEND_REQUEST_RECEIVED, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST
         }
 
         public enum Tool {
@@ -994,7 +994,7 @@ public class Netention {
             SUGGEST_PLAN_STEPS, SCHEDULE_SYSTEM_EVENT, FIND_NOTES_BY_TAG, FOR_EACH, EXECUTE_SEMANTIC_QUERY,
             CREATE_LINKS, GET_PLAN_GRAPH_CONTEXT, GET_SYSTEM_HEALTH_METRICS, IDENTIFY_STALLED_PLANS,
             GET_CONFIG_STATE, APPLY_CONFIG_STATE, GET_SELF_NOSTR_INFO,
-            ADD_CONTACT, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, // NEW: IM Tools
+            ADD_CONTACT, ACCEPT_FRIEND_REQUEST, REJECT_FRIEND_REQUEST, SEND_FRIEND_REQUEST, // NEW: SEND_FRIEND_REQUEST
             DECOMPOSE_GOAL(true), PLAN(true), GET_PLAN_DEPENDENCIES(true), ASSERT_KIF(true), QUERY(true), RETRACT(true),
             API(true), ECHO(true), FILE_OPERATIONS(true), GENERATE_TASK_LOGIC(true), INSPECT(true), EVAL_EXPR(true),
             GENERATE(true), REFLECT(true), REASON(true), DEFINE_CONCEPT(true), EXEC(true), GRAPH_SEARCH(true),
@@ -1119,9 +1119,10 @@ public class Netention {
                 tools.put(Tool.GET_CONFIG_STATE, Tools::getConfigState);
                 tools.put(Tool.APPLY_CONFIG_STATE, Tools::applyConfigState);
                 tools.put(Tool.GET_SELF_NOSTR_INFO, Tools::getSelfNostrInfo);
-                tools.put(Tool.ADD_CONTACT, Tools::addContact); // NEW
-                tools.put(Tool.ACCEPT_FRIEND_REQUEST, Tools::acceptFriendRequest); // NEW
-                tools.put(Tool.REJECT_FRIEND_REQUEST, Tools::rejectFriendRequest); // NEW
+                tools.put(Tool.ADD_CONTACT, Tools::addContact);
+                tools.put(Tool.ACCEPT_FRIEND_REQUEST, Tools::acceptFriendRequest);
+                tools.put(Tool.REJECT_FRIEND_REQUEST, Tools::rejectFriendRequest);
+                tools.put(Tool.SEND_FRIEND_REQUEST, Tools::sendFriendRequest); // NEW
                 // Placeholder tools are not implemented here
             }
 
@@ -1349,7 +1350,7 @@ public class Netention {
                     Map<String, Object> result = new HashMap<>();
                     result.put("decryptedText", decryptedText);
                     result.put("isLmResult", decryptedText.startsWith("{\"type\":\"netention_lm_result\""));
-                    result.put("isFriendRequest", isFriendRequest); // NEW: Add friend request flag
+                    result.put("isFriendRequest", isFriendRequest);
                     if (result.get("isLmResult") instanceof Boolean && (Boolean) result.get("isLmResult")) {
                         try {
                             result.put("lmResultPayload", core.json.readValue(decryptedText, new TypeReference<Map<String, Object>>() {
@@ -1589,11 +1590,13 @@ public class Netention {
                 );
             }
 
-            // NEW: ADD_CONTACT tool implementation
+            // ADD_CONTACT tool implementation
             private static Object addContact(Core core, Map<String, Object> params) {
                 var nostrPubKeyHex = (String) params.get(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey());
+                var profileData = (Map<String, Object>) params.get(Planner.ToolParam.PROFILE_DATA.getKey());
+
                 if (nostrPubKeyHex == null || nostrPubKeyHex.isEmpty()) {
-                    throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for ADD_CONTACT.");
+                    throw new IllegalArgumentException("NOSTR_PUB_KEY_HEX is required for CREATE_OR_UPDATE_CONTACT_NOTE.");
                 }
 
                 var npub = "";
@@ -1614,9 +1617,17 @@ public class Netention {
                     newNote.tags.add(SystemTag.NOSTR_CONTACT.value);
                     newNote.meta.put(Metadata.NOSTR_PUB_KEY_HEX.key, nostrPubKeyHex);
                     newNote.meta.put(Metadata.NOSTR_PUB_KEY.key, finalNpub);
-                    newNote.setTitle(finalNpub.substring(0, 12) + "..."); // Default title
+                    newNote.setTitle(profileData != null && profileData.containsKey("name") ? (String) profileData.get("name") : finalNpub.substring(0, 12) + "...");
+                    newNote.setText(profileData != null && profileData.containsKey("about") ? (String) profileData.get("about") : "");
                     return newNote;
                 });
+
+                if (profileData != null) {
+                    ofNullable((String) profileData.get("name")).ifPresent(contactNote::setTitle);
+                    ofNullable((String) profileData.get("about")).ifPresent(contactNote::setText);
+                    ofNullable((String) profileData.get("picture")).ifPresent(pic -> contactNote.content.put(ContentKey.PROFILE_PICTURE_URL.getKey(), pic));
+                }
+                contactNote.meta.put(Metadata.LAST_SEEN.key, Instant.now().toString());
 
                 // Ensure a chat note exists for this contact
                 var chatNoteOpt = core.notes.getAll(n -> n.tags.contains(SystemTag.CHAT.value) &&
@@ -1637,7 +1648,7 @@ public class Netention {
                 return contactNote.id;
             }
 
-            // NEW: ACCEPT_FRIEND_REQUEST tool implementation
+            // ACCEPT_FRIEND_REQUEST tool implementation
             private static Object acceptFriendRequest(Core core, Map<String, Object> params) {
                 var senderNpub = (String) params.get(Planner.ToolParam.FRIEND_REQUEST_SENDER_NPUB.getKey());
                 var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
@@ -1664,7 +1675,7 @@ public class Netention {
                 }
             }
 
-            // NEW: REJECT_FRIEND_REQUEST tool implementation
+            // REJECT_FRIEND_REQUEST tool implementation
             private static Object rejectFriendRequest(Core core, Map<String, Object> params) {
                 var actionableItemId = (String) params.get(Planner.ToolParam.ACTIONABLE_ITEM_ID.getKey());
 
@@ -1677,6 +1688,28 @@ public class Netention {
 
                 logger.info("Rejected friend request (actionable item removed): {}", actionableItemId);
                 return true;
+            }
+
+            // NEW: SEND_FRIEND_REQUEST tool implementation
+            private static Object sendFriendRequest(Core core, Map<String, Object> params) {
+                var recipientNpub = (String) params.get(Planner.ToolParam.RECIPIENT_NPUB.getKey());
+                if (recipientNpub == null || recipientNpub.isEmpty()) {
+                    throw new IllegalArgumentException("RECIPIENT_NPUB is required for SEND_FRIEND_REQUEST.");
+                }
+                try {
+                    // 1. Send the friend request DM
+                    core.net.sendFriendRequest(recipientNpub);
+                    logger.info("Sent friend request to {}", recipientNpub);
+
+                    // 2. Add contact locally (this will also create a chat note if not exists)
+                    // We need the hex pubkey for ADD_CONTACT
+                    var recipientPubKeyHex = Crypto.bytesToHex(Crypto.Bech32.nip19Decode(recipientNpub));
+                    addContact(core, Map.of(Planner.ToolParam.NOSTR_PUB_KEY_HEX.getKey(), recipientPubKeyHex));
+
+                    return true;
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to send friend request: " + e.getMessage(), e);
+                }
             }
         }
     }
