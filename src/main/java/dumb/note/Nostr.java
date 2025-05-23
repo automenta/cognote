@@ -22,7 +22,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -38,7 +37,7 @@ public class Nostr {
     private String publicKeyXOnlyHex;
     private volatile boolean enabled = false;
 
-    public Nostr(Netention.Config cs, Netention.Core core, Consumer<NostrEvent> rawEventConsumer, Supplier<String> selfNpubSupplier) {
+    public Nostr(Netention.Config cs, Netention.Core core, Consumer<NostrEvent> rawEventConsumer) {
         this.cfg = cs.net;
         this.coreRef = core;
         this.rawEventConsumer = rawEventConsumer;
@@ -48,10 +47,8 @@ public class Nostr {
 
     public void loadIdentity() {
         if (cfg.privateKeyBech32 == null || cfg.privateKeyBech32.isEmpty()) {
-            logger.warn("Nostr private key (nsec) not configured.");
-            this.privateKeyRaw = null;
-            this.publicKeyXOnlyHex = null;
-            cfg.publicKeyBech32 = "";
+            logger.warn("Nostr private key not configured.");
+            clearIdentity();
             return;
         }
         try {
@@ -61,11 +58,15 @@ public class Nostr {
             cfg.publicKeyBech32 = Crypto.Bech32.nip19Encode("npub", pubKeyXOnlyRaw);
             logger.info("Nostr identity loaded for pubkey: {}", cfg.publicKeyBech32);
         } catch (Exception e) {
-            logger.error("Failed to load Nostr identity from nsec: {}. Nostr unavailable.", e.getMessage(), e);
-            this.privateKeyRaw = null;
-            this.publicKeyXOnlyHex = null;
-            cfg.publicKeyBech32 = "";
+            logger.error("Nostr identity load failed: {}", e.getMessage(), e);
+            clearIdentity();
         }
+    }
+
+    private void clearIdentity() {
+        this.privateKeyRaw = null;
+        this.publicKeyXOnlyHex = null;
+        cfg.publicKeyBech32 = "";
     }
 
     public String getPrivateKeyBech32() {
@@ -99,7 +100,7 @@ public class Nostr {
             disconnectFromRelays();
         }
         this.enabled = shouldEnable;
-        logger.info("Nostr service {}", this.enabled ? "enabled" : "disabled");
+        logger.info("Nostr service {}.", this.enabled ? "enabled" : "disabled");
     }
 
     private void connectToRelays() {
@@ -127,7 +128,7 @@ public class Nostr {
                             conn.connect();
                             relays.add(conn);
                         } catch (Exception e) {
-                            logger.error("Failed to initiate connection to relay {}: {}", relayUrl, e.getMessage());
+                            logger.error("Relay connection failed for {}: {}", relayUrl, e.getMessage());
                         }
                     }
                 });
@@ -144,7 +145,7 @@ public class Nostr {
             var parsedMessage = NostrUtil.fromJson(message, new TypeReference<List<Object>>() {
             });
             if (parsedMessage.isEmpty()) {
-                logger.warn("Relay {}: RX empty message array.", relayUri);
+                logger.warn("Relay {}: Empty message array.", relayUri);
                 return;
             }
             var type = (String) parsedMessage.get(0);
@@ -156,25 +157,25 @@ public class Nostr {
                             logger.debug("Relay {}: RX EVENT for sub_id '{}'. Kind: {}, ID: {}, Pubkey: {}", relayUri, parsedMessage.get(1), nostrEvent.kind, nostrEvent.id.substring(0, 8), nostrEvent.pubkey.substring(0, 8));
                             if (rawEventConsumer != null) rawEventConsumer.accept(nostrEvent);
                         } catch (Exception mapEx) {
-                            logger.error("Relay {}: Failed to map/process Nostr EVENT for sub_id '{}': {}. Raw: {}", relayUri, parsedMessage.get(1), mapEx.getMessage(), eventMap, mapEx);
+                            logger.error("Relay {}: Event processing failed for sub_id '{}': {}", relayUri, parsedMessage.get(1), mapEx.getMessage(), mapEx);
                         }
-                    } else logger.warn("Relay {}: RX malformed EVENT message: {}", relayUri, message);
+                    } else logger.warn("Relay {}: Malformed EVENT message: {}", relayUri, message);
                 }
                 case "NOTICE" ->
-                        logger.warn("Relay {}: RX NOTICE: {}", relayUri, parsedMessage.size() >= 2 ? parsedMessage.get(1) : message);
+                        logger.warn("Relay {}: NOTICE: {}", relayUri, parsedMessage.size() >= 2 ? parsedMessage.get(1) : message);
                 case "EOSE" ->
-                        logger.info("Relay {}: RX EOSE for sub_id '{}'", relayUri, parsedMessage.size() >= 2 ? parsedMessage.get(1) : "N/A");
+                        logger.info("Relay {}: EOSE for sub_id '{}'", relayUri, parsedMessage.size() >= 2 ? parsedMessage.get(1) : "N/A");
                 case "OK" -> {
                     var eventId = parsedMessage.size() > 1 ? (String) parsedMessage.get(1) : "N/A";
                     var success = parsedMessage.size() > 2 && Boolean.TRUE.equals(parsedMessage.get(2));
                     var okMessage = parsedMessage.size() > 3 ? (String) parsedMessage.get(3) : "";
-                    logger.info("Relay {}: RX OK for event_id '{}'. Success: {}. Message: '{}'", relayUri, eventId.substring(0, Math.min(eventId.length(), 8)), success, okMessage);
+                    logger.info("Relay {}: OK for event_id '{}'. Success: {}. Message: '{}'", relayUri, eventId.substring(0, Math.min(eventId.length(), 8)), success, okMessage);
                 }
                 default ->
-                        logger.debug("Relay {}: RX unhandled/unknown message. Type: '{}', Full: {}", relayUri, type, message.substring(0, Math.min(message.length(), 100)));
+                        logger.debug("Relay {}: Unhandled message type '{}'. Full: {}", relayUri, type, message.substring(0, Math.min(message.length(), 100)));
             }
         } catch (Exception e) {
-            logger.error("Error processing message from relay {}: {}", relayUri, message, e);
+            logger.error("Relay {}: Message processing error: {}", relayUri, e.getMessage(), e);
         }
     }
 
@@ -215,21 +216,24 @@ public class Nostr {
                     case PUBLISH_PROFILE -> publishProfileInternal((Netention.Note) action.p);
                 }
             } catch (Exception e) {
-                logger.error("Error processing Nostr action {} from queue: {}", action.t, e.getMessage(), e);
+                logger.error("Nostr action {} processing error: {}", action.t, e.getMessage(), e);
             }
         }
     }
 
-    private void publishNoteInternal(Netention.Note note) throws GeneralSecurityException, JsonProcessingException {
+    private NostrEvent createBaseNostrEvent() {
         var e = new NostrEvent();
         e.pubkey = this.publicKeyXOnlyHex;
         e.created_at = Instant.now().getEpochSecond();
+        return e;
+    }
+
+    private void publishNoteInternal(Netention.Note note) throws GeneralSecurityException, JsonProcessingException {
+        var e = createBaseNostrEvent();
         e.kind = 1;
         e.content = note.getTitle() + "\n\n" + note.getText();
-        note.tags.stream().filter(t -> {
-                    if (Stream.of(Netention.SystemTag.values()).noneMatch(st -> st.value.equals(t))) return true;
-                    return t.equals(Netention.SystemTag.NOSTR_FEED.value);
-                })
+        note.tags.stream()
+                .filter(t -> Stream.of(Netention.SystemTag.values()).noneMatch(st -> st.value.equals(t)) || t.equals(Netention.SystemTag.NOSTR_FEED.value))
                 .forEach(t -> e.tags.add(List.of("t", t)));
         e.sign(this.privateKeyRaw, Crypto.generateAuxRand());
         broadcastToRelays(NostrUtil.toJson(List.of("EVENT", e)));
@@ -237,9 +241,7 @@ public class Nostr {
     }
 
     private void sendDirectMessageInternal(String recipientNpub, String message) throws Exception {
-        var e = new NostrEvent();
-        e.pubkey = this.publicKeyXOnlyHex;
-        e.created_at = Instant.now().getEpochSecond();
+        var e = createBaseNostrEvent();
         e.kind = 4;
         var recipientXOnlyBytes = Crypto.Bech32.nip19Decode(recipientNpub);
         e.content = Crypto.nip04Encrypt(message, Crypto.getSharedSecretWithRetry(this.privateKeyRaw, recipientXOnlyBytes), recipientXOnlyBytes);
@@ -251,12 +253,10 @@ public class Nostr {
 
     private void publishProfileInternal(Netention.Note profileNote) throws GeneralSecurityException, JsonProcessingException {
         if (!profileNote.tags.contains(Netention.SystemTag.MY_PROFILE.value)) {
-            logger.warn("Attempted to publish non-profile note {} as profile.", profileNote.id);
+            logger.warn("Cannot publish non-profile note {} as profile.", profileNote.id);
             return;
         }
-        var e = new NostrEvent();
-        e.pubkey = this.publicKeyXOnlyHex;
-        e.created_at = Instant.now().getEpochSecond();
+        var e = createBaseNostrEvent();
         e.kind = 0;
         e.content = NostrUtil.toJson(Map.of(
                 "name", (String) profileNote.content.getOrDefault(Netention.ContentKey.PROFILE_NAME.getKey(), ""),
@@ -292,7 +292,6 @@ public class Nostr {
     }
 
     public void requestSync() {
-        //TODO
     }
 
     public int getConnectedRelayCount() {
@@ -356,7 +355,7 @@ public class Nostr {
             if (canRead) {
                 try {
                     send(NostrUtil.toJson(List.of("REQ", "publicfeed-" + UUID.randomUUID().toString().substring(0, 8), Map.of("kinds", List.of(0, 1), "limit", 50))));
-                    if (selfPublicKeyXOnlyHexForReq != null && !selfPublicKeyXOnlyHexForReq.isEmpty()) {
+                    if (!selfPublicKeyXOnlyHexForReq.isEmpty()) {
                         send(NostrUtil.toJson(List.of("REQ", "mydms-" + UUID.randomUUID().toString().substring(0, 8), Map.of("kinds", List.of(4), "#p", List.of(selfPublicKeyXOnlyHexForReq)))));
                     }
                 } catch (Exception e) {
@@ -394,18 +393,22 @@ public class Nostr {
             if (socket != null && !socket.isOutputClosed()) socket.abort();
         }
 
+        private boolean isSocketReady() {
+            return connected && socket != null && !socket.isOutputClosed();
+        }
+
         private void processPendingMessages() {
             String message;
-            while (connected && socket != null && !socket.isOutputClosed() && (message = pendingMessages.poll()) != null) {
+            while (isSocketReady() && (message = pendingMessages.poll()) != null) {
                 socket.sendText(message, true);
             }
         }
 
         public void send(String message) {
             pendingMessages.offer(message);
-            if (connected && socket != null && !socket.isOutputClosed()) processPendingMessages();
+            if (isSocketReady()) processPendingMessages();
             else
-                logger.warn("Relay {}: Message queued as not connected. URI: {}", uri, message.substring(0, Math.min(message.length(), 100)));
+                logger.warn("Relay {}: Message queued (not connected). Msg: {}", uri, message.substring(0, Math.min(message.length(), 100)));
         }
 
         public void close() {
@@ -413,12 +416,12 @@ public class Nostr {
                 try {
                     socket.sendClose(WebSocket.NORMAL_CLOSURE, "Client closing").orTimeout(5, TimeUnit.SECONDS);
                 } catch (Exception e) {
-                    logger.warn("Relay {}: Exception during sendClose: {}", uri, e.getMessage());
+                    logger.warn("Relay {}: sendClose exception: {}", uri, e.getMessage());
                     socket.abort();
                 }
             }
             connected = false;
-            logger.info("Relay {}: Connection explicitly closed.", uri);
+            logger.info("Relay {}: Connection closed.", uri);
         }
     }
 
