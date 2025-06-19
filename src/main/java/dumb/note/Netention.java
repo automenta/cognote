@@ -188,6 +188,22 @@ public class Netention {
             return getContentTypeEnum().getValue();
         }
 
+        public String getStatus() {
+            return (String) content.getOrDefault(ContentKey.STATUS.getKey(), "Idle");
+        }
+
+        public void setStatus(String status) {
+            content.put(ContentKey.STATUS.getKey(), status);
+        }
+
+        public int getPriority() {
+            return (int) content.getOrDefault(ContentKey.PRIORITY.getKey(), 0);
+        }
+
+        public void setPriority(int priority) {
+            content.put(ContentKey.PRIORITY.getKey(), priority);
+        }
+
         public float[] getEmbeddingV1() {
             return embeddingV1;
         }
@@ -344,6 +360,9 @@ public class Netention {
                 if (Netention.PlanStepState.PENDING.equals(currentStep.status) || Netention.PlanStepState.PENDING_RETRY.equals(currentStep.status)) {
                     currentStep.status = Netention.PlanStepState.RUNNING;
                     currentStep.startTime = Instant.now();
+                    currentStep.lastUpdatedAt = currentStep.startTime; // Set lastUpdatedAt
+                    currentStep.addLog("Execution started."); // Add log
+                    exec.markUpdated(); // Mark execution updated
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
                     executeStep(exec, currentStep);
                 }
@@ -355,23 +374,47 @@ public class Netention {
             var anyFailedNoAlternativesOrRetries = exec.steps.stream().anyMatch(s -> Netention.PlanStepState.FAILED.equals(s.status) && s.retryCount >= s.maxRetries && (s.alternatives.isEmpty() || s.currentAlternativeIndex >= s.alternatives.size() - 1));
             var anyRunningOrWaiting = exec.steps.stream().anyMatch(s -> Set.of(Netention.PlanStepState.RUNNING, Netention.PlanStepState.WAITING_FOR_USER, Netention.PlanStepState.PENDING_RETRY).contains(s.status));
 
-            if (allCompleted && !anyRunningOrWaiting) exec.currentStatus = Netention.PlanState.COMPLETED;
-            else if (anyFailedNoAlternativesOrRetries && !anyRunningOrWaiting)
+            Netention.PlanState oldStatus = exec.currentStatus;
+            String oldErrorMessage = exec.errorMessage;
+
+            if (allCompleted && !anyRunningOrWaiting) {
+                exec.currentStatus = Netention.PlanState.COMPLETED;
+                exec.errorMessage = null;
+            } else if (anyFailedNoAlternativesOrRetries && !anyRunningOrWaiting) {
                 exec.currentStatus = Netention.PlanState.FAILED;
-            else if (!anyRunningOrWaiting && exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING.equals(s.status) || Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
+                exec.errorMessage = exec.steps.stream() // Capture error message
+                        .filter(s -> Netention.PlanStepState.FAILED.equals(s.status) && s.result instanceof String)
+                        .map(s -> s.description + ": " + s.result)
+                        .findFirst()
+                        .orElse("Plan failed with no specific step error message.");
+            } else if (!anyRunningOrWaiting && exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING.equals(s.status) || Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
                 exec.currentStatus = Netention.PlanState.STUCK;
+                exec.errorMessage = "Plan is stuck; no runnable steps and not all completed/failed.";
+            }
+            // If still running, but no specific terminal state, clear error message (or keep last known if preferred)
+            else if (Netention.PlanState.RUNNING.equals(exec.currentStatus) || anyRunningOrWaiting) {
+                 exec.errorMessage = null; // Clear error if plan is still active/progressing
             }
 
-            if (!Netention.PlanState.RUNNING.equals(exec.currentStatus) && exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
+
+            if (oldStatus != exec.currentStatus || !Objects.equals(oldErrorMessage, exec.errorMessage)) {
+                exec.markUpdated(); // Mark updated
                 core.notes.get(exec.planNoteId).ifPresent(n -> {
                     n.meta.put(Metadata.PLAN_STATUS.key, exec.currentStatus.name());
                     if (Set.of(Netention.PlanState.COMPLETED, Netention.PlanState.FAILED, Netention.PlanState.STUCK).contains(exec.currentStatus)) {
-                        n.meta.put(Metadata.PLAN_END_TIME.key, Instant.now().toString());
+                        n.meta.put(Metadata.PLAN_END_TIME.key, exec.lastPlanUpdatedAt.toString()); // Use plan's last update time
+                        if (exec.errorMessage != null) {
+                            n.meta.put("plan_error_message", exec.errorMessage);
+                        } else {
+                            n.meta.remove("plan_error_message"); // Remove if no error
+                        }
                     }
                     core.saveNote(n);
                 });
-                if (Set.of(Netention.PlanState.COMPLETED, Netention.PlanState.FAILED, Netention.PlanState.STUCK).contains(exec.currentStatus)) {
-                    active.remove(exec.planNoteId);
+
+                if (Set.of(Netention.PlanState.COMPLETED, Netention.PlanState.FAILED, Netention.PlanState.STUCK).contains(exec.currentStatus) &&
+                    exec.steps.stream().noneMatch(s -> Netention.PlanStepState.PENDING_RETRY.equals(s.status))) {
+                     active.remove(exec.planNoteId);
                 }
                 core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
             }
@@ -430,31 +473,51 @@ public class Netention {
         private void executeStep(PlanExecution planExec, PlanStep step) {
             new Thread(() -> {
                 var currentToolNameStr = step.toolName;
-                if (currentToolNameStr == null) return;
-                var currentToolParams = step.toolParams;
+                if (currentToolNameStr == null) {
+                    step.addLog("Critical Error: Tool name is null for step ID " + step.id);
+                    step.status = Netention.PlanStepState.FAILED;
+                    step.result = "Tool name was null.";
+                    step.endTime = step.lastUpdatedAt = Instant.now();
+                    planExec.markUpdated();
+                    core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
+                    SwingUtilities.invokeLater(() -> processExecution(planExec));
+                    return;
+                }
+                // Make a mutable copy of original toolParams for resolution
+                Map<String, Object> paramsForExecution = step.toolParams != null ? new HashMap<>(step.toolParams) : new HashMap<>();
 
                 if (step.currentAlternativeIndex >= 0 && step.currentAlternativeIndex < step.alternatives.size()) {
                     var alt = step.alternatives.get(step.currentAlternativeIndex);
                     currentToolNameStr = alt.toolName();
-                    currentToolParams = alt.toolParams();
-                    logger.info("Executing alternative {} for step: {}", step.currentAlternativeIndex, step.description);
+                    // Ensure paramsForExecution is replaced, not merged, if alternative has its own params
+                    paramsForExecution = alt.toolParams() != null ? new HashMap<>(alt.toolParams()) : new HashMap<>();
+                    step.addLog("Using alternative " + step.currentAlternativeIndex + ": " + currentToolNameStr);
                 } else {
-                    logger.info("Executing primary for step: {}", step.description);
+                    step.addLog("Using primary tool: " + currentToolNameStr);
                 }
+                step.lastUpdatedAt = Instant.now();
 
                 try {
                     Map<String, Object> resolvedParams = new HashMap<>();
-                    if (currentToolParams != null) {
-                        for (var entry : currentToolParams.entrySet()) {
+                    if (paramsForExecution != null) {
+                        for (var entry : paramsForExecution.entrySet()) {
                             var value = entry.getValue();
                             resolvedParams.put(entry.getKey(), (value instanceof String valStr && valStr.startsWith("$")) ? resolveContextValue(valStr, planExec) : value);
                         }
                     }
+                    // Update step.toolParams to store the *resolved* parameters for viewing
+                    // This replaces the original (potentially unresolved) parameters.
+                    step.toolParams = resolvedParams;
+
+
                     var currentTool = Core.Tool.fromString(currentToolNameStr);
                     if (Core.Tool.USER_INTERACTION.equals(currentTool)) {
                         var callbackKey = planExec.planNoteId + "_" + step.id;
                         planExec.waitingCallbacks.put(callbackKey, step);
                         step.status = Netention.PlanStepState.WAITING_FOR_USER;
+                        step.addLog("Waiting for user interaction: " + resolvedParams.getOrDefault(Netention.ToolParam.PROMPT.getKey(), "Provide input:"));
+                        step.lastUpdatedAt = Instant.now();
+                        planExec.markUpdated();
                         core.fireCoreEvent(Core.CoreEventType.USER_INTERACTION_REQUESTED, Map.of(Netention.ToolParam.PROMPT.getKey(), resolvedParams.getOrDefault(Netention.ToolParam.PROMPT.getKey(), "Provide input:"), Netention.ToolParam.CALLBACK_KEY.getKey(), callbackKey, Netention.ToolParam.PLAN_NOTE_ID.getKey(), planExec.planNoteId));
                         core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
                         return;
@@ -464,27 +527,30 @@ public class Netention {
                     step.result = result;
                     if (step.id != null && result != null) planExec.context.put(step.id + ".result", result);
                     step.status = Netention.PlanStepState.COMPLETED;
-                    logger.info("Step {} (Tool: {}) completed successfully.", step.description, currentToolNameStr);
+                    step.addLog("Completed. Result: " + (result != null ? result.toString().substring(0, Math.min(result.toString().length(), 100)) : "null"));
                 } catch (Exception e) {
-                    logger.error("Step {} (Tool: {}) failed: {}", step.description, currentToolNameStr, e.getMessage(), e);
+                    String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    logger.error("Step {} (Tool: {}) failed: {}", step.description, currentToolNameStr, errorMsg, e);
+                    step.addLog("Failed: " + errorMsg);
                     if (step.currentAlternativeIndex < step.alternatives.size() - 1) {
                         step.currentAlternativeIndex++;
                         step.status = Netention.PlanStepState.PENDING_RETRY;
-                        logger.info("Will try next alternative for step {}", step.description);
+                        step.addLog("Will attempt next alternative.");
                     } else if (step.retryCount < step.maxRetries) {
                         step.retryCount++;
                         step.currentAlternativeIndex = -1;
                         step.status = Netention.PlanStepState.PENDING_RETRY;
-                        logger.info("Will retry (attempt {}) step {}", step.retryCount, step.description);
+                        step.addLog("Will attempt retry #" + step.retryCount + ".");
                     } else {
                         step.status = Netention.PlanStepState.FAILED;
-                        step.result = e.getMessage();
+                        step.result = errorMsg;
                     }
                 } finally {
-                    if (Set.of(Netention.PlanStepState.COMPLETED, Netention.PlanStepState.FAILED).contains(step.status))
-                        step.endTime = Instant.now();
+                    step.endTime = Instant.now();
+                    step.lastUpdatedAt = step.endTime;
+                    planExec.markUpdated();
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, planExec);
-                    SwingUtilities.invokeLater(this::tick);
+                    SwingUtilities.invokeLater(() -> processExecution(planExec));
                 }
             }).start();
         }
@@ -495,11 +561,12 @@ public class Netention {
                 if (step != null) {
                     step.result = result;
                     step.status = (result == null || (result instanceof String s && s.isEmpty())) ? Netention.PlanStepState.FAILED : Netention.PlanStepState.COMPLETED;
-                    logger.info("User interaction for step {} {}. ", step.description, step.status == Netention.PlanStepState.COMPLETED ? "completed" : "failed (empty input)");
+                    step.addLog("User interaction " + (step.status == Netention.PlanStepState.COMPLETED ? "completed" : "failed/empty") + ". Result: " + result);
                     if (step.id != null && result != null) exec.context.put(step.id + ".result", result);
-                    step.endTime = Instant.now();
+                    step.endTime = step.lastUpdatedAt = Instant.now(); // Update timestamps
+                    exec.markUpdated(); // Mark plan as updated
                     core.fireCoreEvent(Core.CoreEventType.PLAN_UPDATED, exec);
-                    SwingUtilities.invokeLater(this::tick);
+                    SwingUtilities.invokeLater(() -> processExecution(exec)); // Continue plan execution
                 }
             });
         }
@@ -520,13 +587,25 @@ public class Netention {
             public String id = UUID.randomUUID().toString();
             public String description;
             public String toolName;
-            public Map<String, Object> toolParams = new HashMap<>();
+            public Map<String, Object> toolParams = new HashMap<>(); // Existing: For "Parameters"
             public Netention.PlanStepState status = Netention.PlanStepState.PENDING;
             public Object result;
             public String outputNoteId;
-            public Instant startTime, endTime;
+            public Instant startTime, endTime; // Existing: endTime for "Last Updated" of terminal steps
+            public Instant lastUpdatedAt; // New: More granular "Last Updated"
+            public List<String> logs = new CopyOnWriteArrayList<>(); // New: For "Logs/Messages"
             public int retryCount = 0;
             public int currentAlternativeIndex = -1;
+
+            // New: Helper method to add logs and update timestamp
+            public void addLog(String message) {
+                if (this.logs == null) { // Defensive initialization
+                    this.logs = new CopyOnWriteArrayList<>();
+                }
+                // Simple log format, could be enhanced
+                this.logs.add("[" + Instant.now().toString().substring(11, 23) + "] " + message);
+                this.lastUpdatedAt = Instant.now();
+            }
         }
 
         public static class PlanExecution {
@@ -534,7 +613,9 @@ public class Netention {
             public final List<PlanStep> steps = new CopyOnWriteArrayList<>();
             public final Map<String, Object> context = new ConcurrentHashMap<>();
             public final Map<String, PlanStep> waitingCallbacks = new ConcurrentHashMap<>();
-            public Netention.PlanState currentStatus = Netention.PlanState.PENDING;
+            public Netention.PlanState currentStatus = Netention.PlanState.PENDING; // Existing: Overall plan status
+            public Instant lastPlanUpdatedAt = Instant.now(); // New: Timestamp for plan's last update
+            public String errorMessage = null; // New: For overall plan error message
 
             public PlanExecution(String planNoteId) {
                 this.planNoteId = planNoteId;
@@ -543,6 +624,12 @@ public class Netention {
             public PlanExecution(String planNoteId, Map<String, Object> initialContext) {
                 this.planNoteId = planNoteId;
                 this.context.putAll(initialContext);
+                this.lastPlanUpdatedAt = Instant.now(); // Initialize on creation
+            }
+
+            // New: Helper method to mark the plan as updated
+            public void markUpdated() {
+                this.lastPlanUpdatedAt = Instant.now();
             }
 
             public Optional<PlanStep> getStepById(String id) {
