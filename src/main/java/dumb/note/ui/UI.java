@@ -15,7 +15,9 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.text.*;
+import javax.swing.text.html.HTML;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
@@ -338,8 +340,37 @@ public class UI {
         private final JTextField searchField = new JTextField(15);
         private final JButton semanticSearchButton;
         private final JComboBox<View> viewSelector;
+        private final JComboBox<SortOption> sortSelector;
         private final JPanel tagFilterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
         private final Set<String> activeTagFilters = new HashSet<>();
+
+        private enum SortOption {
+            UPDATED_DESC("📝 Updated (Newest)"),
+            UPDATED_ASC("📝 Updated (Oldest)"),
+            TITLE_ASC("🔤 Title (A-Z)"),
+            TITLE_DESC("🔤 Title (Z-A)"),
+            PRIORITY_DESC("❗ Priority (High-Low)"),
+            PRIORITY_ASC("❕ Priority (Low-High)"),
+            STATUS_ASC("📊 Status (A-Z)"),
+            STATUS_DESC("📊 Status (Z-A)");
+
+            private final String displayName;
+            SortOption(String displayName) { this.displayName = displayName; }
+            @Override public String toString() { return displayName; }
+
+            public Comparator<Netention.Note> getComparator() {
+                return switch (this) {
+                    case UPDATED_ASC -> Comparator.comparing(n -> n.updatedAt);
+                    case TITLE_ASC -> Comparator.comparing(Netention.Note::getTitle, String.CASE_INSENSITIVE_ORDER);
+                    case TITLE_DESC -> Comparator.comparing(Netention.Note::getTitle, String.CASE_INSENSITIVE_ORDER).reversed();
+                    case PRIORITY_ASC -> Comparator.comparingInt(Netention.Note::getPriority);
+                    case PRIORITY_DESC -> Comparator.comparingInt(Netention.Note::getPriority).reversed();
+                    case STATUS_ASC -> Comparator.comparing(Netention.Note::getStatus, String.CASE_INSENSITIVE_ORDER);
+                    case STATUS_DESC -> Comparator.comparing(Netention.Note::getStatus, String.CASE_INSENSITIVE_ORDER).reversed();
+                    default -> Comparator.comparing((Netention.Note n) -> n.updatedAt).reversed();
+                };
+            }
+        }
 
         public NavPanel(Netention.Core core, App uiRef, Consumer<Netention.Note> ignoredOnShowNote, Consumer<Netention.Note> ignoredOnShowChat, Consumer<Netention.Note> ignoredOnShowConfigNote, Runnable onNewNote, Consumer<Netention.Note> onNewNoteFromTemplate) {
             this.core = core;
@@ -371,9 +402,6 @@ public class UI {
             var topControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
             topControls.add(UIUtil.button("➕", "New Note", onNewNote));
             topControls.add(UIUtil.button("📄", "New from Template", _ -> {
-                // This logic is duplicated in App.populateActions for NEW_FROM_TEMPLATE.
-                // It should ideally be part of the Action itself or a shared method.
-                // For now, keeping it to ensure functionality.
                 var templates = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.TEMPLATE.value));
                 if (templates.isEmpty()) {
                     JOptionPane.showMessageDialog(this, "No templates found.", "🤷 No Templates", JOptionPane.INFORMATION_MESSAGE);
@@ -382,12 +410,24 @@ public class UI {
                 var selectedTemplate = (Netention.Note) JOptionPane.showInputDialog(this, "Select a template:", "📄 New from Template", JOptionPane.PLAIN_MESSAGE, null, templates.toArray(), templates.stream().findFirst().orElse(null));
                 if (selectedTemplate != null) onNewNoteFromTemplate.accept(selectedTemplate);
             }));
+
+            var viewAndSortPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2,0));
+
             viewSelector = new JComboBox<>(View.values());
+            viewSelector.setToolTipText("Select Note View");
             viewSelector.setSelectedItem(View.NOTES);
             viewSelector.addActionListener(_ -> {
                 refreshNotes();
                 updateServiceDependentButtonStates();
             });
+            viewAndSortPanel.add(viewSelector);
+
+            sortSelector = new JComboBox<>(SortOption.values());
+            sortSelector.setToolTipText("Sort Notes By");
+            sortSelector.setSelectedItem(SortOption.UPDATED_DESC);
+            sortSelector.addActionListener(_ -> refreshNotes());
+            viewAndSortPanel.add(sortSelector);
+
 
             var searchPanel = new JPanel(new BorderLayout(5, 0));
             searchPanel.add(new JLabel("🔍"), BorderLayout.WEST);
@@ -401,9 +441,13 @@ public class UI {
             var tagScrollPane = new JScrollPane(tagFilterPanel, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
             tagScrollPane.setPreferredSize(new Dimension(200, 60));
             var topBox = Box.createVerticalBox();
-            Stream.of(topControls, viewSelector, combinedSearchPanel, tagScrollPane).forEach(comp -> {
+            Stream.of(topControls, viewAndSortPanel, combinedSearchPanel, tagScrollPane).forEach(comp -> {
                 comp.setAlignmentX(Component.LEFT_ALIGNMENT);
-                comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, comp.getPreferredSize().height));
+                if (comp.getLayout() instanceof FlowLayout) {
+                     comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, comp.getPreferredSize().height));
+                } else {
+                     comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, comp.getMaximumSize().height));
+                }
                 topBox.add(comp);
             });
             add(topBox, BorderLayout.NORTH);
@@ -550,9 +594,12 @@ public class UI {
             listModel.clear();
 
             var finalFilter = getPredicate();
+            var selectedSortOption = (SortOption) Objects.requireNonNullElse(sortSelector.getSelectedItem(), SortOption.UPDATED_DESC);
+            var comparator = selectedSortOption.getComparator();
+
             var filteredNotes = (notesToDisplay != null ? notesToDisplay.stream().filter(finalFilter)
                     : core.notes.getAll(finalFilter).stream())
-                    .sorted(Comparator.comparing((Netention.Note n) -> n.updatedAt).reversed())
+                    .sorted(comparator)
                     .toList();
 
             filteredNotes.forEach(listModel::addElement);
@@ -654,20 +701,27 @@ public class UI {
         final JTextField titleF = new JTextField(40);
         final JTextPane contentPane = new JTextPane();
         final JTextField tagsF = new JTextField(40);
+        final JComboBox<String> statusComboBox;
+        final JSpinner prioritySpinner;
+
         final JToolBar toolBar = new JToolBar();
         private final Netention.Core core;
-        private final BaseAppFrame appFrame; // For accessing ActionRegistry
+        private final BaseAppFrame appFrame;
         @Nullable
         private final InspectorPanel inspectorPanelRef;
         private final HTMLEditorKit htmlEditorKit = new HTMLEditorKit();
         private final JLabel embStatusL = new JLabel("Embedding: Unknown");
         private final List<DocumentListener> activeDocumentListeners = new ArrayList<>();
-        private final Consumer<Boolean> onDirtyStateChangeCallback; // For parent frame title update
+        private final Consumer<Boolean> onDirtyStateChangeCallback;
         public Runnable onSaveCb;
         public Netention.Note currentNote;
         private boolean userModified = false;
         private boolean readOnlyMode = false;
         private boolean externallyUpdated = false;
+        private JComboBox<String> fontComboBoxField; // Made field for listener access
+        private JComboBox<String> fontSizeComboBoxField; // Made field for listener access
+        private String[] commonFontsField; // Made field for listener access
+
 
         public NoteEditorPanel(Netention.Core core, Netention.Note note, BaseAppFrame appFrame, Runnable onSaveCb, @Nullable InspectorPanel inspectorPanelRef, Consumer<Boolean> onDirtyStateChangeCallback) {
             super(new BorderLayout(5, 5));
@@ -678,26 +732,50 @@ public class UI {
             this.onSaveCb = onSaveCb;
             this.inspectorPanelRef = inspectorPanelRef;
             this.onDirtyStateChangeCallback = onDirtyStateChangeCallback;
-            setupToolbar();
+
+            // Initialize status and priority controls
+            String[] statuses = {"Idle", "In Progress", "Completed", "Blocked"};
+            statusComboBox = new JComboBox<>(statuses);
+            prioritySpinner = new JSpinner(new SpinnerNumberModel(0, -100, 100, 1));
+
+            setupToolbar(); // Toolbar setup needs to happen before form panel if it uses fields initialized here
             add(toolBar, BorderLayout.NORTH);
+
             var formP = new JPanel(new GridBagLayout());
             var gbc = new GridBagConstraints();
             gbc.insets = new Insets(2, 2, 2, 2);
             gbc.fill = GridBagConstraints.HORIZONTAL;
             gbc.anchor = GridBagConstraints.WEST;
+            gbc.insets = new Insets(4, 4, 4, 4); // Slightly increased padding for better visual separation
+
+            // Row 0: Title and Status
             UIUtil.addLabelAndComponent(formP, gbc, 0, "Title:", titleF);
+            titleF.setToolTipText("The title of your note");
+            gbc.gridx = 2;
+            gbc.weightx = 0.2;
+            UIUtil.addLabelAndComponent(formP, gbc, 0, "Status:", statusComboBox, 1, GridBagConstraints.NONE);
+            statusComboBox.setToolTipText("Set the current status of the note (e.g., Idle, In Progress)");
+
+            // Row 1: Tags and Priority
+            gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.8;
             UIUtil.addLabelAndComponent(formP, gbc, 1, "Tags:", tagsF);
-            tagsF.setToolTipText("Comma-separated. Special: " + Netention.SystemTag.TEMPLATE.value + ", " + Netention.SystemTag.GOAL_WITH_PLAN.value);
-            gbc.gridx = 0;
-            gbc.gridy = 2;
-            gbc.gridwidth = 2;
-            gbc.weighty = 1.0;
+            tagsF.setToolTipText("Comma-separated tags. System tags like '" + Netention.SystemTag.TEMPLATE.value + "' or '" + Netention.SystemTag.GOAL_WITH_PLAN.value + "' can enable special features.");
+            gbc.gridx = 2;
+            gbc.weightx = 0.2;
+            UIUtil.addLabelAndComponent(formP, gbc, 1, "Priority:", prioritySpinner, 1, GridBagConstraints.NONE);
+            prioritySpinner.setToolTipText("Set the numerical priority of the note (higher is more important)");
+
+            // Row 2: Content Pane (takes remaining space)
+            gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 4;
+            gbc.weightx = 1.0; gbc.weighty = 1.0;
             gbc.fill = GridBagConstraints.BOTH;
             formP.add(new JScrollPane(contentPane), gbc);
-            gbc.gridy = 3;
-            gbc.weighty = 0.0;
+
+            // Row 3: Embedding Status
+            gbc.gridy = 3; gbc.weighty = 0.0;
             gbc.fill = GridBagConstraints.HORIZONTAL;
             formP.add(embStatusL, gbc);
+
             add(formP, BorderLayout.CENTER);
             populateFields(note);
         }
@@ -706,9 +784,11 @@ public class UI {
             this.readOnlyMode = readOnly;
             if (currentNote != null) {
                 boolean isMyProfileNote = currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
-                boolean editable = !isEffectivelyReadOnly() && !isMyProfileNote; // Corrected logic
+                boolean editable = !isEffectivelyReadOnly() && !isMyProfileNote;
                 titleF.setEditable(editable);
-                tagsF.setEditable(editable); // Apply corrected 'editable'
+                tagsF.setEditable(editable);
+                statusComboBox.setEnabled(editable);
+                prioritySpinner.setEnabled(editable);
                 contentPane.setEditable(!isEffectivelyReadOnly());
                 updateServiceDependentButtonStates();
             }
@@ -721,6 +801,9 @@ public class UI {
                 contentPane.getDocument().removeDocumentListener(dl);
             });
             activeDocumentListeners.clear();
+            // Clear listeners for status and priority separately if they are not DocumentListeners
+            for (ActionListener al : statusComboBox.getActionListeners()) { statusComboBox.removeActionListener(al); }
+            for (javax.swing.event.ChangeListener cl : prioritySpinner.getChangeListeners()) { prioritySpinner.removeChangeListener(cl); }
         }
 
         private void setupDocumentListeners() {
@@ -729,11 +812,19 @@ public class UI {
                 if (!userModified) {
                     userModified = true;
                     if (onDirtyStateChangeCallback != null) onDirtyStateChangeCallback.accept(true);
-                    updateServiceDependentButtonStates(); // Also updates global actions if appFrame.updateActionStates() is called by onDirtyStateChangeCallback
+                    updateServiceDependentButtonStates();
                 }
             });
             Stream.of(titleF, tagsF, contentPane).forEach(tc -> tc.getDocument().addDocumentListener(listener));
             activeDocumentListeners.add(listener);
+
+            ActionListener dirtyingActionListener = e -> {
+                if (!userModified) { userModified = true; if (onDirtyStateChangeCallback != null) onDirtyStateChangeCallback.accept(true); updateServiceDependentButtonStates(); }
+            };
+            statusComboBox.addActionListener(dirtyingActionListener);
+            prioritySpinner.addChangeListener(e -> { // ChangeListener for JSpinner
+                if (!userModified) { userModified = true; if (onDirtyStateChangeCallback != null) onDirtyStateChangeCallback.accept(true); updateServiceDependentButtonStates(); }
+            });
         }
 
         private void setupToolbar() {
@@ -741,61 +832,114 @@ public class UI {
             toolBar.setRollover(true);
             toolBar.setMargin(new Insets(2, 2, 2, 2));
 
-            // Standard text actions
+            // Standard text actions with tooltips ensured by styleButton
             Stream.of(new StyledEditorKit.BoldAction(), new StyledEditorKit.ItalicAction(), new StyledEditorKit.UnderlineAction())
-                    .map(this::styleButton).forEach(toolBar::add);
+                    .map(this::styleButton).forEach(toolBar::add); // styleButton already sets tooltips
+
+            toolBar.add(styleButton(new StrikeThroughAction()));
             toolBar.addSeparator();
 
-            // Custom actions from registry or specific to editor
-            // For MDI App, actions are in appFrame.actionRegistry
-            // For SimpleNote, actions are also in appFrame.actionRegistry
-            if (appFrame.actionRegistry.get(ActionID.SAVE_NOTE) != null) { // Check if action exists (e.g. SimpleNote might not have Publish)
-                toolBar.add(appFrame.actionRegistry.get(ActionID.SAVE_NOTE));
-            }
-            if (appFrame instanceof App && appFrame.actionRegistry.get(ActionID.PUBLISH_NOTE) != null) { // Publish only for MDI App
-                toolBar.add(appFrame.actionRegistry.get(ActionID.PUBLISH_NOTE));
-            }
+            commonFontsField = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
+            String[] displayFonts = Arrays.stream(commonFontsField)
+                                .filter(f -> new Font(f, Font.PLAIN, 12).canDisplay('a'))
+                                .limit(50)
+                                .toArray(String[]::new);
+            fontComboBoxField = new JComboBox<>(displayFonts);
+            fontComboBoxField.setMaximumSize(new Dimension(150, fontComboBoxField.getPreferredSize().height));
+            fontComboBoxField.setToolTipText("Select Font Family"); // Enhanced tooltip
+            fontComboBoxField.addActionListener(e -> {
+                if (contentPane.isEditable() && contentPane.isEnabled()) {
+                    String selectedFont = (String) fontComboBoxField.getSelectedItem();
+                    if (selectedFont != null) {
+                        new StyledEditorKit.FontFamilyAction(selectedFont, selectedFont).actionPerformed(e);
+                    }
+                }
+            });
+            toolBar.add(fontComboBoxField);
 
-            toolBar.add(UIUtil.button("🔄", "Refresh", "Refresh from Source (if changed externally)",
-                            _ -> refreshFromSource())
-                    //.weaken(externallyUpdated && currentNote != null)
-            ); // Example of local button state
+            String[] fontSizes = {"8", "10", "12", "14", "16", "18", "20", "22", "24", "36", "48"};
+            fontSizeComboBoxField = new JComboBox<>(fontSizes);
+            fontSizeComboBoxField.setMaximumSize(new Dimension(60, fontSizeComboBoxField.getPreferredSize().height));
+            fontSizeComboBoxField.setToolTipText("Select Font Size"); // Enhanced tooltip
+            fontSizeComboBoxField.addActionListener(e -> {
+                if (contentPane.isEditable() && contentPane.isEnabled()) {
+                    int selectedSize = Integer.parseInt((String) fontSizeComboBoxField.getSelectedItem());
+                    new StyledEditorKit.FontSizeAction(String.valueOf(selectedSize), selectedSize).actionPerformed(e);
+                }
+            });
+            toolBar.add(fontSizeComboBoxField);
+
+            JButton colorButton = UIUtil.buttonOf(null, "🎨", "Select Text Color", e -> { // Enhanced tooltip
+                if (contentPane.isEditable() && contentPane.isEnabled()) {
+                    Color newColor = JColorChooser.showDialog(this, "Choose Text Color", contentPane.getForeground());
+                    if (newColor != null) {
+                        new StyledEditorKit.ForegroundAction("color", newColor).actionPerformed(e);
+                    }
+                }
+            });
+            toolBar.add(colorButton);
             toolBar.addSeparator();
 
-            if (appFrame instanceof App && appFrame.actionRegistry.get(ActionID.SET_GOAL) != null) {
-                toolBar.add(appFrame.actionRegistry.get(ActionID.SET_GOAL)); // For MDI App only
-            } else { // Fallback for SimpleNote or if action not in registry
-                toolBar.add(UIUtil.button("🎯", "Set Goal", "Make this note a Goal/Plan", _ -> setGoal()));
+            toolBar.add(UIUtil.buttonOf(null, "•", "Insert Unordered List", new InsertListAction(HTML.Tag.UL)));
+            toolBar.add(UIUtil.buttonOf(null, "1.", "Insert Ordered List", new InsertListAction(HTML.Tag.OL)));
+            toolBar.addSeparator();
+
+            Action saveAction = appFrame.actionRegistry.get(ActionID.SAVE_NOTE);
+            if (saveAction != null) {
+                JButton saveButton = new JButton(saveAction);
+                saveButton.setText(""); // Assume icon is set by Action, make it icon-only
+                saveButton.setToolTipText((String)saveAction.getValue(Action.NAME));
+                toolBar.add(saveButton);
+            }
+
+            if (appFrame instanceof App) {
+                Action publishAction = appFrame.actionRegistry.get(ActionID.PUBLISH_NOTE);
+                if (publishAction != null) {
+                    JButton publishButton = new JButton(publishAction);
+                    publishButton.setText(""); // Icon-only
+                    publishButton.setToolTipText((String)publishAction.getValue(Action.NAME));
+                    toolBar.add(publishButton);
+                }
+            }
+
+            toolBar.add(UIUtil.buttonOf(null, "🔄", "Refresh Note", "Refresh content from external changes (if any)", _ -> refreshFromSource()));
+            toolBar.addSeparator();
+
+            Action setGoalAction = appFrame.actionRegistry.get(ActionID.SET_GOAL);
+            if (appFrame instanceof App && setGoalAction != null) {
+                 JButton setGoalButton = new JButton(setGoalAction);
+                 setGoalButton.setText("🎯"); // Use icon text
+                 setGoalButton.setToolTipText((String)setGoalAction.getValue(Action.NAME) + " (Alt: Click icon in toolbar)");
+                 toolBar.add(setGoalButton);
+            } else {
+                toolBar.add(UIUtil.buttonOf(null, "🎯", "Set as Goal/Plan", "Convert this note into a goal with a plan", _ -> setGoal()));
             }
 
             toolBar.addSeparator();
-            toolBar.add(getLlmMenu());
+            JMenu llmMenu = getLlmMenu();
+            llmMenu.setToolTipText("Perform Large Language Model actions on this note");
+            toolBar.add(llmMenu);
         }
 
         private @NotNull JButton styleButton(StyledEditorKit.StyledTextAction action) {
             var btn = new JButton(action);
-            String name = action.toString(), text;
+            String name = action.toString(), text; // Use action's defined name for tooltip
+            Object actionNameValue = action.getValue(Action.NAME);
+            if (actionNameValue != null) name = actionNameValue.toString();
+
             switch (action) {
-                case StyledEditorKit.BoldAction _ -> {
-                    name = "Bold";
-                    text = "B";
-                }
-                case StyledEditorKit.ItalicAction _ -> {
-                    name = "Italic";
-                    text = "I";
-                }
-                case StyledEditorKit.UnderlineAction _ -> {
-                    name = "Underline";
-                    text = "U";
-                }
+                case StyledEditorKit.BoldAction _ -> text = "B";
+                case StyledEditorKit.ItalicAction _ -> text = "I";
+                case StyledEditorKit.UnderlineAction _ -> text = "U";
+                case StrikeThroughAction _ -> text = "S";
                 default -> text = name.length() > 0 ? name.substring(0, 1) : "?";
             }
             btn.setText(text);
-            btn.setToolTipText(name);
+            btn.setToolTipText(name); // Set tooltip from action name
             return btn;
         }
 
-        private void setGoal() { // This is called by toolbar button or menu action
+        private void setGoal() {
             if (currentNote == null || isEffectivelyReadOnly()) return;
             updateNoteFromFields();
             if (!currentNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value)) {
@@ -822,13 +966,145 @@ public class UI {
             Stream.of(LLMAction.values()).forEach(actionEnum ->
                     llmMenu.add(UIUtil.menuItem(actionEnum.label, actionEnum.name(), this::handleLLMActionFromToolbar)));
 
-            // Enable/disable menu based on LLM readiness and note state
             Timer t = new Timer(500, e -> llmMenu.setEnabled(currentNote != null && !isEffectivelyReadOnly() && core.lm.isReady()));
-            t.setRepeats(false); // Check once after a short delay
+            t.setRepeats(false);
             t.start();
-            // More robust: listen to core events for LLM status change or use AppAction's enabled calculator
+
+            contentPane.addCaretListener(ce -> {
+                if (!contentPane.isFocusOwner()) return;
+                SwingUtilities.invokeLater(() -> {
+                    AttributeSet attrs = contentPane.getCharacterAttributes();
+                    String fontName = StyleConstants.getFontFamily(attrs);
+                    if (fontName != null && fontComboBoxField != null) {
+                        boolean found = false;
+                        for (int i = 0; i < fontComboBoxField.getItemCount(); i++) {
+                            if (fontComboBoxField.getItemAt(i).equalsIgnoreCase(fontName)) {
+                                fontComboBoxField.setSelectedIndex(i);
+                                found = true;
+                                break;
+                            }
+                        }
+                         if (!found && commonFontsField != null && Arrays.asList(commonFontsField).contains(fontName)) {
+                         }
+                    }
+
+                    Integer fontSize = StyleConstants.getFontSize(attrs);
+                    if (fontSize != null && fontSizeComboBoxField != null) {
+                         boolean found = false;
+                        for (int i = 0; i < fontSizeComboBoxField.getItemCount(); i++) {
+                            if (fontSizeComboBoxField.getItemAt(i).equals(String.valueOf(fontSize))) {
+                                fontSizeComboBoxField.setSelectedIndex(i);
+                                found = true;
+                                break;
+                            }
+                        }
+                         if (!found) {
+                         }
+                    }
+                });
+            });
             return llmMenu;
         }
+
+        static class StrikeThroughAction extends StyledEditorKit.StyledTextAction {
+            public StrikeThroughAction() {
+                super("font-strikethrough");
+                putValue(Action.NAME, "Strikethrough");
+            }
+
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                JEditorPane editor = getEditor(e);
+                if (editor != null) {
+                    StyledEditorKit kit = getStyledEditorKit(editor);
+                    MutableAttributeSet attr = kit.getInputAttributes();
+                    boolean strike = !StyleConstants.isStrikeThrough(attr);
+                    SimpleAttributeSet sas = new SimpleAttributeSet();
+                    StyleConstants.setStrikeThrough(sas, strike);
+                    setCharacterAttributes(editor, sas, false);
+                }
+            }
+             @Override
+            public String toString() { return "Strikethrough"; }
+        }
+
+        static class InsertListAction extends AbstractAction {
+            private final HTML.Tag listTag;
+
+            public InsertListAction(HTML.Tag listTag) {
+                super(listTag == HTML.Tag.UL ? "• Unordered List" : "1. Ordered List");
+                this.listTag = listTag;
+                putValue(SHORT_DESCRIPTION, "Insert " + (listTag == HTML.Tag.UL ? "Unordered" : "Ordered") + " List");
+            }
+
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                JEditorPane editor = null;
+                Object source = e.getSource();
+                 if (source instanceof AbstractButton) { // Check if source is a button
+                    Container parent = ((AbstractButton)source).getParent(); // Get toolbar
+                    while (parent != null && !(parent instanceof NoteEditorPanel)) { // Find NoteEditorPanel
+                        if (parent.getParent() == null) { // Avoid infinite loop if not found
+                             parent = null; break;
+                        }
+                        parent = parent.getParent();
+                    }
+                    if (parent instanceof NoteEditorPanel nep) {
+                        editor = nep.contentPane;
+                    }
+                }
+
+
+                if (editor instanceof JTextPane && editor.isEditable() && editor.isEnabled()) {
+                    JTextPane textPane = (JTextPane) editor;
+                    NoteEditorPanel nep = (NoteEditorPanel) SwingUtilities.getAncestorOfClass(NoteEditorPanel.class, textPane);
+
+                    if (!(textPane.getEditorKit() instanceof HTMLEditorKit)) {
+                        if (JOptionPane.showConfirmDialog(textPane,
+                                "To insert a list, the note content type will be set to HTML. Continue?",
+                                "Switch to HTML", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+                            if (nep != null && nep.currentNote != null) {
+                                nep.currentNote.setContentType(Netention.ContentType.TEXT_HTML.getValue());
+                                textPane.setEditorKit(nep.htmlEditorKit);
+                            } else { return; }
+                        } else { return; }
+                    }
+
+                    HTMLEditorKit kit = (HTMLEditorKit) textPane.getEditorKit();
+                    Document doc = textPane.getDocument();
+                    int selectionStart = textPane.getSelectionStart();
+                    int selectionEnd = textPane.getSelectionEnd();
+
+                    String listStartTag = "<" + listTag.toString() + ">"; // Use toString() for HTML.Tag
+                    String listEndTag = "</" + listTag.toString() + ">";
+                    String listItemTag = "<li></li>";
+
+                    try {
+                        if (selectionStart == selectionEnd) {
+                            kit.insertHTML((HTMLDocument) doc, selectionStart, listStartTag + listItemTag + listEndTag, 0, 0, listTag);
+                        } else {
+                            String selectedText = doc.getText(selectionStart, selectionEnd - selectionStart);
+                            String[] lines = selectedText.split("\\r?\\n");
+                            StringBuilder listItems = new StringBuilder();
+                            for (String line : lines) {
+                                listItems.append("<li>").append(line.isEmpty() ? "&nbsp;" : line).append("</li>"); // Handle empty lines
+                            }
+                            String htmlToInsert = listStartTag + listItems.toString() + listEndTag;
+                            if (doc instanceof AbstractDocument) {
+                                ((AbstractDocument)doc).replace(selectionStart, selectionEnd - selectionStart, htmlToInsert, null);
+                            } else {
+                                textPane.select(selectionStart, selectionEnd);
+                                textPane.replaceSelection(htmlToInsert);
+                            }
+                        }
+                    } catch (Exception ex) {
+                        logger.warn("Error inserting list: {}", ex.getMessage());
+                        JOptionPane.showMessageDialog(textPane, "Could not insert list: " + ex.getMessage(), "List Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            }
+        }
+
 
         private void handleLLMActionFromToolbar(ActionEvent e) {
             if (currentNote == null || !core.lm.isReady() || isEffectivelyReadOnly()) {
@@ -971,7 +1247,9 @@ public class UI {
                 titleF.setText("");
                 contentPane.setText("Select or create a note.");
                 tagsF.setText("");
-                Stream.of(titleF, contentPane, tagsF).forEach(c -> c.setEnabled(false));
+                statusComboBox.setSelectedItem("Idle");
+                prioritySpinner.setValue(0);
+                Stream.of(titleF, contentPane, tagsF, statusComboBox, prioritySpinner).forEach(c -> c.setEnabled(false));
                 embStatusL.setText("No note loaded.");
             } else {
                 titleF.setText(currentNote.getTitle());
@@ -979,17 +1257,31 @@ public class UI {
                 contentPane.setText(currentNote.getText());
                 contentPane.setCaretPosition(0);
                 tagsF.setText(String.join(", ", currentNote.tags));
+                statusComboBox.setSelectedItem(currentNote.getStatus());
+                prioritySpinner.setValue(currentNote.getPriority());
                 updateEmbeddingStatus();
 
                 boolean isMyProfileNote = currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
                 boolean effectivelyRO = isEffectivelyReadOnly();
-                boolean editable = !effectivelyRO && !isMyProfileNote; // Corrected logic
+                boolean editable = !effectivelyRO && !isMyProfileNote;
 
                 titleF.setEditable(editable);
-                tagsF.setEditable(editable); // Apply corrected 'editable'
-                contentPane.setEditable(!effectivelyRO);
+                tagsF.setEditable(editable);
+                contentPane.setEditable(!effectivelyRO); // Content always editable if not system RO
+                statusComboBox.setEnabled(editable);
+                prioritySpinner.setEnabled(editable);
 
-                Stream.of(titleF, contentPane, tagsF).forEach(c -> c.setEnabled(true));
+                Stream.of(titleF, contentPane, tagsF, statusComboBox, prioritySpinner).forEach(c -> c.setEnabled(true)); // Enable all if note loaded
+                // Then disable specific ones if conditions met
+                if (effectivelyRO) { // If effectively read-only, disable content related ones beyond system tags
+                     contentPane.setEditable(false);
+                }
+                if (isMyProfileNote) { // My profile note has specific fields non-editable
+                    titleF.setEditable(false); // Title often derived from pubkey or fixed
+                    tagsF.setEditable(false); // Tags are system-managed for profile
+                    statusComboBox.setEnabled(false);
+                    prioritySpinner.setEnabled(false);
+                }
             }
 
             userModified = false;
@@ -1003,9 +1295,11 @@ public class UI {
             this.currentNote = note;
             updateEmbeddingStatus();
             if (!userModified) {
-                clearDocumentListeners();
+                clearDocumentListeners(); // Temporarily clear to prevent firing listeners
                 tagsF.setText(String.join(", ", currentNote.tags));
-                setupDocumentListeners();
+                statusComboBox.setSelectedItem(currentNote.getStatus());
+                prioritySpinner.setValue(currentNote.getPriority());
+                setupDocumentListeners(); // Re-attach
             }
             updateServiceDependentButtonStates();
         }
@@ -1040,16 +1334,7 @@ public class UI {
         }
 
         public void updateServiceDependentButtonStates() {
-            // This method updates states of toolbar buttons created *within* NoteEditorPanel.
-            // Global actions (Save, Publish etc. from menu) are updated by BaseAppFrame.updateActionStates().
-            boolean editable = currentNote != null && !isEffectivelyReadOnly();
-            // Example for locally managed buttons:
-            // refreshButton.setEnabled(externallyUpdated && currentNote != null);
-            // llmMenu.setEnabled(editable && core.lm.isReady() && currentNote != null);
-            // This can be simplified if all toolbar buttons are Actions from the registry.
-            // For now, the existing logic for toolbar buttons (if any are still locally managed) can remain.
-            // The global actions on the toolbar (Save, Publish) will be updated by appFrame.updateActionStates().
-            appFrame.updateActionStates(); // Ensure global actions are also updated if editor state changes affect them
+            appFrame.updateActionStates();
         }
 
         public Netention.Note getCurrentNote() {
@@ -1064,15 +1349,20 @@ public class UI {
             boolean isMyProfile = currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value);
             boolean effectivelyRO = isEffectivelyReadOnly();
 
-            if (!effectivelyRO && !isMyProfile) {
-                currentNote.setTitle(titleF.getText());
-                currentNote.tags.clear();
-                Stream.of(tagsF.getText().split(","))
-                        .map(String::trim).filter(s -> !s.isEmpty())
-                        .forEach(currentNote.tags::add);
+            if (!isMyProfile) { // Profile fields might be non-editable or handled differently
+                if (titleF.isEditable()) currentNote.setTitle(titleF.getText());
+                if (tagsF.isEditable()) {
+                    currentNote.tags.clear();
+                    Stream.of(tagsF.getText().split(","))
+                            .map(String::trim).filter(s -> !s.isEmpty())
+                            .forEach(currentNote.tags::add);
+                }
+                if (statusComboBox.isEnabled()) currentNote.setStatus((String) statusComboBox.getSelectedItem());
+                if (prioritySpinner.isEnabled()) currentNote.setPriority((Integer) prioritySpinner.getValue());
             }
 
-            if (!effectivelyRO) {
+
+            if (contentPane.isEditable()) { // Content is generally editable unless system RO
                 var doc = contentPane.getDocument();
                 if (Netention.ContentType.TEXT_HTML.getValue().equals(contentPane.getContentType())) {
                     var sw = new StringWriter();
@@ -1081,14 +1371,14 @@ public class UI {
                         currentNote.setHtmlText(sw.toString());
                     } catch (IOException | BadLocationException e) {
                         logger.warn("Error writing HTML content, falling back to plain text: {}", e.getMessage());
-                        currentNote.setText(contentPane.getText());
+                        currentNote.setText(contentPane.getText()); // Fallback
                     }
                 } else {
                     try {
                         currentNote.setText(doc.getText(0, doc.getLength()));
                     } catch (BadLocationException e) {
                         logger.warn("Error getting plain text content: {}", e.getMessage());
-                        currentNote.setText("Error reading content: " + e.getMessage());
+                        currentNote.setText("Error reading content: " + e.getMessage()); // Fallback
                     }
                 }
             }
@@ -1104,15 +1394,18 @@ public class UI {
         }
 
         private void saveNoteInternal(boolean andPublish) {
-            if (currentNote != null && isEffectivelyReadOnly()) {
-                JOptionPane.showMessageDialog(this, "Cannot save read-only items.", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
+            if (currentNote != null && isEffectivelyReadOnly() && !currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value) /* Allow saving MyProfile content even if some fields are RO */) {
+                 // Check if it's a system note that's generally read-only, but not the profile note which has editable content part.
+                if (isSystemReadOnly() && !currentNote.tags.contains(Netention.SystemTag.MY_PROFILE.value)) {
+                    JOptionPane.showMessageDialog(this, "Cannot save read-only system items.", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
             }
             updateNoteFromFields();
 
             var savedNote = core.saveNote(this.currentNote);
             if (savedNote != null) {
-                this.currentNote = savedNote;
+                this.currentNote = savedNote; // Update currentNote to the saved one (might have new ID, updatedAt)
                 userModified = false;
                 setExternallyUpdated(false);
                 if (onDirtyStateChangeCallback != null) onDirtyStateChangeCallback.accept(false);
@@ -1123,7 +1416,8 @@ public class UI {
                         JOptionPane.showMessageDialog(this, "Nostr not enabled. Note saved locally.", "Nostr Disabled", JOptionPane.WARNING_MESSAGE);
                 }
                 if (onSaveCb != null) onSaveCb.run();
-                populateFields(this.currentNote);
+                populateFields(this.currentNote); // Repopulate with the (potentially new) note data
+                if (inspectorPanelRef != null) inspectorPanelRef.setContextNote(this.currentNote);
             } else {
                 JOptionPane.showMessageDialog(this, "Failed to save note.", "Error", JOptionPane.ERROR_MESSAGE);
             }
@@ -1132,9 +1426,8 @@ public class UI {
         public void setExternallyUpdated(boolean updated) {
             this.externallyUpdated = updated;
             updateServiceDependentButtonStates();
-            // Also update specific refresh button if it's managed locally
             for (Component c : toolBar.getComponents()) {
-                if (c instanceof JButton btn && "Refresh".equals(btn.getToolTipText())) {
+                if (c instanceof JButton btn && "Refresh".equals(btn.getToolTipText())) { // Tooltip check
                     btn.setEnabled(updated && currentNote != null);
                 }
             }
@@ -1145,7 +1438,7 @@ public class UI {
             var latestNoteOpt = core.notes.get(currentNote.id);
             if (latestNoteOpt.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Note no longer exists in store.", "Error", JOptionPane.ERROR_MESSAGE);
-                return; // Note deleted from backend
+                return;
             }
             var latestNote = latestNoteOpt.get();
             if (userModified) {
@@ -1154,8 +1447,8 @@ public class UI {
                         "Confirm Refresh", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (choice == JOptionPane.NO_OPTION) return;
             }
-            populateFields(latestNote); // This will reset userModified and externallyUpdated
-            if (inspectorPanelRef != null) inspectorPanelRef.setContextNote(latestNote); // Update inspector too
+            populateFields(latestNote);
+            if (inspectorPanelRef != null) inspectorPanelRef.setContextNote(latestNote);
         }
 
         private enum LLMAction {
@@ -1172,17 +1465,16 @@ public class UI {
         private final Netention.Core core;
         private final Netention.Note note;
         private final String partnerNpub;
-        private final JTextPane chatPane; // Changed from JTextArea
+        private final JTextPane chatPane;
         private final JTextField messageInput = new JTextField(40);
         private final DateTimeFormatter chatTSFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
-        private final DateTimeFormatter chatDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault()); // NEW
+        private final DateTimeFormatter chatDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
         private final Consumer<Netention.Core.CoreEvent> coreEventListener;
         private final Consumer<String> statusUpdater;
 
-        // Styles for messages
-        private final SimpleAttributeSet userMessageStyle; // NEW
-        private final SimpleAttributeSet contactMessageStyle; // NEW
-        private final SimpleAttributeSet timestampStyle; // NEW
+        private final SimpleAttributeSet userMessageStyle;
+        private final SimpleAttributeSet contactMessageStyle;
+        private final SimpleAttributeSet timestampStyle;
 
         public ChatPanel(Netention.Core core, Netention.Note note, String partnerNpub, Consumer<String> statusUpdater) {
             super(new BorderLayout(5, 5));
@@ -1192,23 +1484,21 @@ public class UI {
             this.partnerNpub = partnerNpub;
             this.statusUpdater = statusUpdater;
 
-            chatPane = new JTextPane(); // Changed
+            chatPane = new JTextPane();
             chatPane.setEditable(false);
-            chatPane.setMargin(new Insets(5, 5, 5, 5)); // Add some padding
-            chatPane.setContentType("text/html"); // Allow HTML for basic styling if needed, though StyledDocument is preferred
-            // chatPane.setEditorKit(new StyledEditorKit()); // Use StyledEditorKit for StyledDocument
+            chatPane.setMargin(new Insets(5, 5, 5, 5));
+            chatPane.setContentType("text/html");
 
-            // NEW: Define styles
             userMessageStyle = new SimpleAttributeSet();
             StyleConstants.setAlignment(userMessageStyle, StyleConstants.ALIGN_RIGHT);
-            StyleConstants.setBackground(userMessageStyle, new Color(200, 220, 255)); // Light blue
+            StyleConstants.setBackground(userMessageStyle, new Color(200, 220, 255));
             StyleConstants.setLeftIndent(userMessageStyle, 0.2f);
             StyleConstants.setRightIndent(userMessageStyle, 0.05f);
             StyleConstants.setLineSpacing(userMessageStyle, 0.1f);
 
             contactMessageStyle = new SimpleAttributeSet();
             StyleConstants.setAlignment(contactMessageStyle, StyleConstants.ALIGN_LEFT);
-            StyleConstants.setBackground(contactMessageStyle, new Color(230, 230, 230)); // Light gray
+            StyleConstants.setBackground(contactMessageStyle, new Color(230, 230, 230));
             StyleConstants.setLeftIndent(contactMessageStyle, 0.05f);
             StyleConstants.setRightIndent(contactMessageStyle, 0.2f);
             StyleConstants.setLineSpacing(contactMessageStyle, 0.1f);
@@ -1219,7 +1509,7 @@ public class UI {
             StyleConstants.setItalic(timestampStyle, true);
 
 
-            add(new JScrollPane(chatPane), BorderLayout.CENTER); // Changed
+            add(new JScrollPane(chatPane), BorderLayout.CENTER);
             var inputP = new JPanel(new BorderLayout(5, 0));
             inputP.add(messageInput, BorderLayout.CENTER);
             inputP.add(UIUtil.button("➡️", "Send", _ -> sendMessage()), BorderLayout.EAST);
@@ -1253,19 +1543,18 @@ public class UI {
 
         @SuppressWarnings("unchecked")
         public void loadMessages() {
-            chatPane.setText(""); // Changed
-            StyledDocument doc = chatPane.getStyledDocument(); // NEW
+            chatPane.setText("");
+            StyledDocument doc = chatPane.getStyledDocument();
             core.notes.get(this.note.id).ifPresent(freshNote -> {
                 var messages = (List<Map<String, String>>) freshNote.content.getOrDefault(Netention.ContentKey.MESSAGES.getKey(), Collections.emptyList());
-                // Sort messages by timestamp before displaying
                 messages.stream()
                         .sorted(Comparator.comparing(m -> Instant.parse(m.get("timestamp"))))
-                        .forEach(m -> formatAndAppendMsg(doc, m)); // Changed
+                        .forEach(m -> formatAndAppendMsg(doc, m));
             });
             scrollToBottom();
         }
 
-        private void formatAndAppendMsg(StyledDocument doc, Map<String, String> m) { // Changed signature
+        private void formatAndAppendMsg(StyledDocument doc, Map<String, String> m) {
             var senderNpubHex = m.get("sender");
             var text = m.get("text");
             var timestampStr = m.get("timestamp");
@@ -1278,7 +1567,6 @@ public class UI {
                 if (isUserMessage) {
                     displayName = "Me";
                 } else {
-                    // Try to find contact name
                     displayName = core.notes.getAll(n -> n.tags.contains(Netention.SystemTag.CONTACT.value) &&
                                     senderNpubHex.equals(n.meta.get(Netention.Metadata.NOSTR_PUB_KEY_HEX.key)))
                             .stream().findFirst()
@@ -1286,30 +1574,22 @@ public class UI {
                             .orElseGet(() -> senderNpubHex.substring(0, Math.min(senderNpubHex.length(), 8)) + "...");
                 }
 
-                SimpleAttributeSet currentStyle = isUserMessage ? userMessageStyle : contactMessageStyle; // NEW
-                SimpleAttributeSet paragraphStyle = new SimpleAttributeSet(currentStyle); // NEW: Create a new set for paragraph attributes
-                StyleConstants.setSpaceBelow(paragraphStyle, 5); // Add space between messages
+                SimpleAttributeSet currentStyle = isUserMessage ? userMessageStyle : contactMessageStyle;
+                SimpleAttributeSet paragraphStyle = new SimpleAttributeSet(currentStyle);
+                StyleConstants.setSpaceBelow(paragraphStyle, 5);
 
                 String formattedTimestamp = chatTSFormatter.format(timestamp);
-                String fullTimestamp = chatDateFormatter.format(timestamp); // For potential hover
 
-                // Append message content
-                doc.insertString(doc.getLength(), text + "\n", currentStyle); // Changed
-                // Append timestamp
-                doc.insertString(doc.getLength(), formattedTimestamp + "\n\n", timestampStyle); // Changed
+                doc.insertString(doc.getLength(), text + "\n", currentStyle);
+                doc.insertString(doc.getLength(), formattedTimestamp + "\n\n", timestampStyle);
 
-                // Apply paragraph style to the entire message block (text + timestamp)
-                doc.setParagraphAttributes(doc.getLength() - (formattedTimestamp.length() + text.length() + 3), (formattedTimestamp.length() + text.length() + 3), paragraphStyle, false); // Changed
-
-                // Add tooltip for full timestamp (more complex, requires custom JTextPane or MouseMotionListener)
-                // For now, just ensure timestamp is visible.
-                // This would require a custom JTextPane that can map character positions to tooltips.
-                // For simplicity, I'm omitting the hover tooltip for now, as it's a significant complexity increase.
+                doc.setParagraphAttributes(doc.getLength() - (formattedTimestamp.length() + text.length() + 3), (formattedTimestamp.length() + text.length() + 3), paragraphStyle, false);
 
             } catch (Exception e) {
                 logger.warn("Failed to parse chat message timestamp or format message: {}", m, e);
             }
         }
+
 
         private void sendMessage() {
             var textToSend = messageInput.getText().trim();
@@ -1320,7 +1600,7 @@ public class UI {
             }
             core.net.sendDirectMessage(partnerNpub, textToSend);
             core.notes.get(this.note.id).ifPresent(currentChatNote -> {
-                var messageEntry = Map.of("sender", core.net.getPublicKeyXOnlyHex(), "timestamp", Instant.now().toString(), "text", textToSend); // Use hex for sender
+                var messageEntry = Map.of("sender", core.net.getPublicKeyXOnlyHex(), "timestamp", Instant.now().toString(), "text", textToSend);
                 @SuppressWarnings("unchecked")
                 var messagesList = (List<Map<String, String>>) currentChatNote.content.computeIfAbsent(Netention.ContentKey.MESSAGES.getKey(), k -> new ArrayList<Map<String, String>>());
                 messagesList.add(messageEntry);
@@ -1331,7 +1611,7 @@ public class UI {
         }
 
         private void scrollToBottom() {
-            chatPane.setCaretPosition(chatPane.getDocument().getLength()); // Changed
+            chatPane.setCaretPosition(chatPane.getDocument().getLength());
         }
 
         public Netention.Note getChatNote() {
@@ -1351,12 +1631,15 @@ public class UI {
         private final DefaultListModel<Netention.Note> relatedNotesListModel = new DefaultListModel<>();
         private final JList<Netention.Note> relatedNotesJList;
         private final PlanStepsTableModel planStepsTableModel;
+        private final JLabel overallPlanStatusLabel;
+        private final JButton executePlanButton;
         private final DefaultTreeModel planDepsTreeModel;
         private final JTree planDepsTree;
         private final DefaultListModel<ActionableItem> actionableItemsListModel = new DefaultListModel<>();
         private final JList<ActionableItem> actionableItemsJList;
         private final App uiRef;
         Netention.Note contextNote;
+        private final DateTimeFormatter planTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
         public InspectorPanel(Netention.Core core, App uiRef, Consumer<Netention.Note> noteDisplayCallback, Function<String, List<ActionableItem>> actionableItemsProvider) {
             super(new BorderLayout(5, 5));
@@ -1420,17 +1703,45 @@ public class UI {
             planPanel = new JPanel(new BorderLayout());
             planStepsTableModel = new PlanStepsTableModel();
             var planStepsTable = new JTable(planStepsTableModel);
+
+            var tooltipRenderer = new TooltipCellRenderer();
+            int paramColIdx = Arrays.asList(planStepsTableModel.columnNames).indexOf("Parameters");
+            int resultColIdx = Arrays.asList(planStepsTableModel.columnNames).indexOf("Result");
+            int logsColIdx = Arrays.asList(planStepsTableModel.columnNames).indexOf("Logs/Messages");
+
+            if (paramColIdx != -1) planStepsTable.getColumnModel().getColumn(paramColIdx).setCellRenderer(tooltipRenderer);
+            if (resultColIdx != -1) planStepsTable.getColumnModel().getColumn(resultColIdx).setCellRenderer(tooltipRenderer);
+            if (logsColIdx != -1) planStepsTable.getColumnModel().getColumn(logsColIdx).setCellRenderer(tooltipRenderer);
+
             planStepsTable.getColumnModel().getColumn(0).setPreferredWidth(150);
-            planStepsTable.getColumnModel().getColumn(1).setPreferredWidth(50);
+            planStepsTable.getColumnModel().getColumn(1).setPreferredWidth(80);
+            planStepsTable.getColumnModel().getColumn(2).setPreferredWidth(100);
+            if (paramColIdx != -1) planStepsTable.getColumnModel().getColumn(paramColIdx).setPreferredWidth(150);
+            if (resultColIdx != -1) planStepsTable.getColumnModel().getColumn(resultColIdx).setPreferredWidth(150);
+            if (logsColIdx != -1) planStepsTable.getColumnModel().getColumn(logsColIdx).setPreferredWidth(200);
+            int lastUpdatedColIdx = Arrays.asList(planStepsTableModel.columnNames).indexOf("Last Updated");
+            if (lastUpdatedColIdx != -1) planStepsTable.getColumnModel().getColumn(lastUpdatedColIdx).setPreferredWidth(80);
+            planStepsTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+
             planPanel.add(new JScrollPane(planStepsTable), BorderLayout.CENTER);
-            planPanel.add(UIUtil.button("▶️", "Execute/Update Plan", _ -> {
+
+            var planControlsPanel = new JPanel(new BorderLayout(5, 5));
+            overallPlanStatusLabel = new JLabel("Plan Status: Idle");
+            overallPlanStatusLabel.setBorder(new EmptyBorder(2, 5, 2, 5));
+            planControlsPanel.add(overallPlanStatusLabel, BorderLayout.CENTER);
+
+            executePlanButton = UIUtil.button("▶️", "Execute Plan", _ -> {
                 if (contextNote != null) {
-                    if (!contextNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value))
+                    if (!contextNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value)) {
                         contextNote.tags.add(Netention.SystemTag.GOAL_WITH_PLAN.value);
-                    core.saveNote(contextNote);
+                        core.saveNote(contextNote);
+                    }
                     core.planner.execute(contextNote);
                 }
-            }), BorderLayout.SOUTH);
+            });
+            planControlsPanel.add(executePlanButton, BorderLayout.EAST);
+            planPanel.add(planControlsPanel, BorderLayout.SOUTH);
+
             tabbedPane.addTab(Tab.PLAN.title, planPanel);
 
             var planDependenciesPanel = new JPanel(new BorderLayout());
@@ -1470,7 +1781,7 @@ public class UI {
             switch (event.type()) {
                 case PLAN_UPDATED:
                     if (event.data() instanceof Netention.Planner.PlanExecution exec && contextNote != null && contextNote.id.equals(exec.planNoteId)) {
-                        planStepsTableModel.setPlanExecution(exec);
+                        updateOverallPlanStatusLabel(exec);
                         loadPlanDependencies();
                     }
                     break;
@@ -1488,7 +1799,10 @@ public class UI {
         public void switchToPlanTab() {
             if (contextNote != null) {
                 tabbedPane.setSelectedComponent(planPanel);
-                core.planner.getPlanExecution(contextNote.id).ifPresentOrElse(planStepsTableModel::setPlanExecution, () -> planStepsTableModel.setPlanExecution(null));
+                core.planner.getPlanExecution(contextNote.id).ifPresentOrElse(
+                    this::updateOverallPlanStatusLabel, // Ensure button state is updated too
+                    () -> updateOverallPlanStatusLabel(null)
+                );
             }
         }
 
@@ -1501,7 +1815,7 @@ public class UI {
                 if (tags.length() > 35) tags = tags.substring(0, 32) + "...";
 
                 String pubKeyInfo = "";
-                boolean isNostrEntity = note.tags.contains(Netention.SystemTag.NOSTR_CONTACT.value) || note.tags.contains(Netention.SystemTag.NOSTR_FEED.value) || note.tags.contains(Netention.SystemTag.CHAT.value); // Corrected logic
+                boolean isNostrEntity = note.tags.contains(Netention.SystemTag.NOSTR_CONTACT.value) || note.tags.contains(Netention.SystemTag.NOSTR_FEED.value) || note.tags.contains(Netention.SystemTag.CHAT.value);
                 if (isNostrEntity && note.meta.get(Netention.Metadata.NOSTR_PUB_KEY.key) instanceof String npub) {
                     pubKeyInfo = "<br>PubKey: " + npub.substring(0, Math.min(npub.length(), 12)) + "...";
                     copyPubKeyButton.setVisible(true);
@@ -1515,7 +1829,10 @@ public class UI {
                 loadLinks();
                 loadRelatedNotes();
                 loadPlanDependencies();
-                core.planner.getPlanExecution(note.id).ifPresentOrElse(planStepsTableModel::setPlanExecution, () -> planStepsTableModel.setPlanExecution(null));
+                core.planner.getPlanExecution(note.id).ifPresentOrElse(
+                        this::updateOverallPlanStatusLabel,
+                        () -> updateOverallPlanStatusLabel(null)
+                );
                 loadActionableItems(uiRef.getActionableItemsForNote(note.id));
             } else {
                 noteInfoLabel.setText("No note selected.");
@@ -1524,8 +1841,70 @@ public class UI {
                 linksListModel.clear();
                 relatedNotesListModel.clear();
                 planDepsTreeModel.setRoot(new DefaultMutableTreeNode("Plan Dependencies"));
-                planStepsTableModel.setPlanExecution(null);
+                updateOverallPlanStatusLabel(null);
                 actionableItemsListModel.clear();
+            }
+        }
+
+        private void updateOverallPlanStatusLabel(@Nullable Netention.Planner.PlanExecution exec) {
+            planStepsTableModel.setPlanExecution(exec);
+
+            if (exec != null) {
+                String statusText = "Status: " + exec.currentStatus.name();
+                if (exec.lastPlanUpdatedAt != null) {
+                    statusText += " (Updated: " + planTimestampFormatter.format(exec.lastPlanUpdatedAt) + ")";
+                }
+
+                String tooltip = null;
+                if (exec.errorMessage != null && !exec.errorMessage.isEmpty()) {
+                    statusText += " | Error: " + exec.errorMessage.substring(0, Math.min(exec.errorMessage.length(), 50)) + (exec.errorMessage.length() > 50 ? "..." : "");
+                    overallPlanStatusLabel.setForeground(Color.RED.darker());
+                    tooltip = "<html>Error: " + exec.errorMessage.replace("\n", "<br>") + "</html>";
+                } else if (exec.currentStatus == Netention.PlanState.COMPLETED) {
+                    overallPlanStatusLabel.setForeground(new Color(0, 128, 0));
+                } else if (exec.currentStatus == Netention.PlanState.RUNNING) {
+                    overallPlanStatusLabel.setForeground(Color.BLUE.darker());
+                } else if (Set.of(Netention.PlanState.STUCK, Netention.PlanState.FAILED_PARSING, Netention.PlanState.FAILED_NO_STEPS, Netention.PlanState.FAILED).contains(exec.currentStatus)) {
+                     overallPlanStatusLabel.setForeground(Color.ORANGE.darker());
+                } else {
+                    overallPlanStatusLabel.setForeground(UIManager.getColor("Label.foreground"));
+                }
+                overallPlanStatusLabel.setText(statusText);
+                overallPlanStatusLabel.setToolTipText(tooltip);
+
+                switch (exec.currentStatus) {
+                    case RUNNING, PARSING:
+                        executePlanButton.setText("⏳ Running...");
+                        executePlanButton.setEnabled(false);
+                        break;
+                    case COMPLETED, FAILED, FAILED_PARSING, FAILED_NO_STEPS, STUCK:
+                        executePlanButton.setText("🔁 Re-run Plan");
+                        executePlanButton.setEnabled(true);
+                        break;
+                    case PENDING:
+                        executePlanButton.setText("▶️ Execute Plan");
+                        executePlanButton.setEnabled(true);
+                        break;
+                    default:
+                        executePlanButton.setText("▶️ Execute Plan");
+                        executePlanButton.setEnabled(true);
+                }
+            } else {
+                overallPlanStatusLabel.setText("Plan Status: Idle / No Plan");
+                overallPlanStatusLabel.setForeground(UIManager.getColor("Label.foreground"));
+                overallPlanStatusLabel.setToolTipText(null);
+                executePlanButton.setText("▶️ Execute Plan");
+                boolean isGoal = contextNote != null && contextNote.tags.contains(Netention.SystemTag.GOAL_WITH_PLAN.value);
+                executePlanButton.setEnabled(contextNote != null && isGoal);
+                 if (contextNote != null && !isGoal) {
+                    executePlanButton.setText("Declare as Goal & Plan");
+                    executePlanButton.setToolTipText("Convert this note into a goal to enable planning features.");
+                    executePlanButton.setEnabled(true);
+                 } else if (contextNote != null && isGoal) { // Already a goal
+                    executePlanButton.setToolTipText("Execute or re-run the plan for this goal.");
+                 } else { // No context note
+                    executePlanButton.setToolTipText("Select a goal note to manage its plan.");
+                 }
             }
         }
 
@@ -1716,8 +2095,10 @@ public class UI {
         }
 
         static class PlanStepsTableModel extends AbstractTableModel {
-            private final String[] columnNames = {"Description", "Status", "Tool", "Result"};
+            final String[] columnNames = {"Description", "Status", "Tool", "Parameters", "Result", "Logs/Messages", "Last Updated"}; // Made final
             private List<Netention.Planner.PlanStep> steps = new ArrayList<>();
+            private final DateTimeFormatter timestampFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+
 
             public void setPlanExecution(Netention.Planner.PlanExecution exec) {
                 this.steps = exec != null ? new ArrayList<>(exec.steps) : new ArrayList<>();
@@ -1746,12 +2127,64 @@ public class UI {
                     case 0 -> step.description;
                     case 1 -> step.status;
                     case 2 -> step.toolName;
-                    case 3 -> ofNullable(step.result).map(String::valueOf)
-                            .map(s -> s.substring(0, Math.min(s.length(), 50)) + (s.length() > 50 ? "..." : ""))
-                            .orElse("");
+                    case 3 -> formatParams(step.toolParams);
+                    case 4 -> formatResult(step.result);
+                    case 5 -> formatLogs(step.logs);
+                    case 6 -> step.lastUpdatedAt != null ? timestampFormatter.format(step.lastUpdatedAt) : (step.endTime != null ? timestampFormatter.format(step.endTime) : (step.startTime != null ? timestampFormatter.format(step.startTime) : ""));
                     default -> null;
                 };
             }
+
+            private String formatParams(Map<String, Object> params) {
+                if (params == null || params.isEmpty()) return "";
+                return params.entrySet().stream()
+                        .map(e -> e.getKey() + "=" + String.valueOf(e.getValue()).substring(0, Math.min(String.valueOf(e.getValue()).length(), 30)) + (String.valueOf(e.getValue()).length() > 30 ? "..." : ""))
+                        .collect(Collectors.joining(", "));
+            }
+
+            private String formatResult(Object result) {
+                if (result == null) return "";
+                String s = String.valueOf(result);
+                return s.substring(0, Math.min(s.length(), 50)) + (s.length() > 50 ? "..." : "");
+            }
+
+            private String formatLogs(List<String> logs) {
+                if (logs == null || logs.isEmpty()) return "";
+                String lastLog = logs.get(logs.size() - 1);
+                return lastLog.substring(0, Math.min(lastLog.length(), 70)) + (lastLog.length() > 70 ? "..." : "");
+            }
+        }
+    }
+
+    public static class TooltipCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            if (c instanceof JComponent jc) {
+                String tooltipText = null;
+                if (table.getModel() instanceof InspectorPanel.PlanStepsTableModel model) {
+                    // Check if row is valid for the model
+                    int modelRow = table.convertRowIndexToModel(row);
+                    if (modelRow < model.steps.size()) {
+                        var step = model.steps.get(modelRow);
+                        // Use column identifiers from the model to make it robust to column reordering
+                        String colName = model.getColumnName(column);
+
+                        if ("Parameters".equals(colName)) {
+                             tooltipText = step.toolParams != null && !step.toolParams.isEmpty() ? step.toolParams.entrySet().stream()
+                                .map(e -> e.getKey() + ": " + e.getValue())
+                                .collect(Collectors.joining("\n")) : "No parameters";
+                        } else if ("Result".equals(colName)) {
+                            tooltipText = step.result != null ? String.valueOf(step.result) : "No result";
+                        } else if ("Logs/Messages".equals(colName)) {
+                             tooltipText = step.logs != null && !step.logs.isEmpty() ?
+                                String.join("\n", step.logs) : "No logs";
+                        }
+                    }
+                }
+                jc.setToolTipText(tooltipText != null && !tooltipText.isBlank() ? "<html><pre>" + tooltipText.replace("\n", "<br>") + "</pre></html>" : null);
+            }
+            return c;
         }
     }
 
@@ -1761,7 +2194,7 @@ public class UI {
 
         public ActionableItemsPanel(Netention.Core core, Consumer<ActionableItem> onExecuteAction) {
             super(new BorderLayout(5, 5));
-            setBorder(new EmptyBorder(5, 5, 5, 5));
+            setBorder(new EmptyBorder(5, 5, 5, 5)); // Corrected from EmptyBordern
 
             list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
             list.setCellRenderer(new InspectorPanel.ActionableItemCellRenderer());
@@ -1770,8 +2203,6 @@ public class UI {
                     if (e.getClickCount() == 2) {
                         ofNullable(list.getSelectedValue()).ifPresent(item -> {
                             onExecuteAction.accept(item);
-                            // Refresh the list after action, assuming the action will lead to removal via CoreEvent
-                            // For immediate visual feedback, filter out the item.
                             var ii = item.id();
                             refreshList(Stream.of(listModel.toArray())
                                 .filter(i -> i instanceof ActionableItem a && !a.id().equals(ii))
