@@ -18,6 +18,7 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.text.*;
 import javax.swing.text.html.HTML;
+import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
@@ -753,7 +754,7 @@ public class UI {
             titleF.setToolTipText("The title of your note");
             gbc.gridx = 2;
             gbc.weightx = 0.2;
-            UIUtil.addLabelAndComponent(formP, gbc, 0, "Status:", statusComboBox, 1, GridBagConstraints.NONE);
+            UIUtil.addLabelAndComponent(formP, gbc, 0, "Status:", statusComboBox);
             statusComboBox.setToolTipText("Set the current status of the note (e.g., Idle, In Progress)");
 
             // Row 1: Tags and Priority
@@ -762,7 +763,7 @@ public class UI {
             tagsF.setToolTipText("Comma-separated tags. System tags like '" + Netention.SystemTag.TEMPLATE.value + "' or '" + Netention.SystemTag.GOAL_WITH_PLAN.value + "' can enable special features.");
             gbc.gridx = 2;
             gbc.weightx = 0.2;
-            UIUtil.addLabelAndComponent(formP, gbc, 1, "Priority:", prioritySpinner, 1, GridBagConstraints.NONE);
+            UIUtil.addLabelAndComponent(formP, gbc, 1, "Priority:", prioritySpinner);
             prioritySpinner.setToolTipText("Set the numerical priority of the note (higher is more important)");
 
             // Row 2: Content Pane (takes remaining space)
@@ -869,7 +870,7 @@ public class UI {
             });
             toolBar.add(fontSizeComboBoxField);
 
-            JButton colorButton = UIUtil.buttonOf(null, "🎨", "Select Text Color", e -> { // Enhanced tooltip
+            JButton colorButton = UIUtil.button( "🎨", "Select Text Color", e -> { // Enhanced tooltip
                 if (contentPane.isEditable() && contentPane.isEnabled()) {
                     Color newColor = JColorChooser.showDialog(this, "Choose Text Color", contentPane.getForeground());
                     if (newColor != null) {
@@ -880,8 +881,8 @@ public class UI {
             toolBar.add(colorButton);
             toolBar.addSeparator();
 
-            toolBar.add(UIUtil.buttonOf(null, "•", "Insert Unordered List", new InsertListAction(HTML.Tag.UL)));
-            toolBar.add(UIUtil.buttonOf(null, "1.", "Insert Ordered List", new InsertListAction(HTML.Tag.OL)));
+            toolBar.add(UIUtil.button("•", "Insert Unordered List", new InsertListAction(HTML.Tag.UL)));
+            toolBar.add(UIUtil.button("1.", "Insert Ordered List", new InsertListAction(HTML.Tag.OL)));
             toolBar.addSeparator();
 
             Action saveAction = appFrame.actionRegistry.get(ActionID.SAVE_NOTE);
@@ -902,17 +903,17 @@ public class UI {
                 }
             }
 
-            toolBar.add(UIUtil.buttonOf(null, "🔄", "Refresh Note", "Refresh content from external changes (if any)", _ -> refreshFromSource()));
+            toolBar.add(UIUtil.button("🔄", "Refresh Note", "Refresh content from external changes (if any)", _ -> refreshFromSource()));
             toolBar.addSeparator();
 
             Action setGoalAction = appFrame.actionRegistry.get(ActionID.SET_GOAL);
             if (appFrame instanceof App && setGoalAction != null) {
                  JButton setGoalButton = new JButton(setGoalAction);
                  setGoalButton.setText("🎯"); // Use icon text
-                 setGoalButton.setToolTipText((String)setGoalAction.getValue(Action.NAME) + " (Alt: Click icon in toolbar)");
+                 setGoalButton.setToolTipText(setGoalAction.getValue(Action.NAME) + " (Alt: Click icon in toolbar)");
                  toolBar.add(setGoalButton);
             } else {
-                toolBar.add(UIUtil.buttonOf(null, "🎯", "Set as Goal/Plan", "Convert this note into a goal with a plan", _ -> setGoal()));
+                toolBar.add(UIUtil.button("🎯", "Set as Goal/Plan", "Convert this note into a goal with a plan", _ -> setGoal()));
             }
 
             toolBar.addSeparator();
@@ -1055,8 +1056,7 @@ public class UI {
                 }
 
 
-                if (editor instanceof JTextPane && editor.isEditable() && editor.isEnabled()) {
-                    JTextPane textPane = (JTextPane) editor;
+                if (editor instanceof JTextPane textPane && editor.isEditable() && editor.isEnabled()) {
                     NoteEditorPanel nep = (NoteEditorPanel) SwingUtilities.getAncestorOfClass(NoteEditorPanel.class, textPane);
 
                     if (!(textPane.getEditorKit() instanceof HTMLEditorKit)) {
@@ -1076,7 +1076,7 @@ public class UI {
                     int selectionEnd = textPane.getSelectionEnd();
 
                     String listStartTag = "<" + listTag.toString() + ">"; // Use toString() for HTML.Tag
-                    String listEndTag = "</" + listTag.toString() + ">";
+                    String listEndTag = "</" + listTag + ">";
                     String listItemTag = "<li></li>";
 
                     try {
@@ -1089,7 +1089,7 @@ public class UI {
                             for (String line : lines) {
                                 listItems.append("<li>").append(line.isEmpty() ? "&nbsp;" : line).append("</li>"); // Handle empty lines
                             }
-                            String htmlToInsert = listStartTag + listItems.toString() + listEndTag;
+                            String htmlToInsert = listStartTag + listItems + listEndTag;
                             if (doc instanceof AbstractDocument) {
                                 ((AbstractDocument)doc).replace(selectionStart, selectionEnd - selectionStart, htmlToInsert, null);
                             } else {

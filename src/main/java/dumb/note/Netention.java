@@ -98,7 +98,7 @@ public class Netention {
     }
 
     public enum ContentKey {
-        TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES, PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN, RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE;
+        TITLE, TEXT, CONTENT_TYPE, PLAN_STEPS, EVENT_TYPE, PAYLOAD, STATUS, MESSAGES, PROFILE_NAME, PROFILE_ABOUT, PROFILE_PICTURE_URL, RESULTS, LAST_RUN, RELAY_URL, RELAY_ENABLED, RELAY_READ, RELAY_WRITE, PRIORITY;
 
         public String getKey() {
             return name().toLowerCase();
@@ -246,6 +246,9 @@ public class Netention {
             return Objects.hash(id);
         }
 
+        public void setContentType(String value) {
+            //TODO
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
